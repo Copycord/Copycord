@@ -95,7 +95,7 @@ COMMAND_GROUPS = (
         ("service", "Run Copycord as an OS service (install, start, stop, status)"),
     )),
     ("Updates", (
-        ("update", "Update Copycord; switch channel with --channel stable|beta|dev"),
+        ("update", "Update Copycord to the latest version"),
     )),
     ("Remove", (
         ("uninstall", "Remove Copycord; asks whether to delete your data"),
@@ -105,9 +105,9 @@ COMMAND_GROUPS = (
 EXAMPLES = (
     ("copycord run", "start Copycord in this terminal"),
     ("copycord service install", "run it in the background"),
-    ("copycord update status", "see whether an update is available"),
-    ("copycord update --channel beta", "switch to pre-releases"),
-    ("copycord update --channel dev --ref main", "install from git"),
+    ("copycord update", "update to the latest version"),
+    ("copycord doctor", "check your setup"),
+    ("copycord config set PASSWORD 'new-pass'", "change the dashboard password"),
 )
 
 
@@ -138,11 +138,8 @@ COMMAND_EXAMPLES = {
         ("copycord service stop", "stop it"),
     ),
     "copycord update": (
+        ("copycord update", "update to the latest version"),
         ("copycord update status", "see whether an update is available"),
-        ("copycord update", "update on the saved channel"),
-        ("copycord update --channel beta", "switch to pre-releases"),
-        ("copycord update --channel dev --ref v4-dev", "install a git branch"),
-        ("copycord update --channel dev --repo you/Copycord --ref 1a2b3c4", "a fork's commit"),
         ("copycord update --tag 4.0.0", "install one exact version"),
     ),
     "copycord uninstall": (
@@ -154,12 +151,14 @@ COMMAND_EXAMPLES = {
     ),
 }
 
-# prog -> (section title, [(name, text)]) printed before the examples.
-COMMAND_NOTES = {
-    "copycord update": ("Channels", (
-        ("stable", "newest GitHub release"),
-        ("beta", "newest GitHub release, pre-releases included"),
-        ("dev", "a git branch, tag or commit (needs npm to build the dashboard)"),
+# prog -> (section title, option dests, examples): options left out of the
+# regular list and printed last, with their own examples.
+COMMAND_ADVANCED = {
+    "copycord update": ("Advanced (channels and git installs)", ("channel", "branch", "repo", "no_install"), (
+        ("copycord update --channel beta", "switch to pre-releases"),
+        ("copycord update --channel stable", "back to releases"),
+        ("copycord update --channel dev --ref v4-dev", "install a git branch"),
+        ("copycord update --channel dev --repo you/Copycord --ref 1a2b3c4", "a fork's commit"),
     )),
 }
 
@@ -208,7 +207,7 @@ def format_help() -> str:
     w(ui.accent("Options:"))
     opt_width = max(width, len("-V, --version"))
     w(f"  {ui.cmd('-h, --help'.ljust(opt_width))}  Show this help")
-    w(f"  {ui.cmd('-V, --version'.ljust(opt_width))}  Print the version and the update channel")
+    w(f"  {ui.cmd('-V, --version'.ljust(opt_width))}  Print the version")
     w()
     w(ui.dim("Run `copycord <command> --help` for the options of one command."))
     w(ui.dim(f"Docs: {DOCS_URL}"))
@@ -261,7 +260,17 @@ def format_command_help(parser: argparse.ArgumentParser) -> str:
         for x in textwrap.wrap(parser.description, 78):
             w(x)
 
-    commands, arguments, options = [], [], []
+    def example_rows(items) -> None:
+        width = min(max(len(c) for c, _ in items), 44)
+        for example, text in items:
+            if len(example) > width:
+                w(f"  {ui.cmd(example)}")
+                w(f"  {' ' * width}  {ui.dim(text)}")
+            else:
+                w(f"  {ui.cmd(example.ljust(width))}  {ui.dim(text)}")
+
+    advanced_title, advanced_dests, advanced_examples = COMMAND_ADVANCED.get(parser.prog, ("", (), ()))
+    commands, arguments, options, advanced = [], [], [], []
     usage = [parser.prog]
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
@@ -272,6 +281,8 @@ def format_command_help(parser: argparse.ArgumentParser) -> str:
             name = "|".join(action.choices) if action.choices else (action.metavar or action.dest).upper()
             usage.append(f"[{name}]" if action.nargs == "?" else name)
             arguments.append((name, _sentence(action.help or "")))
+        elif action.dest in advanced_dests:
+            advanced.append((_invocation(action), _sentence(action.help or "")))
         elif not isinstance(action, argparse._HelpAction):
             options.append((_invocation(action), _sentence(action.help or "")))
     options.append(("-h, --help", "Show this help"))
@@ -281,20 +292,15 @@ def format_command_help(parser: argparse.ArgumentParser) -> str:
     rows("Commands", commands)
     rows("Arguments", arguments)
     rows("Options", options)
-    note = COMMAND_NOTES.get(parser.prog)
-    if note:
-        rows(note[0], note[1])
     examples = COMMAND_EXAMPLES.get(parser.prog, ())
     if examples:
-        width = min(max(len(c) for c, _ in examples), 44)
         w()
         w(ui.accent("Examples:"))
-        for example, text in examples:
-            if len(example) > width:
-                w(f"  {ui.cmd(example)}")
-                w(f"  {' ' * width}  {ui.dim(text)}")
-            else:
-                w(f"  {ui.cmd(example.ljust(width))}  {ui.dim(text)}")
+        example_rows(examples)
+    rows(advanced_title, advanced)
+    if advanced_examples:
+        w()
+        example_rows(advanced_examples)
     w()
     if commands:
         w(ui.dim(f"Run `{parser.prog} <command> --help` for the options of one command."))
@@ -372,7 +378,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         raise SystemExit(0)
     parser = _Parser(prog="copycord")
     parser.add_argument("-V", "--version", action=_VersionAction, nargs=0,
-                        help="print the version and the update channel")
+                        help="print the version")
     sub = parser.add_subparsers(dest="command", required=True, parser_class=_SubParser)
 
     data_dir = argparse.ArgumentParser(add_help=False)
@@ -463,9 +469,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     update = sub.add_parser(
         "update",
         parents=[data_dir],
-        help="update Copycord",
-        description="Update Copycord from the saved channel (default stable), or "
-        "switch channel. The channel is saved in <data dir>/update.json.",
+        help="update Copycord to the latest version",
+        description="Update Copycord to the latest version and restart a running "
+        "service. The database is backed up first.",
     )
     update.add_argument(
         "action",

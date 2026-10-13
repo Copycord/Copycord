@@ -24,13 +24,53 @@ copycord uninstall [--purge|--keep-data] [--yes] [--keep-service] [--dry-run] [-
 copycord --version | -V
 ```
 
-Every command has `--help`, for example `copycord service install --help`. `copycord --help` lists the commands by group with examples, and each command's help has the same layout: a heading, the usage line, its commands or options, and examples. A command group on its own (`copycord config`, `copycord service`) prints its help. A mistake such as an unknown option prints one line and points at the help:
+`copycord` on its own (or `copycord --help`) lists the commands by group with a few examples:
+
+```
+$ copycord
+Copycord v4.0.0
+
+Usage: copycord <command> [options]
+
+Get started:
+  run        Run Copycord (dashboard, server bot and client)
+  restart    Restart the Copycord service to apply changed settings
+  doctor     Check this machine can run Copycord
+
+Settings:
+  config     Read or write settings (get, set, unset, export, import)
+
+Service:
+  service    Run Copycord as an OS service (install, start, stop, status)
+
+Updates:
+  update     Update Copycord to the latest version
+
+Remove:
+  uninstall  Remove Copycord; asks whether to delete your data
+
+Examples:
+  copycord run                             start Copycord in this terminal
+  copycord service install                 run it in the background
+  copycord update                          update to the latest version
+  copycord doctor                          check your setup
+  copycord config set PASSWORD 'new-pass'  change the dashboard password
+
+Options:
+  -h, --help     Show this help
+  -V, --version  Print the version
+
+Run `copycord <command> --help` for the options of one command.
+Docs: https://copycord.github.io/Copycord/docs/cli
+```
+
+Every command has `--help`, for example `copycord service install --help`. Each command's help has the same layout: a heading, the usage line, its commands or options, and examples. Options most people never need come last, under their own heading. A command group on its own (`copycord config`, `copycord service`) prints its help. A mistake such as an unknown option prints one line and points at the help:
 
 ```
 $ copycord update --help
 copycord update
-Update Copycord from the saved channel (default stable), or switch channel.
-The channel is saved in <data dir>/update.json.
+Update Copycord to the latest version and restart a running service. The
+database is backed up first.
 
 Usage: copycord update [status] [options]
 
@@ -38,19 +78,23 @@ Arguments:
   status  Print the installed version, the channel and the latest on it
 
 Options:
-  --data-dir PATH            Data directory (sets DATA_DIR)
-  --channel stable|beta|dev  Switch to this channel and save it ...
-  --tag VERSION              Install this exact version once; the saved channel does not change
+  --data-dir PATH  Data directory (sets DATA_DIR)
+  --tag VERSION    Install this exact version once; the saved channel does not
+                   change
   ...
-  -h, --help                 Show this help
-
-Channels:
-  stable  newest GitHub release
-  beta    newest GitHub release, pre-releases included
-  dev     a git branch, tag or commit (needs npm to build the dashboard)
+  -h, --help       Show this help
 
 Examples:
-  copycord update status   see whether an update is available
+  copycord update              update to the latest version
+  ...
+
+Advanced (channels and git installs):
+  --channel stable|beta|dev  Switch to this channel and save it (stable:
+                             GitHub releases, beta: GitHub pre-releases too,
+                             dev: a git ref, needs npm)
+  ...
+
+  copycord update --channel beta                switch to pre-releases
   ...
 ```
 
@@ -418,28 +462,18 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 
 ## copycord update {#copycord-update}
 
-Updates a Copycord installed with the install script (or with `pipx`).
+Updates a Copycord installed with the install script (or with `pipx`) to the latest version.
 
 ```bash
-copycord update                        # newest release on the saved channel
+copycord update                        # update to the latest version
 copycord update status                 # only show what is installed and what is available
-copycord update --channel beta         # switch to the beta channel and update
-copycord update --channel stable       # switch back to stable
 copycord update --tag 4.0.0            # install exactly this release, once
-copycord update --channel dev          # git install of Copycord/Copycord at main
-copycord update --channel dev --ref v4-dev
-copycord update --channel dev --repo you/Copycord --ref 1a2b3c4
-copycord update --channel beta --no-install
 ```
 
 | Option | What it does |
 |--------|--------------|
 | `status` | Prints the installed version, the channel, the install method and the newest version on that channel, then exits without installing. Network errors are printed as `WARN`. |
-| `--channel stable\|beta\|dev` | Switches to this channel, installs from it and saves it once the install worked |
-| `--ref REF` | Dev channel only: the git branch, tag or commit to install (default `main`). |
-| `--repo OWNER/NAME` | Dev channel only: the GitHub repository to install from (default `Copycord/Copycord`), for example a fork |
-| `--tag VERSION` | Installs this exact release (`4.0.0` or `v4.0.0`). One-off: the saved channel does not change. Cannot be combined with `--channel`, `--repo` or `--ref`. |
-| `--no-install` | Only saves `--channel` (and `--repo`, `--ref`), installs nothing. The install scripts use this. |
+| `--tag VERSION` | Installs this exact release (`4.0.0` or `v4.0.0`). One-off: the saved channel does not change. Cannot be combined with the [advanced](#update-advanced) `--channel`, `--repo` or `--ref`. |
 | `--no-backup` | Skips the [database backup](#downgrade) made before the install |
 | `--yes`, `-y` | Installs an [older version](#downgrade) without asking |
 | `--data-dir PATH` | Reads and saves the channel in this data directory |
@@ -478,6 +512,26 @@ To turn it off, set the app config `UPDATE_CHECK_ON_START` to `false` (`copycord
 ### Auto-update {#auto-update}
 
 Off by default. With the app config `AUTO_UPDATE` set to `true` (`copycord config set AUTO_UPDATE true`), a Copycord running as a background [service](#copycord-service) checks every 6 hours and, when an update exists, runs the same steps as `copycord update` and restarts the service. Every check and every update is written to the log. A `copycord run` in a terminal never updates itself; it only prints the hint above. Docker and git checkouts are not updated this way.
+
+### Advanced: channels and git installs {#update-advanced}
+
+Most installs stay on the default `stable` channel. These options switch to pre-releases or install Copycord from git; `copycord update --help` lists them under **Advanced**.
+
+```bash
+copycord update --channel beta         # switch to the beta channel and update
+copycord update --channel stable       # switch back to stable
+copycord update --channel dev          # git install of Copycord/Copycord at main
+copycord update --channel dev --ref v4-dev
+copycord update --channel dev --repo you/Copycord --ref 1a2b3c4
+copycord update --channel beta --no-install
+```
+
+| Option | What it does |
+|--------|--------------|
+| `--channel stable\|beta\|dev` | Switches to this channel, installs from it and saves it once the install worked |
+| `--ref REF` | Dev channel only: the git branch, tag or commit to install (default `main`). |
+| `--repo OWNER/NAME` | Dev channel only: the GitHub repository to install from (default `Copycord/Copycord`), for example a fork |
+| `--no-install` | Only saves `--channel` (and `--repo`, `--ref`), installs nothing. The install scripts use this. |
 
 ### Update channels {#update-channels}
 
