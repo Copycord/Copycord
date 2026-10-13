@@ -570,7 +570,7 @@ def test_version_prints_dev_branch(data_dir, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main(["--version"])
     assert exc.value.code == 0
-    assert "channel dev (branch v4-dev)" in capsys.readouterr().out
+    assert "dev channel · v4-dev" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------
@@ -595,9 +595,9 @@ def test_check_stable_ignores_prereleases_and_drafts(data_dir, fake_net, no_inst
     _, seen = fake_net
     assert cli.main(["update", "status"]) == 0
     out = capsys.readouterr().out
-    assert "current 4.0.0" in out
-    assert "channel stable" in out
-    assert "latest  4.0.0 (v4.0.0)" in out
+    assert "current  4.0.0" in out
+    assert "stable channel" in out
+    assert "latest   4.0.0 (v4.0.0)" in out
     assert "up to date" in out
     assert seen == [(LIST_URL, 5.0)]
 
@@ -606,14 +606,14 @@ def test_check_beta_considers_prereleases(data_dir, fake_net, no_install, capsys
     update.save_channel(update.Channel("beta"))
     assert cli.main(["update", "status"]) == 0
     out = capsys.readouterr().out
-    assert "channel beta" in out
-    assert "latest  4.1.0b2 (v4.1.0b2)" in out
+    assert "beta channel" in out
+    assert "latest   4.1.0b2 (v4.1.0b2)" in out
     assert "Update available" in out
 
 
 def test_check_with_channel_does_not_save(data_dir, fake_net, no_install, capsys):
     assert cli.main(["update", "status", "--channel", "beta"]) == 0
-    assert "latest  4.1.0b2" in capsys.readouterr().out
+    assert "latest   4.1.0b2" in capsys.readouterr().out
     assert not (data_dir / "update.json").exists()
 
 
@@ -622,15 +622,15 @@ def test_check_network_failure_is_a_warning(data_dir, fake_net, no_install, caps
     responses[LIST_URL] = OSError("timed out")
     assert cli.main(["update", "status"]) == 0
     out = capsys.readouterr().out
-    assert "current 4.0.0" in out and "channel stable" in out
-    assert "WARN" in out and "timed out" in out
+    assert "current  4.0.0" in out and "stable channel" in out
+    assert "! " in out and "timed out" in out
 
 
 def test_check_no_release_is_a_warning(data_dir, fake_net, no_install, capsys):
     responses, _ = fake_net
     responses[LIST_URL] = [release("v4.0.0", draft=True)]
     assert cli.main(["update", "status"]) == 0
-    assert "WARN  no published stable release" in capsys.readouterr().out
+    assert "! no published stable release" in capsys.readouterr().out
 
 
 def test_check_warns_about_a_missing_wheel(data_dir, fake_net, no_install, capsys):
@@ -638,8 +638,8 @@ def test_check_warns_about_a_missing_wheel(data_dir, fake_net, no_install, capsy
     responses[LIST_URL] = [release("v4.0.1", wheel=False)]
     assert cli.main(["update", "status"]) == 0
     out = capsys.readouterr().out
-    assert "latest  4.0.1 (v4.0.1)" in out
-    assert "WARN  release v4.0.1 has no wheel asset" in out
+    assert "latest   4.0.1 (v4.0.1)" in out
+    assert "! release v4.0.1 has no wheel asset" in out
 
 
 def test_check_dev_shows_branch_head(data_dir, fake_net, no_install, monkeypatch, capsys):
@@ -650,8 +650,8 @@ def test_check_dev_shows_branch_head(data_dir, fake_net, no_install, monkeypatch
     update.save_channel(update.Channel("dev", "v4-dev"))
     assert cli.main(["update", "status"]) == 0
     out = capsys.readouterr().out
-    assert "channel dev (branch v4-dev)" in out
-    assert "latest  v4-dev @ 0123456789ab 2026-10-11T12:00:00Z client: fix reconnect" in out
+    assert "dev channel · v4-dev" in out
+    assert "latest   v4-dev @ 0123456789ab 2026-10-11T12:00:00Z client: fix reconnect" in out
     assert "Update available" in out
     assert seen == [(url, 5.0)]
 
@@ -672,7 +672,7 @@ def test_check_dev_github_failure_is_a_warning(data_dir, fake_net, no_install, c
     update.save_channel(update.Channel("dev", "main"))
     assert cli.main(["update", "status"]) == 0
     out = capsys.readouterr().out
-    assert "WARN" in out and "Network is unreachable" in out
+    assert "! " in out and "Network is unreachable" in out
 
 
 # --------------------------------------------------------------------------
@@ -762,7 +762,7 @@ def test_github_failure_in_the_check_installs_anyway(current, monkeypatch, capsy
     assert cli.main(["update"]) == 0
     assert rec.calls == [uv(GIT_SPEC.format("v4-dev"))]
     err = capsys.readouterr().err
-    assert "WARN" in err and "Network is unreachable" in err
+    assert "! " in err and "Network is unreachable" in err
 
 
 @pytest.mark.parametrize("dev", [True, False])
@@ -901,7 +901,7 @@ GIT_INSTALL = {
 def test_a_git_install_with_no_saved_channel_reads_as_dev_at_its_ref(data_dir, monkeypatch):
     _fake_dist(monkeypatch, GIT_INSTALL)
     assert update.load_channel() == update.Channel("dev", "v4/doctor-fix")
-    assert update.load_channel().describe() == "dev (branch v4/doctor-fix)"
+    assert update.load_channel().describe() == "dev channel · v4/doctor-fix"
 
 
 def test_a_saved_channel_wins_over_a_git_install(data_dir, monkeypatch):

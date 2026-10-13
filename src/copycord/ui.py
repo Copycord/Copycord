@@ -165,9 +165,7 @@ def attention(items: Iterable[tuple], stream: Optional[TextIO] = None) -> None:
         return
     heading("Needs your attention", stream)
     for status, text, hint in items:
-        print(f"{mark(status, stream)} {text}", file=stream)
-        if hint:
-            print(f"  {dim(hint, stream)}", file=stream)
+        line(status, text, hint, stream)
 
 
 def kv(rows: Iterable[tuple], stream: Optional[TextIO] = None, width: int = 0) -> None:

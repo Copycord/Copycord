@@ -111,9 +111,9 @@ def test_check_reports_newer_version(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
     assert cli.main(["update", "status"]) == 0
     out = capsys.readouterr().out
-    assert "current 3.28.0" in out
-    assert "channel stable" in out
-    assert "latest  4.0.0 (v4.0.0)" in out
+    assert "current  3.28.0" in out
+    assert "stable channel" in out
+    assert "latest   4.0.0 (v4.0.0)" in out
     assert "Update available" in out
     assert fake_net["seen"] == [(LIST_URL, 5.0)]
 
@@ -129,7 +129,7 @@ def test_check_github_failure_is_a_warning(monkeypatch, capsys, fake_net):
     fake_net["value"] = urllib.error.URLError("timed out")
     assert update.update(check_only=True) == 0
     out = capsys.readouterr().out
-    assert "WARN" in out and "timed out" in out
+    assert "! " in out and "timed out" in out
 
 
 def test_check_does_not_upgrade(monkeypatch, fake_net):
