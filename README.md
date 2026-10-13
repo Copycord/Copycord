@@ -25,12 +25,12 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 >
 > <details>
 > <summary><b>Multi-Server Cloning</b></summary>
-> Instantly mirror categories, channels, and message history from target servers—with the option to include roles, emojis, and stickers, and much more, all fully controlled through the web UI.
+> Instantly mirror categories, channels, and message history from target servers, with the option to include roles, emojis, and stickers, and much more, all fully controlled through the web UI.
 > </details>
 >
 > <details>
 > <summary><b>Forward Messages to External Services</b></summary>
-> Create custom rules with flexible filters, then forward matching messages instantly in real time to Telegram, Pushover, and more—so you never miss an important message or notification again.
+> Create custom rules with flexible filters, then forward matching messages instantly in real time to Telegram, Pushover, and more, so you never miss an important message or notification again.
 > </details>
 >
 > <details>
@@ -40,7 +40,7 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 >
 > <details>
 > <summary><b>Send Messages as Real Users</b></summary>
-> Optionally deliver cloned messages through real user accounts instead of webhooks, so posts appear to come from genuine members—pin each source author to their own account and mirror their nickname and roles so it looks just like them.
+> Optionally deliver cloned messages through real user accounts instead of webhooks, so posts appear to come from genuine members. Pin each source author to their own account and mirror their nickname and roles so it looks just like them.
 > </details>
 >
 > <details>
@@ -90,17 +90,12 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 
 ## Quick Start
 
-> [!TIP]
-> For full setup instructions, configuration options, slash commands, and more, visit the **[Copycord Documentation](https://copycord.github.io/Copycord/)**.
+### What you need
 
-### Prerequisites
+- A computer running Linux, macOS or Windows
+- A Discord bot token and a Discord user token ([how to get them](https://copycord.github.io/Copycord/docs/getting-started/discord-setup))
 
-- Linux, macOS or Windows
-- A Discord Bot Token + a Discord User Token ([how to get them](https://copycord.github.io/Copycord/docs/getting-started/discord-setup))
-
-### Install (recommended)
-
-The install script installs Copycord from the latest GitHub release. It installs [uv](https://docs.astral.sh/uv/) if needed, which provides Python; there is nothing else to set up.
+### Install
 
 Linux and macOS:
 
@@ -114,65 +109,44 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
-Then start Copycord, open http://localhost:8080 and log in with the default password `copycord`. Enter your bot token (Server Token) and user token (Client Token) and finish the setup in the dashboard:
+The installer sets up everything Copycord needs.
+
+### Start
 
 ```bash
-copycord run                      # start Copycord, then open http://localhost:8080
-copycord service install --user   # or run it in the background as a service (Linux; macOS/Windows: without --user)
+copycord run
 ```
 
-Change the default password in `~/.copycord/.env` (`%USERPROFILE%\.copycord\.env` on Windows) or with `copycord config set PASSWORD 'new-pass'`, then run `copycord restart`. Update later with `copycord update`; `copycord doctor` checks the setup.
+Open **http://localhost:8080**, log in with the password `copycord`, and add your tokens in the dashboard. That's it.
 
-See the [Quick Start](https://copycord.github.io/Copycord/docs/getting-started/quick-start), [Install Options](https://copycord.github.io/Copycord/docs/getting-started/manual-install) and the [CLI reference](https://copycord.github.io/Copycord/docs/cli).
+To keep Copycord running in the background, run `copycord service install`.
+
+> [!IMPORTANT]
+> Change the default password: edit `PASSWORD` in `~/.copycord/.env` (`%USERPROFILE%\.copycord\.env` on Windows), then run `copycord restart`.
+
+The [Quick Start guide](https://copycord.github.io/Copycord/docs/getting-started/quick-start) walks through every step.
 
 ### Docker (advanced)
 
-For users who already run their apps in containers.
-
-1. Create a folder with this `docker-compose.yml`:
-
-```yaml
-services:
-  copycord:
-    image: ghcr.io/copycord/copycord:latest # pinning a release tag is recommended
-    container_name: copycord
-    environment:
-      - PASSWORD=copycord # change or comment out to disable login
-    ports:
-      - '8080:8080'
-    volumes:
-      - ./data:/data
-    restart: unless-stopped
-```
-
-2. Run `docker compose up -d` and open **http://localhost:8080**
-
-Copycord runs as a single container with the dashboard, server and client together. See [Docker Install](https://copycord.github.io/Copycord/docs/getting-started/docker-install).
-
-### Upgrading from v3
-
-v4 replaces the three `admin`/`server`/`client` containers with one and removes the `ROLE` variable (v4 refuses to start while it is set). The old launcher in `install-tools/` is replaced by the install script. Your database is kept and backed up automatically on the first v4 start. Follow **[Upgrading from v3](https://copycord.github.io/Copycord/docs/getting-started/upgrading-from-v3)**.
+If you already run your apps in containers, see [Docker Install](https://copycord.github.io/Copycord/docs/getting-started/docker-install).
 
 > [!WARNING]
-> Copycord uses self-bot functionality, which is against Discord's Terms of Service and could lead to account suspension or termination. While uncommon, we strongly recommend using an alternate account to minimize risk.
+> Copycord uses self-bot functionality, which is against Discord's Terms of Service and could lead to account suspension or termination. We strongly recommend using an alternate account.
 
 ## Documentation
 
-Visit the **[Copycord Docs](https://copycord.github.io/Copycord/)** for:
+The **[Copycord Docs](https://copycord.github.io/Copycord/)** cover:
 
-- [Getting Started](https://copycord.github.io/Copycord/docs/getting-started/quick-start): Quick Start, Discord setup, install options
-- [Upgrading from v3](https://copycord.github.io/Copycord/docs/getting-started/upgrading-from-v3): Moving from three containers or the v3 launcher to v4
-- [CLI Reference](https://copycord.github.io/Copycord/docs/cli): `copycord run`, `doctor`, `config`, `service` and `update`
-- [Web Dashboard](https://copycord.github.io/Copycord/docs/dashboard/overview): Managing mappings, filters, backfills, forwarding
-- [Slash Commands](https://copycord.github.io/Copycord/docs/commands/overview): Full command reference
-- [Configuration](https://copycord.github.io/Copycord/docs/configuration/cloning-options): All cloning options explained
-- [Features](https://copycord.github.io/Copycord/docs/features/message-cloning): How cloning, syncing, and forwarding work
+- [Getting Started](https://copycord.github.io/Copycord/docs/getting-started/quick-start): installing and first run
+- [Web Dashboard](https://copycord.github.io/Copycord/docs/dashboard/overview): mappings, filters, history import, forwarding
+- [Slash Commands](https://copycord.github.io/Copycord/docs/commands/overview): every command
+- [Configuration](https://copycord.github.io/Copycord/docs/configuration/cloning-options): all cloning options
+- [Command Line](https://copycord.github.io/Copycord/docs/cli): start, stop, update and settings
+- [Upgrading from v3](https://copycord.github.io/Copycord/docs/getting-started/upgrading-from-v3)
 
 ## Contributing & Support
 
-Feel free to [open an issue](https://github.com/Copycord/Copycord/issues) if you hit any road bumps or want to request new features.
-
-We appreciate all contributions — see the [Contributing Guide](https://copycord.github.io/Copycord/docs/contributing) for development setup instructions.
+[Open an issue](https://github.com/Copycord/Copycord/issues) if you hit a problem or want to request a feature. Contributions are welcome: see the [Contributing Guide](https://copycord.github.io/Copycord/docs/contributing).
 
 ## Buy me a coffee
 
