@@ -212,6 +212,8 @@ Useful environment variables (on a native install, set them in [`<home>/.env`](#
 
 The terminal shows the dashboard's log and warnings or errors from the server and client. The full server and client logs go to files in the data directory; see [Logs](/docs/dashboard/system#where-logs-go).
 
+When the dashboard port or one of the internal ports (`9101` and `9102`) is in use at start, Copycord waits up to 15 seconds for it, since a Copycord that just stopped can hold its ports for a moment. If the port is still in use, it prints `✗ Port 9101 is in use, so Copycord cannot start` with what to do (stop the other Copycord with `copycord service stop`, or run `copycord doctor` to check the port) and exits with 1.
+
 ## copycord --version {#copycord-version}
 
 `copycord --version` (or `-V`) prints two plain lines: the installed version and the saved [update channel](#update-channels).
@@ -295,6 +297,7 @@ A check that was fixed shows on its own line as fixed, for example `✓ .env cre
 | `home folder missing` | Creates the Copycord home | Automatic |
 | `last backup ... ago`, `no backups yet` | Backs up the database now, the same `.tar.gz` the daily backup makes | Automatic |
 | `service installed, not running` | Starts the service | Automatic |
+| `service runs in a console window` (Windows) | Writes the service task again so it runs without a window, with the same data directory, and restarts it | Automatic |
 | `web UI missing`, `missing dependencies` | Reinstalls the version you have from your update channel (a dev install rebuilds the same ref), through `copycord update`, which backs up the database first | Automatic |
 | `port 8080 in use` | Asks `y/N` to move to the next free port and writes it as `ADMIN_PORT` in `.env` | Guided |
 
@@ -477,6 +480,8 @@ copycord restart
 
 Restarting the Linux system service needs root: `sudo "$(command -v copycord)" restart`.
 
+On Windows, `copycord restart` and `copycord service stop` end every process the service started, then wait up to 20 seconds until it has stopped and, for a restart, until its ports are free, before starting it again. If that does not happen in time, the service stays stopped and the command says why, for example `Copycord did not stop within 20 seconds: port 9101 is still in use`, and exits with 1.
+
 ## copycord service {#copycord-service}
 
 Runs Copycord in the background with your operating system's service manager, so it keeps running without an open terminal and starts again automatically.
@@ -527,7 +532,7 @@ Use `--user` with the other `service` commands as well. Without `--user`, `start
 
 **macOS.** The agent's output goes to `copycord.out.log` and `copycord.err.log` in the data directory. `--user` has no effect.
 
-**Windows.** The task runs as the current user at logon. `--user` has no effect.
+**Windows.** The task runs as the current user at logon, without a window: it starts `copycordw.exe`, which is installed next to `copycord.exe` (or `pythonw.exe` of the same install when `copycordw.exe` is missing). What a terminal would show goes to `copycord.out` in the [logs folder](#data-dir). A task created by an older version runs `copycord.exe` in a console window, and closing that window stops Copycord; `copycord doctor` shows `service runs in a console window`, and `copycord doctor --fix` writes the task again so it runs without a window, keeping its data directory (`copycord service install` does the same with the data directory you give it). `--user` has no effect.
 
 ### Environment variables for the service
 
