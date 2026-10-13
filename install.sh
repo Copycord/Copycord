@@ -289,14 +289,62 @@ run() {
 }
 
 fetch() {
-    # fetch URL
+    # fetch URL; GITHUB_TOKEN, when set, goes to the GitHub API only (a higher rate limit).
+    auth=""
+    case "$1" in https://api.github.com/*) [ -n "${GITHUB_TOKEN:-}" ] && auth="Authorization: Bearer $GITHUB_TOKEN" ;; esac
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL -H "Accept: application/vnd.github+json" "$1"
+        if [ -n "$auth" ]; then
+            curl -fsSL -H "Accept: application/vnd.github+json" -H "$auth" "$1"
+        else
+            curl -fsSL -H "Accept: application/vnd.github+json" "$1"
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO- --header="Accept: application/vnd.github+json" "$1"
+        if [ -n "$auth" ]; then
+            wget -qO- --header="Accept: application/vnd.github+json" --header="$auth" "$1"
+        else
+            wget -qO- --header="Accept: application/vnd.github+json" "$1"
+        fi
     else
         die "neither curl nor wget is installed"
     fi
+}
+
+newest_version() {
+    # The highest version among the tag names on stdin (v4.1.0 > v4.1.0rc1 > v4.1.0b2).
+    awk '{
+        v = $0; sub(/^v/, "", v)
+        if (!match(v, /^[0-9]+\.[0-9]+\.[0-9]+/)) next
+        rest = substr(v, RLENGTH + 1); split(substr(v, 1, RLENGTH), p, ".")
+        rank = 3; n = 0
+        if (rest != "") {
+            rank = -1
+            if (rest ~ /^[-.]?(a|alpha)/) rank = 0
+            else if (rest ~ /^[-.]?(b|beta)/) rank = 1
+            else if (rest ~ /^[-.]?(c|rc|pre|preview)/) rank = 2
+            num = rest; gsub(/[^0-9]/, " ", num); split(num, q, " "); n = q[1] + 0
+        }
+        print p[1], p[2], p[3], rank, n, $0
+    }' | sort -k1,1n -k2,2n -k3,3n -k4,4n -k5,5n | tail -n 1 | awk '{ print $6 }'
+}
+
+release_tag() {
+    # The tag this run installs: --version, else the newest stable release
+    # (/latest), or for beta the highest version of the non-draft releases.
+    if [ -n "$VERSION" ]; then
+        printf 'v%s\n' "$VERSION"
+        return 0
+    fi
+    if [ "$CHANNEL" = "beta" ]; then
+        json="$(fetch "$API?per_page=30")" || return 1
+        tag="$(printf '%s' "$json" | tr ',' '\n' | awk '
+            /"tag_name"[[:space:]]*:/ { t = $0; sub(/.*"tag_name"[[:space:]]*:[[:space:]]*"/, "", t); sub(/".*/, "", t) }
+            /"draft"[[:space:]]*:[[:space:]]*false/ { if (t != "") print t; t = "" }' | newest_version)"
+    else
+        json="$(fetch "$API/latest")" || return 1
+        tag="$(printf '%s' "$json" | json_field tag_name)"
+    fi
+    [ -n "$tag" ] || return 1
+    printf '%s\n' "$tag"
 }
 
 download() {
@@ -443,11 +491,7 @@ already_installed() {
             want="$VERSION"
         else
             [ "$CHANNEL_SET" != "1" ] || [ "$chan" = "$CHANNEL" ] || return 1
-            if [ "$CHANNEL" = "beta" ]; then
-                want="$(fetch "$API?per_page=1" 2>/dev/null | json_field tag_name)" || return 1
-            else
-                want="$(fetch "$API/latest" 2>/dev/null | json_field tag_name)" || return 1
-            fi
+            want="$(release_tag 2>/dev/null)" || return 1
             want="${want#v}"
         fi
         [ -n "$want" ] && [ "${have_version#v}" = "$want" ] || return 1
@@ -541,17 +585,8 @@ install_release() {
         dry "uv tool install --force --python $PYTHON_VERSION <copycord wheel of $LABEL>"
         return 0
     fi
-    if [ -n "$VERSION" ]; then
-        TAG="v$VERSION"
-    elif [ "$CHANNEL" = "beta" ]; then
-        # Newest first; drafts are not listed for anonymous requests.
-        LIST_JSON="$(fetch "$API?per_page=1")" || die "could not list releases from $API"
-        TAG="$(printf '%s' "$LIST_JSON" | json_field tag_name)"
-    else
-        LATEST_JSON="$(fetch "$API/latest")" || die "could not get the latest release from $API/latest"
-        TAG="$(printf '%s' "$LATEST_JSON" | json_field tag_name)"
-    fi
-    [ -n "$TAG" ] || die "no $CHANNEL release found on $REPO_URL/releases"
+    TAG="$(release_tag)" \
+        || die "could not find the newest $CHANNEL release on $REPO_URL/releases (see the error above; if GitHub says 403, wait an hour or set GITHUB_TOKEN)"
 
     RELEASE_JSON="$(fetch "$API/tags/$TAG")" \
         || die "no release $TAG on $REPO_URL/releases. If $VERSION is a branch, tag or commit, use --version with that name, e.g. --version v4-dev"
