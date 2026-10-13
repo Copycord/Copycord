@@ -373,6 +373,7 @@ copycord update --channel beta --no-install
 | `--tag VERSION` | Installs this exact release (`4.0.0` or `v4.0.0`). One-off: the saved channel does not change. Cannot be combined with `--channel`, `--repo` or `--ref`. |
 | `--no-install` | Only saves `--channel` (and `--repo`, `--ref`), installs nothing. The install scripts use this. |
 | `--no-backup` | Skips the [database backup](#downgrade) made before the install |
+| `--yes`, `-y` | Installs an [older version](#downgrade) without asking |
 | `--data-dir PATH` | Reads and saves the channel in this data directory |
 
 After a successful update, a running [service](#copycord-service) is restarted so it uses the new version.
@@ -382,6 +383,8 @@ After a successful update, a running [service](#copycord-service) is restarted s
 ### Downgrading and backups {#downgrade}
 
 Before it installs anything, every `copycord update` (any channel, `--tag`, dev refs, upgrades and downgrades alike) copies the database with SQLite's online backup to `data-pre-update-<version>-<UTC timestamp>.db` in the backups directory (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)), for example `data-pre-update-4.0.0-20261012T091500Z.db`. It prints the path. The newest 5 are kept; the daily backups have their own retention. With no database yet it says so and goes on. If the backup fails, the update stops and nothing is installed; `--no-backup` skips the backup.
+
+When the version to install is older than the installed one (a `--tag` below it, or `--channel stable` or `beta` whose newest release is older), `copycord update` first asks `Downgrade from vX to vY? Your data is backed up first; a newer database schema will block the older version until you restore the backup. (y/N)`; `--yes` (`-y`) skips the question, and without a terminal it exits with status 1 unless you add `--yes`. Dev refs have no comparable version and are never asked about.
 
 Copycord refuses to start on a database written by a newer version (a higher `schema_version`), so an older version never changes it. `copycord run` prints:
 
