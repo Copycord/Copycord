@@ -801,6 +801,31 @@ def test_doctor_fix_does_not_reinstall_without_the_frontend_build(reinstall, doc
     assert "COPYCORD_SKIP_FRONTEND is set" in capsys.readouterr().out
 
 
+def test_doctor_fix_on_a_git_install_without_npm_fails_early(reinstall, doctor_env, monkeypatch, capsys):
+    from copycord import node_runtime, update
+
+    calls, _ = reinstall
+    monkeypatch.setattr(update, "git_source", lambda: update.GitSource(
+        "https://github.com/Copycord/Copycord", "v4/doctor-fix", "d" * 40))
+    monkeypatch.setattr(node_runtime, "find_npm", lambda env=None: None)
+    assert _fix(doctor_env) == 1
+    assert calls == []
+    out = capsys.readouterr().out
+    assert f"FAIL  could not fix: web UI missing: {cli.NPM_MISSING}" in out
+    assert "npm is not installed" in cli.NPM_MISSING and "Node.js" in cli.NPM_MISSING
+
+
+def test_doctor_fix_on_a_git_install_with_npm_reinstalls(reinstall, doctor_env, monkeypatch):
+    from copycord import node_runtime, update
+
+    calls, _ = reinstall
+    monkeypatch.setattr(update, "git_source", lambda: update.GitSource(
+        "https://github.com/Copycord/Copycord", "v4/doctor-fix", "d" * 40))
+    monkeypatch.setattr(node_runtime, "find_npm", lambda env=None: node_runtime.Path("/usr/bin"))
+    assert _fix(doctor_env) == 0
+    assert calls == [{"reinstall": True}]
+
+
 @pytest.fixture()
 def stopped_service(doctor_env, monkeypatch):
     from copycord import service

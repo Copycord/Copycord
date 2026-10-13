@@ -797,6 +797,45 @@ def test_reinstall_on_dev_rebuilds_the_saved_ref(env, data_dir, fake_net):
     assert _saved(data_dir) == {"channel": "dev", "branch": "v4-dev"}
 
 
+GIT_INSTALL = {
+    "url": "https://github.com/Copycord/Copycord",
+    "vcs_info": {"vcs": "git", "requested_revision": "v4/doctor-fix", "commit_id": "d" * 40},
+}
+
+
+def test_a_git_install_with_no_saved_channel_reads_as_dev_at_its_ref(data_dir, monkeypatch):
+    _fake_dist(monkeypatch, GIT_INSTALL)
+    assert update.load_channel() == update.Channel("dev", "v4/doctor-fix")
+    assert update.load_channel().describe() == "dev (branch v4/doctor-fix)"
+
+
+def test_a_saved_channel_wins_over_a_git_install(data_dir, monkeypatch):
+    _fake_dist(monkeypatch, GIT_INSTALL)
+    update.save_channel(update.Channel("beta"))
+    assert update.load_channel() == update.Channel("beta")
+
+
+def test_a_git_install_from_a_fork_reads_as_dev_on_that_repo(data_dir, monkeypatch):
+    _fake_dist(monkeypatch, {**GIT_INSTALL, "url": "https://github.com/you/Copycord.git"})
+    assert update.load_channel() == update.Channel("dev", "v4/doctor-fix", "you/Copycord")
+
+
+@pytest.mark.parametrize("saved", [None, update.Channel("stable")])
+def test_reinstall_of_a_git_install_builds_the_installed_commit_not_a_release(
+    env, data_dir, fake_net, monkeypatch, saved
+):
+    rec, _, _ = env
+    _, seen = fake_net
+    _fake_dist(monkeypatch, GIT_INSTALL)
+    monkeypatch.setattr(update, "backup_database", lambda skip=False: True)
+    if saved:
+        update.save_channel(saved)
+    assert update.update(reinstall=True) == 0
+    assert rec.calls == [["uv", "tool", "install", "--reinstall", "--force", "--python", "3.12",
+                          "git+https://github.com/Copycord/Copycord@" + "d" * 40]]
+    assert seen == []
+
+
 def test_reinstall_with_pipx_forces_a_new_venv():
     cmd, _ = update.install_command(update.PIPX, "spec", reinstall=True)
     assert cmd == ["pipx", "install", "--force", "spec"]
