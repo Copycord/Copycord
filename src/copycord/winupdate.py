@@ -9,10 +9,11 @@
 
 """
 Windows only: `uv tool install --force` deletes the tool environment, and
-Windows cannot delete the copycord.exe and python.exe that run `copycord
-update`. So the install runs in a helper started from the base Python with a
-script copied to a temp dir; it waits for this process to exit, stops the
-service, installs, and restarts the service.
+Windows cannot delete a running .exe or a loaded .pyd/.dll, but it can rename
+them. So right before the install the executable files of the environment and
+the running launcher are moved into a .copycord-old folder on the same drive;
+the install then runs in this process like on Linux, and the next update
+deletes the old folder.
 """
 
 from __future__ import annotations
@@ -20,13 +21,11 @@ from __future__ import annotations
 import json
 import ntpath
 import os
+import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
-from typing import List, Mapping, Optional, Sequence
-
-from copycord import service
+from typing import List, Optional, Tuple
 
 # Parents that mean a process was started by Task Scheduler (the service).
 _SERVICE_PARENTS = {"svchost.exe", "taskeng.exe", "taskhostw.exe"}
@@ -36,71 +35,6 @@ _PS_QUERY = (
     "Select-Object ProcessId,ParentProcessId,Name,ExecutablePath | "
     "ConvertTo-Json -Compress"
 )
-
-HELPER = r'''
-import ctypes, json, os, subprocess, sys, time
-
-job = json.load(open(sys.argv[1], encoding="utf-8"))
-log = open(job["log"], "a", encoding="utf-8")
-
-def say(text):
-    for out in (sys.stdout, log):
-        try:
-            out.write(text + "\n")
-            out.flush()
-        except Exception:
-            pass
-
-def wait_for(pid, seconds):
-    k32 = ctypes.windll.kernel32
-    h = k32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
-    if h:
-        k32.WaitForSingleObject(h, int(seconds * 1000))
-        k32.CloseHandle(h)
-
-def schtasks(*args):
-    return subprocess.run(["schtasks", *args, "/TN", job["task"]],
-                          capture_output=True, text=True).returncode
-
-for pid in job["pids"]:
-    wait_for(pid, 60)
-time.sleep(1)
-say("")
-if job["restart"]:
-    schtasks("/End")
-    time.sleep(3)
-    say("Stopped the Copycord service for the update.")
-say("$ " + job["hint"])
-proc = subprocess.Popen(job["cmd"], env=job["env"], stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, text=True, errors="replace")
-for line in proc.stdout:
-    say(line.rstrip("\r\n"))
-rc = proc.wait()
-if rc == 0:
-    say("Copycord was updated: " + job["spec"])
-    if job["channel"]:
-        try:
-            with open(job["channel_path"], "w", encoding="utf-8") as f:
-                f.write(job["channel"])
-            say("Update channel set to " + job["channel_label"] + ".")
-        except OSError as e:
-            say("Could not save the update channel: " + str(e))
-else:
-    say("The update failed (exit %d). Reinstall Copycord with: %s" % (rc, job["hint"]))
-if job["restart"]:
-    if schtasks("/Run") == 0:
-        say("Restarted the Copycord service.")
-    else:
-        say("Could not restart the Copycord service; start it with: copycord service start")
-say("Log: " + job["log"])
-log.close()
-try:
-    os.remove(sys.argv[1])
-except OSError:
-    pass
-sys.exit(rc)
-'''
-
 
 def _processes() -> Optional[list]:
     try:
@@ -162,73 +96,56 @@ def scan(rows: list, me: int, prefix: str):
     return mine, None
 
 
-def base_python() -> Optional[str]:
-    """A python.exe outside the tool environment, or None."""
-    exe = getattr(sys, "_base_executable", None) or sys.executable
-    if not exe or _under(exe, sys.prefix) or not Path(exe).is_file():
-        return None
-    return exe
+ASIDE = ".copycord-old"
+_LOCKED = {".exe", ".dll", ".pyd"}
 
 
-def log_path() -> Path:
-    from copycord.common.paths import data_dir
+def _aside_dir(path: Path, home: Path) -> Path:
+    """Where path is moved: under the Copycord home when on the same drive."""
+    same = ntpath.splitdrive(str(path))[0].lower() == ntpath.splitdrive(str(home))[0].lower()
+    return (home if same else path.parent) / ASIDE / str(os.getpid())
 
-    return data_dir() / "logs" / "update.log"
+
+def clean_old(home: Path, launchers: List[str]) -> None:
+    """Delete what earlier updates moved aside."""
+    for folder in {home / ASIDE, *(Path(p).parent / ASIDE for p in launchers)}:
+        if folder.is_dir():
+            shutil.rmtree(folder, ignore_errors=True)
 
 
-def handoff(
-    pids: List[int],
-    cmd: Sequence[str],
-    hint: str,
-    spec: str,
-    env: Optional[Mapping[str, str]],
-    restart: bool,
-    channel_json: Optional[str] = None,
-    channel_path: Optional[Path] = None,
-    channel_label: str = "",
-) -> int:
-    """Start the helper and return; the install runs once this process exits."""
-    from copycord import ui
+def move_aside(prefix: str, launchers: List[str], home: Path) -> List[Tuple[Path, Path]]:
+    """Rename the executable files of the environment and the launchers out of the way."""
+    files = [p for p in Path(prefix).rglob("*") if p.suffix.lower() in _LOCKED and p.is_file()]
+    files += [Path(p) for p in launchers if Path(p).is_file()]
+    moved = []
+    for i, src in enumerate(files):
+        dest = _aside_dir(src, home) / f"{i}-{src.name}"
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(src, dest)
+        except OSError:
+            continue
+        moved.append((src, dest))
+    return moved
 
-    py = base_python()
-    if py is None:
-        ui.fail("could not find the Python that runs the update outside Copycord",
-                f"close Copycord and run: {hint}")
-        return 1
-    log = log_path()
-    log.parent.mkdir(parents=True, exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix="copycord-update-"))
-    script = work / "copycord_update.py"
-    script.write_text(HELPER, encoding="utf-8")
-    job = work / "job.json"
-    job.write_text(json.dumps({
-        "pids": pids or [os.getpid()],
-        "cmd": list(cmd),
-        "hint": hint,
-        "spec": spec,
-        "env": dict(os.environ if env is None else env),
-        "restart": restart,
-        "task": service.TASK_NAME,
-        "log": str(log),
-        "channel": channel_json,
-        "channel_path": str(channel_path) if channel_path else None,
-        "channel_label": channel_label,
-    }), encoding="utf-8")
-    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    try:
-        subprocess.Popen([py, "-I", str(script), str(job)], cwd=str(work),
-                         creationflags=flags, close_fds=True)
-    except OSError as e:
-        ui.fail("could not start the update", str(e))
-        return 1
-    ui.info("the update continues in this window once this command exits",
-            f"log: {log}")
-    return 0
+
+def restore(moved: List[Tuple[Path, Path]]) -> None:
+    """Put moved files back when the install left the old environment in place."""
+    for src, dest in moved:
+        try:
+            if src.parent.is_dir() and not src.exists():
+                os.replace(dest, src)
+        except OSError:
+            pass
 
 
 def running():
-    """(pids of this command, pid of a Copycord running outside the service or None)."""
+    """(launcher .exe paths of this command outside the environment, pid of a
+    Copycord running outside the service or None)."""
     rows = _processes()
     if rows is None:
-        return [os.getpid()], None
-    return scan(rows, os.getpid(), sys.prefix)
+        return [], None
+    mine, other = scan(rows, os.getpid(), sys.prefix)
+    by_pid = {r.get("ProcessId"): r for r in rows}
+    exes = [by_pid[p].get("ExecutablePath") for p in mine if p != os.getpid()]
+    return [e for e in exes if e and not _under(e, sys.prefix)], other

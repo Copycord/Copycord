@@ -220,6 +220,7 @@ def env(data_dir, fake_net, monkeypatch):
     monkeypatch.setattr(
         service, "service_state", lambda: service.State(False, False, "test")
     )
+    monkeypatch.setattr(update, "installed_version", lambda: ("4.0.0", "abcdef1234567"))
     return rec, on_path, restarts
 
 
@@ -851,81 +852,137 @@ ME = proc(30, 20, "python.exe", PREFIX + r"\Scripts\python.exe")
 
 @pytest.fixture()
 def win(env, monkeypatch, tmp_path):
-    started = []
+    calls = []
     monkeypatch.setattr(update.sys, "platform", "win32")
-    monkeypatch.setattr(winupdate, "running", lambda: ([30, 20], None))
-    monkeypatch.setattr(winupdate, "base_python", lambda: r"C:\py\python.exe")
-    monkeypatch.setattr(winupdate, "log_path", lambda: tmp_path / "logs" / "update.log")
-    monkeypatch.setattr(winupdate.tempfile, "mkdtemp", lambda prefix: str(tmp_path))
-    monkeypatch.setattr(
-        winupdate.subprocess, "Popen",
-        lambda args, **kw: started.append((args, kw)),
-    )
-    return env, started, tmp_path
+    monkeypatch.setattr(winupdate, "running", lambda: ([r"C:\bin\copycord.exe"], None))
+    monkeypatch.setattr(winupdate, "clean_old", lambda home, launchers: calls.append("clean"))
+
+    def move_aside(prefix, launchers, home):
+        calls.append(("move", launchers))
+        return [("src", "dest")]
+
+    monkeypatch.setattr(winupdate, "move_aside", move_aside)
+    monkeypatch.setattr(winupdate, "restore", lambda moved: calls.append(("restore", moved)))
+    rec = env[0]
+    real = rec.__call__
+
+    def run(cmd, capture=True, env=None):
+        calls.append("install")
+        return real(cmd, capture, env)
+
+    monkeypatch.setattr(service, "run_cmd", run)
+    return env, calls
 
 
-def job(tmp_path):
-    return json.loads((tmp_path / "job.json").read_text(encoding="utf-8"))
-
-
-def test_windows_hands_the_install_to_a_helper(win, capsys):
-    (rec, _, restarts), started, tmp_path = win
+def test_windows_moves_the_locked_files_aside_and_installs_inline(win, capsys):
+    (rec, _, restarts), calls = win
     assert update.update() == 0
-    assert rec.calls == []
+    assert rec.calls == [uv(wheel_url("v4.0.0"))]
+    assert calls == ["clean", ("move", [r"C:\bin\copycord.exe"]), "install"]
     assert restarts == []
-    (args, kw), = started
-    assert args[0] == r"C:\py\python.exe"
-    assert args[2] == str(tmp_path / "copycord_update.py")
-    assert kw["cwd"] == str(tmp_path)
-    j = job(tmp_path)
-    assert j["cmd"][:3] == ["uv", "tool", "install"]
-    assert j["pids"] == [30, 20]
-    assert j["restart"] is False
-    assert j["channel"] is None
-    assert "once this command exits" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Copycord updated to 4.0.0 (abcdef1)" in out
+    assert "$ uv" not in out
 
 
-def test_windows_helper_restarts_a_running_service(win, monkeypatch):
-    _, _, tmp_path = win
-    monkeypatch.setattr(service, "service_state", lambda: service.State(True, True, "t"))
-    assert update.update() == 0
-    assert job(tmp_path)["restart"] is True
-
-
-def test_windows_channel_switch_is_saved_by_the_helper(win, data_dir):
-    _, _, tmp_path = win
-    assert update.update(channel="beta") == 0
-    j = job(tmp_path)
-    assert json.loads(j["channel"]) == {"channel": "beta"}
-    assert j["channel_path"] == str(update.settings_path())
+def test_windows_failed_install_puts_the_files_back(win, monkeypatch, data_dir, capsys):
+    (rec, _, _), calls = win
+    rec.rc = 2
+    assert update.update(channel="beta") == 2
+    assert calls[-1] == ("restore", [("src", "dest")])
     assert not update.settings_path().exists()
 
 
-def test_windows_reinstall_uses_the_helper(win):
-    (rec, _, _), started, tmp_path = win
-    assert update.update(reinstall=True) == 0
-    assert rec.calls == []
-    assert "--reinstall" in job(tmp_path)["cmd"]
+def test_windows_stops_and_restarts_a_running_service(win, monkeypatch):
+    (_, _, restarts), calls = win
+    monkeypatch.setattr(service, "service_state", lambda: service.State(True, True, "t"))
+
+    class Svc:
+        def stop(self):
+            calls.append("stop")
+
+    monkeypatch.setattr(service, "get_service", lambda: Svc())
+    assert update.update() == 0
+    assert calls.index("stop") < calls.index("install")
+    assert restarts == [1]
+
+
+def test_windows_channel_switch_is_saved(win, data_dir):
+    assert update.update(channel="beta") == 0
+    assert update.load_channel(update.settings_path()) == update.Channel("beta")
 
 
 def test_windows_refuses_while_copycord_runs_elsewhere(win, monkeypatch, capsys):
-    (rec, _, _), started, _ = win
+    (rec, _, _), calls = win
     backups = []
     monkeypatch.setattr(update, "backup_database", lambda skip=False: backups.append(1))
-    monkeypatch.setattr(winupdate, "running", lambda: ([30], 99))
+    monkeypatch.setattr(winupdate, "running", lambda: ([], 99))
     assert update.update() == 1
-    assert rec.calls == [] and started == [] and backups == []
+    assert rec.calls == [] and calls == [] and backups == []
     assert "stop it first" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("platform", ["linux", "darwin"])
-def test_other_platforms_install_inline(env, monkeypatch, platform):
+def test_other_platforms_install_inline_and_quietly(env, monkeypatch, platform, capsys):
     rec, _, _ = env
     monkeypatch.setattr(update.sys, "platform", platform)
     monkeypatch.setattr(winupdate, "running", lambda: pytest.fail("checked processes"))
-    monkeypatch.setattr(winupdate, "handoff", lambda *a, **k: pytest.fail("handed off"))
+    monkeypatch.setattr(winupdate, "move_aside", lambda *a: pytest.fail("moved files"))
     assert update.update() == 0
     assert rec.calls == [uv(wheel_url("v4.0.0"))]
+    out = capsys.readouterr().out
+    assert "Installing Copycord v4.0.0..." in out
+    assert "Copycord updated to 4.0.0 (abcdef1)" in out
+    assert "$ uv" not in out
+
+
+def test_uv_output_goes_to_the_log(env, data_dir, monkeypatch, capsys):
+    rec, _, _ = env
+
+    def noisy(cmd, capture=True, env=None):
+        rec.calls.append(list(cmd))
+        lines = "".join(f"+ pkg{i}==1.0\n" for i in range(40))
+        return subprocess.CompletedProcess(list(cmd), 0, lines, "")
+
+    monkeypatch.setattr(service, "run_cmd", noisy)
+    assert update.update() == 0
+    captured = capsys.readouterr()
+    assert "pkg" not in captured.out + captured.err
+    assert "+ pkg39==1.0" in update.log_path().read_text(encoding="utf-8")
+
+
+def test_failed_install_shows_the_log_tail(env, data_dir, monkeypatch, capsys):
+    def broken(cmd, capture=True, env=None):
+        lines = "".join(f"line {i}\n" for i in range(30))
+        return subprocess.CompletedProcess(list(cmd), 1, lines, "error: boom\n")
+
+    monkeypatch.setattr(service, "run_cmd", broken)
+    assert update.update() == 1
+    err = capsys.readouterr().err
+    assert "update failed (exit 1)" in err
+    assert "error: boom" in err and "line 29" in err and "line 5\n" not in err
+    assert str(update.log_path()) in err
+
+
+def test_move_aside_renames_executables_and_launchers(tmp_path, monkeypatch):
+    env = tmp_path / "tools" / "copycord"
+    (env / "Scripts").mkdir(parents=True)
+    (env / "Lib").mkdir()
+    for name in ("Scripts/python.exe", "Scripts/pythonw.exe", "Lib/x.pyd", "Lib/x.py"):
+        (env / name).write_text("x")
+    shim = tmp_path / "bin" / "copycord.exe"
+    shim.parent.mkdir()
+    shim.write_text("x")
+    home = tmp_path / "home"
+    moved = winupdate.move_aside(str(env), [str(shim)], home)
+    assert len(moved) == 4
+    assert not (env / "Scripts" / "python.exe").exists() and not shim.exists()
+    assert (env / "Lib" / "x.py").exists()
+    winupdate.restore(moved)
+    assert (env / "Scripts" / "python.exe").exists() and shim.exists()
+    winupdate.move_aside(str(env), [str(shim)], home)
+    winupdate.clean_old(home, [str(shim)])
+    assert not (home / winupdate.ASIDE).exists()
 
 
 def test_scan_finds_own_chain_and_ignores_the_service():

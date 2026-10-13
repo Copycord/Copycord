@@ -636,12 +636,12 @@ def update(
     if kind in (DOCKER, SOURCE):
         print(f"Copycord was installed with {kind}; update it with:\n  {manual_hint(kind)}")
         return 1
-    # Windows cannot replace the files of a running Copycord, so the install
-    # runs after this process exits; another running Copycord blocks it.
-    handoff = sys.platform == "win32" and kind in (UV_TOOL, PIPX)
-    own_pids: list = []
-    if handoff:
-        own_pids, other = winupdate.running()
+    # Windows cannot replace the files of a running Copycord, so they are moved
+    # aside first (see winupdate); another running Copycord blocks the update.
+    windows = sys.platform == "win32" and kind in (UV_TOOL, PIPX)
+    launchers: list = []
+    if windows:
+        launchers, other = winupdate.running()
         if other is not None:
             _err("Copycord is running in another window "
                  f"(process {other}); stop it first, then run this again")
@@ -705,7 +705,6 @@ def update(
             )
             return 1
         cmd_env = node_runtime.with_path(npm_dir)
-        ui.info("the admin UI is built during the install")
 
     # Read before the install replaces the files.
     try:
@@ -714,25 +713,30 @@ def update(
         ui.warn("could not read the service state", str(e))
         state = None
 
-    if handoff:
-        save = not tag and switching
-        return winupdate.handoff(
-            own_pids, cmd, hint, spec, cmd_env,
-            restart=bool(state is not None and state.installed and state.running),
-            channel_json=channel_text(target) if save else None,
-            channel_path=settings_path() if save else None,
-            channel_label=target.describe(),
-        )
-
-    print(f"$ {hint}")
-    if cmd_env is None:
-        result = service.run_cmd(cmd, capture=False)
+    restart = bool(state is not None and state.installed and state.running)
+    if release is not None:
+        what = release.tag
+    elif source is not None:
+        what = source.ref or (source.commit or "")[:12] or "git"
     else:
-        result = service.run_cmd(cmd, capture=False, env=cmd_env)
+        what = target.ref
+    text = f"Installing Copycord {what}" + (" and building the admin UI" if git else "")
+    result, log = _install(cmd, hint, cmd_env, windows, launchers, restart, text + "...")
     if result.returncode != 0:
-        _err(f"update failed (exit {result.returncode})")
+        _err(f"update failed (exit {result.returncode})", f"reinstall with: {hint}")
+        tail = (log.read_text(encoding="utf-8", errors="replace").splitlines()
+                if log.is_file() else [])[-20:]
+        for line in tail:
+            print(f"  {line}", file=sys.stderr)
+        ui.info("full log", str(log), stream=sys.stderr)
+        if windows and restart:
+            _restart_service()
         return result.returncode
-    ui.ok("installed", spec)
+    version, commit = installed_version()
+    if version:
+        ui.ok(f"Copycord updated to {version}" + (f" ({commit[:7]})" if commit else ""))
+    else:
+        ui.ok("Copycord updated", spec)
 
     # --tag is a one-off; a channel switch is saved once the install worked.
     if not tag and switching:
@@ -742,11 +746,73 @@ def update(
         except OSError as e:
             ui.warn("could not save the update channel", str(e))
 
-    if state is not None and state.installed and state.running:
-        try:
-            service.restart_service()
-        except service.ServiceError as e:
-            _err(f"updated, but restarting the service failed: {e}")
-            return 1
-        ui.ok("restarted the copycord service")
+    if restart and not _restart_service():
+        return 1
     return 0
+
+
+def _restart_service() -> bool:
+    try:
+        service.restart_service()
+    except service.ServiceError as e:
+        _err(f"updated, but restarting the service failed: {e}")
+        return False
+    ui.ok("restarted the copycord service")
+    return True
+
+
+def log_path() -> Path:
+    from copycord.common.paths import data_dir
+
+    return data_dir() / "logs" / "update.log"
+
+
+def _install(cmd, hint, env, windows, launchers, restart, text):
+    """Run the install quietly into the update log; (result, log path)."""
+    import subprocess
+
+    log = log_path()
+    moved: list = []
+    if windows:
+        from copycord.common.paths import data_dir
+
+        if restart:
+            try:
+                service.get_service().stop()
+            except service.ServiceError:
+                pass
+        winupdate.clean_old(data_dir(), launchers)
+        moved = winupdate.move_aside(sys.prefix, launchers, data_dir())
+    with ui.Spinner(text) as spin:
+        if not spin.active:
+            ui.info(text)
+        result = service.run_cmd(cmd, capture=True, env=env)
+    if windows and result.returncode != 0:
+        winupdate.restore(moved)
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(f"$ {hint}\n{result.stdout or ''}{result.stderr or ''}",
+                       encoding="utf-8")
+    except OSError:
+        pass
+    return result, log
+
+
+_VERSION_CODE = (
+    "import json, copycord.update as u; "
+    "print(json.dumps([u.current_version(), u.installed_commit()]))"
+)
+
+
+def installed_version() -> Tuple[Optional[str], Optional[str]]:
+    """(version, commit) of the freshly installed Copycord, read by its own Python."""
+    import subprocess
+
+    exe = Path(sys.prefix) / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    try:
+        res = subprocess.run([str(exe), "-I", "-c", _VERSION_CODE],
+                             capture_output=True, text=True, timeout=60)
+        version, commit = json.loads(res.stdout.strip().splitlines()[-1])
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None, None
+    return (version or None), (commit or None)
