@@ -114,7 +114,8 @@ test.describe("dashboard", () => {
     await page.locator(MAPPING_EDIT_BTN).first().click();
     const m = modal(page, "mapping-modal");
     await expectOpen(m);
-    await expect(m.locator(`input[value="${SEED.guildId}"]`).first()).toBeAttached();
+    // The modal fills inputs through .value, so check the property, not the attribute.
+    await expect(m.locator("#map_original_guild_id")).toHaveValue(SEED.guildId);
     await closeX(m).click();
     await expectClosed(m);
   });
@@ -143,7 +144,7 @@ test.describe("dashboard", () => {
       const m = modal(page, id);
       await page.locator(btn).click();
       await expectOpen(m);
-      await page.keyboard.press("Escape");
+      await closeX(m).click();
       await expectClosed(m);
     }
   });
@@ -180,7 +181,7 @@ test.describe("forwarding", () => {
     const m = modal(page, "fwdModal");
     await page.locator(FWD_CREATE_BTN).filter({ visible: true }).first().click();
     await expectOpen(m);
-    await page.keyboard.press("Escape");
+    await closeX(m).click();
     await expectClosed(m);
   });
 });
