@@ -13,6 +13,9 @@ Terminal styling for the copycord CLI, plain ANSI.
 Color follows NO_COLOR, FORCE_COLOR, TERM and whether the stream is a TTY.
 Without color the layout and symbols stay the same; the symbols fall back to
 ASCII only where the stream's encoding cannot print them.
+
+Interactive flows such as uninstall run inside a Rail, which joins their steps
+with a line down the left on a terminal and changes nothing elsewhere.
 """
 
 from __future__ import annotations
@@ -196,10 +199,11 @@ def mark(status: str, stream: Optional[TextIO] = None) -> str:
 
 
 def line(status: str, text: str, detail: str = "", stream: Optional[TextIO] = None) -> None:
-    """One status line: "✓ label  detail"."""
+    """One status line: "✓ label  detail"; on the rail the mark takes its place."""
     stream = sys.stdout if stream is None else stream
     tail = f"  {dim(linkify(detail, stream), stream)}" if detail else ""
-    print(f"{mark(status, stream)} {linkify(text, stream)}{tail}", file=stream)
+    gap = "  " if on_rail(stream) else " "
+    print(f"{mark(status, stream)}{gap}{linkify(text, stream)}{tail}", file=stream)
 
 
 def ok(text, detail="", stream=None):
@@ -254,9 +258,16 @@ def _visible_len(text: str) -> int:
 
 def box(lines: Iterable[str], title: str = "", status: str = "info",
         stream: Optional[TextIO] = None) -> None:
-    """A boxed notice."""
+    """A boxed notice; on the rail a titled step with the lines under it."""
     stream = sys.stdout if stream is None else stream
     lines = [linkify(x, stream) for x in lines]
+    if on_rail(stream):
+        if title:
+            head = _rail_glyph("done", stream) if status == "info" else mark(status, stream)
+            print(f"{head}  {bold(title, stream)}", file=stream)
+        for x in lines:
+            print(f"{_rail_glyph('bar', stream)}  {x}", file=stream)
+        return
     fancy = use_color(stream) and _unicode(stream)
     tl, tr, bl, br, h, v = (
         ("╭", "╮", "╰", "╯", "─", "│")
@@ -271,6 +282,125 @@ def box(lines: Iterable[str], title: str = "", status: str = "info",
         pad = " " * (width - _visible_len(x))
         print(f"{edge(v)} {x}{pad} {edge(v)}", file=stream)
     print(edge(bl + h * (width + 2) + br), file=stream)
+
+
+# --------------------------------------------------------------------------
+# step rail
+# --------------------------------------------------------------------------
+
+# A rail joins the steps of an interactive flow into one column:
+#
+#   ┌  Uninstall Copycord
+#   │
+#   ◆  Your data is in ...       (◇ once answered)
+#   │  Keep my data
+#   │
+#   ✓  removed the copycord program
+#   └  Your data is still in ...
+#
+# name -> (color, symbol, ASCII fallback); all of them single width.
+_RAIL = {
+    "start": ("gray", "┌", "+"),
+    "bar": ("gray", "│", "|"),
+    "ask": ("accent", "◆", "*"),
+    "done": ("green", "◇", "o"),
+    "end": ("gray", "└", "+"),
+}
+
+_rail: Optional["Rail"] = None
+# An ask() whose line was not finished, e.g. by Ctrl-C at the prompt.
+_open_prompt = False
+
+
+def _tty(stream: TextIO) -> bool:
+    try:
+        return stream.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def on_rail(stream: Optional[TextIO] = None) -> bool:
+    """True while a rail is open and stream is a terminal it shows on."""
+    stream = sys.stdout if stream is None else stream
+    return _rail is not None and _rail.active and _tty(stream)
+
+
+def _rail_glyph(name: str, stream: TextIO) -> str:
+    # One set for the whole rail, so it never mixes box glyphs and ASCII.
+    fancy = _encodable("".join(symbol for _, symbol, _ in _RAIL.values()), stream)
+    color, symbol, ascii_symbol = _RAIL[name]
+    return paint(symbol if fancy else ascii_symbol, color, stream=stream)
+
+
+def note(text: str = "", stream: Optional[TextIO] = None) -> None:
+    """A plain line; on the rail it hangs off the rail instead of its indent."""
+    stream = sys.stdout if stream is None else stream
+    if not on_rail(stream):
+        print(text, file=stream)
+        return
+    text = text.lstrip()
+    bar = _rail_glyph("bar", stream)
+    print(f"{bar}  {text}" if text else bar, file=stream)
+
+
+def gap(stream: Optional[TextIO] = None) -> None:
+    """A blank line between steps; on the rail just the rail."""
+    global _open_prompt
+    stream = sys.stdout if stream is None else stream
+    if on_rail(stream) and _open_prompt:
+        print(file=stream)
+    _open_prompt = False
+    note("", stream)
+
+
+class Rail:
+    """Context manager for an interactive flow: opens the rail with title and
+    closes it on the way out. Off a terminal, or under --json, title is a plain
+    heading and the output keeps its usual layout."""
+
+    def __init__(self, title: str, stream: Optional[TextIO] = None):
+        self.title = title
+        self.stream = sys.stdout if stream is None else stream
+        self.active = False
+        self._closed = False
+        self._outer: Optional["Rail"] = None
+
+    def __enter__(self) -> "Rail":
+        global _rail
+        from copycord import jsonout
+
+        self.active = _tty(self.stream) and not jsonout.active()
+        self._outer, _rail = _rail, self
+        if self.active:
+            s = self.stream
+            print(f"\n{_rail_glyph('start', s)}  {accent(self.title, s)}", file=s)
+        else:
+            heading(self.title, self.stream)
+        return self
+
+    def close(self, text: str = "") -> None:
+        """End the rail, with text after its last mark; off the rail text as is."""
+        global _open_prompt
+        if self._closed:
+            return
+        self._closed = True
+        s = self.stream
+        if not self.active:
+            if text:
+                print(text, file=s)
+            return
+        if _open_prompt:
+            print(file=s)
+            _open_prompt = False
+        end = _rail_glyph("end", s)
+        print(f"{end}  {text.lstrip()}" if text.strip() else end, file=s)
+
+    def __exit__(self, *exc) -> None:
+        global _rail
+        try:
+            self.close()
+        finally:
+            _rail = self._outer
 
 
 # --------------------------------------------------------------------------
@@ -317,7 +447,8 @@ class Spinner:
         """The spinner line at time now (time.monotonic)."""
         spent = now - self._started
         tail = f"  {dim(_elapsed(spent), self.stream)}" if spent >= self.ELAPSED_AFTER else ""
-        return f"\r{paint(frame, 'accent', stream=self.stream)} {self.text}{tail}"
+        gap = "  " if on_rail(self.stream) else " "
+        return f"\r{paint(frame, 'accent', stream=self.stream)}{gap}{self.text}{tail}"
 
     def _spin(self) -> None:
         for frame in itertools.cycle(self.FRAMES):
@@ -354,26 +485,44 @@ class Spinner:
 # --------------------------------------------------------------------------
 
 
-def ask(question: str, default: str = "", secret: bool = False) -> str:
+def _ask_head(question: str) -> str:
+    """The question line: "? question", on the rail "◆  question"."""
+    if on_rail():
+        return f"{_rail_glyph('ask', sys.stdout)}  {bold(question)}"
+    return f"{paint('?', 'accent', 'bold')} {bold(question)}"
+
+
+def _ask_row(row: str) -> str:
+    """A line under the question; on the rail it hangs off the rail."""
+    return f"{_rail_glyph('bar', sys.stdout)}  {row}" if on_rail() else row
+
+
+def ask(question: str, default: str = "", secret: bool = False, _follow_up: bool = False) -> str:
+    global _open_prompt
     hint = f" {dim('[' + default + ']')}" if default and not secret else ""
-    prompt = f"{paint('?', 'accent', 'bold')} {bold(question)}{hint} "
+    head = _ask_row(bold(question)) if _follow_up else _ask_head(question)
+    prompt = f"{head}{hint} "
+    _open_prompt = True
     if secret:
         import getpass
 
         value = getpass.getpass(prompt)
     else:
         value = input(prompt)
+    _open_prompt = False
     return value.strip() or default
 
 
 def _choose_typed(question: str, options: List[str], default: int) -> int:
-    print(f"{paint('?', 'accent', 'bold')} {bold(question)}")
+    print(_ask_head(question))
     for i, option in enumerate(options, 1):
         tail = f" {dim('(default)')}" if i - 1 == default else ""
-        print(f"  {accent(str(i))}) {option}{tail}")
+        row = f"{accent(str(i))}) {option}{tail}"
+        print(_ask_row(row) if on_rail() else f"  {row}")
     numbers = ", ".join(str(i) for i in range(1, len(options)))
     while True:
-        raw = ask(f"Enter {numbers} or {len(options)}", default=str(default + 1))
+        raw = ask(f"Enter {numbers} or {len(options)}", default=str(default + 1),
+                  _follow_up=on_rail())
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return int(raw) - 1
 
@@ -537,7 +686,11 @@ def _select(render, keys, question: str, answer) -> int:
     def collapse(status: str, text: str) -> None:
         tail = accent(text) if status == "ok" else dim(text)
         clear()
-        out.write(f"{mark(status)} {bold(question)} {tail}\n")
+        if on_rail(out):
+            head = _rail_glyph("done", out) if status == "ok" else mark(status, out)
+            out.write(f"{head}  {bold(question)}\n{_ask_row(tail)}\n")
+        else:
+            out.write(f"{mark(status)} {bold(question)} {tail}\n")
         out.flush()
         state["lines"] = 0
 
@@ -571,14 +724,14 @@ def choose(question: str, options: List[str], default: int = 0) -> int:
     a numbered prompt otherwise. Enter picks the default."""
     if raw_keys_available():
         def render(index):
-            rows = [f"{paint('?', 'accent', 'bold')} {bold(question)}"]
+            rows = [_ask_head(question)]
             for i, option in enumerate(options):
                 if i == index:
-                    rows.append(f"{accent(_pointer() + ' ' + option)}")
+                    rows.append(_ask_row(f"{accent(_pointer() + ' ' + option)}"))
                 else:
-                    rows.append(f"  {dim(option)}")
+                    rows.append(_ask_row(f"  {dim(option)}"))
             arrows = "↑/↓" if _encodable("↑↓", sys.stdout) else "Up/Down"
-            rows.append(f"  {dim(arrows + ' to move, Enter to select')}")
+            rows.append(_ask_row(f"  {dim(arrows + ' to move, Enter to select')}"))
             return rows
 
         def keys(key, index):
@@ -608,7 +761,10 @@ def confirm(question: str, default: bool = True) -> bool:
         def render(index):
             parts = [accent(f"{_pointer()} {label}") if i == index else dim(label)
                      for i, label in enumerate(labels)]
-            return [f"{paint('?', 'accent', 'bold')} {bold(question)}  {parts[0]}{dim(' / ')}{parts[1]}"]
+            answer = f"{parts[0]}{dim(' / ')}{parts[1]}"
+            if on_rail():
+                return [_ask_head(question), _ask_row(answer)]
+            return [f"{_ask_head(question)}  {answer}"]
 
         def keys(key, index):
             if key is None:
