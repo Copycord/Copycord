@@ -62,7 +62,7 @@ DASHBOARD_HOST_TEXT = (
     "# to open it to your network, after setting your own PASSWORD"
 )
 
-BACKUP_DIR_TEXT ="where the daily database backups go; remove the # to use another folder"
+BACKUP_DIR_TEXT = "where the daily database backups go; remove the # to use another folder"
 
 TEMPLATE_KEYS = (
     "PASSWORD",
