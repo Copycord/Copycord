@@ -15,15 +15,9 @@
 #
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1))) -Version v4-dev
 #
-# Two install methods:
-#   release (default)  the wheel asset of a GitHub release
-#   git                a clone of any repo and ref (branch, tag or commit),
-#                      frontend built with npm, no release needed
-#
-# Installs uv (https://docs.astral.sh/uv/) if it is missing, then installs
-# Copycord with `uv tool install`. The git method also needs git and Node 20+;
-# Node is installed per user when it is missing. It does not touch Docker.
-# Run with -Help for the parameters and their environment variables.
+# Installs uv if it is missing, then Copycord with `uv tool install`, either
+# from a release wheel (default) or from a git ref built locally, which needs
+# git and Node 20+. Run with -Help for the parameters.
 
 param(
     [ValidateSet('release', 'git')]
@@ -115,9 +109,8 @@ Test a branch, no release needed:
     $dryRun = $Opts.DryRun -or $env:COPYCORD_DRY_RUN -eq '1'
     $showOutput = [bool]$Opts.ShowOutput
     $version = if ($Opts.Version) { $Opts.Version } else { '' }
-    # -Version alone picks the method: a release version (optional v, then
-    # digits.digits.digits and an optional pre-release suffix) is a release,
-    # anything else is a git ref. An explicit method wins.
+    # Without an explicit method, a -Version that looks like a release version
+    # means release, anything else a git ref.
     if (-not $Opts.MethodSet -and -not $Opts.Git -and $version) {
         $method = if ($version -cmatch '^v?\d+\.\d+\.\d+([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$') { 'release' } else { 'git' }
         $inferred = ', inferred from -Version'
@@ -168,8 +161,7 @@ Test a branch, no release needed:
 
     $log = [IO.Path]::GetTempFileName()
     function Run([string]$Label, [string]$File, [string[]]$Arguments, [string]$Cwd = (Get-Location).Path) {
-        # Run a program with a spinner and its output in $log; on failure show
-        # the tail of the output and stop. -ShowOutput streams it instead.
+        # Output goes to $log; on failure print its tail and stop.
         if ($showOutput) {
             Info $Label
             Push-Location $Cwd
@@ -222,9 +214,7 @@ Test a branch, no release needed:
     }
     $uv = Get-Command uv -ErrorAction SilentlyContinue
 
-    # An upgrade or a reinstall (Copycord or its home is already there) ends with
-    # `copycord doctor --fix`, so the automatic repairs happen on their own. A
-    # first install has nothing to repair.
+    # An upgrade or reinstall ends with `copycord doctor --fix`.
     $upgrade = [bool](Get-Command copycord -ErrorAction SilentlyContinue) -or
         (Test-Path (Join-Path $env:USERPROFILE '.local\bin\copycord.exe')) -or
         (Test-Path (Join-Path $homeDir '.env')) -or (Test-Path (Join-Path $homeDir 'data.db'))
@@ -260,7 +250,6 @@ Test a branch, no release needed:
     if ($verify) { PlanLine 'verify' 'copycord --version and copycord doctor' }
     if ($dryRun) { PlanLine 'dry run' 'nothing will be changed' }
 
-    # uv, install, finishing up; release: find the release; git: fetch, build.
     $script:stepTotal = if ($method -eq 'git') { 5 } else { 4 }
     if ($needNode) { $script:stepTotal++ }
     if ($upgrade) { $script:stepTotal++ }
@@ -300,7 +289,6 @@ Test a branch, no release needed:
                         $list = Invoke-RestMethod -Uri "${api}?per_page=30" -Headers $Headers -TimeoutSec 30
                         $release = $list | Where-Object { -not $_.draft } | Select-Object -First 1
                     } else {
-                        # GitHub's latest release: newest that is not a draft or a pre-release.
                         $release = Invoke-RestMethod -Uri "$api/latest" -Headers $Headers -TimeoutSec 30
                     }
                 } catch {
@@ -333,13 +321,12 @@ Test a branch, no release needed:
                 $arch = switch ($env:PROCESSOR_ARCHITECTURE) { 'AMD64' { 'x64' } 'ARM64' { 'arm64' } default { Fail "no Node build for $env:PROCESSOR_ARCHITECTURE; install Node $NodeMinMajor+ yourself" } }
                 $nodeName = "node-v$NodeVersion-win-$arch"
                 if (Test-Path (Join-Path (Join-Path $nodeHome $nodeName) 'npm.cmd')) {
-                    # Already there, from an earlier install or `copycord update --channel dev`.
                     $env:Path = "$(Join-Path $nodeHome $nodeName);$env:Path"
                     Done "reusing $(Join-Path $nodeHome $nodeName)"
                 } elseif ($dryRun) {
                     Dry "download $NodeDist/v$NodeVersion/$nodeName.zip, check its sha256, unpack into $nodeHome"
                 } else {
-                    # The official zip, checked against SHASUMS256.txt; no admin rights needed.
+                    # The official zip, checked against SHASUMS256.txt.
                     Info "Node $NodeVersion into $nodeHome"
                     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("copycord-node-" + [guid]::NewGuid())
                     New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -395,7 +382,6 @@ Test a branch, no release needed:
             if ($dryRun) {
                 Dry "cd $frontend; npm ci; npm run build"
             } else {
-                # A fresh dist for this ref; hatch_build.py then ships it in the wheel.
                 Remove-Item -Recurse -Force (Join-Path $frontend 'dist') -ErrorAction SilentlyContinue
                 # npm.cmd, not npm.ps1: Start-Process cannot launch a .ps1 directly.
                 $npm = (Get-Command npm.cmd).Source
@@ -408,8 +394,7 @@ Test a branch, no release needed:
                 Dry "uv tool install --force --python $PythonVersion --reinstall-package copycord $gitDir"
                 $label = $ref
             } else {
-                # --reinstall-package: uv would otherwise reuse a cached build of
-                # the same directory from an older ref.
+                # Otherwise uv reuses a cached build of this directory from an older ref.
                 Run "uv tool install copycord from $gitDir" 'uv' @('tool', 'install', '--force', '--python', $PythonVersion, '--reinstall-package', 'copycord', $gitDir)
                 $label = "$ref ($sha)"
             }
@@ -434,8 +419,7 @@ Test a branch, no release needed:
             $exe = Join-Path $binDir 'copycord.exe'
         }
 
-        # Save a custom home where the CLI and the service find it without the
-        # environment variable (common/paths.py reads ~/.copycord-home).
+        # Save a custom home in ~/.copycord-home so the CLI and service find it.
         $defaultHome = Join-Path $env:USERPROFILE '.copycord'
         if ($homeDir -ne $defaultHome) {
             if ($dryRun) { Dry "save $homeDir in $homePointer" }
@@ -447,10 +431,8 @@ Test a branch, no release needed:
             }
         } elseif ((Test-Path $homePointer) -and -not $dryRun) { Remove-Item -Force $homePointer }
 
-        # Settings that are read from the environment only live in <home>\.env,
-        # which copycord loads at every start. Make sure it exists: write it once
-        # with every key set to its default; never overwrite it. Keep it in step
-        # with envfile.template() in src/copycord/envfile.py.
+        # Write <home>\.env once, never overwriting it.
+        # Keep in step with envfile.template() in src/copycord/envfile.py.
         $envFile = Join-Path $homeDir '.env'
         if (-not (Test-Path $envFile)) {
             if ($dryRun) { Dry "write the settings file $envFile" }
@@ -500,8 +482,7 @@ Test a branch, no release needed:
             }
         }
 
-        # The channel file (update.json) is written by `copycord update --no-install`,
-        # so its format stays with the CLI.
+        # The CLI writes update.json, so its format lives in one place.
         $channelArgs = @()
         if ($method -eq 'release') {
             if (-not $version -and $channelSet) { $channelArgs = @('--channel', $channel) }
@@ -523,14 +504,12 @@ Test a branch, no release needed:
 
         # --- repair ---------------------------------------------------------
 
-        # After an upgrade or a reinstall: the doctor's automatic fixes (piped, it never
-        # prompts). Its exit status does not fail the install; what is left is in its output.
+        # Piped, the doctor never prompts. Its exit status does not fail the install.
         if ($upgrade) {
             Step 'Repairing (copycord doctor --fix)'
             if ($dryRun) { Dry 'copycord doctor --fix' }
             else {
-                # Windows PowerShell turns stderr lines (uv's progress) into
-                # errors under 'Stop'; here they are only output.
+                # Windows PowerShell turns stderr lines into errors under 'Stop'.
                 $prevPreference = $ErrorActionPreference
                 $ErrorActionPreference = 'Continue'
                 try { & $exe doctor --fix 2>&1 | ForEach-Object { Out "    $_" } }
