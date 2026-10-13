@@ -67,7 +67,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from copycord.common.config import CURRENT_VERSION
-from copycord.common.db import DBManager
+from copycord.common.db import DBManager, backups_dir
 from copycord.common.paths import data_dir, out_candidates, out_dir
 from copycord.common import inprocess
 from copycord.common.backup_scheduler import (
@@ -164,7 +164,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = os.getenv("DB_PATH", str(DATA_DIR / "data.db"))
 db = DBManager(DB_PATH, init_schema=True)
 
-BACKUP_DIR = Path(os.getenv("BACKUP_DIR") or str(DATA_DIR / "backups"))
+BACKUP_DIR = backups_dir()
 
 
 def _log_files(name: str) -> list:

@@ -972,7 +972,12 @@ def test_doctor_fix_recreates_the_env_file(doctor_env, capsys):
             in _after(out, "Settings"))
     # The installer's file: the same template, the same live defaults.
     assert env.read_text(encoding="utf-8") == envfile.template(env.resolve().parent)
-    assert f"BACKUP_DIR={env.resolve().parent / 'backups'}" in env.read_text(encoding="utf-8").splitlines()
+    # BACKUP_DIR is a commented example showing the folder the code uses.
+    from copycord.common.db import backups_dir
+
+    lines = env.read_text(encoding="utf-8").splitlines()
+    assert f"#BACKUP_DIR={backups_dir()}" in lines
+    assert not any(x.startswith("BACKUP_DIR=") for x in lines)
     if sys.platform != "win32":
         assert (env.stat().st_mode & 0o777) == 0o600
     # The re-check runs after the fix; the real environment's PASSWORD still wins.
@@ -1640,7 +1645,6 @@ def test_env_template_sets_every_default(tmp_path):
         "UI_TZ": "America/New_York",
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "HUMAN",
-        "BACKUP_DIR": str(home / "backups"),
         "BACKUP_AT": "03:17",
         "BACKUP_RETAIN": "14",
         "COPYCORD_NO_UPDATE_CHECK": "0",
@@ -1653,8 +1657,11 @@ def test_env_template_sets_every_default(tmp_path):
     # Copycord saves its own SECRET_KEY; the template says so instead of setting one.
     assert not any(x.lstrip("#").startswith("SECRET_KEY=") for x in lines)
     assert any(x.startswith("# SECRET_KEY") and "secret.key" in x for x in lines)
+    assert any(x.startswith("# SECRET_KEY") and "<home>/data/secret.key" in x for x in lines)
+    # BACKUP_DIR is left to the code default, <home>/data/backups, shown commented out.
+    assert f"#BACKUP_DIR={home.resolve() / 'data' / 'backups'}" in lines
     assert "copycord restart" in text
-    assert set(envfile.ENV_KEYS) - {"SECRET_KEY"} <= set(expected)
+    assert set(envfile.ENV_KEYS) - {"SECRET_KEY", "BACKUP_DIR"} <= set(expected)
 
     env = tmp_path / ".env"
     env.write_text(text, encoding="utf-8")
@@ -1688,7 +1695,8 @@ def test_env_template_defaults_match_the_code(tmp_path, monkeypatch):
         assert reads, key
         assert set(reads) == {envfile.ENV_DEFAULTS[key]}, key
         assert not re.search(rf'os\.getenv\("{key}", ', sources), key
-    assert 'os.getenv("BACKUP_DIR") or str(DATA_DIR / "backups")' in sources
+    assert "BACKUP_DIR = backups_dir()" in sources
+    assert 'os.getenv("BACKUP_DIR")' not in sources
 
 
 def test_config_set_updates_the_template_lines_in_place(tmp_path):
@@ -2126,3 +2134,128 @@ def test_doctor_layout_fix_refuses_while_running(flat_home, monkeypatch):
     with pytest.raises(cli.FixError):
         cli.fix_layout([])
     assert (flat_home / "data.db").is_file()
+
+
+@pytest.fixture()
+def old_backup_home(native, monkeypatch):
+    """A split home whose .env still has the earlier installer's BACKUP_DIR line."""
+    from copycord import envfile
+
+    home = (native / ".copycord").resolve()
+    (home / "data").mkdir(parents=True)
+    _make_db(home / "data" / "data.db")
+    (home / "backups").mkdir()
+    (home / "backups" / "copycord_1.tar.gz").write_text("a")
+    (home / "backups" / "pre-update-1.db").write_text("b")
+    (home / ".env").write_text(f"PASSWORD=x\n\n# where the backups go\nBACKUP_DIR={home / 'backups'}\nTZ=UTC\n")
+    # As loaded from .env on start.
+    monkeypatch.setenv("BACKUP_DIR", envfile.get("BACKUP_DIR", home / ".env"))
+    return home
+
+
+def test_backup_dir_defaults_to_the_data_folder(native, monkeypatch):
+    from copycord import envfile
+    from copycord.common.db import backups_dir
+
+    monkeypatch.delenv("BACKUP_DIR", raising=False)
+    home = (native / ".copycord").resolve()
+    assert backups_dir() == home / "data" / "backups"
+    assert envfile.default_backup_dir(home) == backups_dir()
+    assert f"#BACKUP_DIR={backups_dir()}" in envfile.template(home).splitlines()
+    monkeypatch.setenv("BACKUP_DIR", str(native / "elsewhere"))
+    assert backups_dir() == (native / "elsewhere").resolve()
+
+
+def test_old_installer_backup_dir_moves_into_the_data_folder(old_backup_home):
+    from copycord import envfile
+    from copycord.common.db import backups_dir
+
+    home = old_backup_home
+    assert backups_dir() == home / "backups"
+    lines = []
+    line = paths.migrate_backup_dir(log=lines.append)
+    assert lines == [line] and str(home / "data" / "backups") in line
+    assert sorted(p.name for p in (home / "data" / "backups").iterdir()) == [
+        "copycord_1.tar.gz", "pre-update-1.db"]
+    assert not (home / "backups").exists()
+    assert envfile.get("BACKUP_DIR", home / ".env") is None
+    # The line stays as a commented example of the folder now in use.
+    new = home / "data" / "backups"
+    assert (home / ".env").read_text() == f"PASSWORD=x\n\n# where the backups go\n#BACKUP_DIR={new}\nTZ=UTC\n"
+    # The loaded value is dropped too, so this run already uses the default.
+    assert "BACKUP_DIR" not in os.environ
+    assert backups_dir() == home / "data" / "backups"
+    assert paths.migrate_backup_dir() is None
+
+
+def test_old_backup_dir_merges_without_overwriting(old_backup_home):
+    home = old_backup_home
+    new = home / "data" / "backups"
+    new.mkdir()
+    (new / "copycord_0.tar.gz").write_text("z")
+    paths.migrate_backup_dir()
+    assert sorted(p.name for p in new.iterdir()) == [
+        "copycord_0.tar.gz", "copycord_1.tar.gz", "pre-update-1.db"]
+    assert not (home / "backups").exists()
+
+    # A name already in the data folder: nothing moves and the line stays.
+    from copycord import envfile
+
+    (home / "backups").mkdir()
+    (home / "backups" / "copycord_0.tar.gz").write_text("other")
+    envfile.set_value("BACKUP_DIR", str(home / "backups"), home / ".env")
+    line = paths.migrate_backup_dir()
+    assert "copycord_0.tar.gz already in" in line
+    assert (new / "copycord_0.tar.gz").read_text() == "z"
+    assert (home / "backups" / "copycord_0.tar.gz").read_text() == "other"
+    assert envfile.get("BACKUP_DIR", home / ".env") == str(home / "backups")
+
+
+def test_old_backup_dir_without_backups_only_drops_the_line(old_backup_home):
+    from copycord import envfile
+    import shutil
+
+    shutil.rmtree(old_backup_home / "backups")
+    assert paths.migrate_backup_dir() is not None
+    assert envfile.get("BACKUP_DIR", old_backup_home / ".env") is None
+    assert not (old_backup_home / "data" / "backups").exists()
+
+
+def test_a_chosen_backup_dir_is_left_alone(old_backup_home, monkeypatch):
+    from copycord import envfile
+
+    home = old_backup_home
+    mine = home / "my-backups"
+    envfile.set_value("BACKUP_DIR", str(mine), home / ".env")
+    monkeypatch.setenv("BACKUP_DIR", str(mine))
+    assert paths.old_backup_dir() is None
+    assert paths.migrate_backup_dir() is None
+    assert envfile.get("BACKUP_DIR", home / ".env") == str(mine)
+    assert (home / "backups" / "copycord_1.tar.gz").is_file()
+
+
+def test_old_backup_dir_is_kept_in_docker(old_backup_home):
+    assert paths.migrate_backup_dir(docker=True) is None
+    assert (old_backup_home / "backups").is_dir()
+
+
+def test_old_backup_dir_moves_on_start(old_backup_home, caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="copycord.layout"):
+        cli.migrate_on_start()
+    assert "Moved the backups into" in caplog.text
+    assert (old_backup_home / "data" / "backups" / "copycord_1.tar.gz").is_file()
+
+
+def test_doctor_flags_and_fixes_the_old_backup_dir(old_backup_home, monkeypatch):
+    from copycord.common.db import backups_dir
+
+    monkeypatch.setattr(cli, "service_state", lambda: None)
+    check = cli.check_layout()
+    assert check.status == cli.WARN and check.fix == "layout"
+    assert check.path == str(old_backup_home / "backups")
+    assert "Moved the backups into" in cli.fix_layout([check])
+    assert cli.check_layout().status == cli.PASS
+    # The backups check reports the folder in use.
+    assert cli.check_backups().path == str(old_backup_home / "data" / "backups") == str(backups_dir())

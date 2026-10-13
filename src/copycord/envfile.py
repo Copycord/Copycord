@@ -24,7 +24,7 @@ FILENAME = ".env"
 
 ENV_KEYS: Dict[str, str] = {
     "PASSWORD": "dashboard login password; change it from the default (empty: no login page)",
-    "SECRET_KEY": "signs the dashboard login cookie (default: a key saved in <home>/secret.key)",
+    "SECRET_KEY": "signs the dashboard login cookie (default: a key saved in <home>/data/secret.key)",
     "ADMIN_PORT": "dashboard port",
     "TZ": "time zone for the daily backup, e.g. Europe/Berlin",
     "UI_TZ": "time zone shown in exports",
@@ -37,7 +37,8 @@ ENV_KEYS: Dict[str, str] = {
 
 DEFAULT_PASSWORD = "copycord"
 
-# BACKUP_DIR defaults to <home>/backups, filled in by template().
+# BACKUP_DIR is left out: the default <data dir>/backups applies, and the
+# template shows it as a commented example.
 ENV_DEFAULTS: Dict[str, str] = {
     "PASSWORD": DEFAULT_PASSWORD,
     "ADMIN_PORT": "8080",
@@ -54,8 +55,10 @@ ENV_DEFAULTS: Dict[str, str] = {
 LOG_LEVEL_TEXT = "DEBUG or INFO; the dashboard's log level wins once it is saved"
 
 SECRET_KEY_TEXT = (
-    "SECRET_KEY is left out: Copycord keeps its own key in <home>/secret.key"
+    "SECRET_KEY is left out: Copycord keeps its own key in <home>/data/secret.key"
 )
+
+BACKUP_DIR_TEXT = "where the daily database backups go; remove the # to use another folder"
 
 TEMPLATE_KEYS = (
     "PASSWORD",
@@ -172,10 +175,29 @@ def unset(key: str, path: Optional[Path] = None) -> bool:
     return True
 
 
+def comment_out(key: str, example: str, path: Optional[Path] = None) -> bool:
+    """Turn the KEY line into the commented example #KEY=example; False when
+    KEY was not set in the file."""
+    path = env_path() if path is None else path
+    lines = _read_lines(path)
+    out = []
+    done = False
+    for line in lines:
+        m = _LINE.match(line)
+        if m and m.group(1) == key:
+            if not done:
+                out.append(f"#{key}={example}")
+                done = True
+            continue
+        out.append(line)
+    if done:
+        _write_lines(path, out)
+    return done
+
+
 def template(home: Optional[Path] = None) -> str:
     """The default <home>/.env written on first install."""
     home = env_path().parent if home is None else Path(home)
-    defaults = {**ENV_DEFAULTS, "BACKUP_DIR": str(home / "backups")}
     lines = [
         "# Copycord settings that are read from the environment only.",
         "# Everything else is set in the dashboard. Each value below is the default.",
@@ -187,9 +209,24 @@ def template(home: Optional[Path] = None) -> str:
     for key in TEMPLATE_KEYS:
         if key == "SECRET_KEY":
             lines += [f"# {SECRET_KEY_TEXT}", ""]
+        elif key == "BACKUP_DIR":
+            lines += [f"# {BACKUP_DIR_TEXT}", f"#BACKUP_DIR={default_backup_dir(home)}", ""]
         else:
-            lines += [f"# {texts[key]}", f"{key}={defaults[key]}", ""]
+            lines += [f"# {texts[key]}", f"{key}={ENV_DEFAULTS[key]}", ""]
     return "\n".join(lines)
+
+
+def default_backup_dir(home: Path) -> Path:
+    """The backups folder used when BACKUP_DIR is not set, for the .env in home:
+    <home>/data/backups natively, <data dir>/backups when .env sits in the data dir."""
+    from copycord.common.paths import DATA_SUBDIR, data_dir, home_dir
+
+    home = Path(home).resolve()
+    if home == home_dir() and home != data_dir():
+        return data_dir() / "backups"
+    if home == data_dir():
+        return home / "backups"
+    return home / DATA_SUBDIR / "backups"
 
 
 def write_template(path: Optional[Path] = None) -> Path:

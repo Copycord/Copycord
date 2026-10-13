@@ -259,3 +259,82 @@ def migrate_layout(
     if log is not None:
         log(line)
     return line
+
+
+def old_backup_dir(env: Optional[Mapping[str, str]] = None, docker: Optional[bool] = None) -> Optional[Path]:
+    """<home>/backups when <home>/.env still has the BACKUP_DIR line an earlier
+    4.0 installer wrote there; None otherwise (no line, or a folder of your own)."""
+    env = os.environ if env is None else env
+    docker = in_docker() if docker is None else docker
+    if docker or not split_layout(env):
+        return None
+    home = copycord_home(env).resolve()
+    if home_dir(env) != home or data_dir(env) != home / DATA_SUBDIR:
+        return None
+    from copycord import envfile
+
+    raw = envfile.get("BACKUP_DIR", home / envfile.FILENAME)
+    old = home / "backups"
+    if not raw or Path(raw).expanduser().resolve() != old:
+        return None
+    return old
+
+
+def migrate_backup_dir(
+    env: Optional[MutableMapping[str, str]] = None,
+    docker: Optional[bool] = None,
+    log=None,
+) -> Optional[str]:
+    """Move the backups from <home>/backups into <home>/data/backups and drop the
+    old installer's BACKUP_DIR line, so the default folder applies.
+
+    Never overwrites: when an archive with the same name is already in the data
+    folder, nothing moves and the line stays. A failed rename puts back what was
+    moved. Returns the line it logged, or None when there was nothing to do.
+    """
+    env = os.environ if env is None else env
+    old = old_backup_dir(env, docker)
+    if old is None:
+        return None
+    from copycord import envfile
+
+    home = old.parent
+    new = home / DATA_SUBDIR / "backups"
+    env_file = home / envfile.FILENAME
+    raw = envfile.get("BACKUP_DIR", env_file)
+    if old.is_dir():
+        new.parent.mkdir(parents=True, exist_ok=True)
+    if old.is_dir() and not os.path.lexists(new):
+        os.rename(old, new)
+    elif old.is_dir():
+        entries = sorted(old.iterdir())
+        clash = [p.name for p in entries if os.path.lexists(new / p.name)]
+        if clash:
+            line = (f"Backups left in {old}: {', '.join(clash)} already in {new}; "
+                    f"BACKUP_DIR in {env_file} still points at {old}")
+            if log is not None:
+                log(line)
+            return line
+        moved = []
+        try:
+            for src in entries:
+                os.rename(src, new / src.name)
+                moved.append(src)
+        except OSError:
+            for src in reversed(moved):
+                try:
+                    os.rename(new / src.name, src)
+                except OSError:
+                    pass
+            raise
+        try:
+            old.rmdir()
+        except OSError:
+            pass
+    envfile.comment_out("BACKUP_DIR", str(new), env_file)
+    if raw is not None and env.get("BACKUP_DIR") == raw:
+        env.pop("BACKUP_DIR", None)
+    line = f"Moved the backups into {new}; BACKUP_DIR in {env_file} is now the default"
+    if log is not None:
+        log(line)
+    return line
