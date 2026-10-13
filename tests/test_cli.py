@@ -202,7 +202,7 @@ def uninstall_env(data_dir, monkeypatch):
     data_dir.mkdir(parents=True)
     (data_dir / "data.db").write_text("db", encoding="utf-8")
     monkeypatch.setattr(cli, "_uninstall_service", lambda dry_run, removed, kept: True)
-    monkeypatch.setattr(cli, "_uninstall_program", lambda dry_run, purge, removed, kept: True)
+    monkeypatch.setattr(cli, "_uninstall_program", lambda dry_run, purge, removed, kept, *a: True)
     monkeypatch.setenv("NO_COLOR", "1")
     return data_dir
 
@@ -326,6 +326,92 @@ def test_uninstall_purge_and_keep_data_conflict(uninstall_env, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main(["uninstall", "--purge", "--keep-data"])
     assert exc.value.code == 2
+
+
+@pytest.fixture()
+def win_uninstall(data_dir, tmp_path, monkeypatch):
+    """Windows uninstall with the service, processes, files and uv recorded."""
+    import shutil
+    from copycord import service, winupdate
+
+    data_dir.mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setattr(winupdate, "running", lambda: calls.append("running") or (["C:/bin/copycord.exe"], None))
+    monkeypatch.setattr(cli, "_uninstall_service",
+                        lambda dry_run, removed, kept: calls.append("service") or True)
+    monkeypatch.setattr(winupdate, "clean_old", lambda home, launchers: calls.append("clean"))
+    monkeypatch.setattr(winupdate, "scratch_dir", lambda prefix: tmp_path / "scratch")
+    moved = [(Path("C:/env/python.exe"), tmp_path / "scratch" / ".copycord-old" / "1" / "0-python.exe")]
+
+    def move_aside(prefix, launchers, home):
+        calls.append(("move", launchers, home))
+        return moved
+
+    monkeypatch.setattr(winupdate, "move_aside", move_aside)
+    monkeypatch.setattr(winupdate, "restore", lambda m: calls.append(("restore", m)))
+    monkeypatch.setattr(winupdate, "delete_after_exit", lambda folders: calls.append(("delete", folders)))
+    monkeypatch.setattr(shutil, "which", lambda name: "uv" if name == "uv" else None)
+    result = {"code": 0}
+
+    def run_cmd(cmd, *a, **k):
+        calls.append(" ".join(cmd))
+        return __import__("subprocess").CompletedProcess(cmd, result["code"], "", "Access is denied")
+
+    monkeypatch.setattr(service, "run_cmd", run_cmd)
+    monkeypatch.setenv("NO_COLOR", "1")
+    return calls, result, moved
+
+
+def test_uninstall_windows_moves_files_aside_then_runs_uv(win_uninstall, data_dir, tmp_path, capsys):
+    from copycord import winupdate
+
+    calls, _result, moved = win_uninstall
+    assert cli.main(["uninstall", "--yes"]) == 0
+    assert calls[:4] == ["running", "service", "clean",
+                         ("move", ["C:/bin/copycord.exe"], tmp_path / "scratch")]
+    assert calls[4] == "uv tool uninstall copycord"
+    assert calls[5] == ("delete", [tmp_path / "scratch", moved[0][1].parent,
+                                   data_dir / winupdate.ASIDE])
+    assert not any(c[0] == "restore" for c in calls if isinstance(c, tuple))
+    out = capsys.readouterr().out
+    assert "Copycord uninstalled" in out
+
+
+def test_uninstall_windows_purge_skips_the_update_leftovers(win_uninstall, data_dir, tmp_path):
+    calls, _result, moved = win_uninstall
+    assert cli.main(["uninstall", "--yes", "--purge"]) == 0
+    assert "clean" not in calls
+    assert calls[-1] == ("delete", [tmp_path / "scratch", moved[0][1].parent])
+
+
+def test_uninstall_windows_restores_the_files_when_uv_fails(win_uninstall, capsys):
+    calls, result, moved = win_uninstall
+    result["code"] = 1
+    assert cli.main(["uninstall", "--yes"]) == 1
+    i = calls.index("uv tool uninstall copycord")
+    assert calls[i + 1] == ("restore", moved)
+    captured = capsys.readouterr()
+    assert "Uninstall incomplete" in captured.out and "Access is denied" in captured.err
+
+
+def test_uninstall_windows_refuses_while_another_copycord_runs(win_uninstall, monkeypatch, capsys):
+    from copycord import winupdate
+
+    calls, _result, _moved = win_uninstall
+    monkeypatch.setattr(winupdate, "running", lambda: calls.append("running") or ([], 4242))
+    assert cli.main(["uninstall", "--yes"]) == 1
+    assert calls == ["running"]
+    err = capsys.readouterr().err
+    assert "Copycord is running in another window (process 4242); stop it first" in err
+
+
+def test_uninstall_linux_runs_uv_without_moving_files(win_uninstall, monkeypatch, capsys):
+    calls, _result, _moved = win_uninstall
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+    assert cli.main(["uninstall", "--yes"]) == 0
+    assert calls == ["service", "uv tool uninstall copycord"]
+    assert "Copycord uninstalled" in capsys.readouterr().out
 
 
 def test_uninstall_help_mentions_the_data_question(data_dir, capsys):
