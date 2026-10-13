@@ -42,6 +42,7 @@ NODE_VERSION="${COPYCORD_NODE_VERSION:-22.12.0}"
 VERIFY="${COPYCORD_VERIFY:-0}"
 DRY_RUN="${COPYCORD_DRY_RUN:-0}"
 VERBOSE="${COPYCORD_VERBOSE:-0}"
+FORCE="${COPYCORD_FORCE:-0}"
 SHOW_HELP=0
 
 usage() {
@@ -67,6 +68,8 @@ Options:
                          \`copycord doctor\` and fail if either fails
   --dry-run              print the plan and the actions, change nothing
   --verbose              stream the output of every step
+  --force                reinstall even when this version is already
+                         installed (without it the installer stops there)
   --help, -h             show this help
 
 Advanced:
@@ -80,6 +83,7 @@ Environment (flags win):
   COPYCORD_VERIFY=1                     COPYCORD_DRY_RUN=1
   COPYCORD_VERBOSE=1                    COPYCORD_NODE_VERSION=<x.y.z>
   COPYCORD_ALLOW_ROOT=1                 COPYCORD_HOME=<path>
+  COPYCORD_FORCE=1
   NO_COLOR=1                            plain output
 
 Examples:
@@ -117,6 +121,7 @@ while [ $# -gt 0 ]; do
         --verify) VERIFY=1 ;;
         --dry-run) DRY_RUN=1 ;;
         --verbose) VERBOSE=1 ;;
+        --force) FORCE=1 ;;
         --help | -h) SHOW_HELP=1 ;;
         *) printf 'copycord install: unknown option %s (see --help)\n' "$1" >&2; exit 2 ;;
     esac
@@ -331,6 +336,85 @@ UPGRADE=0
 if command -v copycord >/dev/null 2>&1 || [ -x "$HOME/.local/bin/copycord" ] \
     || [ -e "$COPYCORD_HOME/.env" ] || [ -e "$COPYCORD_HOME/data.db" ]; then
     UPGRADE=1
+fi
+
+# --- already installed? ---------------------------------------------------------
+
+installed_copycord() {
+    # The copycord command on PATH or in a bin dir the installer uses.
+    if command -v copycord >/dev/null 2>&1; then
+        command -v copycord
+        return 0
+    fi
+    for dir in "${UV_TOOL_BIN_DIR:-}" "${XDG_BIN_HOME:-}" "$HOME/.local/bin"; do
+        if [ -n "$dir" ] && [ -x "$dir/copycord" ]; then
+            printf '%s\n' "$dir/copycord"
+            return 0
+        fi
+    done
+    return 1
+}
+
+remote_head() {
+    # remote_head REF: commit of a branch or tag of $REPO_URL (a tag peeled).
+    command -v git >/dev/null 2>&1 || return 1
+    heads="$(GIT_TERMINAL_PROMPT=0 git ls-remote "$REPO_URL.git" "refs/heads/$1" "refs/tags/$1" "refs/tags/$1^{}" 2>/dev/null)" || return 1
+    printf '%s\n' "$heads" | awk -v r="$1" '
+        $2 == "refs/tags/" r "^{}" { peeled = $1 }
+        $2 == "refs/heads/" r { head = $1 }
+        $2 == "refs/tags/" r { tag = $1 }
+        END { s = head; if (s == "") s = peeled; if (s == "") s = tag; if (s == "") exit 1; print s }'
+}
+
+already_installed() {
+    # Prints the installed label when it is what this run would install.
+    # Any doubt (no network, unknown output) means install.
+    exe="$(installed_copycord)" || return 1
+    out="$(NO_COLOR=1 "$exe" --version </dev/null 2>/dev/null)" || return 1
+    first="$(printf '%s\n' "$out" | sed -n 1p)"
+    chan="$(printf '%s\n' "$out" | sed -n 's/^channel //p' | head -n 1)"
+    have_version="${first%% *}"
+    have_commit="$(printf '%s' "$first" | sed -n 's/^[^ ]* (\([0-9a-f]\{7,40\}\))$/\1/p')"
+    [ -n "$have_version" ] && [ -n "$chan" ] || return 1
+    if [ "$METHOD" = "git" ]; then
+        [ -n "$have_commit" ] || return 1
+        if printf '%s' "$REF" | grep -Eq '^[0-9a-f]{7,40}$'; then
+            want="$REF"
+        else
+            # The installer saves this channel for a branch of the default repo.
+            if [ "$REPO" = "$DEFAULT_REPO" ] && [ "$chan" != "dev (branch $REF)" ]; then
+                return 1
+            fi
+            want="$(remote_head "$REF")" || return 1
+        fi
+        case "$want" in "$have_commit"*) ;; *) return 1 ;; esac
+        printf '%s (%s)\n' "$REF" "$(printf '%s' "$have_commit" | cut -c1-7)"
+    else
+        case "$chan" in stable | beta) ;; *) return 1 ;; esac
+        if [ -n "$VERSION" ]; then
+            want="$VERSION"
+        else
+            [ "$CHANNEL_SET" != "1" ] || [ "$chan" = "$CHANNEL" ] || return 1
+            if [ "$CHANNEL" = "beta" ]; then
+                want="$(fetch "$API?per_page=1" 2>/dev/null | json_field tag_name)" || return 1
+            else
+                want="$(fetch "$API/latest" 2>/dev/null | json_field tag_name)" || return 1
+            fi
+            want="${want#v}"
+        fi
+        [ -n "$want" ] && [ "${have_version#v}" = "$want" ] || return 1
+        printf 'v%s\n' "$want"
+    fi
+}
+
+if [ "$FORCE" != "1" ] && [ "$DRY_RUN" != "1" ]; then
+    if HAVE="$(already_installed)"; then
+        banner
+        done_line "Copycord $HAVE is already installed"
+        info "Run copycord update to update it, or rerun with --force to reinstall."
+        say ""
+        exit 0
+    fi
 fi
 
 # --- plan ---------------------------------------------------------------------
