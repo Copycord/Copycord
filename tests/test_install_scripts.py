@@ -219,3 +219,29 @@ def test_plan_names_the_repair_step(path):
 @pytest.mark.parametrize("path", [SH, PS1])
 def test_doctor_has_no_yes_flag(path):
     assert "doctor --fix --yes" not in _text(path)
+
+
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_stops_when_already_installed(path):
+    text = _text(path)
+    assert "is already installed" in text
+    assert "Run copycord update to update it, or rerun with" in text
+    assert "git ls-remote" in text
+    assert "--version" in text and "channel" in text
+    assert "COPYCORD_FORCE" in text
+
+
+@pytest.mark.parametrize("path, flag", [(SH, "--force) FORCE=1"), (PS1, "[switch]$Force")])
+def test_force_reinstalls(path, flag):
+    text = _text(path)
+    assert flag in text
+    help_flag = "--force" if path == SH else "-Force"
+    assert re.search(r"^\s+" + re.escape(help_flag) + r"\s+reinstall", text, re.M)
+
+
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_the_check_comes_before_any_install_step(path):
+    text = _text(path)
+    check = text.index("is already installed")
+    assert check < text.index("Preparing uv")
+    assert check < text.index("uv tool install --force")
