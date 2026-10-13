@@ -119,11 +119,21 @@ def stubbed(monkeypatch, tmp_path):
     return monkeypatch
 
 
+# What a spinner writes on its line, up to the wipe the row is printed after.
+SPINNER = re.compile(r"[^\n]*\r\033\[2K")
+
+
 @pytest.mark.parametrize("mode", list(MODES))
 def test_output_matches_the_old_renderer(stubbed, mode):
     if MODES[mode][2]:
         stubbed.setenv("NO_COLOR", "1")
     code, out = render(mode)
+    if mode == "rail_color":
+        # One spinner per step, each wiped before its row; the rest is as before.
+        assert len(SPINNER.findall(out)) == sum(len(steps) for _, steps in cli.doctor_steps())
+        out = SPINNER.sub("", out)
+    else:
+        assert "\r" not in out
     assert (code, out) == EXPECTED[mode]
 
 
