@@ -474,7 +474,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "action",
         nargs="?",
         choices=("status",),
-        help="status: print the installed version, the channel and the latest on it",
+        help="print the installed version, the channel and the latest on it",
     )
     target = update.add_mutually_exclusive_group()
     target.add_argument(

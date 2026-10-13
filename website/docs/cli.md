@@ -10,7 +10,7 @@ The [installer](/docs/getting-started/quick-start) installs the `copycord` comma
 ```
 copycord run [--data-dir PATH]
 copycord restart
-copycord doctor [--data-dir PATH]
+copycord doctor [--verbose] [--data-dir PATH]
 copycord config get KEY [--show-secrets] [--data-dir PATH]
 copycord config set KEY VALUE [--data-dir PATH]
 copycord config unset KEY [--data-dir PATH]
@@ -24,7 +24,37 @@ copycord uninstall [--purge] [--yes] [--keep-service] [--dry-run] [--data-dir PA
 copycord --version | -V
 ```
 
-Every command has `--help`, for example `copycord service install --help`. `copycord --help` lists the commands by group with examples.
+Every command has `--help`, for example `copycord service install --help`. `copycord --help` lists the commands by group with examples, and each command's help has the same layout: a heading, the usage line, its commands or options, and examples. A command group on its own (`copycord config`, `copycord service`) prints its help. A mistake such as an unknown option prints one line and points at the help:
+
+```
+$ copycord update --help
+copycord update
+Update Copycord from the saved channel (default stable), or switch channel.
+The channel is saved in <data dir>/update.json.
+
+Usage: copycord update [status] [options]
+
+Arguments:
+  status  Print the installed version, the channel and the latest on it
+
+Options:
+  --data-dir PATH            Data directory (sets DATA_DIR)
+  --channel stable|beta|dev  Switch to this channel and save it ...
+  --tag VERSION              Install this exact version once; the saved channel does not change
+  ...
+  -h, --help                 Show this help
+
+Channels:
+  stable  newest GitHub release
+  beta    newest GitHub release, pre-releases included
+  dev     a git branch, tag or commit (needs npm to build the dashboard)
+
+Examples:
+  copycord update status   see whether an update is available
+  ...
+```
+
+Colors follow the same rules as the rest of the output: plain text when it is not a terminal or `NO_COLOR` is set.
 
 ## Output and colors {#output}
 
@@ -33,9 +63,9 @@ In a terminal the CLI shows the Copycord banner, colored check marks and crosses
 Without colors every status line starts with a plain word, so scripts can match it:
 
 ```
-PASS  data dir: /home/you/.copycord is writable
-WARN  frontend: ... is missing, the admin UI will not load
-FAIL  admin port: port 8080 is in use
+PASS  home writable
+WARN  dashboard password is the default: change it with `copycord config set PASSWORD <new>`, then `copycord restart`
+FAIL  database schema 5 is newer than this Copycord supports (4): ...
 ```
 
 ## The data directory {#data-dir}
@@ -88,28 +118,57 @@ channel stable
 
 ## copycord doctor {#copycord-doctor}
 
-Checks that this machine can run Copycord. It does not use the network.
+Checks that this machine can run Copycord and that it is set up, in five groups. A line only gets details when something is wrong; paths are shown for warnings and failures, or for every line with `--verbose`.
 
 ```bash
 copycord doctor
+copycord doctor --verbose
 copycord doctor --data-dir ~/copycord/data
 ```
 
-| Check | Passes when |
-|-------|-------------|
-| `python` | Python is 3.12 to 3.14 |
-| `ROLE` | The `ROLE` variable is not set |
-| `data dir` | The data directory is writable, or can be created |
-| `database` | `data.db` opens, or does not exist yet |
-| `admin port` | `ADMIN_PORT` (default 8080) is free |
-| `frontend` | The dashboard files are installed |
-| `import ...` | The required packages (`curl_cffi`, `py-cord`, `fastapi`, `uvicorn`) import |
+| Group | Checks |
+|-------|--------|
+| Install | The version, commit and update channel; Python is 3.12 to 3.14; the web UI files are installed; the required packages (`curl_cffi`, `py-cord`, `fastapi`, `uvicorn`) import, as one `dependencies OK` line that names only the missing ones |
+| Settings | `<home>/.env` exists; `PASSWORD` is not still the default `copycord`; `SERVER_TOKEN` and `CLIENT_TOKEN` are set (token values are never printed); a `FAIL` when the removed `ROLE` variable is still set |
+| Data | The Copycord home is writable; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the last backup in the backups folder is under 2 days old |
+| Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running |
+| Updates | The update check, cached for 24 hours. A network error is only reported, never a failure |
 
-In a terminal each check shows a green check, a yellow `!` or a red cross; piped, each line starts with `PASS`, `WARN` or `FAIL`. The command exits with status 1 when any check fails, so it can be used in scripts.
+Without colors it looks like this on a new install:
+
+```
+Install
+PASS  Copycord v4.0.0 (1a2b3c4), channel stable
+PASS  Python 3.12.3
+PASS  web UI included
+PASS  dependencies OK
+
+Settings
+PASS  .env found
+WARN  dashboard password is the default: change it with `copycord config set PASSWORD <new>`, then `copycord restart`
+WARN  SERVER_TOKEN and CLIENT_TOKEN not set yet: finish setup at http://localhost:8080
+
+Data
+PASS  home writable
+INFO  database created on first run
+INFO  no backups yet
+
+Running
+PASS  admin port 8080 free
+INFO  service not installed: `copycord service install` runs Copycord in the background
+
+Updates
+PASS  up to date
+
+2 warnings, 0 problems
+```
+
+In a terminal each line shows a green check, a yellow `!`, a red cross or a blue dot; piped, each line starts with `PASS`, `WARN`, `FAIL` or `INFO`. The last line is `All good`, or the number of warnings and problems. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts.
 
 :::tip Port in use
-`FAIL  admin port` usually means Copycord is already running (for example as a service). Stop it, or set `ADMIN_PORT` to another port.
+`WARN  port 8080 in use` means another program has the port: set `ADMIN_PORT` to a free one. When Copycord itself is listening (as a service, or `copycord run` in another terminal) the line says `port 8080 in use by Copycord` instead.
 :::
+
 
 ## copycord config {#copycord-config}
 
