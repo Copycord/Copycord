@@ -7,21 +7,9 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""Attribute-compatible wrappers over raw gateway/REST dicts.
+"""Wrappers over raw gateway and REST dicts with discord.py's attribute names.
 
-src/copycord/client reads a few hundred attributes off discord.py-self model objects
-(``g.name``, ``role.color.value``, ``ch.type.value``, ``msg.author.display_avatar.url``,
-``th.permissions_for(me).read_message_history`` ...). Every wrapper here keeps
-the raw payload in ``_data`` and exposes those same names as properties, so the
-client can switch imports without its serialization code changing.
-
-Lookups that need state outside the payload (the guild a message belongs to,
-the channel a thread hangs off, the logged-in user) go through an optional
-``state`` object. Anything with ``get_guild``/``get_channel``/``get_user`` and a
-``user`` attribute works; the real one is the Client that lands with
-v4/selfclient-gateway. With no state the wrappers still read their own payload.
-
-No ``discord`` import anywhere in this module.
+Lookups outside the payload go through an optional ``state`` object.
 """
 
 from __future__ import annotations
@@ -448,8 +436,7 @@ class ChannelFlags(_Flags):
 
 
 class SystemChannelFlags(_Flags):
-    # Discord's bits are "suppress" bits; discord.py inverts them for its
-    # attribute names, but the client only ever reads .value.
+    # Discord's raw "suppress" bits, not inverted as discord.py does.
     FLAGS = {
         "suppress_join_notifications": 0,
         "suppress_premium_subscriptions": 1,
@@ -579,9 +566,8 @@ ClientUser = User
 class Member(User):
     """A guild member: a user plus the guild-scoped member object.
 
-    ``data`` is the member payload with its ``user`` object inside it, which is
-    what GUILD_MEMBER_ADD and REST return. MESSAGE_CREATE sends ``author`` and
-    ``member`` separately; ``Member.from_message`` joins them.
+    ``data`` is a member payload with ``user`` inside. MESSAGE_CREATE sends them
+    apart; use ``Member.from_message`` for that.
     """
 
     __slots__ = ("_member", "guild")
@@ -792,8 +778,7 @@ class PartialEmoji:
 
     @classmethod
     def from_dict(cls, data: Optional[Dict[str, Any]]) -> Optional["PartialEmoji"]:
-        """From a reaction ``emoji`` object or the ``emoji_id``/``emoji_name`` pair
-        forum tags and default reactions use. None if both are empty."""
+        """From an ``emoji`` object or an ``emoji_id``/``emoji_name`` pair; None if empty."""
         if not data:
             return None
         eid = data.get("id", data.get("emoji_id"))
@@ -944,11 +929,7 @@ GuildSticker = Sticker
 
 @dataclass(frozen=True)
 class PermissionOverwrite:
-    """One raw channel overwrite: target id, target type, allow/deny bits.
-
-    ``type`` stays the raw int (0 role, 1 member), which is what
-    sitemap._serialize_role_overwrites compares against.
-    """
+    """One raw channel overwrite. ``type`` stays the raw int (0 role, 1 member)."""
 
     id: int
     type: int
@@ -1100,17 +1081,9 @@ class GuildChannel(_Channel):
     def permissions_for(self, obj: Any) -> Permissions:
         """Effective permissions of a member or role in this channel.
 
-        discord.py's GuildChannel.permissions_for order:
-          1. guild owner gets everything;
-          2. @everyone's role permissions OR every role the member has;
-          3. administrator short-circuits to everything;
-          4. @everyone channel overwrite;
-          5. all role overwrites for the member's roles, denies then allows,
-             combined so no single role order wins;
-          6. the member-specific overwrite;
-          7. implicit removals: timed-out members keep only view/read history,
-             no send_messages strips the send-dependent bits, no view_channel
-             strips every channel permission, no connect in voice strips voice.
+        Same order as discord.py: owner, base roles, administrator, @everyone
+        overwrite, role overwrites combined, member overwrite, then implicit
+        removals (timeout, no send, no view, no connect).
         """
         guild = self.guild
         if guild is None:
@@ -1178,8 +1151,7 @@ class GuildChannel(_Channel):
                 denied.manage_roles = True
                 base.value &= ~denied.value
         elif ctype in TEXT_LIKE_TYPES or ctype in FORUM_LIKE_TYPES:
-            # Text channels carry no voice permissions (discord.py
-            # TextChannel/ForumChannel.permissions_for).
+            # Text channels carry no voice permissions.
             base.value &= ~Permissions.voice().value
 
         return base
@@ -1464,8 +1436,7 @@ class Thread(GuildChannel):
     _overwrites = permission_overwrites
 
     def permissions_for(self, obj: Any) -> Permissions:
-        """The parent's permissions, with sending governed by
-        send_messages_in_threads (discord.py Thread.permissions_for)."""
+        """The parent's permissions, with sending governed by send_messages_in_threads."""
         parent = self.parent
         if not isinstance(parent, GuildChannel):
             return Permissions.none()
@@ -1580,8 +1551,7 @@ class Guild(_Wrapper):
     """A guild from GUILD_CREATE, READY, or REST.
 
     User-account READY nests most scalar fields under ``properties``; reads fall
-    back to it so either shape works. Channels, threads, roles, emojis,
-    stickers and members are wrapped once at construction and indexed by id.
+    back to it.
     """
 
     __slots__ = ("_channels", "_threads", "_roles", "_members", "_emojis", "_stickers")
@@ -1608,7 +1578,7 @@ class Guild(_Wrapper):
         self._emojis: List[Emoji] = [Emoji(e, self, state) for e in data.get("emojis") or []]
         self._stickers: List[Sticker] = [Sticker(s, state) for s in data.get("stickers") or []]
 
-    # -- cache upkeep (used by the gateway branch; harmless here) ----------
+    # -- cache upkeep ------------------------------------------------------
 
     def _add_channel(self, raw: Dict[str, Any]) -> Optional[GuildChannel]:
         if not isinstance(raw, dict):
@@ -2292,14 +2262,12 @@ class Message(_Wrapper):
         return MessageReference(ref, resolved)
 
     def is_system(self) -> bool:
-        """Whether this is a system message rather than user content
-        (discord.py Message.is_system)."""
+        """Whether this is a system message rather than user content."""
         return self._data.get("type", 0) not in NON_SYSTEM_MESSAGE_TYPES
 
     @property
     def clean_content(self) -> str:
-        """Content with mentions rendered as plain names and @everyone/@here
-        defused, the way discord.py's clean_content renders them."""
+        """Content with mentions as plain names and @everyone/@here defused."""
         guild = self.guild
         names: Dict[int, str] = {}
         for user in self.mentions:
@@ -2327,11 +2295,7 @@ class Message(_Wrapper):
 
     @property
     def system_content(self) -> str:
-        """Discord's rendering of a system message, else the plain content.
-
-        A port of discord.py's Message.system_content for the types the
-        client can see; anything unrecognised falls back to ``content``.
-        """
+        """Discord's rendering of a system message, else the plain content."""
         t = self._data.get("type", 0)
         author = self.author
         name = author.name
