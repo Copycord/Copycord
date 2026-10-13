@@ -63,7 +63,7 @@ const channelUrls = (m: ReturnType<typeof serve>) =>
 
 const sections = () =>
   Array.from(document.querySelectorAll("#channels-root section")).map((s) => [
-    s.querySelector("h3")?.textContent?.trim(),
+    s.querySelector("h3 [data-cat-name]")?.firstChild?.textContent?.trim(),
     Array.from(s.querySelectorAll("article")).map((a) => a.getAttribute("data-cid")),
   ]);
 

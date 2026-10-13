@@ -5,11 +5,17 @@ import { describe, expect, it, vi } from "vitest";
 import { App, PAGES } from "./App";
 import { CSRF_HEADER } from "./lib/api";
 import { logout } from "./components/Sidebar";
+import { ToastProvider } from "./components/Toast";
+import { ConfirmProvider } from "./components/ui";
 
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <App />
+      <ToastProvider>
+        <ConfirmProvider>
+          <App />
+        </ConfirmProvider>
+      </ToastProvider>
     </MemoryRouter>,
   );
 }
