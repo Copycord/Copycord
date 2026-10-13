@@ -513,7 +513,7 @@ def test_doctor_role_set_fails(doctor_env, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     role = _line(out, "ROLE is set")
-    assert role.startswith("FAIL")
+    assert role.startswith("✖")
     assert role.startswith("✖ ROLE is set  Copycord v4 removed the ROLE option.")
     assert "one container" not in role
     assert out.splitlines()[-1] == "✖ 0 warnings, 1 problem"
@@ -632,7 +632,7 @@ def test_doctor_missing_dependency_names_only_it(doctor_env, monkeypatch, capsys
 
     out = capsys.readouterr().out
     line = _line(out, "missing dependencies")
-    assert line.startswith("✖ missing dependencies  nothing-dist:")
+    assert line.startswith("✖ missing dependencies: nothing-dist  cannot import")
     assert "pytest" not in line
     assert out.splitlines()[-2:] == ["✖ 0 warnings, 1 problem", FIX_HINT.format(1)]
 
