@@ -16,6 +16,8 @@ async function open(page: Page, name: PageName): Promise<void> {
 
 test.describe("shared", () => {
   test("1 sidebar links reach every page", async ({ page }) => {
+    // Eight page loads, each allowed up to 15 s of networkidle in settle().
+    test.setTimeout(180_000);
     await open(page, "dashboard");
     for (const name of Object.keys(PAGES) as PageName[]) {
       const href = pageUrl(name);
