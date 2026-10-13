@@ -226,6 +226,7 @@ export function GlobalConfigSection() {
             <Row label="Log Level" hint={FIELD_TIPS.LOG_LEVEL}>
               <Select
                 id="LOG_LEVEL"
+                aria-label="Log Level"
                 name="LOG_LEVEL"
                 value={values.LOG_LEVEL}
                 onChange={(e) => set("LOG_LEVEL", e.target.value === "DEBUG" ? "DEBUG" : "INFO")}
@@ -241,6 +242,7 @@ export function GlobalConfigSection() {
               <div className="flex items-center gap-2">
                 <Input
                   id="LOG_MAX_SIZE_MB"
+                  aria-label="Max Log Size"
                   name="LOG_MAX_SIZE_MB"
                   type="number"
                   min={0}
