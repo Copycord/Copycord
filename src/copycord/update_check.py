@@ -249,7 +249,7 @@ def auto_update_once() -> bool:
     if not result.available:
         return False
     logger.info("auto-update: applying %s", result.latest[:12] if result.dev else result.latest)
-    rc = update.update()
+    rc = update.update(yes=True)
     if rc != 0:
         logger.error("auto-update: failed (exit %s)", rc)
         return False

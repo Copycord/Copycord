@@ -501,7 +501,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--yes",
         "-y",
         action="store_true",
-        help="install an older version without asking (needed with no terminal)",
+        help="update without asking first; also confirms installing an older version "
+        "(needed with no terminal)",
     )
     update.add_argument(
         "--force",

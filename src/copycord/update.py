@@ -576,6 +576,42 @@ def confirm_downgrade(current: str, target: str, yes: bool = False) -> int:
     return 0
 
 
+def confirm_update(lines: list, question: str, title: str = "Update available") -> int:
+    """Show what will change and ask; 0 to go ahead, else the exit code."""
+    if lines:
+        ui.box(lines, title=title, status="info")
+    try:
+        ok = ui.confirm(question, default=True)
+    except (KeyboardInterrupt, EOFError):
+        print()
+        ui.warn("update cancelled", "nothing was changed")
+        return 130
+    if not ok:
+        print("Update cancelled, nothing was changed")
+        return CANCELLED
+    return 0
+
+
+CANCELLED = -1  # confirm_update: the user said no; update() exits 0
+
+
+def _installed_label() -> str:
+    commit = installed_commit()
+    return current_version() + (f" ({commit[:7]})" if commit else "")
+
+
+def _target_label(target: Channel) -> str:
+    ref = target.ref if target.repo_name == DEFAULT_REPO else f"{target.repo_name}@{target.ref}"
+    head = _heads.get((target.repo_name, target.ref))
+    if head is None:
+        return ref
+    return f"{ref} ({head.sha[:7]})" + (f" {head.subject[:60]}" if head.subject else "")
+
+
+# Branch heads read by nothing_new, so the prompt can show the new commit.
+_heads: dict = {}
+
+
 def nothing_new(target: Channel) -> Tuple[bool, Optional[Release]]:
     """(True, ...) when the install already matches the newest of target; prints why.
 
@@ -592,6 +628,7 @@ def nothing_new(target: Channel) -> Tuple[bool, Optional[Release]]:
         except Exception as e:
             ui.warn(f"could not get the head of {target.ref} from GitHub; installing anyway", str(e))
             return False, None
+        _heads[(target.repo_name, target.ref)] = head
         if head.sha != installed:
             return False, None
         ui.ok(f"Copycord is up to date ({current}, {installed[:7]})")
@@ -726,6 +763,20 @@ def update(
     # Dev refs have no comparable version, so only releases can be a downgrade.
     if release is not None and is_older(release.version, current_version()):
         rc = confirm_downgrade(current_version(), release.version, yes)
+        if rc:
+            return rc
+    elif not yes and ui.is_interactive():
+        current = current_version()
+        same = release.version == current if release is not None else force
+        if same and not switching:
+            rc = confirm_update([], f"Reinstall Copycord {current}?")
+        else:
+            new = release.version if release is not None else _target_label(target)
+            title = (f"Switch to the {target.channel} channel"
+                     if switching and target != saved else "Update available")
+            rc = confirm_update([f"{_installed_label()} -> {new}"], "Update Copycord now?", title)
+        if rc == CANCELLED:
+            return 0
         if rc:
             return rc
     if not backup_database(no_backup):
