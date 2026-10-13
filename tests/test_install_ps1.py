@@ -94,6 +94,23 @@ def test_uv_is_pinned_and_not_piped():
     assert "'-File', $uvScript" in text
 
 
+def test_one_release_lookup_sorted_by_version():
+    text = _text()
+    assert text.count("Invoke-RestMethod") == 3
+    body = text[text.index("function FindRelease"):text.index("function AlreadyInstalled")]
+    assert "Sort-Object" in body and "ReleaseKey" in body
+    assert "GITHUB_TOKEN" in body and "HTTP $status" in body
+    assert text.count("$release = FindRelease") == 1 and "$found = FindRelease" in text
+
+
+def test_option_names_and_errors_match_install_sh():
+    text = _text()
+    for alias in ("[Alias('Method')]", "[Alias('Dir')]", "[Alias('Home')]", "[Alias('Verbose')]"):
+        assert alias in text
+    assert "$env:COPYCORD_VERBOSE -eq '1'" in text
+    assert 'throw "copycord install: -CopycordHome must be an absolute path' in text
+
+
 def test_release_wheel_is_checked_before_install():
     text = _text()
     check = text.index("Get-FileHash -Algorithm SHA256 $wheelFile")

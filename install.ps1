@@ -20,17 +20,22 @@
 # git and Node 20+. Run with -Help for the parameters.
 
 param(
+    # The aliases are the install.sh option names.
     [ValidateSet('release', 'git')]
+    [Alias('Method')]
     [string]$InstallMethod = $(if ($env:COPYCORD_INSTALL_METHOD) { $env:COPYCORD_INSTALL_METHOD } else { 'release' }),
     [switch]$Git,
     [string]$Repo = $(if ($env:COPYCORD_REPO) { $env:COPYCORD_REPO } else { 'Copycord/Copycord' }),
     [Alias('Tag')]
     [string]$Version = $env:COPYCORD_VERSION,
     [switch]$Beta,
+    [Alias('Dir')]
     [string]$GitDir = $env:COPYCORD_GIT_DIR,
+    [Alias('Home')]
     [string]$CopycordHome = $env:COPYCORD_HOME,
     [switch]$Verify,
     [switch]$DryRun,
+    [Alias('Verbose')]
     [switch]$ShowOutput,
     [switch]$Force,
     [switch]$Help
@@ -44,13 +49,13 @@ function Install-Copycord {
 
     $DefaultRepo = 'Copycord/Copycord'
     $PythonVersion = '3.12'  # Python the installer asks uv for: the recommended, tested version
-    # A fixed uv version, so `uv tool install` behaves the same on every run.
-    $UvVersion = if ($env:COPYCORD_UV_VERSION) { $env:COPYCORD_UV_VERSION } else { '0.9.5' }
-    $UvInstaller = "https://astral.sh/uv/$UvVersion/install.ps1"
     $NodeDist = 'https://nodejs.org/dist'
     $NodeMinMajor = 20
     # Keep in step with NODE_VERSION in src/copycord/node_runtime.py.
     $NodeVersion = if ($env:COPYCORD_NODE_VERSION) { $env:COPYCORD_NODE_VERSION } else { '22.12.0' }
+    # A fixed uv version, so `uv tool install` behaves the same on every run.
+    $UvVersion = if ($env:COPYCORD_UV_VERSION) { $env:COPYCORD_UV_VERSION } else { '0.9.5' }
+    $UvInstaller = "https://astral.sh/uv/$UvVersion/install.ps1"
     $Headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'copycord-install' }
 
     if ($Opts.Help) {
@@ -69,26 +74,28 @@ Options:
   -Beta                       release: newest release, pre-releases included;
                               saved as the copycord update channel
   -CopycordHome <path>        Copycord home: data, logs, backups, src\ and node\
-                              (default: %USERPROFILE%\.copycord)
-  -GitDir <path>              git: checkout directory
-                              (default: <home>\src)
+  (alias -Home)               (default: %USERPROFILE%\.copycord)
+  -GitDir <path>              git: a folder for the installer's own checkout;
+  (alias -Dir)                it is reset and cleaned on every run, so never
+                              point it at your own clone (default: <home>\src)
   -Verify                     after installing, run copycord --version and
                               copycord doctor and fail if either fails
   -DryRun                     print the plan and the actions, change nothing
   -ShowOutput                 stream the output of every step
+  (alias -Verbose)
   -Force                      reinstall even when this version is already
                               installed (without it the installer stops there)
   -Help                       show this help
 
 Advanced:
-  -InstallMethod release|git and -Git force the method instead of inferring it
-  from -Version; COPYCORD_INSTALL_METHOD does too.
+  -InstallMethod (alias -Method) release|git and -Git force the method instead
+  of inferring it from -Version; COPYCORD_INSTALL_METHOD does too.
 
 Environment (parameters win):
   COPYCORD_REPO, COPYCORD_VERSION, COPYCORD_CHANNEL=stable|beta,
   COPYCORD_BETA=1, COPYCORD_GIT_DIR, COPYCORD_HOME, COPYCORD_VERIFY=1,
   COPYCORD_DRY_RUN=1, COPYCORD_NODE_VERSION, COPYCORD_UV_VERSION, COPYCORD_ALLOW_ROOT=1,
-  COPYCORD_FORCE=1, NO_COLOR=1
+  COPYCORD_FORCE=1, COPYCORD_VERBOSE=1, GITHUB_TOKEN, NO_COLOR=1
 
 Test a branch, no release needed:
   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/$DefaultRepo/v4-dev/install.ps1))) -Version v4-dev
@@ -114,7 +121,7 @@ Test a branch, no release needed:
     $verify = $Opts.Verify -or $env:COPYCORD_VERIFY -eq '1'
     $dryRun = $Opts.DryRun -or $env:COPYCORD_DRY_RUN -eq '1'
     $force = $Opts.Force -or $env:COPYCORD_FORCE -eq '1'
-    $showOutput = [bool]$Opts.ShowOutput
+    $showOutput = [bool]$Opts.ShowOutput -or $env:COPYCORD_VERBOSE -eq '1'
     $version = if ($Opts.Version) { $Opts.Version } else { '' }
     # Without an explicit method, a -Version that looks like a release version
     # means release, anything else a git ref.
@@ -123,7 +130,7 @@ Test a branch, no release needed:
         $inferred = ', inferred from -Version'
     }
     $homeDir = if ($Opts.CopycordHome) { $Opts.CopycordHome } else { Join-Path $env:USERPROFILE '.copycord' }
-    if (-not [IO.Path]::IsPathRooted($homeDir)) { Write-Host "copycord install: -CopycordHome must be an absolute path (got $homeDir)"; return }
+    if (-not [IO.Path]::IsPathRooted($homeDir)) { throw "copycord install: -CopycordHome must be an absolute path (got $homeDir)" }
     $homeDir = $homeDir.TrimEnd('\', '/')
     $homePointer = Join-Path $env:USERPROFILE '.copycord-home'
     $env:COPYCORD_HOME = $homeDir
