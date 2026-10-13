@@ -19,7 +19,7 @@ import aiohttp
 
 logger = logging.getLogger("admin.notifications")
 
-# Cooldown to prevent spam (seconds per event type)
+# Seconds between notifications of the same event type.
 _COOLDOWN = 300  # 5 minutes
 _last_sent: dict[str, float] = {}
 
@@ -88,33 +88,16 @@ async def notify(
     description: str,
     color: int = 0xFF6B6B,
 ) -> bool:
-    """Send a notification if the event type is enabled and not in cooldown.
-
-    Parameters
-    ----------
-    db : DBManager
-        Database instance to read webhook config from.
-    event : str
-        Event key, e.g. ``"client_offline"``, ``"proxies_dead"``.
-    title : str
-        Embed title.
-    description : str
-        Embed description.
-    color : int
-        Embed color (hex).
-    """
-    # Check cooldown
+    """Send a notification if the event type is enabled and not in cooldown."""
     now = time.monotonic()
     last = _last_sent.get(event, 0)
     if now - last < _COOLDOWN:
         return False
 
-    # Read webhook URL
     webhook_url = (db.get_config("NOTIFICATION_WEBHOOK_URL", "") or "").strip()
     if not webhook_url:
         return False
 
-    # Check if this event type is enabled
     enabled_raw = (db.get_config(f"NOTIFY_{event.upper()}", "") or "").strip().lower()
     if enabled_raw in ("0", "false", "no"):
         return False
@@ -124,15 +107,14 @@ async def notify(
             return False
 
     ok = await send_webhook(webhook_url, title, description, color)
-    # Always update cooldown — on failure too — to prevent retry spam
-    # when the webhook endpoint is unreachable.
+    # Update the cooldown on failure too, so an unreachable webhook is not retried in a loop.
     _last_sent[event] = now
     if ok:
         logger.info("[webhook] Sent %s notification", event)
     return ok
 
 
-# Pre-defined notification events
+# Known events
 EVENTS = {
     "CLIENT_OFFLINE": {
         "title": "Client Offline",

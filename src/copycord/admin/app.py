@@ -126,9 +126,7 @@ def _redact_dict(d: dict) -> dict:
 
 
 def _redact_token(tok: str) -> str:
-    """
-    Keep only the first 8 chars of a token for debug logs.
-    """
+    """Keep only the first 8 chars of a token for debug logs."""
     if not tok:
         return "<empty>"
     t = str(tok)
@@ -322,9 +320,7 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "LOG_MAX_SIZE_MB": "10",
 }
 
-# Startup/shutdown hooks run in registration order via the lifespan handler
-# (FastAPI removed @app.on_event; a custom lifespan ignores on_event handlers,
-# so all hooks must register through these decorators).
+# Hooks run in registration order from the lifespan handler; on_event is not used.
 _startup_hooks = []
 _shutdown_hooks = []
 
@@ -827,18 +823,14 @@ DISCORD_API_BASE = "https://discord.com/api/v9"
 
 
 async def _check_client_token_valid(raw_token: str) -> bool:
-    """
-    Returns True if CLIENT_TOKEN (selfbot/user token) is a valid *user* session.
-    We hit /users/@me with the raw token and also reject bot tokens here.
-    """
+    """Return True if CLIENT_TOKEN is a valid user session (bot tokens are rejected)."""
     token = (raw_token or "").strip()
     if not token:
         LOGGER.debug("_check_client_token_valid | no token provided")
         return False
 
     url = f"{DISCORD_API_BASE}/users/@me"
-    # Present the same realistic desktop fingerprint the sender uses — a bare
-    # User-Agent can 401 even a valid user token. See common.selfbot_headers.
+    # A bare User-Agent can 401 even a valid user token, so send the sender's headers.
     headers = _selfbot_headers(token)
 
     try:
@@ -890,10 +882,7 @@ async def _check_client_token_valid(raw_token: str) -> bool:
 
 
 async def _check_server_token_valid(bot_token: str) -> tuple[bool, Optional[str]]:
-    """
-    Returns (valid, bot_user_id) — checks if SERVER_TOKEN is valid and a bot.
-    The bot_user_id is the same as the application/client ID for invite URLs.
-    """
+    """Return (valid, bot_user_id) for SERVER_TOKEN; the bot id doubles as the client id for invite URLs."""
     token = (bot_token or "").strip()
     if not token:
         LOGGER.debug("_check_server_token_valid | no token provided")
@@ -959,10 +948,7 @@ async def _check_server_token_valid(bot_token: str) -> tuple[bool, Optional[str]
 
 
 async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
-    """
-    Run both checks and build human-friendly error messages.
-    Called by /save before we actually persist.
-    """
+    """Run both token checks and build user-facing error messages for /save."""
     errs: list[str] = []
 
     raw_client = values.get("CLIENT_TOKEN", "") or ""
@@ -1008,13 +994,7 @@ async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
 
 
 async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
-    """
-    Returns True if the user account (CLIENT_TOKEN / self bot)
-    is a member of guild_id.
-    Strategy: Paginate GET /users/@me/guilds?limit=200&after=<last_id>
-              until we find the guild or run out of pages.
-    Handles 429 rate-limits by sleeping and retrying.
-    """
+    """Return True if the user account is a member of guild_id, paging /users/@me/guilds and retrying on 429."""
     if not client_token or not guild_id:
         LOGGER.debug(
             "_selfbot_in_guild | missing client_token or guild_id token=%s guild_id=%s",
@@ -1100,10 +1080,7 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
 
 
 async def _selfbot_identity(token: str) -> dict | None:
-    """Return {"id", "username"} for a user token, or None if invalid.
-
-    Used to label a mapping's user tokens in the dashboard.
-    """
+    """Return {"id", "username"} for a user token, or None if invalid."""
     if not token:
         return None
 
@@ -1134,11 +1111,7 @@ async def _selfbot_identity(token: str) -> dict | None:
 
 
 async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
-    """
-    Returns True if the bot (SERVER_TOKEN) is in guild_id.
-    Strategy: GET /guilds/{guild_id} with Bot <token>.
-    If the bot is *not* in that guild, Discord responds 403.
-    """
+    """Return True if the bot is in guild_id (Discord answers 403 when it is not)."""
     if not server_token or not guild_id:
         LOGGER.debug(
             "_bot_in_guild | missing server_token or guild_id bot=%s guild_id=%s",
@@ -1486,7 +1459,6 @@ async def _ws_cmd(url: str, payload: dict, timeout: float = 0.7) -> dict:
     with _Timer(f"_ws_cmd {url}") as t:
         try:
             async with asyncio.timeout(timeout):
-                # Role agents answer in-process.
                 res = await inprocess.admin_request(url, payload, timeout)
                 if res is not None:
                     return res
@@ -1545,37 +1517,16 @@ async def _ws_cmd(url: str, payload: dict, timeout: float = 0.7) -> dict:
 
 
 def _as_bool(v: str | None, default: bool = False) -> bool:
-    """
-    Normalize legacy string-y boolean config values ("true", "1", "yes") -> bool.
-    """
+    """Normalize legacy string booleans ("true", "1", "yes") to bool."""
     if v is None or v == "":
         return default
     return str(v).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _bootstrap_legacy_mapping_if_needed() -> dict:
-    """
-    One-time V2 -> V3 migration.
+    """Migrate a legacy single-guild install: backfill guild ids into legacy rows, create the first guild_mappings row, then drop the legacy config keys.
 
-    If guild_mappings is EMPTY and legacy single-guild fields still live
-    in app_config (HOST_GUILD_ID / CLONE_GUILD_ID + old per-guild flags),
-    we do three things in this order:
-
-      1. Backfill original_guild_id / cloned_guild_id into every legacy row
-         across tables (messages, threads, channel_mappings, etc.).
-      2. Create the first row in guild_mappings using those legacy values.
-      3. Wipe the legacy keys from app_config so we never do this again.
-
-    We return a dict that includes:
-      - created: bool
-      - mapping_id: str | None
-      - host_guild_id / clone_guild_id
-      - host_guild_name / clone_guild_name
-      - backfill: { <table.change_key>: rowcount, ... } or {"error": "..."}
-      - cleaned_keys: [list of legacy keys we attempted to remove]
-      - skipped_reason if we didn't migrate
-      - count if we already had mappings
-    """
+    Returns a dict describing what was created, backfilled or skipped."""
 
     try:
         existing = db.list_guild_mappings() or []
@@ -1787,13 +1738,7 @@ async def save(request: Request):
 async def _check_controller(
     name: str, url: str, timeout: float = 0.7
 ) -> tuple[bool, str, dict]:
-    """
-    Ping a controller with {"cmd": "status"} and decide if it's reachable.
-
-    Returns (reachable, friendly_reason, raw_response).
-    - reachable = did the Admin reach the controller WebSocket at all?
-    - friendly_reason = short text like "running", "stopped", or an error string.
-    """
+    """Ping a controller with a status command; return (reachable, reason, raw_response)."""
     res = await _ws_cmd(url, {"cmd": "status"}, timeout=timeout)
 
     if not res.get("ok") or res.get("error"):
@@ -1992,10 +1937,7 @@ async def _startup_links():
 
 @_on_startup
 async def _migrate_legacy_single_mapping():
-    """
-    Runs once on startup and (if needed) upgrades a legacy single-guild install
-    to the new multi-guild model used in Copycord v3.
-    """
+    """Upgrade a legacy single-guild install to the multi-guild model, once at startup."""
     try:
         result = _bootstrap_legacy_mapping_if_needed()
 
@@ -2179,11 +2121,7 @@ async def _suppress_orphaned_dns_errors():
 
 
 async def _log_prune_loop():
-    """Periodically check log file sizes and truncate to the configured max.
-
-    Uses seek-based reading so only the tail is loaded into memory,
-    even if the file is hundreds of MB.
-    """
+    """Periodically truncate log files to the configured max, reading only the tail."""
     LOG_FILES = ("server.out", "client.out")
     LOGGER.info("Log pruning task started (checks every 5 minutes)")
     while True:
@@ -2231,11 +2169,7 @@ async def _log_prune_loop():
 
 @_on_startup
 async def _cleanup_stale_mapping_pairs_on_boot():
-    """
-    On admin API startup, purge any per-(host, clone) state that no longer
-    has a corresponding row in guild_mappings. This keeps the DB free of
-    stale mappings that could confuse the server.
-    """
+    """Purge per-(host, clone) state that no longer has a row in guild_mappings."""
     try:
         stats = db.cleanup_stale_mapping_pairs()
         pairs = int(stats.get("pairs_cleared") or 0)
@@ -2263,9 +2197,7 @@ async def _cleanup_stale_mapping_pairs_on_boot():
 
 @_on_startup
 async def _refresh_discord_build_on_boot():
-    """Refresh the shared user-token fingerprint to the current Discord build so
-    token *validation* uses the same up-to-date fingerprint as the sender.
-    Best-effort — falls back to the baked build number if unreachable."""
+    """Refresh the shared user-token fingerprint to the current Discord build; falls back to the baked build number if unreachable."""
     try:
         await _refresh_build_info()
     except Exception:
@@ -2768,13 +2700,7 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
 
 
 def _derive_state(obj: dict) -> str:
-    """
-    Normalize a status payload into 'running' or 'stopped' (or passthrough).
-    Accepts either:
-      - running=True
-      - status string in a set of "good" states
-      - presence of a pid as a strong hint of running
-    """
+    """Normalize a status payload to 'running' or 'stopped', or pass it through."""
     s = str(obj.get("status", "")).strip().lower()
     if obj.get("running") is True:
         return "running"
@@ -2819,14 +2745,7 @@ def _enrich_from_bus(ctrl: dict, bus: dict) -> dict:
 
 
 def _is_discord_ready(obj: dict) -> bool:
-    """
-    Accepts multiple shapes so agents can send whatever is convenient.
-    We consider the bot 'ready' if any of these are truthy/readyish:
-      - obj['discord']['ready' | 'connected' | 'online'] is True
-      - obj['discord']['state'] in {'ready','connected','online'}
-      - obj['gateway'] in {'ready','connected','online'}
-      - obj['discord_status'] in {'ready','connected','online'}
-    """
+    """True if the status payload reports the bot ready (discord.ready/connected/online or state, gateway, discord_status)."""
     if not isinstance(obj, dict):
         return False
 
@@ -3149,11 +3068,7 @@ async def api_mapping_channels(mapping_id: str):
 async def _fetch_active_threads(guild_id: int, client_token: str) -> list[dict]:
     """Currently-active threads in a guild, shaped like the channel rows.
 
-    Best effort: a guild with no active threads, or a call that fails, simply
-    means the picker offers none. Archived threads are not listed -- Discord
-    pages them per channel, and a thread nobody has posted in is not what
-    someone is trying to filter out.
-    """
+    Best effort: a failure just means the picker offers none. Archived threads are not listed, since Discord pages them per channel."""
     url = f"{DISCORD_API_BASE}/guilds/{guild_id}/threads/active"
     try:
         async with aiohttp.ClientSession() as sess:
@@ -5020,7 +4935,7 @@ async def _ensure_queue_processor():
 
 
 async def _queue_processor():
-    """Process the scraper queue sequentially — one guild at a time."""
+    """Process the scraper queue sequentially, one guild at a time."""
     global scraper_state
 
     try:
@@ -5196,7 +5111,7 @@ async def _run_single_scrape(queue_item: dict):
     )
 
     def _save_results_to_disk(members, metadata, total_count, elapsed_seconds):
-        """Save results to /data/scrapes/{guild_id}/ — returns filename or None."""
+        """Save results to /data/scrapes/{guild_id}/; returns filename or None."""
         if not members:
             return None
         try:
@@ -5579,16 +5494,7 @@ _DASHES_RE = re.compile(r"-{2,}")
 
 
 def _discordify(s: str | None) -> str | None:
-    """
-    Convert free text to a Discord-safe channel name:
-    - Normalize NFKC
-    - Lowercase A–Z
-    - Whitespace -> '-'
-    - Allow emojis and most Unicode symbols (no aggressive stripping)
-    - Collapse multiple '-'
-    - Trim leading/trailing '-'
-    - Enforce max length 100
-    """
+    """Convert free text to a Discord-safe channel name (NFKC, lowercase, dashes for whitespace, max 100)."""
     if s is None:
         return None
 
@@ -6109,7 +6015,7 @@ async def api_delete_mapping(mapping_id: str):
 
 
 def _mask_token(tok: str) -> str:
-    """Mask a user token for display — never return the full value to the UI."""
+    """Mask a user token for display."""
     tok = str(tok or "")
     if not tok:
         return ""
@@ -6465,18 +6371,7 @@ def to_bool(value, default: bool = False) -> bool:
 
 
 def _normalize_forwarding_rule_filters(raw: dict | str | None) -> dict:
-    """
-    Normalize filter payload so the DB and UI always see consistent shapes.
-
-    - keywords_*: list[str]
-    - channel_ids: list[str]
-    - user_ids: list[str]
-    - case_sensitive: bool
-    - include_embeds: bool
-    - include_bots: bool (default False to preserve old behaviour)
-    - include_system: bool (default False; Discord's own join/boost/pin notices)
-    - has_attachments: bool (default False)
-    """
+    """Normalize a filter payload to consistent shapes for the DB and UI."""
     if not raw:
         raw = {}
     elif isinstance(raw, str):
@@ -6523,13 +6418,7 @@ def _normalize_forwarding_rule_filters(raw: dict | str | None) -> dict:
 async def _validate_forwarding_provider_config(
     provider: str, config: Any
 ) -> tuple[bool, list[str], dict]:
-    """Validate provider credentials/config by calling the provider API.
-
-    Returns: (ok, errors, details)
-    - ok: True if valid
-    - errors: list[str] user-friendly error messages
-    - details: optional metadata to help the UI (never includes secrets)
-    """
+    """Validate provider credentials by calling the provider API; returns (ok, errors, details)."""
 
     provider = (provider or "").strip().lower()
 
