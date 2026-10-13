@@ -28,7 +28,10 @@ def data_dir(tmp_path, monkeypatch):
     """A temp data dir; --data-dir writes os.environ, so DATA_DIR is restored."""
     d = tmp_path / "data"
     monkeypatch.setenv("DATA_DIR", str(d))
-    _unset(monkeypatch, "DB_PATH", "ROLE")
+    _unset(monkeypatch, "DB_PATH", "ROLE", "BACKUP_DIR", "PASSWORD", "SERVER_TOKEN", "CLIENT_TOKEN")
+    # No network and no real OS service in the doctor tests.
+    monkeypatch.setenv("COPYCORD_NO_UPDATE_CHECK", "1")
+    monkeypatch.setattr(cli, "service_state", lambda: None)
     return d
 
 
@@ -39,7 +42,26 @@ def _free_port():
 
 
 def _statuses(out):
-    return [line.split()[0] for line in out.strip().splitlines()]
+    return [line.split()[0] for line in out.strip().splitlines()
+            if line.split() and line.split()[0] in ("PASS", "WARN", "FAIL", "INFO")]
+
+
+def _line(out, text):
+    return next(line for line in out.splitlines() if text in line)
+
+
+@pytest.fixture()
+def doctor_env(data_dir, monkeypatch):
+    """A doctor run that passes: a .env, a free port, a password, tokens, no import checks."""
+    data_dir.mkdir(parents=True)
+    (data_dir / ".env").write_text("TZ=UTC\n", encoding="utf-8")
+    monkeypatch.setenv("ADMIN_PORT", str(_free_port()))
+    monkeypatch.setenv("PASSWORD", "not-the-default")
+    monkeypatch.setenv("SERVER_TOKEN", "x")
+    monkeypatch.setenv("CLIENT_TOKEN", "y")
+    monkeypatch.setattr(cli, "REQUIRED_IMPORTS", ())
+    monkeypatch.setattr(cli, "check_frontend", lambda: cli.Check(cli.PASS, "web UI included"))
+    return data_dir
 
 
 # --------------------------------------------------------------------------
@@ -90,7 +112,52 @@ def test_command_group_without_subcommand_prints_its_help(group, data_dir, capsy
     with pytest.raises(SystemExit) as exc:
         cli.main([group])
     assert exc.value.code == 0
-    assert f"usage: copycord {group}" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"Usage: copycord {group} <command> [options]" in out
+    assert "Commands:" in out and "Examples:" in out
+
+
+@pytest.mark.parametrize("command", ("config", "service", "update", "uninstall", "doctor", "run", "restart"))
+def test_command_help_is_styled_with_examples(command, data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main([command, "--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"copycord {command}\n")
+    assert f"Usage: copycord {command}" in out
+    assert "Options:" in out and "-h, --help" in out
+    assert "Examples:" in out and f"  copycord {command}" in out
+    assert "\033[" not in out and "usage:" not in out
+
+
+def test_update_help_lists_options_and_channels(data_dir, capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["update", "--help"])
+    out = capsys.readouterr().out
+    assert "Usage: copycord update [status] [options]" in out
+    assert "--channel stable|beta|dev" in out and "--tag VERSION" in out
+    assert "-y, --yes" in out
+    assert "Channels:" in out
+
+
+def test_command_help_is_colored_on_a_tty(data_dir, capsys, monkeypatch):
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    _unset(monkeypatch, "NO_COLOR")
+    with pytest.raises(SystemExit):
+        cli.main(["service", "--help"])
+    assert "\033[" in capsys.readouterr().out
+    monkeypatch.setenv("NO_COLOR", "1")
+    with pytest.raises(SystemExit):
+        cli.main(["service", "--help"])
+    assert "\033[" not in capsys.readouterr().out
+
+
+def test_subcommand_mistake_is_one_styled_line(data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["update", "--channel", "nightly"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert err.startswith("FAIL") and "copycord update --help" in err
 
 
 @pytest.mark.parametrize("argv", (["version"], ["update", "--check"], ["update", "--branch", "main"], ["onboard"]))
@@ -105,57 +172,236 @@ def test_removed_commands_and_flags(argv, data_dir, capsys):
 # --------------------------------------------------------------------------
 
 
-def test_doctor_passes_with_temp_data_dir(data_dir, monkeypatch, capsys):
-    monkeypatch.setenv("ADMIN_PORT", str(_free_port()))
-    # The import checks depend on what this venv has installed; covered below.
-    monkeypatch.setattr(cli, "REQUIRED_IMPORTS", ())
-
+def test_doctor_all_good(doctor_env, capsys):
+    data_dir = doctor_env
     assert cli.main(["doctor", "--data-dir", str(data_dir)]) == 0
 
     out = capsys.readouterr().out
-    assert set(_statuses(out)) <= {"PASS", "WARN"}
-    assert f"data dir: {data_dir.resolve()} will be created" in out
-    assert "ROLE: unset" in out
-    # Read-only checks: nothing created.
-    assert not data_dir.exists()
+    lines = out.splitlines()
+    for title in ("Install", "Settings", "Data", "Running", "Updates"):
+        assert title in lines
+    assert set(_statuses(out)) <= {"PASS", "INFO"}
+    assert lines[-1] == "All good"
+    assert "PASS  home writable" in lines
+    assert "PASS  .env found" in lines
+    assert "PASS  dependencies OK" in lines
+    assert "INFO  database created on first run" in lines
+    assert "INFO  no backups yet" in lines
+    assert any(line.startswith("PASS  Copycord v") and ", channel stable" in line for line in lines)
+    # No ROLE line and no paths when nothing is wrong.
+    assert "ROLE" not in out
+    assert str(data_dir.resolve()) not in out
+    # Read-only checks: nothing created next to the .env.
+    assert os.listdir(data_dir) == [".env"]
 
 
-def test_doctor_role_set_fails(data_dir, monkeypatch, capsys):
-    monkeypatch.setenv("ADMIN_PORT", str(_free_port()))
-    monkeypatch.setattr(cli, "REQUIRED_IMPORTS", ())
+def test_doctor_verbose_shows_paths(doctor_env, capsys):
+    data_dir = doctor_env
+    assert cli.main(["doctor", "--verbose", "--data-dir", str(data_dir)]) == 0
+    out = capsys.readouterr().out
+    assert f"PASS  home writable: {data_dir.resolve()}" in out
+    assert f"PASS  .env found: {data_dir.resolve() / '.env'}" in out
+
+
+def test_doctor_role_set_fails(doctor_env, monkeypatch, capsys):
     monkeypatch.setenv("ROLE", "server")
 
-    assert cli.main(["doctor", "--data-dir", str(data_dir)]) == 1
+    assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 1
 
-    lines = capsys.readouterr().out.splitlines()
-    role = next(line for line in lines if " ROLE:" in line)
+    out = capsys.readouterr().out
+    role = _line(out, "ROLE is set")
     assert role.startswith("FAIL")
-    assert "ROLE option was removed" in role
+    assert "v4 removed the ROLE option" in role and "one container" not in role
+    assert out.splitlines()[-1] == "0 warnings, 1 problem"
 
 
-def test_doctor_port_in_use_fails(data_dir, monkeypatch, capsys):
-    monkeypatch.setattr(cli, "REQUIRED_IMPORTS", ())
+def test_doctor_default_password_warns(doctor_env, monkeypatch, capsys):
+    monkeypatch.setenv("PASSWORD", "copycord")
+
+    assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 0
+
+    out = capsys.readouterr().out
+    line = _line(out, "dashboard password")
+    assert line.startswith("WARN  dashboard password is the default")
+    assert "copycord config set PASSWORD" in line and "copycord restart" in line
+    assert out.splitlines()[-1] == "1 warning, 0 problems"
+
+
+def test_doctor_missing_tokens_warn_without_values(doctor_env, monkeypatch, capsys):
+    from copycord.common.db import DBManager
+
+    _unset(monkeypatch, "CLIENT_TOKEN")
+    monkeypatch.setenv("SERVER_TOKEN", "")
+    monkeypatch.setenv("ADMIN_PORT", str(_free_port()))
+    db = DBManager(str(doctor_env / "data.db"), init_schema=True)
+    db.set_config("SERVER_TOKEN", "secret-bot-token")
+    db.conn.close()
+
+    assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 0
+
+    out = capsys.readouterr().out
+    line = _line(out, "not set yet")
+    port = os.environ["ADMIN_PORT"]
+    # The DB value counts, as in the app; only CLIENT_TOKEN is missing.
+    assert line == f"WARN  CLIENT_TOKEN not set yet: finish setup at http://localhost:{port}"
+    assert "secret-bot-token" not in out
+
+
+def test_check_tokens_both_missing(data_dir):
+    check = cli.check_tokens({"ADMIN_PORT": "9000"})
+    assert check.status == cli.WARN
+    assert check.name == "SERVER_TOKEN and CLIENT_TOKEN not set yet"
+    assert check.reason == "finish setup at http://localhost:9000"
+    assert cli.check_tokens({"SERVER_TOKEN": "a", "CLIENT_TOKEN": "b"}).status == cli.PASS
+
+
+def test_check_env_file(tmp_path):
+    missing = cli.check_env_file(tmp_path / ".env")
+    assert missing.status == cli.WARN and missing.path == str(tmp_path / ".env")
+    (tmp_path / ".env").write_text("PASSWORD=x\n")
+    assert cli.check_env_file(tmp_path / ".env").status == cli.PASS
+
+
+def test_doctor_newer_schema_fails(doctor_env, capsys):
+    from copycord.common.db import SCHEMA_VERSION, SCHEMA_VERSION_KEY, DBManager
+
+    db = DBManager(str(doctor_env / "data.db"), init_schema=True)
+    db.set_config(SCHEMA_VERSION_KEY, str(SCHEMA_VERSION + 1))
+    db.conn.close()
+
+    assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 1
+
+    out = capsys.readouterr().out
+    line = _line(out, "database schema")
+    assert line.startswith(f"FAIL  database schema {SCHEMA_VERSION + 1} is newer")
+    assert str(doctor_env.resolve() / "data.db") in line
+    assert out.splitlines()[-1].endswith("1 problem")
+
+
+def test_check_backups(tmp_path):
+    import time
+
+    now = time.time()
+    backups, db = tmp_path / "backups", tmp_path / "data.db"
+    # Fresh install: no DB, no backups.
+    assert cli.check_backups(backups, db, now).status == cli.INFO
+
+    backups.mkdir()
+    old = backups / "20260101-031700.tar.gz"
+    old.write_bytes(b"x")
+    os.utime(old, (now - 3 * 86400, now - 3 * 86400))
+    stale = cli.check_backups(backups, db, now)
+    assert stale.status == cli.WARN
+    assert stale.name == "last backup 3 days ago"
+    assert "BACKUP_AT" in stale.reason
+
+    new = backups / "data-pre-update-4.0.0-20260102T000000Z.db"
+    new.write_bytes(b"x")
+    os.utime(new, (now - 5 * 3600, now - 5 * 3600))
+    recent = cli.check_backups(backups, db, now)
+    assert recent.status == cli.PASS and recent.name == "last backup 5 hours ago"
+
+
+def test_doctor_stale_backup_warns(doctor_env, monkeypatch, capsys):
+    import time
+
+    from copycord.common.db import DBManager
+
+    DBManager(str(doctor_env / "data.db"), init_schema=True).conn.close()
+    archive = doctor_env / "backups" / "20260101-031700.tar.gz"
+    archive.parent.mkdir()
+    archive.write_bytes(b"x")
+    past = time.time() - 10 * 86400
+    os.utime(archive, (past, past))
+
+    assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 0
+
+    out = capsys.readouterr().out
+    assert _line(out, "last backup").startswith("WARN  last backup 10 days ago")
+    assert str(archive.parent.resolve()) in _line(out, "last backup")
+
+
+def test_doctor_missing_dependency_names_only_it(doctor_env, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli, "REQUIRED_IMPORTS", (("json", "pytest"), ("no_such_module_copycord", "nothing-dist"))
+    )
+
+    assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 1
+
+    out = capsys.readouterr().out
+    line = _line(out, "missing dependencies")
+    assert line.startswith("FAIL  missing dependencies: nothing-dist:")
+    assert "pytest" not in line
+    assert out.splitlines()[-1] == "0 warnings, 1 problem"
+
+
+def test_doctor_port_in_use(doctor_env, monkeypatch, capsys):
     with socket.socket() as s:
         s.bind((cli.ADMIN_BIND_HOST, 0))
         s.listen(1)
         port = s.getsockname()[1]
         monkeypatch.setenv("ADMIN_PORT", str(port))
 
-        check = cli.check_admin_port()
-        assert check.status == cli.FAIL
-        assert str(port) in check.reason
+        check = cli.check_admin_port(probe=lambda p: False)
+        assert check.status == cli.WARN
+        assert check.name == f"port {port} in use"
+        assert "ADMIN_PORT" in check.reason
 
-        assert cli.main(["doctor", "--data-dir", str(data_dir)]) == 1
+        ours = cli.check_admin_port(probe=lambda p: p == port)
+        assert (ours.status, ours.name) == (cli.PASS, f"port {port} in use by Copycord")
+        running = cli.check_admin_port(service_running=True, probe=lambda p: False)
+        assert running.status == cli.PASS
+
+        monkeypatch.setattr(cli, "copycord_on_port", lambda p, timeout=1.0: False)
+        assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 0
     out = capsys.readouterr().out
-    assert any(
-        line.startswith("FAIL") and "admin port" in line for line in out.splitlines()
-    )
+    assert f"WARN  port {port} in use" in out
+    assert out.splitlines()[-1] == "1 warning, 0 problems"
 
 
 def test_check_admin_port_free_and_invalid():
-    assert cli.check_admin_port({"ADMIN_PORT": str(_free_port())}).status == cli.PASS
+    check = cli.check_admin_port({"ADMIN_PORT": str(_free_port())})
+    assert check.status == cli.PASS and check.name.endswith(" free")
     assert cli.check_admin_port({"ADMIN_PORT": "nope"}).status == cli.FAIL
     assert cli.check_admin_port({"ADMIN_PORT": "70000"}).status == cli.FAIL
+
+
+def test_check_service():
+    from copycord.service import State
+
+    assert cli.check_service(None).status == cli.INFO
+    assert cli.check_service(State(False, False, "x")).status == cli.INFO
+    assert cli.check_service(State(True, True, "x")).status == cli.PASS
+    stopped = cli.check_service(State(True, False, "x"))
+    assert stopped.status == cli.WARN and "copycord service start" in stopped.reason
+
+
+def test_check_updates_never_fails(data_dir, monkeypatch):
+    from copycord import update_check
+
+    _unset(monkeypatch, "COPYCORD_NO_UPDATE_CHECK")
+
+    def offline(**_):
+        raise OSError("network is unreachable")
+
+    monkeypatch.setattr(update_check, "check_cached", offline)
+    check = cli.check_updates()
+    assert check.status == cli.INFO and "network is unreachable" in check.reason
+
+    result = update_check.Result(True, "4.0.0", "4.1.0", 0.0)
+    monkeypatch.setattr(update_check, "check_cached", lambda **_: result)
+    check = cli.check_updates()
+    assert check.status == cli.INFO and check.name == "Update available: v4.1.0 (you have v4.0.0)"
+
+    monkeypatch.setattr(update_check, "check_cached", lambda **_: result._replace(available=False))
+    assert cli.check_updates().status == cli.PASS
+
+
+def test_doctor_summary():
+    ok, warn, fail = cli.Check(cli.PASS, "a"), cli.Check(cli.WARN, "b"), cli.Check(cli.FAIL, "c")
+    assert cli.doctor_summary([ok, cli.Check(cli.INFO, "i")]) == "All good"
+    assert cli.doctor_summary([ok, warn, warn, fail]) == "2 warnings, 1 problem"
+    assert cli.doctor_summary([fail, fail]) == "0 warnings, 2 problems"
 
 
 def test_check_python_floor():
@@ -174,9 +420,9 @@ def test_check_data_dir(tmp_path):
 
 
 def test_check_db(tmp_path):
-    from copycord.common.db import DBManager
+    from copycord.common.db import SCHEMA_VERSION, DBManager
 
-    assert cli.check_db(tmp_path / "missing.db").status == cli.PASS
+    assert cli.check_db(tmp_path / "missing.db").status == cli.INFO
 
     bad = tmp_path / "bad.db"
     bad.write_bytes(b"this is not a sqlite database" * 200)
@@ -186,11 +432,12 @@ def test_check_db(tmp_path):
     DBManager(str(good), init_schema=True).conn.close()
     check = cli.check_db(good)
     assert check.status == cli.PASS
-    assert "opens" in check.reason
+    assert check.name == f"database OK at schema {SCHEMA_VERSION}"
 
 
 def test_check_frontend(tmp_path):
-    assert cli.check_frontend(tmp_path).status == cli.WARN
+    missing = cli.check_frontend(tmp_path)
+    assert missing.status == cli.FAIL and missing.name == "web UI missing"
     (tmp_path / "assets").mkdir()
     (tmp_path / "assets" / "main.js").write_text("")
     assert cli.check_frontend(tmp_path).status == cli.PASS
@@ -199,6 +446,7 @@ def test_check_frontend(tmp_path):
 def test_check_import():
     assert cli.check_import("json", "pytest").status == cli.PASS
     assert cli.check_import("no_such_module_copycord", "nothing").status == cli.FAIL
+    assert cli.check_dependencies((("json", "pytest"),)).name == "dependencies OK"
 
 
 # --------------------------------------------------------------------------
