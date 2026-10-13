@@ -670,7 +670,28 @@ Test a branch, no release needed:
         Out ('{0,-50}' -f $Text) -NoNewline
         Out (' ' + $box.V) Magenta
     }
-    $port = if ($env:ADMIN_PORT) { $env:ADMIN_PORT } else { '8080' }
+    function EnvValue([string]$Key) {
+        # A setting from <home>\.env through the CLI, else the file's own line, else ''.
+        $prevPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $value = ''
+        try {
+            $doc = (& $exe config get $Key --show-secrets --json 2>$null) -join "`n"
+            if ($LASTEXITCODE -eq 0 -and $doc) { $value = [string](($doc | ConvertFrom-Json).value) }
+        } catch { $value = '' } finally { $ErrorActionPreference = $prevPreference }
+        if (-not $value -and (Test-Path $envFile)) {
+            $line = Get-Content $envFile | Where-Object { $_ -match "^\s*$Key\s*=" } | Select-Object -Last 1
+            if ($line) { $value = ($line -replace "^\s*$Key\s*=\s*", '').Trim().Trim('"', "'") }
+        }
+        return $value
+    }
+    # The dashboard address and password come from the settings file, not this shell.
+    $port = EnvValue 'ADMIN_PORT'
+    if ($port -notmatch '^\d+$') { $port = '8080' }
+    $dashHost = EnvValue 'DASHBOARD_HOST'
+    if (-not $dashHost -or $dashHost -in @('127.0.0.1', '0.0.0.0', '::', '::1')) { $dashHost = 'localhost' }
+    elseif ($dashHost -match ':') { $dashHost = "[$dashHost]" }
+    $password = EnvValue 'PASSWORD'
     $rule = [string]$box.H * 54
     Out ("  " + $box.TL + $rule + $box.TR) Magenta
     foreach ($text in @(
@@ -685,14 +706,12 @@ Test a branch, no release needed:
             '',
             'Needs your attention:'
         )) { BoxLine $text }
-    $envText = if (Test-Path $envFile) { Get-Content $envFile } else { @() }
-    if ($envText -contains 'PASSWORD=copycord') {
-        BoxItem 'Change the default dashboard password:'
-        BoxLine '    edit PASSWORD in the settings file above,'
-        BoxLine '    then run: copycord restart'
-    }
     BoxItem 'Finish the setup in the dashboard once it runs:'
-    BoxLink "http://localhost:$port"
+    BoxLink "http://${dashHost}:$port"
+    if ($password) {
+        BoxLine "    password: $password"
+        BoxLine '    (PASSWORD in the settings file above)'
+    }
 
     Out ("  " + $box.BL + $rule + $box.BR) Magenta
     Out ''
