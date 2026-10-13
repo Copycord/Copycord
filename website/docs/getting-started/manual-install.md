@@ -125,6 +125,8 @@ Branches are not published as images. Use the installer to test one.
 
 A branch of `Copycord/Copycord` is saved as the `dev` update channel, so `copycord update` keeps following it. A branch of a fork works with `--repo you/Copycord --version my-fix`; to update a fork, run the installer again. To go back to releases, run `copycord update --channel stable`.
 
+A release install can also switch to a branch with `copycord update --channel dev --ref v4-dev`; without Node.js it downloads Node into `<home>/node` the same way.
+
 ## The Copycord home {#home}
 
 Everything Copycord stores lives in one folder: `data.db`, the logs, the daily backups, `.env`, and for git builds `src/` and `node/`.

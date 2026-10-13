@@ -8,13 +8,14 @@ and update status. No network, no real uv/pipx/npm.
 """
 import io
 import json
+import os
 import subprocess
 import urllib.error
 
 import pytest
 
 from copycord import __main__ as cli
-from copycord import service, update
+from copycord import node_runtime, service, update
 
 GIT_SPEC = "git+https://github.com/Copycord/Copycord@{}"
 RELEASES = "https://api.github.com/repos/Copycord/Copycord/releases"
@@ -203,10 +204,12 @@ def fake_net(monkeypatch):
 class Recorder:
     def __init__(self, rc=0):
         self.calls = []
+        self.envs = []
         self.rc = rc
 
-    def __call__(self, cmd, capture=True):
+    def __call__(self, cmd, capture=True, env=None):
         self.calls.append(list(cmd))
+        self.envs.append(env)
         return subprocess.CompletedProcess(list(cmd), self.rc, "", "")
 
 
@@ -357,21 +360,47 @@ def test_unknown_channel_is_rejected(env):
         cli.main(["update", "--channel", "nightly"])
 
 
-def test_dev_refuses_without_npm(env, data_dir, capsys):
+def test_dev_without_npm_and_no_node_stops(env, data_dir, monkeypatch, capsys):
     rec, on_path, _ = env
     on_path.discard("npm")
+
+    def no_node(env=None):
+        raise node_runtime.NodeError("no official Node build for plan9 mips; install Node.js")
+
+    monkeypatch.setattr(node_runtime, "ensure_npm", no_node)
     assert cli.main(["update", "--channel", "dev"]) == 1
     assert rec.calls == []
-    assert "npm" in capsys.readouterr().err
+    assert "plan9 mips" in capsys.readouterr().err
     assert not (data_dir / "update.json").exists()
 
 
-def test_saved_dev_refuses_without_npm(env, data_dir):
+def test_dev_without_npm_builds_with_the_home_node(env, data_dir, tmp_path, monkeypatch):
     rec, on_path, _ = env
     on_path.discard("npm")
+    node_bin = tmp_path / "node" / "node-v22.12.0-linux-x64" / "bin"
+    monkeypatch.setattr(node_runtime, "ensure_npm", lambda env=None: node_bin)
+    monkeypatch.setenv("PATH", "/usr/bin")
     update.save_channel(update.Channel("dev", "main"))
-    assert cli.main(["update"]) == 1
-    assert rec.calls == []
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [uv(GIT_SPEC.format("main"))]
+    # The uv subprocess gets the Node bin dir first on PATH, so hatch_build.py
+    # finds npm.
+    path = rec.envs[0]["PATH"].split(os.pathsep)
+    assert path == [str(node_bin), "/usr/bin"]
+
+
+def test_release_update_never_sets_up_node(env, data_dir, monkeypatch):
+    rec, on_path, _ = env
+    on_path.discard("npm")
+    monkeypatch.setattr(node_runtime, "ensure_npm", lambda env=None: pytest.fail("Node set up"))
+    assert cli.main(["update"]) == 0
+    assert rec.envs == [None]
+
+
+def test_dev_with_npm_on_path_passes_its_dir(env, data_dir):
+    rec, _, _ = env
+    assert cli.main(["update", "--channel", "dev"]) == 0
+    assert rec.envs[0]["PATH"].split(os.pathsep)[0] == "/usr/bin"
 
 
 def test_failed_install_does_not_switch_channel(env, data_dir):
