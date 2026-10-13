@@ -31,6 +31,8 @@ from typing import List, Optional, Tuple
 
 # Parents that mean a process was started by Task Scheduler (the service).
 _SERVICE_PARENTS = {"svchost.exe", "taskeng.exe", "taskhostw.exe"}
+# The console launcher and the windowless one the service runs.
+_LAUNCHERS = {"copycord.exe", "copycordw.exe"}
 
 _PS_QUERY = (
     "Get-CimInstance Win32_Process | "
@@ -69,7 +71,7 @@ def scan(rows: list, me: int, prefix: str):
 
     def is_copycord(r) -> bool:
         name = (r.get("Name") or "").lower()
-        return name == "copycord.exe" or _under(r.get("ExecutablePath"), prefix)
+        return name in _LAUNCHERS or _under(r.get("ExecutablePath"), prefix)
 
     mine: List[int] = []
     pid, seen = me, set()
@@ -108,6 +110,44 @@ def scan(rows: list, me: int, prefix: str):
             continue
         return mine, pid
     return mine, None
+
+
+def service_leftovers(rows: list, me: int, prefix: str,
+                      launcher_dir: Optional[str] = None) -> List[int]:
+    """Pids of this install's Copycord that the service started and that are
+    still running: their launcher chain starts at Task Scheduler or lost its
+    parent when the task ended. This command and its parents are left alone."""
+    by_pid = {r.get("ProcessId"): r for r in rows}
+    folder = ntpath.normcase(ntpath.normpath(launcher_dir)) if launcher_dir else None
+
+    def ours(r) -> bool:
+        path = r.get("ExecutablePath")
+        if _under(path, prefix):
+            return True
+        if (r.get("Name") or "").lower() not in _LAUNCHERS or not path:
+            return False
+        return folder is None or ntpath.normcase(ntpath.dirname(path)) == folder
+
+    mine, pid = set(), me
+    while pid in by_pid and pid not in mine:
+        mine.add(pid)
+        pid = by_pid[pid].get("ParentProcessId")
+
+    found: List[int] = []
+    for r in rows:
+        pid = r.get("ProcessId")
+        if pid in mine or not ours(r):
+            continue
+        top, hops = r, 0
+        while hops < 50:
+            parent = by_pid.get(top.get("ParentProcessId"))
+            if parent is None or not ours(parent):
+                break
+            top, hops = parent, hops + 1
+        parent = by_pid.get(top.get("ParentProcessId"))
+        if parent is None or (parent.get("Name") or "").lower() in _SERVICE_PARENTS:
+            found.append(pid)
+    return found
 
 
 ASIDE = ".copycord-old"

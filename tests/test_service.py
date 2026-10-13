@@ -277,8 +277,17 @@ def test_task_xml_python_module_fallback_keeps_module_args():
     assert "<Arguments>-m copycord run --data-dir C:\\d</Arguments>" in xml
 
 
-def test_scheduled_task_install_and_lifecycle(tmp_path, monkeypatch):
+@pytest.fixture()
+def no_processes(monkeypatch):
+    """No leftover processes, free ports and no real waiting."""
+    monkeypatch.setattr(service, "list_processes", lambda: [])
+    monkeypatch.setattr(service, "busy_ports", lambda env=None: [])
+    monkeypatch.setattr(service, "_sleep", lambda s: None)
+
+
+def test_scheduled_task_install_and_lifecycle(tmp_path, monkeypatch, no_processes):
     written = {}
+    task = {"running": False}
 
     def fake(cmd, capture=True):
         cmd = list(cmd)
@@ -286,24 +295,35 @@ def test_scheduled_task_install_and_lifecycle(tmp_path, monkeypatch):
         if cmd[:2] == ["schtasks", "/Create"]:
             xml_path = cmd[cmd.index("/XML") + 1]
             written["xml"] = Path(xml_path).read_bytes().decode("utf-16")
+        if cmd[:2] == ["schtasks", "/Run"]:
+            task["running"] = True
+        if cmd[:2] == ["schtasks", "/End"]:
+            task["running"] = False
         if cmd[:2] == ["schtasks", "/Query"]:
-            return subprocess.CompletedProcess(cmd, 0, '"\\Copycord","N/A","Running"\n', "")
+            status = "Running" if task["running"] else "Ready"
+            return subprocess.CompletedProcess(cmd, 0, f'"\\Copycord","N/A","{status}"\n', "")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     calls = []
     monkeypatch.setattr(service, "run_cmd", fake)
     svc = service.ScheduledTaskService(env={"USERNAME": "mac", "USERDOMAIN": "PC"})
     svc.install(WIN_EXE, tmp_path / "data")
-    assert [c[:2] for c in calls] == [["schtasks", "/Create"], ["schtasks", "/Run"]]
-    assert calls[0][-1] == "/F"
+    assert [c[:2] for c in calls] == [
+        ["schtasks", "/Query"], ["schtasks", "/Create"], ["schtasks", "/Run"],
+    ]
+    create = calls[1]
+    assert create[-1] == "/F"
     assert "<UserId>PC\\mac</UserId>" in written["xml"]
-    assert not Path(calls[0][calls[0].index("/XML") + 1]).exists()
+    assert not Path(create[create.index("/XML") + 1]).exists()
 
     assert svc.state() == service.State(True, True, svc.where)
 
     calls.clear()
     svc.restart()
-    assert calls == [["schtasks", "/End", "/TN", "Copycord"], ["schtasks", "/Run", "/TN", "Copycord"]]
+    actions = [c[:2] for c in calls if c[1] != "/Query"]
+    assert actions == [["schtasks", "/End"], ["schtasks", "/Run"]]
+    assert calls[0] == ["schtasks", "/End", "/TN", "Copycord"]
+    assert calls[-1] == ["schtasks", "/Run", "/TN", "Copycord"]
 
     calls.clear()
     svc.uninstall()

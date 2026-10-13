@@ -18,9 +18,11 @@ from __future__ import annotations
 import os
 import plistlib
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import List, Mapping, NamedTuple, Optional, Sequence
 from xml.sax.saxutils import escape
@@ -389,25 +391,75 @@ def task_xml(command: Sequence[str], data_dir: Path, user: str) -> str:
 """
 
 
+def list_processes() -> Optional[list]:
+    """Windows processes as rows (ProcessId, ParentProcessId, Name,
+    ExecutablePath), or None when they cannot be listed; tests replace this."""
+    from copycord import winupdate
+
+    return winupdate._processes()
+
+
+def busy_ports(env=None) -> List[int]:
+    """The ports `copycord run` binds that something still holds."""
+    env = os.environ if env is None else env
+    wanted = [
+        ("127.0.0.1", env.get("CONTROL_PORT_SERVER") or "9101"),
+        ("127.0.0.1", env.get("CONTROL_PORT_CLIENT") or "9102"),
+        ("0.0.0.0", env.get("ADMIN_PORT") or "8080"),
+    ]
+    busy = []
+    for host, raw in wanted:
+        try:
+            port = int(raw)
+        except ValueError:
+            continue
+        if not port_free(host, port):
+            busy.append(port)
+    return busy
+
+
+def port_free(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Like uvicorn, ignore TIME_WAIT sockets; on Windows SO_REUSEADDR would share a live port.
+        if sys.platform != "win32":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+# How long stop and restart wait for the old Copycord to exit and free its ports.
+STOP_WAIT = 20.0
+_clock = time.monotonic
+_sleep = time.sleep
+
+
 class ScheduledTaskService:
     def __init__(self, env=None):
         self.env = os.environ if env is None else env
+        self.name = self.env.get("COPYCORD_TASK_NAME") or TASK_NAME
 
     @property
     def where(self) -> str:
-        return f'scheduled task "{TASK_NAME}"'
+        return f'scheduled task "{self.name}"'
 
     def _query(self) -> subprocess.CompletedProcess:
-        return run_cmd(["schtasks", "/Query", "/TN", TASK_NAME, "/FO", "CSV", "/NH"])
+        return run_cmd(["schtasks", "/Query", "/TN", self.name, "/FO", "CSV", "/NH"])
 
     def install(self, command: Sequence[str], data_dir: Path) -> List[str]:
         xml = task_xml(command, data_dir, windows_user(self.env))
+        # A running copy keeps its old command until it ends.
+        if self.state().running:
+            run_cmd(["schtasks", "/End", "/TN", self.name])
+            self._end(ports=True)
         fd, tmp = tempfile.mkstemp(suffix=".xml", prefix="copycord-task-")
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(xml.encode("utf-16"))
             _check(
-                run_cmd(["schtasks", "/Create", "/TN", TASK_NAME, "/XML", tmp, "/F"]),
+                run_cmd(["schtasks", "/Create", "/TN", self.name, "/XML", tmp, "/F"]),
                 "schtasks /Create",
             )
         finally:
@@ -415,21 +467,63 @@ class ScheduledTaskService:
                 os.unlink(tmp)
             except OSError:
                 pass
-        _check(run_cmd(["schtasks", "/Run", "/TN", TASK_NAME]), "schtasks /Run")
+        _check(run_cmd(["schtasks", "/Run", "/TN", self.name]), "schtasks /Run")
         return [
-            f'created scheduled task "{TASK_NAME}" (runs at logon, restarts on failure)',
+            f'created scheduled task "{self.name}" (runs at logon, restarts on failure)',
             "started it now",
         ]
 
     def start(self) -> None:
-        _check(run_cmd(["schtasks", "/Run", "/TN", TASK_NAME]), "schtasks /Run")
+        _check(run_cmd(["schtasks", "/Run", "/TN", self.name]), "schtasks /Run")
 
     def stop(self) -> None:
-        _check(run_cmd(["schtasks", "/End", "/TN", TASK_NAME]), "schtasks /End")
+        _check(run_cmd(["schtasks", "/End", "/TN", self.name]), "schtasks /End")
+        self._end(ports=False)
 
     def restart(self) -> None:
-        run_cmd(["schtasks", "/End", "/TN", TASK_NAME])
+        run_cmd(["schtasks", "/End", "/TN", self.name])
+        self._end(ports=True)
         self.start()
+
+    def _leftovers(self) -> List[int]:
+        from copycord import winupdate
+
+        rows = list_processes()
+        if not rows:
+            return []
+        exe = Path(copycord_command()[0])
+        launcher_dir = str(exe.parent) if exe.stem.lower() == "copycord" else None
+        return winupdate.service_leftovers(rows, os.getpid(), sys.prefix, launcher_dir)
+
+    def _end(self, ports: bool) -> None:
+        """After schtasks /End: end what is left of the processes the task
+        started, then wait until they are gone and, with ports, until the
+        ports Copycord binds are free. /End may end only the first process,
+        and a port stays taken for a moment after its process exits."""
+        deadline = _clock() + STOP_WAIT
+        while True:
+            left = self._leftovers()
+            for pid in left:
+                run_cmd(["taskkill", "/F", "/T", "/PID", str(pid)])
+            running = self.state().running
+            busy = busy_ports(self.env) if ports else []
+            if not (left or running or busy):
+                return
+            if _clock() >= deadline:
+                break
+            _sleep(0.5)
+        if busy:
+            what = f"port {busy[0]} is still in use" if len(busy) == 1 else (
+                "ports " + ", ".join(str(p) for p in busy) + " are still in use")
+        elif left:
+            what = "Copycord is still running (process " + ", ".join(str(p) for p in left) + ")"
+        else:
+            what = f"the {self.where} is still running"
+        raise ServiceError(
+            f"Copycord did not stop within {STOP_WAIT:.0f} seconds: {what}. "
+            "Close any other Copycord, or run copycord doctor to check the port, "
+            "then run copycord service start"
+        )
 
     def state(self) -> State:
         res = self._query()
@@ -444,12 +538,16 @@ class ScheduledTaskService:
 
     def uninstall(self) -> List[str]:
         if self._query().returncode != 0:
-            return [f'nothing to remove (no scheduled task "{TASK_NAME}")']
-        run_cmd(["schtasks", "/End", "/TN", TASK_NAME])
+            return [f'nothing to remove (no scheduled task "{self.name}")']
+        run_cmd(["schtasks", "/End", "/TN", self.name])
+        try:
+            self._end(ports=False)
+        except ServiceError:
+            pass
         _check(
-            run_cmd(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"]), "schtasks /Delete"
+            run_cmd(["schtasks", "/Delete", "/TN", self.name, "/F"]), "schtasks /Delete"
         )
-        return [f'stopped and deleted scheduled task "{TASK_NAME}"']
+        return [f'stopped and deleted scheduled task "{self.name}"']
 
 
 # --------------------------------------------------------------------------
