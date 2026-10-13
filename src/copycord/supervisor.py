@@ -8,12 +8,9 @@
 # =============================================================================
 
 """
-Supervisor: runs admin, server and client as asyncio tasks.
-
-Each role is a RoleSupervisor that owns one task, restarts it on crash with
-capped exponential backoff and can be started/stopped on demand. Server and
-client also get a ControlEndpoint speaking the control websocket protocol
-(common.control_protocol), so the admin drives them over loopback control ports.
+Runs admin, server and client as asyncio tasks in one process, restarting a
+crashed role with backoff. The admin drives server and client over their
+loopback control ports.
 """
 
 from __future__ import annotations
@@ -39,8 +36,7 @@ logger = logging.getLogger("copycord.supervisor")
 RoleFactory = Callable[[], Awaitable[None]]
 
 ROLES = ("admin", "server", "client")
-# Shutdown runs client first so it stops forwarding before the server goes,
-# and admin last so the UI stays up while the others drain.
+# Client stops first so it stops forwarding before the server; admin last.
 SHUTDOWN_ORDER = ("client", "server", "admin")
 
 DEFAULT_SERVER_CONTROL_PORT = 9101
@@ -64,13 +60,7 @@ class Backoff:
 
 
 class RoleSupervisor:
-    """
-    Runs one role as an asyncio task and restarts it when it crashes.
-
-    A crash (any exception from the role coroutine) never propagates out of
-    the task, so other roles are unaffected. A role that returns on its own is
-    left stopped unless restart_on_exit is set.
-    """
+    """Runs one role as an asyncio task and restarts it when it crashes."""
 
     def __init__(
         self,
@@ -261,9 +251,7 @@ class Supervisor:
 
 
 def _apply_db_config() -> None:
-    """
-    Copy the whitelisted DB.app_config keys into os.environ before a role starts.
-    """
+    """Copy the allowed app config keys into os.environ before a role starts."""
     try:
         from copycord.common.db import DBManager
 
@@ -278,13 +266,10 @@ def _apply_db_config() -> None:
 
 class ThreadedRole:
     """
-    Runs a role's blocking entry (ServerReceiver().run() / ClientListener().run())
-    on its own thread with its own event loop, awaited as an asyncio task.
+    Runs a role's blocking run() on its own thread and event loop, awaited as a task.
 
-    Both roles drive their loop with run_until_complete, so they cannot share
-    the supervisor's running loop; a thread keeps them in-process unchanged.
-    Cancelling the awaiting task schedules the role's _shutdown() on its loop
-    and waits for the thread to finish.
+    The roles call run_until_complete, so they cannot share the supervisor's loop.
+    Cancelling the task runs the role's _shutdown() and joins the thread.
     """
 
     def __init__(self, name: str, build: Callable[[], object], stop_timeout: float = 15.0):
@@ -377,7 +362,7 @@ def client_factory() -> RoleFactory:
 
 
 def admin_factory(host: str, port: int, log_level: str) -> RoleFactory:
-    """uvicorn copycord.admin.app:app driven in the supervisor's loop (entrypoint.sh flags)."""
+    """The admin app under uvicorn in the supervisor's loop."""
 
     async def run_admin() -> None:
         import uvicorn
@@ -468,16 +453,7 @@ def build_supervisor(
     backoff: Optional[Backoff] = None,
     inprocess_transport: Optional[bool] = None,
 ) -> Supervisor:
-    """
-    All three roles in this process; the admin is autostarted and drives
-    server/client through loopback control ports.
-
-    WebsocketManager/AdminBus switch to the in-process transport
-    (copycord.common.inprocess); inprocess_transport overrides that (tests use fake
-    factories).
-
-    factories/control_* overrides exist for tests.
-    """
+    """All three roles in this process, using the in-process transport by default."""
     real = factories is None
     if inprocess_transport is None:
         inprocess_transport = real
@@ -520,7 +496,7 @@ def build_supervisor(
 
 
 async def _auto_update() -> None:
-    """AUTO_UPDATE=true: a background service updates itself; see copycord.update_check."""
+    """Start the auto-update loop when AUTO_UPDATE=true."""
     from copycord import update_check
 
     try:
@@ -536,8 +512,7 @@ async def _auto_update() -> None:
 async def run() -> None:
     _set_runtime_env()
     setup_logging()
-    # The one startup banner; the role modules' own banners are INFO on their
-    # role threads, so they reach the role files but not the console.
+    # The role banners are INFO on role threads, so only this one reaches the console.
     logger.info("[✨] Starting Copycord %s", CURRENT_VERSION)
     sup = build_supervisor()
 
@@ -547,8 +522,7 @@ async def run() -> None:
         try:
             loop.add_signal_handler(sig, stop.set)
         except (NotImplementedError, RuntimeError):
-            # Windows: asyncio.run turns Ctrl+C into cancellation of this
-            # task, and Supervisor.run's finally still shuts down in order.
+            # On Windows Ctrl+C arrives as cancellation; run's finally still shuts down in order.
             pass
 
     auto_update = asyncio.create_task(_auto_update())
