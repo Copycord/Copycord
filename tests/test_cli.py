@@ -98,6 +98,25 @@ def test_bare_copycord_prints_the_overview(data_dir, capsys):
     assert "Usage: copycord <command>" in out and "Examples:" in out
 
 
+def test_overview_shows_only_what_a_regular_user_needs(data_dir, capsys):
+    with pytest.raises(SystemExit):
+        cli.main([])
+    out = capsys.readouterr().out
+    assert "update     Update Copycord to the latest version\n" in out
+    assert "uninstall  Remove Copycord; asks whether to delete your data\n" in out
+    assert "-V, --version  Print the version\n" in out
+    examples = out.split("Examples:\n", 1)[1].split("\n\n", 1)[0].splitlines()
+    assert [line.split("  ")[1].strip() for line in examples] == [
+        "copycord run",
+        "copycord service install",
+        "copycord update",
+        "copycord doctor",
+        "copycord config set PASSWORD 'new-pass'",
+    ]
+    for advanced in ("--channel", "beta", "--ref", "--repo", "update status"):
+        assert advanced not in out
+
+
 def test_unknown_command_is_one_styled_line(data_dir, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main(["frobnicate"])
@@ -130,14 +149,19 @@ def test_command_help_is_styled_with_examples(command, data_dir, capsys):
     assert "\033[" not in out and "usage:" not in out
 
 
-def test_update_help_lists_options_and_channels(data_dir, capsys):
+def test_update_help_keeps_channels_in_the_advanced_section(data_dir, capsys):
     with pytest.raises(SystemExit):
         cli.main(["update", "--help"])
     out = capsys.readouterr().out
     assert "Usage: copycord update [status] [options]" in out
-    assert "--channel stable|beta|dev" in out and "--tag VERSION" in out
-    assert "-y, --yes" in out
-    assert "Channels:" in out
+    regular, advanced = out.split("Advanced (channels and git installs):\n", 1)
+    assert "--tag VERSION" in regular and "-y, --yes" in regular and "--no-backup" in regular
+    for flag in ("--channel", "--ref", "--repo", "--no-install", "beta"):
+        assert flag not in regular
+    assert "--channel stable|beta|dev" in advanced
+    assert "--ref REF" in advanced and "--repo OWNER/NAME" in advanced and "--no-install" in advanced
+    assert "copycord update --channel beta" in advanced
+    assert "copycord update --channel dev --ref v4-dev" in advanced
 
 
 def test_command_help_is_colored_on_a_tty(data_dir, capsys, monkeypatch):
