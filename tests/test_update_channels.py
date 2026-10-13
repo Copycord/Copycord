@@ -602,6 +602,28 @@ def test_check_stable_ignores_prereleases_and_drafts(data_dir, fake_net, no_inst
     assert seen == [(LIST_URL, 5.0)]
 
 
+def test_check_on_a_terminal_is_a_rail(data_dir, fake_net, no_install, monkeypatch):
+    class Terminal(io.StringIO):
+        encoding = "utf-8"
+
+        def isatty(self):
+            return True
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(update.ui, "_columns", lambda: 78)
+    monkeypatch.setattr(update.ui, "brand", lambda stream=None: "Copycord v4.0.0")
+    out = Terminal()
+    monkeypatch.setattr(update.sys, "stdout", out)
+    assert cli.main(["update", "status"]) == 0
+    lines = out.getvalue().splitlines()
+    assert "Copycord v4.0.0" in lines
+    assert "\u250c  Copycord update status" in lines
+    box = [x for x in lines if x.startswith(("\u25c7", "\u2502 ", "\u251c"))]
+    assert {len(x) for x in box} == {78}
+    assert any("current  4.0.0" in x for x in box)
+    assert lines[-2:] == ["\u2713  Copycord is up to date", "\u2514"]
+
+
 def test_check_beta_considers_prereleases(data_dir, fake_net, no_install, capsys):
     update.save_channel(update.Channel("beta"))
     assert cli.main(["update", "status"]) == 0
@@ -1196,6 +1218,7 @@ def test_update_on_a_terminal_asks_on_the_rail(current, tty, monkeypatch):
     rec, backups, _, _ = current
     monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
     monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(update.ui, "brand", lambda stream=None: "Copycord v3.28.0")
     out = Terminal()
     monkeypatch.setattr(update.sys, "stdout", out)
     tty["answers"] = ["n"]
@@ -1203,7 +1226,8 @@ def test_update_on_a_terminal_asks_on_the_rail(current, tty, monkeypatch):
     assert rec.calls == [] and backups == []
     assert tty["asked"] == ["◆  Update Copycord now? (Y/n) "]
     lines = out.getvalue().splitlines()
-    assert lines[1].startswith("┌  Updating Copycord")
+    assert lines[1] == "Copycord v3.28.0"
+    assert lines[3].startswith("┌  Updating Copycord")
     at = lines.index("◇  Update available")
     assert lines[at - 1] == "│" and lines[at + 1] == "│  3.28.0 -> 4.0.0"
     assert lines[-3:] == ["│", "│  Update cancelled, nothing was changed", "└"]

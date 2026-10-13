@@ -17,6 +17,7 @@ release wheel; dev builds a git ref, which needs npm for the admin UI.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import shutil
@@ -459,9 +460,20 @@ def _row(key: str, value: str) -> None:
 
 def check(channel: Optional[Channel] = None) -> int:
     channel = load_channel() if channel is None else channel
+    tty = sys.stdout.isatty()
+    with ui.Rail("Copycord update status", brand=ui.brand() if tty else "") as rail:
+        # On the rail the rows are a section; off it they print as they come.
+        with ui.section("Copycord") if rail.active else contextlib.nullcontext():
+            verdict = _status_rows(channel)
+        if verdict is not None:
+            verdict()
+    return 0
+
+
+def _status_rows(channel: Channel):
+    """The rows of check(); returns what prints after them, or None when a
+    warning already said why there is no answer."""
     current = current_version()
-    out = sys.stdout
-    ui.heading("Copycord update status")
     _row("current", current)
     _row("channel", channel.describe(ui.dot()))
     _row("method", detect_installer())
@@ -476,41 +488,37 @@ def check(channel: Optional[Channel] = None) -> int:
             with ui.Spinner(f"Reading {repo}@{ref} from GitHub"):
                 head = fetch_branch_head(ref, repo=repo)
         except Exception as e:
-            ui.warn(f"could not get the head of {ref} from GitHub", str(e), stream=out)
-            return 0
+            ui.warn(f"could not get the head of {ref} from GitHub", str(e), stream=sys.stdout)
+            return None
         _row("latest", f"{ref} @ {head.sha[:12]} {head.date} {head.subject}".rstrip())
         installed = installed_commit()
         if installed is None:
-            ui.info("installed commit unknown",
-                    f"run {ui.cmd('copycord update')} to install the {ref} head")
-        elif installed == head.sha:
-            ui.ok("Copycord is up to date")
-        else:
-            ui.box([f"installed {installed[:12]}, {ref} is at {head.sha[:12]}",
-                    f"Run {ui.cmd('copycord update')} to update."],
-                   title="Update available", status="warn")
-        return 0
+            return lambda: ui.info("installed commit unknown",
+                                   f"run {ui.cmd('copycord update')} to install the {ref} head")
+        if installed == head.sha:
+            return lambda: ui.ok("Copycord is up to date")
+        return lambda: ui.box([f"installed {installed[:12]}, {ref} is at {head.sha[:12]}",
+                               f"Run {ui.cmd('copycord update')} to update."],
+                              title="Update available", status="warn")
 
     try:
         with ui.Spinner("Checking GitHub releases"):
             release = fetch_latest_release(prerelease=channel.channel == BETA)
     except ReleaseError as e:
-        ui.warn(str(e), stream=out)
-        return 0
+        ui.warn(str(e), stream=sys.stdout)
+        return None
     except Exception as e:
-        ui.warn("could not get the latest release from GitHub", str(e), stream=out)
-        return 0
+        ui.warn("could not get the latest release from GitHub", str(e), stream=sys.stdout)
+        return None
     latest = release.version
     _row("latest", f"{latest} ({release.tag})")
     if release.wheel_url is None:
-        ui.warn(f"release {release.tag} has no wheel asset yet", stream=out)
+        ui.warn(f"release {release.tag} has no wheel asset yet", stream=sys.stdout)
     if is_newer(latest, current):
-        ui.box([f"{current} -> {latest}",
-                f"Run {ui.cmd('copycord update')} to install it."],
-               title="Update available", status="warn")
-    else:
-        ui.ok("Copycord is up to date")
-    return 0
+        return lambda: ui.box([f"{current} -> {latest}",
+                               f"Run {ui.cmd('copycord update')} to install it."],
+                              title="Update available", status="warn")
+    return lambda: ui.ok("Copycord is up to date")
 
 
 def status_report(channel: Optional[Channel] = None) -> dict:
@@ -784,7 +792,7 @@ def update(
         title = f"Reinstalling Copycord{ui.dot()}{label}"
     else:
         title = f"Updating Copycord{ui.dot()}{target.describe(ui.dot()) if not tag else 'tag ' + tag}"
-    with ui.Rail(title):
+    with ui.Rail(title, brand=ui.brand() if sys.stdout.isatty() else ""):
         ui.gap(blank=False)
         git = source is not None or (target.channel == DEV and not tag)
         if source is not None:
