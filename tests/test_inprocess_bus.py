@@ -26,6 +26,11 @@ class LoopThread:
     def __init__(self, name):
         self.name = name
         self.loop = asyncio.new_event_loop()
+        # The loop only holds weak references to its tasks. A task parked on
+        # a future (start_server, subscribe) that nobody else holds is a
+        # garbage cycle, and a gc run destroys it mid-test, unregistering its
+        # endpoint. Keep every spawned future, as the roles keep _ws_task.
+        self.spawned = []
         self.thread = threading.Thread(target=self._run, name=name, daemon=True)
         self.thread.start()
 
@@ -34,7 +39,9 @@ class LoopThread:
         self.loop.run_forever()
 
     def spawn(self, coro):
-        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+        fut = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        self.spawned.append(fut)
+        return fut
 
     def run(self, coro, timeout=5.0):
         return self.spawn(coro).result(timeout)
