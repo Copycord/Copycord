@@ -229,7 +229,7 @@ def env(data_dir, fake_net, monkeypatch):
 
 
 def uv(spec):
-    return ["uv", "tool", "install", "--force", spec]
+    return ["uv", "tool", "install", "--force", "--python", "3.12", spec]
 
 
 # --------------------------------------------------------------------------

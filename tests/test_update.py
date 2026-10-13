@@ -81,7 +81,7 @@ def test_detect_source_checkout_and_docker(tmp_path):
 
 def test_install_commands():
     assert update.install_command(update.UV_TOOL, WHEEL)[0] == [
-        "uv", "tool", "install", "--force", WHEEL
+        "uv", "tool", "install", "--force", "--python", "3.12", WHEEL
     ]
     assert update.install_command(update.PIPX, WHEEL)[0] == [
         "pipx", "install", "--force", WHEEL
@@ -186,7 +186,7 @@ def test_update_restarts_running_service(uv_tool, monkeypatch):
     rec, restarts = uv_tool
     _state(monkeypatch, True, True)
     assert cli.main(["update"]) == 0
-    assert rec.calls == [["uv", "tool", "install", "--force", WHEEL]]
+    assert rec.calls == [["uv", "tool", "install", "--force", "--python", "3.12", WHEEL]]
     assert restarts == [1]
 
 
@@ -197,7 +197,7 @@ def test_update_does_not_restart_stopped_or_missing_service(
     rec, restarts = uv_tool
     _state(monkeypatch, installed, running)
     assert update.update() == 0
-    assert rec.calls == [["uv", "tool", "install", "--force", WHEEL]]
+    assert rec.calls == [["uv", "tool", "install", "--force", "--python", "3.12", WHEEL]]
     assert restarts == []
 
 
