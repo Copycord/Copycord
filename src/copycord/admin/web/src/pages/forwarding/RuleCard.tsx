@@ -15,7 +15,7 @@ const BADGE_TONE: Record<string, string> = {
 
 const ICON = "block size-3.5 shrink-0";
 
-function ProviderIcon({ provider }: { provider: string }) {
+export function ProviderIcon({ provider }: { provider: string }) {
   switch (provider) {
     case "telegram":
       return (

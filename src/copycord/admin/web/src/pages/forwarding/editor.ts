@@ -1,6 +1,5 @@
-// Hook point for the rule create/edit modal (plan lane 10). Until that lands
-// the New Forward, Create your first rule, Edit and Duplicate buttons call
-// the no-op opener below and open nothing.
+// What New Forward, Create your first rule, Edit and Duplicate ask for. The
+// Forwarding page opens RuleModal with it unless a test passes its own opener.
 
 import type { ForwardingRule } from "../../types/forwarding";
 
@@ -10,5 +9,3 @@ export type RuleEditorRequest =
   | { mode: "duplicate"; rule: ForwardingRule };
 
 export type OpenRuleEditor = (req: RuleEditorRequest) => void;
-
-export const openRuleEditorStub: OpenRuleEditor = () => undefined;

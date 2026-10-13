@@ -55,3 +55,44 @@ export interface ForwardingSaveResponse {
   guild_id: string;
   item?: ForwardingRule;
 }
+
+/** GET /api/client-guilds: the guild scope options of the rule modal. */
+export interface ClientGuild {
+  id: string;
+  name?: string | null;
+}
+
+export interface ClientGuildsResponse {
+  items: ClientGuild[];
+}
+
+/** The filters object the old buildPayloadFromForm posted. */
+export interface ForwardingRuleFiltersPayload {
+  keywords_any: string[];
+  keywords_all: string[];
+  channel_ids: string[];
+  user_ids: string[];
+  case_sensitive: boolean;
+  include_embeds: boolean;
+  include_bots: boolean;
+  include_system: boolean;
+  has_attachments: boolean;
+}
+
+/** POST /api/forwarding body; a null rule_id creates a rule. */
+export interface ForwardingRulePayload {
+  rule_id: string | null;
+  guild_id: string | null;
+  label: string;
+  provider: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  filters: ForwardingRuleFiltersPayload;
+}
+
+/** POST /api/forwarding/validate; a 400 carries the same shape with ok false. */
+export interface ForwardingValidateResponse {
+  ok: boolean;
+  errors?: string[];
+  details?: unknown;
+}

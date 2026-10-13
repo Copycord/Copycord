@@ -1,8 +1,8 @@
 // Forwarding page: the rule list from the old forwarding.html and
 // forwarding.js. Search, the total forwarded count, one card per rule with
-// its own count, Enable/Disable and Delete (asks first). The create/edit
-// modal is plan lane 10: New Forward, Edit and Duplicate go through
-// openRuleEditor, a no-op stub for now (forwarding/editor.ts).
+// its own count, Enable/Disable and Delete (asks first). New Forward, Edit
+// and Duplicate open the rule modal (forwarding/RuleModal.tsx) through
+// openRuleEditor.
 // Element ids match the old page for the e2e specs.
 
 import { useState } from "react";
@@ -15,8 +15,7 @@ import type {
   ForwardingListResponse,
   ForwardingRule,
 } from "../types/forwarding";
-import { openRuleEditorStub } from "./forwarding/editor";
-import type { OpenRuleEditor } from "./forwarding/editor";
+import type { OpenRuleEditor, RuleEditorRequest } from "./forwarding/editor";
 import {
   COUNT_BY_RULE_URL,
   COUNT_URL,
@@ -27,6 +26,7 @@ import {
   toCount,
 } from "./forwarding/forwardingApi";
 import { RuleCard } from "./forwarding/RuleCard";
+import { RuleModal } from "./forwarding/RuleModal";
 import { useNotify, useSafeConfirm } from "./system/providers";
 
 const NO_VALUE = "—";
@@ -57,11 +57,11 @@ function Skeletons() {
 }
 
 export interface ForwardingProps {
-  /** Lane 10 passes the real modal opener here. */
+  /** Replaces the built in rule modal opener (tests). */
   openRuleEditor?: OpenRuleEditor;
 }
 
-export function Forwarding({ openRuleEditor = openRuleEditorStub }: ForwardingProps) {
+export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
   const rules = useApi<ForwardingListResponse>(RULES_URL);
   const total = useApi<ForwardingCountResponse>(COUNT_URL);
   const byRule = useApi<ForwardingCountByRuleResponse>(COUNT_BY_RULE_URL);
@@ -70,6 +70,8 @@ export function Forwarding({ openRuleEditor = openRuleEditorStub }: ForwardingPr
 
   const [query, setQuery] = useState("");
   const [rowBusy, setRowBusy] = useState<RowBusy | null>(null);
+  const [editor, setEditor] = useState<RuleEditorRequest | null>(null);
+  const openRuleEditor: OpenRuleEditor = openOverride ?? setEditor;
 
   const loaded = rules.data !== undefined || rules.error !== undefined;
   const items: ForwardingRule[] = Array.isArray(rules.data?.items) ? rules.data.items : [];
@@ -114,6 +116,16 @@ export function Forwarding({ openRuleEditor = openRuleEditorStub }: ForwardingPr
     } finally {
       setRowBusy(null);
     }
+  }
+
+  // The old saveForwardingRule: swap the saved rule in, or put a new one first; reload when only the id came back.
+  function onSaved(saved: ForwardingRule | null) {
+    if (!saved) {
+      rules.reload();
+      return;
+    }
+    const known = items.some((r) => r.rule_id === saved.rule_id);
+    replaceItems(known ? items.map((r) => (r.rule_id === saved.rule_id ? saved : r)) : [saved, ...items]);
   }
 
   const empty = loaded && items.length === 0;
@@ -229,6 +241,7 @@ export function Forwarding({ openRuleEditor = openRuleEditorStub }: ForwardingPr
           ) : null}
         </div>
       </Card>
+      {openOverride ? null : <RuleModal request={editor} onClose={() => setEditor(null)} onSaved={onSaved} />}
     </div>
   );
 }
