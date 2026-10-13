@@ -168,7 +168,7 @@ def test_sh_repairs_with_the_doctor_after_an_upgrade_only():
         assert probe in detect
     # Before the install replaces anything, after the settings and the channel.
     assert text.index("UPGRADE=0") < text.index("install_release()")
-    assert text.index("<<ENVEOF") < text.index(call) > text.index("--no-install\n")
+    assert text.index('"$BIN_DIR/copycord" config init') < text.index(call) > text.index("--no-install\n")
     assert "| while IFS= read -r line; do" in text[text.index(call):].splitlines()[0]
     assert "done || true" in text[text.index(call):]
 
@@ -182,7 +182,7 @@ def test_ps1_repairs_with_the_doctor_after_an_upgrade_only():
     for probe in ("Get-Command copycord", "Join-Path $homeDir '.env'", "Join-Path $homeDir 'data.db'"):
         assert probe in detect
     assert text.index("$upgrade = ") < text.index("Step 'Finishing up'")
-    assert text.index("$envTemplate") < text.index(call) > text.index("'--no-install'")
+    assert text.index("& $exe config init") < text.index(call) > text.index("'--no-install'")
     block = text[text.index(call) - 300:text.index(call) + 1400]
     assert "$env:NO_COLOR = '1'" in block
     assert "$ErrorActionPreference = 'Continue'" in block
