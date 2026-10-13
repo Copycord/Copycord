@@ -69,6 +69,14 @@ function renderPage() {
   );
 }
 
+function findCard(id: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const el = document.querySelector<HTMLElement>(`.fwd-card[data-id="${id}"]`);
+    if (!el) throw new Error(`card ${id} not rendered yet`);
+    return el;
+  });
+}
+
 function input(id: string): HTMLInputElement {
   return document.getElementById(id) as HTMLInputElement;
 }
@@ -253,7 +261,7 @@ describe("rule modal", () => {
       },
     });
     renderPage();
-    const card = await waitFor(() => document.querySelector<HTMLElement>('.fwd-card[data-id="r1"]')!);
+    const card = await findCard("r1");
     await user.click(within(card).getByRole("button", { name: /edit/i }));
     const dialog = await screen.findByRole("dialog", { name: "Edit Forwarding Rule" });
 
@@ -292,7 +300,7 @@ describe("rule modal", () => {
     const user = userEvent.setup();
     server();
     renderPage();
-    const card = await waitFor(() => document.querySelector<HTMLElement>('.fwd-card[data-id="r1"]')!);
+    const card = await findCard("r1");
     await user.click(within(card).getByRole("button", { name: /duplicate/i }));
     await screen.findByRole("dialog", { name: "Duplicate Forwarding Rule" });
     expect(input("fwd_label").value).toBe("Phone alerts (Copy)");
