@@ -137,6 +137,9 @@ Test a branch, no release needed:
     $utf = [Console]::OutputEncoding.CodePage -eq 65001
     # Clickable links (OSC 8) only in Windows Terminal and VS Code; the classic console shows the codes.
     $hyperlinks = $useColor -and ([bool]$env:WT_SESSION -or $env:TERM_PROGRAM -eq 'vscode')
+    # Windows Terminal shows OSC 9;4 progress on the tab while a step runs.
+    $progressBar = $useColor -and [bool]$env:WT_SESSION
+    $esc = [char]27
     $okMark = if ($utf) { [string][char]0x2713 } else { '+' }
     $failMark = if ($utf) { [string][char]0x2717 } else { 'x' }
     $dotMark = if ($utf) { [string][char]0x2022 } else { '-' }
@@ -167,6 +170,11 @@ Test a branch, no release needed:
         Out "[$($script:step)/$($script:stepTotal)] " Magenta -NoNewline; Out $Title
     }
 
+    function Spent([int]$Seconds) {
+        if ($Seconds -lt 60) { return "${Seconds}s" }
+        return '{0}m {1:00}s' -f [Math]::Floor($Seconds / 60), ($Seconds % 60)
+    }
+
     $log = [IO.Path]::GetTempFileName()
     function Run([string]$Label, [string]$File, [string[]]$Arguments, [string]$Cwd = (Get-Location).Path) {
         # Output goes to $log; on failure print its tail and stop.
@@ -185,13 +193,27 @@ Test a branch, no release needed:
         # Touch the handle now: without it ExitCode stays empty once the process exits.
         $null = $p.Handle
         $i = 0
-        while (-not $p.HasExited) {
-            if ($useColor) { Out ("`r  " + $frames[$i % $frames.Count] + " $Label") Magenta -NoNewline }
-            $i++
-            Start-Sleep -Milliseconds 100
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        $tail = ''
+        # The finally also runs on Ctrl-C, so the tab never stays busy.
+        try {
+            if ($progressBar) { Write-Host "$esc]9;4;3;0$esc\" -NoNewline }
+            while (-not $p.HasExited) {
+                if ($useColor) {
+                    # The time spent shows from 3 seconds on.
+                    $secs = [int][Math]::Floor($clock.Elapsed.TotalSeconds)
+                    if ($secs -ge 3) { $tail = '  ' + (Spent $secs) }
+                    Out ("`r  " + $frames[$i % $frames.Count] + " $Label") Magenta -NoNewline
+                    if ($tail) { Out $tail DarkGray -NoNewline }
+                }
+                $i++
+                Start-Sleep -Milliseconds 100
+            }
+            $p.WaitForExit()
+        } finally {
+            if ($progressBar) { Write-Host "$esc]9;4;0;0$esc\" -NoNewline }
         }
-        $p.WaitForExit()
-        if ($useColor) { Write-Host ("`r" + (' ' * ($Label.Length + 6)) + "`r") -NoNewline }
+        if ($useColor) { Write-Host ("`r" + (' ' * ($Label.Length + $tail.Length + 6)) + "`r") -NoNewline }
         Get-Content $err -ErrorAction SilentlyContinue | Add-Content $log
         Remove-Item $err -ErrorAction SilentlyContinue
         if ($p.ExitCode -ne 0) {
@@ -669,7 +691,7 @@ Test a branch, no release needed:
     function BoxLink([string]$Url) {
         # A box row with the URL, clickable where the terminal supports it.
         $row = '{0,-52}' -f "    $Url"
-        if ($hyperlinks) { $e = [char]27; $row = $row.Replace($Url, "$e]8;;$Url$e\$Url$e]8;;$e\") }
+        if ($hyperlinks) { $row = $row.Replace($Url, "$esc]8;;$Url$esc\$Url$esc]8;;$esc\") }
         Out ("  " + $box.V + ' ') Magenta -NoNewline
         Out $row -NoNewline
         Out (' ' + $box.V) Magenta

@@ -278,37 +278,74 @@ def box(lines: Iterable[str], title: str = "", status: str = "info",
 # --------------------------------------------------------------------------
 
 
+def _elapsed(seconds: float) -> str:
+    """12s, or 2m 05s from a minute on."""
+    s = int(seconds)
+    return f"{s}s" if s < 60 else f"{s // 60}m {s % 60:02d}s"
+
+
+def _taskbar_progress(stream: TextIO) -> bool:
+    """Windows Terminal shows OSC 9;4 progress on the tab and the taskbar."""
+    if not os.environ.get("WT_SESSION"):
+        return False
+    try:
+        return stream.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 class Spinner:
-    """Context manager that shows a spinner on a TTY and nothing otherwise."""
+    """Context manager that shows a spinner on a TTY and nothing otherwise.
+    After a few seconds it adds the time spent; in Windows Terminal the tab
+    also shows that Copycord is busy."""
 
     FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    ELAPSED_AFTER = 3.0
+    BUSY = "\033]9;4;3;0\033\\"
+    IDLE = "\033]9;4;0;0\033\\"
 
     def __init__(self, text: str, stream: Optional[TextIO] = None):
         self.text = text
         self.stream = sys.stderr if stream is None else stream
         self.active = use_color(self.stream) and _unicode(self.stream)
+        self.progress = self.active and _taskbar_progress(self.stream)
+        self._started = 0.0
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+
+    def render(self, frame: str, now: float) -> str:
+        """The spinner line at time now (time.monotonic)."""
+        spent = now - self._started
+        tail = f"  {dim(_elapsed(spent), self.stream)}" if spent >= self.ELAPSED_AFTER else ""
+        return f"\r{paint(frame, 'accent', stream=self.stream)} {self.text}{tail}"
 
     def _spin(self) -> None:
         for frame in itertools.cycle(self.FRAMES):
             if self._stop.is_set():
                 break
-            self.stream.write(f"\r{paint(frame, 'accent', stream=self.stream)} {self.text}")
+            self.stream.write(self.render(frame, time.monotonic()))
             self.stream.flush()
-            time.sleep(0.08)
+            self._stop.wait(0.08)
 
     def __enter__(self) -> "Spinner":
         if self.active:
+            self._started = time.monotonic()
+            if self.progress:
+                self.stream.write(self.BUSY)
             self._thread = threading.Thread(target=self._spin, daemon=True)
             self._thread.start()
         return self
 
     def __exit__(self, *exc) -> None:
-        if self._thread is not None:
-            self._stop.set()
+        # Runs on success, on an error and on Ctrl-C alike.
+        if self._thread is None:
+            return
+        self._stop.set()
+        try:
             self._thread.join()
-            self.stream.write("\r\033[2K")
+        finally:
+            self._thread = None
+            self.stream.write("\r\033[2K" + (self.IDLE if self.progress else ""))
             self.stream.flush()
 
 

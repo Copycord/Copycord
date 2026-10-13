@@ -110,7 +110,7 @@ Colors follow the same rules as the rest of the output: no color when it is not 
 
 ## Output and colors {#output}
 
-Every status line starts with one symbol: `✓` success, `!` warning, `✗` failure, `•` info, and `?` for a question. The installers use the same set. Commands inside a message are shown in the command color. The Copycord banner appears only on the bare `copycord` overview and in the installers. In a terminal the CLI also shows a spinner while it waits for GitHub and boxed notices for things you need to act on.
+Every status line starts with one symbol: `✓` success, `!` warning, `✗` failure, `•` info, and `?` for a question. The installers use the same set. Commands inside a message are shown in the command color. The Copycord banner appears only on the bare `copycord` overview and in the installers. In a terminal the CLI also shows a spinner while it waits for GitHub or installs an update, and boxed notices for things you need to act on. A step that takes longer than a few seconds shows the time spent next to the spinner, for example `Installing Copycord  12s`; the installers do the same. In Windows Terminal the tab and the taskbar button also show that Copycord is busy until the step ends.
 
 Colors are turned off when the output is not a terminal (a pipe, a file, a service log), when `NO_COLOR` is set, with `--no-color` (before or after the command, for example `copycord --no-color doctor`), or when `TERM=dumb`. `FORCE_COLOR=1` turns them on anyway. Without colors the lines and symbols stay the same:
 

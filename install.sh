@@ -158,6 +158,16 @@ else
     BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; CYAN=""; ACCENT=""; RESET=""
     TTY=0
 fi
+# Windows Terminal shows OSC 9;4 progress on the tab while a step runs.
+PROGRESS=0
+if [ "$TTY" = "1" ] && [ -n "${WT_SESSION:-}" ]; then PROGRESS=1; fi
+PROGRESS_ON=0
+progress_off() {
+    if [ "$PROGRESS_ON" = "1" ]; then
+        printf '%s]9;4;0;0%s\\' "$ESC" "$ESC"
+        PROGRESS_ON=0
+    fi
+}
 # Clickable links (OSC 8) only in terminals known to show them; tmux and screen do not pass them on.
 HYPERLINKS=0
 if [ "$TTY" = "1" ] && [ -z "${TMUX:-}" ] && [ -z "${STY:-}" ]; then
@@ -216,6 +226,7 @@ dry() { printf '  %sdry run:%s %s\n' "$YELLOW" "$RESET" "$*"; }
 LOG="$(mktemp "${TMPDIR:-/tmp}/copycord-install.XXXXXX")"
 TMP_DIR=""
 cleanup() {
+    progress_off
     rm -f "$LOG"
     [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"
     return 0
@@ -237,15 +248,29 @@ run() {
     if [ "$TTY" = "1" ]; then
         "$@" >"$LOG" 2>&1 </dev/null &
         pid=$!
+        if [ "$PROGRESS" = "1" ]; then
+            printf '%s]9;4;3;0%s\\' "$ESC" "$ESC"
+            PROGRESS_ON=1
+        fi
+        started=$(date +%s)
+        spent=""
         while kill -0 "$pid" 2>/dev/null; do
+            # The time spent shows from 3 seconds on.
+            secs=$(($(date +%s) - started))
+            if [ "$secs" -ge 60 ]; then
+                spent="  $DIM$((secs / 60))m $(printf '%02d' $((secs % 60)))s$RESET"
+            elif [ "$secs" -ge 3 ]; then
+                spent="  $DIM${secs}s$RESET"
+            fi
             for frame in $SPIN_FRAMES; do
                 kill -0 "$pid" 2>/dev/null || break
-                printf '\r  %s%s%s %s' "$ACCENT" "$frame" "$RESET" "$label"
+                printf '\r  %s%s%s %s%s' "$ACCENT" "$frame" "$RESET" "$label" "$spent"
                 sleep 0.1 2>/dev/null || sleep 1
             done
         done
         if wait "$pid"; then rc=0; else rc=$?; fi
         printf '\r%s' "$ESC[2K"
+        progress_off
     else
         if "$@" >"$LOG" 2>&1 </dev/null; then rc=0; else rc=$?; fi
     fi
