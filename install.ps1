@@ -44,7 +44,9 @@ function Install-Copycord {
 
     $DefaultRepo = 'Copycord/Copycord'
     $PythonVersion = '3.12'  # Python the installer asks uv for: the recommended, tested version
-    $UvInstaller = 'https://astral.sh/uv/install.ps1'
+    # A fixed uv version, so `uv tool install` behaves the same on every run.
+    $UvVersion = if ($env:COPYCORD_UV_VERSION) { $env:COPYCORD_UV_VERSION } else { '0.9.5' }
+    $UvInstaller = "https://astral.sh/uv/$UvVersion/install.ps1"
     $NodeDist = 'https://nodejs.org/dist'
     $NodeMinMajor = 20
     # Keep in step with NODE_VERSION in src/copycord/node_runtime.py.
@@ -85,7 +87,7 @@ Advanced:
 Environment (parameters win):
   COPYCORD_REPO, COPYCORD_VERSION, COPYCORD_CHANNEL=stable|beta,
   COPYCORD_BETA=1, COPYCORD_GIT_DIR, COPYCORD_HOME, COPYCORD_VERIFY=1,
-  COPYCORD_DRY_RUN=1, COPYCORD_NODE_VERSION, COPYCORD_ALLOW_ROOT=1,
+  COPYCORD_DRY_RUN=1, COPYCORD_NODE_VERSION, COPYCORD_UV_VERSION, COPYCORD_ALLOW_ROOT=1,
   COPYCORD_FORCE=1, NO_COLOR=1
 
 Test a branch, no release needed:
@@ -390,7 +392,7 @@ Test a branch, no release needed:
             if ($needNode) { PlanLine 'node' "Node $NodeVersion into $nodeHome (per user)" }
             else { PlanLine 'node' "$(& node -v) at $((Get-Command node).Source)" }
         }
-        if ($uv) { PlanLine 'uv' $uv.Source } else { PlanLine 'uv' "not found, will install it from $UvInstaller" }
+        if ($uv) { PlanLine 'uv' $uv.Source } else { PlanLine 'uv' "not found, will install uv $UvVersion from $UvInstaller" }
         if ($upgrade) { PlanLine 'repair' 'copycord doctor --fix (an upgrade or reinstall)' }
         if ($verify) { PlanLine 'verify' 'copycord --version and copycord doctor' }
         PlanLine 'dry run' 'nothing will be changed'
@@ -408,9 +410,18 @@ Test a branch, no release needed:
         if ($uv) {
             Done "uv found: $(& uv --version)"
         } elseif ($dryRun) {
-            Dry "irm $UvInstaller | iex"
+            Dry "download $UvInstaller (uv $UvVersion) and run it"
         } else {
-            Run 'Installing uv' 'powershell' @('-NoProfile', '-ExecutionPolicy', 'ByPass', '-Command', "irm $UvInstaller | iex")
+            # Saved to a file and run from there, not piped into the shell.
+            $uvDir = Join-Path ([IO.Path]::GetTempPath()) ("copycord-uv-" + [guid]::NewGuid())
+            New-Item -ItemType Directory -Path $uvDir | Out-Null
+            try {
+                $uvScript = Join-Path $uvDir 'uv-install.ps1'
+                Invoke-WebRequest -UseBasicParsing -Uri $UvInstaller -OutFile $uvScript -TimeoutSec 120
+                Run "Installing uv $UvVersion" 'powershell' @('-NoProfile', '-ExecutionPolicy', 'ByPass', '-File', $uvScript)
+            } finally {
+                Remove-Item -Recurse -Force $uvDir -ErrorAction SilentlyContinue
+            }
             $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
             if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
                 Fail 'uv was installed but is not on PATH; open a new terminal and run this again'
@@ -450,8 +461,27 @@ Test a branch, no release needed:
                 Info $wheel.browser_download_url
 
                 Step 'Installing Copycord'
-                StopRunning
-                Run "uv tool install copycord $tag" 'uv' @('tool', 'install', '--force', '--python', $PythonVersion, $wheel.browser_download_url)
+                # The wheel is downloaded and checked against the sha256 GitHub lists for it.
+                $wheelDir = Join-Path ([IO.Path]::GetTempPath()) ("copycord-wheel-" + [guid]::NewGuid())
+                New-Item -ItemType Directory -Path $wheelDir | Out-Null
+                try {
+                    $wheelFile = Join-Path $wheelDir $wheel.name
+                    Invoke-WebRequest -UseBasicParsing -Uri $wheel.browser_download_url -OutFile $wheelFile -TimeoutSec 300
+                    $expected = ''
+                    if ($wheel.PSObject.Properties['digest'] -and "$($wheel.digest)" -match '^sha256:([0-9a-fA-F]{64})$') { $expected = $Matches[1].ToLower() }
+                    $actual = (Get-FileHash -Algorithm SHA256 $wheelFile).Hash.ToLower()
+                    if (-not $expected) {
+                        Warn "release $tag lists no checksum for $($wheel.name); installing it unchecked"
+                    } elseif ($actual -ne $expected) {
+                        Fail "the downloaded $($wheel.name) does not match its release (sha256 $actual, expected $expected); nothing was installed"
+                    } else {
+                        Done "Checked $($wheel.name) (sha256)"
+                    }
+                    StopRunning
+                    Run "uv tool install copycord $tag" 'uv' @('tool', 'install', '--force', '--python', $PythonVersion, $wheelFile)
+                } finally {
+                    Remove-Item -Recurse -Force $wheelDir -ErrorAction SilentlyContinue
+                }
                 $label = $tag
             }
         } else {

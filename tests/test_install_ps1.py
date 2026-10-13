@@ -85,3 +85,19 @@ def test_settings_and_data_are_limited_to_the_user():
 
 def test_upgrade_detection_checks_the_current_data_path():
     assert "'data\\data.db'" in _text()
+
+
+def test_uv_is_pinned_and_not_piped():
+    text = _text()
+    assert re.search(r"else \{ '\d+\.\d+\.\d+' \}\n\s+\$UvInstaller = \"https://astral\.sh/uv/\$UvVersion/install\.ps1\"", text)
+    assert "| iex\")" not in text
+    assert "'-File', $uvScript" in text
+
+
+def test_release_wheel_is_checked_before_install():
+    text = _text()
+    check = text.index("Get-FileHash -Algorithm SHA256 $wheelFile")
+    assert "$wheel.digest" in text
+    assert check < text.index("uv tool install copycord $tag")
+    assert "$wheelFile)" in text
+    assert "$wheel.browser_download_url)" not in text
