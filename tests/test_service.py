@@ -439,7 +439,7 @@ def clock(monkeypatch):
 def test_restart_ends_leftover_processes_and_waits_for_the_port(monkeypatch, clock):
     task = FakeTask(running=True, lingers=2)
     monkeypatch.setattr(service, "run_cmd", task)
-    left = [[{"ProcessId": 42}], [], []]
+    left = [[42], [], []]
     monkeypatch.setattr(service, "list_processes", lambda: [])
     monkeypatch.setattr(service.ScheduledTaskService, "_leftovers",
                         lambda self: left.pop(0) if left else [])

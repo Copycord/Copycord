@@ -1117,6 +1117,37 @@ def test_scan_ignores_a_copycord_of_another_install():
     assert winupdate.scan(rows, 30, PREFIX) == ([30, 20], None)
 
 
+def test_service_leftovers_finds_what_the_task_started():
+    BIN = r"C:\Users\u\.local\bin"
+    rows = [
+        SHELL, LAUNCHER, ME,
+        # The service: Task Scheduler, the windowless launcher, its Python.
+        proc(40, 2, "svchost.exe"),
+        proc(41, 40, "copycordw.exe", BIN + r"\copycordw.exe"),
+        proc(42, 41, "pythonw.exe", PREFIX + r"\Scripts\pythonw.exe"),
+        # Left behind by schtasks /End: its launcher is gone.
+        proc(45, 44, "python.exe", PREFIX + r"\Scripts\python.exe"),
+        # copycord run in a terminal and another install: not the service.
+        proc(50, 1, "cmd.exe"),
+        proc(51, 50, "copycord.exe", BIN + r"\copycord.exe"),
+        proc(52, 51, "python.exe", PREFIX + r"\Scripts\python.exe"),
+        proc(60, 40, "copycord.exe", r"D:\other\bin\copycord.exe"),
+        proc(61, 60, "python.exe", r"D:\other\tools\copycord\Scripts\python.exe"),
+    ]
+    assert winupdate.service_leftovers(rows, 30, PREFIX, BIN) == [41, 42, 45]
+    # This command and its launcher are never in the list.
+    assert winupdate.service_leftovers([LAUNCHER, ME], 30, PREFIX, BIN) == []
+
+
+def test_scan_counts_the_windowless_launcher_as_copycord():
+    rows = [
+        SHELL, LAUNCHER, ME,
+        proc(50, 1, "cmd.exe"),
+        proc(51, 50, "copycordw.exe", r"C:\Users\u\.local\bin\copycordw.exe"),
+    ]
+    assert winupdate.scan(rows, 30, PREFIX)[1] == 51
+
+
 def test_running_without_powershell_does_not_block(monkeypatch):
     def boom(*a, **k):
         raise OSError("no powershell")
