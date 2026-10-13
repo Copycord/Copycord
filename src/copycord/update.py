@@ -385,14 +385,39 @@ def fetch_branch_head(
 
 
 def installed_commit() -> Optional[str]:
-    """Commit of a git install (PEP 610 direct_url.json); None otherwise."""
+    """Commit of a git install; None otherwise.
+
+    PEP 610 direct_url.json carries it for `git+https://...` installs. The
+    installer's git method installs from its local checkout (a file:// URL),
+    so for those the commit is read from that checkout.
+    """
+    import subprocess
+    import urllib.parse
     from importlib import metadata
 
     try:
         raw = metadata.distribution("copycord").read_text("direct_url.json")
-        return json.loads(raw)["vcs_info"]["commit_id"] if raw else None
+        info = json.loads(raw) if raw else {}
     except Exception:
         return None
+    commit = (info.get("vcs_info") or {}).get("commit_id")
+    if commit:
+        return commit
+    url = info.get("url", "")
+    if not url.startswith("file://"):
+        return None
+    path = urllib.parse.unquote(urllib.parse.urlparse(url).path)
+    if sys.platform == "win32" and re.match(r"^/[A-Za-z]:", path):
+        path = path[1:]
+    try:
+        res = subprocess.run(
+            ["git", "-C", path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    sha = res.stdout.strip()
+    return sha if res.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", sha) else None
 
 
 def _row(key: str, value: str) -> None:

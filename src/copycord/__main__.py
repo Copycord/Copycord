@@ -160,15 +160,20 @@ def format_help() -> str:
 
 def print_version() -> None:
     from copycord import ui
-    from copycord.update import load_channel
+    from copycord.update import installed_commit, load_channel
 
     version = _version()
+    commit = installed_commit()
+    rows = [("version", version), ("channel", load_channel().describe())]
+    if commit:
+        rows.append(("commit", commit[:7]))
     if ui.use_color():
         ui.banner(version)
-        ui.kv([("version", version), ("channel", load_channel().describe())])
+        ui.kv(rows)
     else:
         print(version)
-        print(f"channel {load_channel().describe()}")
+        for key, value in rows[1:]:
+            print(f"{key} {value}")
     if sys.stdout.isatty():
         from copycord import update_check
 

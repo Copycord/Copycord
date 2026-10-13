@@ -47,12 +47,25 @@ def _statuses(out):
 # --------------------------------------------------------------------------
 
 
-def test_version_prints_current_version(data_dir, capsys):
+def test_version_prints_current_version(data_dir, capsys, monkeypatch):
+    from copycord import update
+
+    monkeypatch.setattr(update, "installed_commit", lambda: None)
     with pytest.raises(SystemExit) as exc:
         cli.main(["--version"])
     assert exc.value.code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines == [CURRENT_VERSION, "channel stable"]
+
+
+def test_version_prints_short_commit_of_a_git_install(data_dir, capsys, monkeypatch):
+    from copycord import update
+
+    monkeypatch.setattr(update, "installed_commit", lambda: "7cf48660c2cd76d8a4bf5aac5b427904a2dcd86b")
+    with pytest.raises(SystemExit):
+        cli.main(["--version"])
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines == [CURRENT_VERSION, "channel stable", "commit 7cf4866"]
 
 
 @pytest.mark.parametrize("argv", (["version"], ["update", "--check"], ["update", "--branch", "main"], ["onboard"]))

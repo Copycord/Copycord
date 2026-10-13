@@ -596,3 +596,48 @@ def test_is_prerelease():
     assert update.is_prerelease("4.0.0.dev2")
     assert not update.is_prerelease("4.0.0")
     assert not update.is_prerelease("4.0.0.post1")
+
+
+# --------------------------------------------------------------------------
+# installed_commit
+# --------------------------------------------------------------------------
+
+
+class _Dist:
+    def __init__(self, direct_url):
+        self._raw = json.dumps(direct_url)
+
+    def read_text(self, name):
+        return self._raw if name == "direct_url.json" else None
+
+
+def _fake_dist(monkeypatch, direct_url):
+    from importlib import metadata
+
+    monkeypatch.setattr(metadata, "distribution", lambda name: _Dist(direct_url))
+
+
+def test_installed_commit_from_vcs_info(monkeypatch):
+    _fake_dist(monkeypatch, {"url": "https://github.com/Copycord/Copycord", "vcs_info": {"vcs": "git", "commit_id": "a" * 40}})
+    assert update.installed_commit() == "a" * 40
+
+
+def test_installed_commit_from_a_local_checkout(monkeypatch, tmp_path):
+    repo = tmp_path / "src"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "x"], check=True)
+    sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    _fake_dist(monkeypatch, {"url": repo.as_uri(), "dir_info": {}})
+    assert update.installed_commit() == sha
+
+
+def test_installed_commit_is_none_for_a_wheel(monkeypatch):
+    _fake_dist(monkeypatch, {"url": "https://github.com/Copycord/Copycord/releases/download/v4.0.0/copycord-4.0.0-py3-none-any.whl", "archive_info": {}})
+    assert update.installed_commit() is None
+
+
+def test_installed_commit_is_none_for_a_folder_without_git(monkeypatch, tmp_path):
+    _fake_dist(monkeypatch, {"url": tmp_path.as_uri(), "dir_info": {}})
+    assert update.installed_commit() is None
