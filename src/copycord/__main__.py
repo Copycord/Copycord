@@ -1610,7 +1610,9 @@ def uninstall_command(args: argparse.Namespace) -> int:
         options = [keep, delete] if purge is None else [delete if purge else keep]
         try:
             picked = options + ["Cancel"]
-            choice = picked[ui.choose(f"Your data is in {target}", picked)]
+            # Enter never deletes data: with --purge the default is Cancel.
+            default = len(picked) - 1 if purge else 0
+            choice = picked[ui.choose(f"Your data is in {target}", picked, default=default)]
         except (KeyboardInterrupt, EOFError):
             choice = "Cancel"
             print()

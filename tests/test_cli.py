@@ -300,11 +300,17 @@ def test_uninstall_purge_deletes_without_asking(uninstall_env, monkeypatch, caps
 
 
 def test_uninstall_purge_interactive_offers_delete_or_cancel(uninstall_env, monkeypatch, capsys):
-    _answers(monkeypatch, "")
+    _answers(monkeypatch, "1")
     assert cli.main(["uninstall", "--purge"]) == 0
     assert not uninstall_env.exists()
     out = capsys.readouterr().out
     assert "1) Delete everything" in out and "2) Cancel" in out and "Keep my data" not in out
+
+
+def test_uninstall_purge_enter_cancels(uninstall_env, monkeypatch, capsys):
+    _answers(monkeypatch, "")
+    assert cli.main(["uninstall", "--purge"]) == 1
+    assert (uninstall_env / "data.db").exists()
 
 
 def test_uninstall_keep_data_does_not_ask(uninstall_env, monkeypatch, capsys):
