@@ -242,8 +242,11 @@ class DBManager:
                 self._tx_depth = 0
 
     def close(self) -> None:
-        """Fold the WAL back into data.db and close the connection."""
+        """Fold the WAL back into data.db and close the connection; safe to call twice."""
         with self.lock:
+            if getattr(self, "_closed", False):
+                return
+            self._closed = True
             try:
                 self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
             except sqlite3.Error:

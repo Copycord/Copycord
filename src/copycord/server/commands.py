@@ -56,6 +56,9 @@ try:
     ]
 except Exception:
     _ids = []
+finally:
+    # The slash-command decorators below read GUILD_IDS at import, so this read stays eager.
+    _db_boot.close()
 
 GUILD_IDS: list[int] = sorted({int(g) for g in (_ids or []) if g})
 

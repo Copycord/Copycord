@@ -2895,3 +2895,6 @@ class ClientListener:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             loop.close()
+            # Nothing touches the DB after the tasks are gone; fold the WAL back in.
+            self.db.close()
+            self.config.db.close()

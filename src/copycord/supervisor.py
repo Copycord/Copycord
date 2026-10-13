@@ -333,9 +333,15 @@ def _apply_db_config() -> None:
     try:
         from copycord.common.db import DBManager
 
-        cfg = DBManager(os.environ["DB_PATH"]).get_all_config() or {}
-    except Exception as e:
-        logger.warning("DB config read failed: %s", e)
+        db = DBManager(os.environ["DB_PATH"])
+        try:
+            cfg = db.get_all_config() or {}
+        finally:
+            db.close()
+    except Exception:
+        logger.warning(
+            "DB config read failed; the role starts with .env values only", exc_info=True
+        )
         return
     for k, v in cfg.items():
         if k in ALLOWED_ENV and v is not None:
@@ -614,3 +620,16 @@ async def run() -> None:
         await sup.run(stop)
     finally:
         auto_update.cancel()
+        _close_admin_db()
+
+
+def _close_admin_db() -> None:
+    """Close the admin app's module-level DB once every role is down; admin restarts reuse it."""
+    admin = sys.modules.get("copycord.admin.app")
+    db = getattr(admin, "db", None)
+    if db is None:
+        return
+    try:
+        db.close()
+    except Exception:
+        logger.debug("admin DB close failed", exc_info=True)

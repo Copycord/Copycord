@@ -1989,7 +1989,7 @@ def _config_steps(args: argparse.Namespace) -> int:
             ui.ok(f"Imported {imported} keys", restart_hint(), stream=sys.stderr)
             return 0
     finally:
-        db.conn.close()
+        db.close()
     return 2
 
 
