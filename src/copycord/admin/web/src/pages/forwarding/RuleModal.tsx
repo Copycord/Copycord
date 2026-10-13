@@ -43,8 +43,8 @@ export interface RuleModalProps {
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="form-section flex flex-col gap-3.5 border-b border-border pb-4 last:border-b-0">
-      <h4 className="form-section-title text-xs font-bold tracking-wide text-text-2 uppercase">{title}</h4>
+    <section className="form-section flex flex-col gap-3.5 pb-6 last:pb-0">
+      <h4 className="form-section-title border-l-[3px] border-accent pl-2 text-[13px] leading-none font-bold tracking-wide text-accent uppercase">{title}</h4>
       {children}
     </section>
   );
@@ -156,7 +156,7 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
   return createPortal(
     <div
       id="fwdModal"
-      className={cx("modal fixed inset-0 z-40 items-center justify-center bg-black/60 p-3 sm:p-4", open ? "show flex" : "hidden")}
+      className={cx("modal fixed inset-0 z-40 items-start justify-center bg-black/60 p-3 pt-[110px] sm:p-4 sm:pt-[116px]", open ? "show flex" : "hidden")}
       aria-hidden={!open}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -169,10 +169,10 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
           aria-modal="true"
           aria-labelledby="fwdModalTitle"
           tabIndex={-1}
-          className="modal-content flex max-h-[calc(100dvh-24px)] w-full max-w-[640px] flex-col rounded-card border border-border bg-card-solid text-text shadow-card outline-none"
+          className="modal-content flex max-h-[calc(100dvh-170px)] w-full max-w-[900px] sm:max-h-[calc(100dvh-160px)] flex-col rounded-card border border-border bg-card-solid text-text shadow-card outline-none"
         >
           <header className="modal-header flex items-center justify-between border-b border-border px-5 py-4">
-            <h3 id="fwdModalTitle" className="modal-title text-lg font-semibold">
+            <h3 id="fwdModalTitle" className="modal-title text-lg font-bold text-accent">
               {modalTitle(request)}
             </h3>
             <button

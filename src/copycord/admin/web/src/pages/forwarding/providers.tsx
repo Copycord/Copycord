@@ -50,7 +50,7 @@ export function ProviderPicker({ value, onChange }: { value: string; onChange: (
   };
 
   return (
-    <div ref={wrapRef} className="provider-select-wrap relative">
+    <div ref={wrapRef} className="provider-select-wrap relative w-[240px] max-w-full">
       <input type="hidden" id="fwd_provider" value={value} />
       <button
         ref={btnRef}
