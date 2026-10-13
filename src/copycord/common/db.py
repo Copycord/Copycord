@@ -193,17 +193,25 @@ class DBManager:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
-        self.conn.execute("PRAGMA foreign_keys = ON;")
-
-        self.conn.execute("PRAGMA wal_checkpoint(FULL);")
-        self.conn.execute("PRAGMA journal_mode = DELETE;")
-
-        self.conn.execute("PRAGMA synchronous = FULL;")
         self.conn.execute("PRAGMA busy_timeout = 5000;")
+        self.conn.execute("PRAGMA foreign_keys = ON;")
+        # WAL lets readers and the writer run side by side; SQLite checkpoints
+        # on its own (autocheckpoint) and close() checkpoints on a clean stop.
+        self.conn.execute("PRAGMA journal_mode = WAL;")
+        self.conn.execute("PRAGMA synchronous = NORMAL;")
         self.lock = threading.RLock()
         if init_schema:
             self._init_schema()
             self._set_schema_version()
+
+    def close(self) -> None:
+        """Fold the WAL back into data.db and close the connection."""
+        with self.lock:
+            try:
+                self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+            except sqlite3.Error:
+                pass
+            self.conn.close()
 
     def _set_schema_version(self) -> None:
         """Record the schema version, written after the pre-v4 backup exists; only ever raises it."""

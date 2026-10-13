@@ -75,6 +75,7 @@ from copycord.common.backup_scheduler import (
     BackupConfig,
     DailySQLiteBackupScheduler,
     record_backup_stats,
+    snapshot_database,
 )
 from copycord.common.common_helpers import (
     discord_urls_from_config,
@@ -2457,9 +2458,17 @@ async def backup_restore(
         bak = live.with_suffix(".bak")
         try:
             if live.exists():
-                shutil.copy2(live, bak)
+                bak.unlink(missing_ok=True)
+                snapshot_database(live, bak)
 
-            shutil.copy2(extracted, live)
+            # Copy through the open connection: with WAL a file copy over
+            # data.db would leave the live -wal/-shm pointing at old pages.
+            src = sqlite3.connect(str(extracted))
+            try:
+                with db.lock:
+                    src.backup(db.conn)
+            finally:
+                src.close()
         except Exception as e:
             return PlainTextResponse(f"restore failed: {e}", status_code=500)
 
