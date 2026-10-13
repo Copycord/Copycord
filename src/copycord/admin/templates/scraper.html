@@ -166,10 +166,8 @@
     </footer>
   </aside>
 
-  <!-- ─── MAIN CONTENT ─── -->
   <main class="container scraper-wide" id="scraper-root">
 
-    <!-- Page header -->
     <div class="scraper-header">
       <div class="scraper-header-left">
         <h2 class="scraper-title">
@@ -186,17 +184,14 @@
       </span>
     </div>
 
-    <!-- ─── TOP GRID: Tokens + Config ─── -->
     <div class="scraper-grid">
 
-      <!-- ── Token Management Card ── -->
       <section class="card scraper-card" id="sc-tokens-card">
         <div class="card-titlebar">
           <h3>Tokens</h3>
           <span class="token-count-badge" id="sc-token-count">0 tokens</span>
         </div>
 
-        <!-- Add token form (always visible) -->
         <div class="sc-add-form" id="sc-add-form">
           <div class="sc-add-form-row">
             <input type="text" class="input sc-input-grow" id="sc-token-value"
@@ -207,7 +202,6 @@
           </div>
         </div>
 
-        <!-- Token list -->
         <div class="sc-token-list" id="sc-token-list">
           <div class="sc-token-empty" id="sc-token-empty">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" width="32" height="32">
@@ -219,7 +213,6 @@
         </div>
       </section>
 
-      <!-- ── Scraper Config Card ── -->
       <section class="card scraper-card" id="sc-config-card">
         <div class="card-titlebar">
           <h3>Configuration</h3>
@@ -259,7 +252,6 @@
             <p class="sc-opts-hint">Enabling <b>Bio</b> requires extra API calls and will be slower.</p>
           </fieldset>
 
-          <!-- Validation results (appears above buttons when shown) -->
           <div class="sc-validation-result" id="sc-validation-result" hidden></div>
 
           <div class="sc-config-actions">
@@ -284,7 +276,6 @@
       </section>
     </div>
 
-    <!-- ─── Proxy Info ─── -->
     <div class="card scraper-card sc-proxy-card" id="sc-proxy-card">
       <h3 style="margin:0 0 8px">Proxies</h3>
       <p class="sc-proxy-hint" style="margin:0">
@@ -294,7 +285,6 @@
       </p>
     </div>
 
-    <!-- ─── Scrape Queue ─── -->
     <section class="card scraper-card" id="sc-queue-card" hidden>
       <div class="card-titlebar">
         <h3>Queue</h3>
@@ -312,7 +302,6 @@
       </div>
     </section>
 
-    <!-- ─── Progress Section ─── -->
     <section class="card scraper-card" id="sc-progress-card" hidden>
       <div class="card-titlebar">
         <h3>Progress</h3>
@@ -333,7 +322,6 @@
       </div>
     </section>
 
-    <!-- ─── Log Panel (inline, not modal) ─── -->
     <section class="card scraper-card sc-log-card" id="sc-log-card">
       <div class="card-titlebar">
         <h3>Scraper Logs</h3>
@@ -350,7 +338,6 @@
       <pre class="log-output" id="sc-log-body" aria-live="polite" aria-label="Scraper log output"></pre>
     </section>
 
-    <!-- ─── Past Scrapes ─── -->
     <section class="card scraper-card" id="sc-scrapes-card">
       <div class="card-titlebar">
         <h3>Past Scrapes</h3>
@@ -371,7 +358,6 @@
 
   </main>
 
-  <!-- ─── Footer ─── -->
   <footer id="fixed-footer" role="contentinfo" aria-label="Site footer">
     <div class="footer-bar">
       <span class="footer-brand" aria-label="Copycord version {{ version or 'dev' }}">

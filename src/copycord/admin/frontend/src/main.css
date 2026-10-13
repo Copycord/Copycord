@@ -10871,7 +10871,6 @@ body.page-forwarding .fwd-no-match-sub {
   }
 }
 
-/* ─── Mapping Modal ─── */
 .mapping-form {
   padding: 0 20px 20px;
   max-height: 70vh;
@@ -11067,7 +11066,6 @@ body.page-forwarding .fwd-no-match-sub {
   padding-bottom: 6px;
 }
 
-/* ── User Message Sending (per-mapping user tokens) ── */
 .user-token-disclaimer {
   font-size: 12px;
   line-height: 1.5;
@@ -11492,7 +11490,6 @@ body.page-forwarding .fwd-no-match-sub {
   z-index: 3;
 }
 
-/* ─── Notifications ─── */
 .notif-webhook-row {
   display: flex;
   gap: 8px;
@@ -11546,7 +11543,6 @@ body.page-forwarding .fwd-no-match-sub {
   display: inline-flex !important;
 }
 
-/* ─── Message Features Modal ─── */
 .msg-features-content {
   width: min(620px, 92vw) !important;
 }
@@ -12375,7 +12371,6 @@ body.page-forwarding .fwd-no-match-sub {
   flex-shrink: 0;
 }
 
-/* ── Queue Card ── */
 .sc-queue-body {
   display: flex;
   flex-direction: column;
@@ -12543,15 +12538,10 @@ body.page-forwarding .fwd-no-match-sub {
   animation: spin-icon 0.8s linear infinite;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   Event Logs Page — table layout
-   ═══════════════════════════════════════════════════════════ */
-
 .logs-wide {
   max-width: 1200px;
 }
 
-/* ── Header row ──────────────────────────────────────────── */
 .logs-header {
   display: flex;
   align-items: center;
@@ -12566,7 +12556,6 @@ body.page-forwarding .fwd-no-match-sub {
   margin: 0;
 }
 
-/* ── Filters toolbar ─────────────────────────────────────── */
 .logs-filters {
   display: flex;
   align-items: center;
@@ -12591,7 +12580,6 @@ body.page-forwarding .fwd-no-match-sub {
   gap: 12px;
 }
 
-/* Search */
 .logs-search-wrap {
   position: relative;
   display: flex;
@@ -12622,7 +12610,6 @@ body.page-forwarding .fwd-no-match-sub {
   opacity: 0.6;
 }
 
-/* Filter select (native <select> is hidden; .dd wrapper inherits size) */
 .logs-select {
   padding: 7px 12px;
   border-radius: 8px;
@@ -12645,7 +12632,6 @@ body.page-forwarding .fwd-no-match-sub {
   color: var(--text);
 }
 
-/* Override custom .dd dropdown when used in logs filter */
 .logs-filter-group .dd {
   width: 300px;
   min-width: 300px;
@@ -12667,14 +12653,12 @@ body.page-forwarding .fwd-no-match-sub {
   overflow-wrap: normal;
 }
 
-/* Count label */
 .logs-count {
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
 }
 
-/* Clear Filters button */
 .btn-clear-filters {
   display: inline-flex;
   align-items: center;
@@ -12694,7 +12678,6 @@ body.page-forwarding .fwd-no-match-sub {
   border-color: rgba(139, 92, 246, 0.5);
 }
 
-/* Delete-all icon button */
 .btn-icon-sm {
   display: inline-flex;
   align-items: center;
@@ -12714,7 +12697,6 @@ body.page-forwarding .fwd-no-match-sub {
   border-color: rgba(239, 68, 68, 0.3);
 }
 
-/* ── Table wrapper with scroll ───────────────────────────── */
 .logs-table-wrap {
   border-radius: 12px;
   border: 1px solid var(--border);
@@ -12725,7 +12707,6 @@ body.page-forwarding .fwd-no-match-sub {
   overflow-y: auto;
 }
 
-/* Custom scrollbar */
 .logs-table-wrap::-webkit-scrollbar {
   width: 6px;
 }
@@ -12740,7 +12721,6 @@ body.page-forwarding .fwd-no-match-sub {
   background: rgba(139, 92, 246, 0.4);
 }
 
-/* ── Table ────────────────────────────────────────────────── */
 .logs-table {
   width: 100%;
   border-collapse: collapse;
@@ -12768,14 +12748,12 @@ body.page-forwarding .fwd-no-match-sub {
   white-space: nowrap;
 }
 
-/* Column widths */
 .lt-col-time    { width: 200px; min-width: 200px; }
 .lt-col-type    { width: 160px; }
 .lt-col-guild   { width: 140px; }
 .lt-col-details { width: auto; }
 .lt-col-actions { width: 44px; text-align: center; }
 
-/* ── Table rows ──────────────────────────────────────────── */
 .log-row {
   transition: background 0.15s;
 }
@@ -12790,7 +12768,6 @@ body.page-forwarding .fwd-no-match-sub {
   vertical-align: middle;
 }
 
-/* Timestamp */
 .log-ts {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
@@ -12798,14 +12775,12 @@ body.page-forwarding .fwd-no-match-sub {
   white-space: nowrap;
 }
 
-/* Guild label */
 .log-guild-label {
   font-size: 12px;
   color: var(--muted);
   font-weight: 500;
 }
 
-/* Detail text */
 .log-detail-text {
   color: rgba(255, 255, 255, 0.8);
   font-size: 13px;
@@ -12849,7 +12824,6 @@ tr.log-expanded td {
   word-break: break-all;
 }
 
-/* ── Type badge ──────────────────────────────────────────── */
 .log-type-badge {
   display: inline-block;
   font-size: 11px;
@@ -12861,7 +12835,6 @@ tr.log-expanded td {
   white-space: nowrap;
 }
 
-/* Color themes per type */
 .log-type-badge.log-created {
   background: rgba(16, 185, 129, 0.15);
   color: #34d399;
@@ -12938,7 +12911,6 @@ tr.log-expanded td {
   border: 1px solid rgba(148, 163, 184, 0.25);
 }
 
-/* ── Delete button in row ────────────────────────────────── */
 .log-delete-btn {
   background: none;
   border: none;
@@ -12960,7 +12932,6 @@ tr.log-expanded td {
   background: rgba(239, 68, 68, 0.1);
 }
 
-/* ── Empty state ─────────────────────────────────────────── */
 .logs-empty {
   display: flex;
   flex-direction: column;
@@ -12975,7 +12946,6 @@ tr.log-expanded td {
   margin: 0;
 }
 
-/* ── Pagination ─────────────────────────────────────────── */
 .logs-pagination {
   display: flex;
   align-items: center;
@@ -13012,7 +12982,6 @@ tr.log-expanded td {
   font-size: 0.85rem;
 }
 
-/* ── Animations ──────────────────────────────────────────── */
 @keyframes log-fade-out {
   from {
     opacity: 1;
@@ -13027,7 +12996,6 @@ tr.log-expanded td {
   animation: log-fade-out 0.25s ease-in forwards;
 }
 
-/* ── Sortable Headers ────────────────────────────────────── */
 .sortable {
   cursor: pointer;
   user-select: none;
@@ -13047,7 +13015,6 @@ tr.log-expanded td {
   color: var(--accent, #5865f2);
 }
 
-/* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 768px) {
   .logs-filters {
     flex-direction: column;
@@ -13100,7 +13067,6 @@ tr.log-expanded td {
 }
 
 
-/* ── Favorite proxies ── */
 .srv-proxy-chip-star {
   display: inline-flex;
   align-items: center;
