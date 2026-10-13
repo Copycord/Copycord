@@ -156,5 +156,5 @@ copycord uninstall --purge    # also delete the Copycord home: database, logs, b
 `--purge` asks you to type `DELETE` unless you add `--yes`. `--dry-run` shows the steps without changing anything. See [`copycord uninstall`](/docs/cli#copycord-uninstall).
 
 :::note Coming from v3?
-The old launcher, `Copycord.exe` and the `install-tools/` folder are deprecated. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
+The old launcher (`Copycord.exe`, `launcher.py`) is replaced by the install script. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
 :::

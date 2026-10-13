@@ -13,7 +13,7 @@ Copycord v4 runs the dashboard (admin), the server bot and the client in **one p
 |----|----|
 | Three containers: `admin`, `server`, `client` | One `copycord` container |
 | `ROLE=admin`, `ROLE=server`, `ROLE=client` | No `ROLE`; v4 refuses to start while it is set |
-| `install-tools/` launcher, `Copycord.exe`, `launcher.py` | Install script and the [`copycord` command](/docs/cli) |
+| Old launcher (`Copycord.exe`, `launcher.py`) | Install script and the [`copycord` command](/docs/cli) |
 | Settings in `code/.env` (non-Docker) | The dashboard, plus a few keys in [`<home>/.env`](/docs/getting-started/configuration) |
 | Python 3.11, Node.js and venvs (non-Docker) | Python 3.12+ provided by uv; nothing else to install |
 | Client on discord.py-self | Client on Copycord's own built-in library |
@@ -98,7 +98,7 @@ To keep the three-container layout for now, pin your services to a v3 image tag 
 
 ## Without Docker (v3 launcher)
 
-The `install-tools/` folder (`Copycord.exe` on Windows, `launcher.py` on Linux/macOS) is **deprecated** in v4. It stays only for existing v3 installs. Move to the install script:
+The old launcher (`Copycord.exe` on Windows, `launcher.py` on Linux/macOS) is replaced by the install script in v4 and is no longer shipped. Move to the install script:
 
 ### 1. Stop v3
 
