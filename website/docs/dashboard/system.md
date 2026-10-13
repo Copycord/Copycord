@@ -32,7 +32,7 @@ Copycord runs the dashboard (admin), the server bot and the client together. The
 |-------|--------------|
 | **Terminal** (`copycord run`), `docker compose logs`, or the service's log | The dashboard's log, plus **warnings and errors** from the server and client. Each line is tagged `[admin]`, `[server]` or `[client]`. |
 | **Dashboard log viewers** | The **full** server and client logs, streamed live |
-| **Data directory** | `server.out` and `client.out`: the files behind the dashboard log viewers (plus `scraper.out` for the member scraper) |
+| **Log files** | `server.out` and `client.out`: the files behind the dashboard log viewers (plus `scraper.out` for the member scraper), in `logs` in the Copycord home (`~/.copycord/logs`), or in `/data` in Docker |
 
 A terminal line looks like this:
 
