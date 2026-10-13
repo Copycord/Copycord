@@ -32,7 +32,7 @@ import TabItem from '@theme/TabItem';
 </TabItem>
 </Tabs>
 
-You do not need to install Python, Node.js or virtual environments. The installer installs [uv](https://docs.astral.sh/uv/), and uv provides Python 3.12 and every package Copycord needs. Only [testing a branch](/docs/getting-started/manual-install#branches) also needs git, and Node.js, which the installer fetches for you when it is missing.
+You do not need to install Python, Node.js or virtual environments. The installer installs [uv](https://docs.astral.sh/uv/), and uv provides Python 3.14 and every package Copycord needs. Only [testing a branch](/docs/getting-started/manual-install#branches) also needs git, and Node.js, which the installer fetches for you when it is missing.
 
 ## From Discord
 

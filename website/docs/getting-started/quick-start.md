@@ -54,7 +54,7 @@ Run the command for your system from above. The installer runs numbered steps:
 
 ![The Copycord installer in a terminal: the banner, four steps with check marks and the success box](/img/install-script.svg)
 
-1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) if it is missing. uv provides Python 3.12.
+1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) if it is missing. uv provides Python 3.14.
 2. **Finding the release:** the newest stable [GitHub release](https://github.com/Copycord/Copycord/releases).
 3. **Installing Copycord:** installs the release wheel as a per-user uv tool.
 4. **Finishing up:** puts `copycord` on your `PATH` and writes the [settings file](/docs/getting-started/configuration) `.env` in the Copycord home.

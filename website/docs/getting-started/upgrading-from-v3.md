@@ -15,7 +15,7 @@ Copycord v4 runs the dashboard (admin), the server bot and the client together a
 | `ROLE=admin`, `ROLE=server`, `ROLE=client` | No `ROLE`; v4 refuses to start while it is set |
 | Old launcher (`Copycord.exe`, `launcher.py`) | Install script and the [`copycord` command](/docs/cli) |
 | Settings in `code/.env` (non-Docker) | The dashboard, plus a few keys in [`<home>/.env`](/docs/getting-started/configuration) |
-| Python 3.11, Node.js and venvs (non-Docker) | Python 3.12 provided by uv; nothing else to install |
+| Python 3.11, Node.js and venvs (non-Docker) | Python 3.14 provided by uv; nothing else to install |
 | Client on discord.py-self | Client on Copycord's own built-in library |
 
 ## Automatic backup of your database

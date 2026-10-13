@@ -39,7 +39,7 @@ It prints the banner and first checks for an existing install. When the `copycor
 
 Otherwise it runs numbered steps:
 
-1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) when it is not on your `PATH`. uv provides Python 3.12 and Copycord's dependencies.
+1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) when it is not on your `PATH`. uv provides Python 3.14 and Copycord's dependencies.
 2. **Finding the release:** the newest stable release, or the one you asked for.
 3. **Installing Copycord:** `uv tool install --force` with the release wheel, a per-user install with no sudo.
 4. **Finishing up:** adds uv's tool directory to your `PATH` when needed (`uv tool update-shell`), writes [`.env`](/docs/getting-started/configuration) in the Copycord home if it does not exist yet, and saves the update channel when you chose one.
@@ -108,7 +108,7 @@ Pin a release with the image tag, for example `ghcr.io/copycord/copycord:v4.0.0`
 
 ## Test a branch {#branches}
 
-Testers can install any branch, tag or commit without a release. The installer then clones the repository into `<home>/src`, builds the dashboard with npm and installs that checkout. It needs git; when Node.js 20 or newer is missing it downloads the official build from nodejs.org, checks its SHA-256 and unpacks it into `<home>/node`, without sudo.
+Testers can install any branch, tag or commit without a release. The installer then clones the repository into `<home>/src`, builds the dashboard with npm and installs that checkout. It needs git; when Node.js 22 or newer is missing it downloads the official build from nodejs.org, checks its SHA-256 and unpacks it into `<home>/node`, without sudo.
 
 <Tabs groupId="os" queryString>
 <TabItem value="unix" label="Linux / macOS" default>

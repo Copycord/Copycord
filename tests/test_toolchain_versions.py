@@ -69,3 +69,15 @@ def test_entrypoint_has_no_pipefail_under_sh():
 def test_dockerfile_runs_as_non_root():
     users = re.findall(r"^USER\s+(\S+)", _read("Dockerfile"), re.M)
     assert users and users[-1] not in ("root", "0")
+
+
+def test_installers_match_python_version_and_node_major():
+    py = _read(".python-version").strip()
+    major = _read(".nvmrc").strip().lstrip("v").split(".")[0]
+    sh, ps = _read("install.sh"), _read("install.ps1")
+    assert re.search(r'^PYTHON_VERSION="%s"' % re.escape(py), sh, re.M)
+    assert re.search(r"^\s*\$PythonVersion = '%s'" % re.escape(py), ps, re.M)
+    assert re.search(r"^NODE_MIN_MAJOR=%s$" % major, sh, re.M)
+    assert re.search(r"^\s*\$NodeMinMajor = %s$" % major, ps, re.M)
+    assert "Node %s+" % major in sh
+    assert "Node %s+" % major in ps

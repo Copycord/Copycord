@@ -15,16 +15,16 @@
 #
 # Installs uv if it is missing, then Copycord with `uv tool install`, either
 # from a release wheel (default) or from a git ref built locally, which needs
-# git and Node 20+. Run with --help for the options.
+# git and Node 22+. Run with --help for the options.
 
 set -eu
 
 DEFAULT_REPO="Copycord/Copycord"
 # The Python version uv is asked for.
-PYTHON_VERSION="3.12"
+PYTHON_VERSION="3.14"
 UV_INSTALLER="https://astral.sh/uv/install.sh"
 NODE_DIST="https://nodejs.org/dist"
-NODE_MIN_MAJOR=20
+NODE_MIN_MAJOR=22
 
 # --- options ------------------------------------------------------------------
 

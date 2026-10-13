@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Python 3.11+
-- Node.js 20+ (for frontend build check only)
+- Node.js 22+ (for frontend build check only)
 
 ## Install dependencies
 

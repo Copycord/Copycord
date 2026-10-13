@@ -17,7 +17,7 @@
 #
 # Installs uv if it is missing, then Copycord with `uv tool install`, either
 # from a release wheel (default) or from a git ref built locally, which needs
-# git and Node 20+. Run with -Help for the parameters.
+# git and Node 22+. Run with -Help for the parameters.
 
 param(
     # The aliases are the install.sh option names.
@@ -48,9 +48,9 @@ function Install-Copycord {
     $ErrorActionPreference = 'Stop'
 
     $DefaultRepo = 'Copycord/Copycord'
-    $PythonVersion = '3.12'  # Python the installer asks uv for: the recommended, tested version
+    $PythonVersion = '3.14'  # Python the installer asks uv for: the recommended, tested version
     $NodeDist = 'https://nodejs.org/dist'
-    $NodeMinMajor = 20
+    $NodeMinMajor = 22
     # Keep in step with NODE_VERSION in src/copycord/node_runtime.py.
     $NodeVersion = if ($env:COPYCORD_NODE_VERSION) { $env:COPYCORD_NODE_VERSION } else { '22.12.0' }
     # A fixed uv version, so `uv tool install` behaves the same on every run.
