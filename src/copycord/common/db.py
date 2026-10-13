@@ -8,6 +8,7 @@
 # =============================================================================
 
 
+import contextlib
 from datetime import datetime, timezone
 import json
 import logging
@@ -200,9 +201,33 @@ class DBManager:
         self.conn.execute("PRAGMA journal_mode = WAL;")
         self.conn.execute("PRAGMA synchronous = NORMAL;")
         self.lock = threading.RLock()
+        self._tx_depth = 0
         if init_schema:
             self._init_schema()
             self._set_schema_version()
+
+    @contextlib.contextmanager
+    def _tx(self):
+        """Hold the lock and run the block as one transaction: commit on
+        success, roll back on error. Nested calls join the outer transaction."""
+        with self.lock:
+            if self._tx_depth:
+                self._tx_depth += 1
+                try:
+                    yield self.conn
+                finally:
+                    self._tx_depth -= 1
+                return
+            self._tx_depth = 1
+            try:
+                yield self.conn
+            except BaseException:
+                self.conn.rollback()
+                raise
+            else:
+                self.conn.commit()
+            finally:
+                self._tx_depth = 0
 
     def close(self) -> None:
         """Fold the WAL back into data.db and close the connection."""
@@ -1472,7 +1497,7 @@ class DBManager:
             self.conn.execute(f"PRAGMA foreign_keys = {1 if prev_fk else 0};")
 
     def set_config(self, key: str, value: str) -> None:
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 "INSERT INTO app_config(key,value) VALUES(?,?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -1503,7 +1528,7 @@ class DBManager:
     def set_applied_asset_hash(
         self, cloned_guild_id: int, kind: str, applied_hash: str
     ) -> None:
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 "INSERT INTO guild_asset_state(cloned_guild_id, kind, applied_hash, last_updated) "
                 "VALUES(?,?,?,CURRENT_TIMESTAMP) "
@@ -1518,7 +1543,7 @@ class DBManager:
         return row[0] if row else ""
 
     def set_version(self, version: str):
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 INSERT INTO settings (id, version) VALUES (1, ?)
@@ -1535,7 +1560,7 @@ class DBManager:
         return row[0] if row else ""
 
     def set_notified_version(self, version: str):
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 INSERT INTO settings (id, notified_version) VALUES (1, ?)
@@ -1559,7 +1584,7 @@ class DBManager:
     ):
         cgid = int(cloned_guild_id) if cloned_guild_id is not None else None
 
-        with self.lock, self.conn:
+        with self._tx():
             row = self.conn.execute(
                 "SELECT cloned_category_id FROM category_mappings "
                 "WHERE original_category_id=? AND cloned_guild_id=?",
@@ -1632,7 +1657,7 @@ class DBManager:
             self.conn.commit()
 
     def delete_category_mapping(self, orig_id: int):
-        with self.lock, self.conn:
+        with self._tx():
             row = self.conn.execute(
                 "SELECT cloned_category_id FROM category_mappings WHERE original_category_id=?",
                 (orig_id,),
@@ -1839,7 +1864,7 @@ class DBManager:
         self.conn.commit()
 
     def delete_channel_mapping(self, orig_id: int):
-        with self.lock, self.conn:
+        with self._tx():
             row = self.conn.execute(
                 "SELECT cloned_channel_id FROM channel_mappings WHERE original_channel_id=?",
                 (orig_id,),
@@ -1877,7 +1902,7 @@ class DBManager:
         if not kw_norm:
             return False
 
-        with self.lock, self.conn:
+        with self._tx():
 
             cur = self.conn.execute(
                 """
@@ -1906,7 +1931,7 @@ class DBManager:
         if not kw_norm:
             return False
 
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 """
                 DELETE FROM blocked_keywords
@@ -2344,7 +2369,7 @@ class DBManager:
         cloned_guild_id: int | None = None,
     ) -> None:
         """Insert a filter row, no-op if it exists. kind is 'whitelist' | 'exclude', scope 'category' | 'channel'; with guild ids it is a per-mapping rule, otherwise global."""
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 INSERT OR IGNORE INTO filters(
@@ -2374,7 +2399,7 @@ class DBManager:
         member_count: Optional[int],
         description: Optional[str],
     ) -> None:
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 INSERT INTO guilds (guild_id, name, icon_url, owner_id, member_count,
@@ -2405,7 +2430,7 @@ class DBManager:
             )
 
     def delete_guild(self, guild_id: int) -> None:
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute("DELETE FROM guilds WHERE guild_id = ?", (int(guild_id),))
 
     def get_all_guild_ids(self) -> list[int]:
@@ -2453,7 +2478,7 @@ class DBManager:
     def set_channel_clone_name(
         self, original_channel_id: int, cloned_guild_id: int, clone_name: str | None
     ) -> None:
-        with self.conn as con:
+        with self._tx() as con:
             con.execute(
                 """
                 UPDATE channel_mappings
@@ -2491,7 +2516,7 @@ class DBManager:
     def set_category_clone_name(
         self, original_category_id: int, cloned_guild_id: int, clone_name: str | None
     ) -> None:
-        with self.conn as con:
+        with self._tx() as con:
             con.execute(
                 """
                 UPDATE category_mappings
@@ -2525,7 +2550,7 @@ class DBManager:
 
     def add_role_block(self, original_role_id: int, cloned_guild_id: int) -> bool:
         """Block this original role id for a specific clone guild. Returns True if newly added."""
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 """
                 INSERT OR IGNORE INTO role_blocks(original_role_id, cloned_guild_id)
@@ -2539,7 +2564,7 @@ class DBManager:
         self, original_role_id: int, cloned_guild_id: int | None = None
     ) -> bool:
         """Remove a block for the clone guild, or for all clones when cloned_guild_id is None. True if any row was removed."""
-        with self.lock, self.conn:
+        with self._tx():
             if cloned_guild_id is None:
                 cur = self.conn.execute(
                     "DELETE FROM role_blocks WHERE original_role_id = ?",
@@ -2587,7 +2612,7 @@ class DBManager:
 
     def clear_role_blocks(self, cloned_guild_id: int | None = None) -> int:
         """Delete role_blocks entries, only for the clone when cloned_guild_id is given. Returns rows removed."""
-        with self.lock, self.conn:
+        with self._tx():
             if cloned_guild_id is None:
                 cnt_row = self.conn.execute(
                     "SELECT COUNT(*) FROM role_blocks"
@@ -2618,7 +2643,7 @@ class DBManager:
         cloned_guild_id: int | None = None,
         sent_token_id: str | None = None,
     ) -> None:
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 INSERT INTO messages (
@@ -2696,7 +2721,7 @@ class DBManager:
         skip_pairs: Optional[list[tuple[int, int]]] = None,
     ) -> int:
         """Delete messages older than older_than_seconds, except for the (original_guild_id, cloned_guild_id) pairs in skip_pairs (per-mapping DB_CLEANUP_MSG=False). Returns rows deleted."""
-        with self.lock, self.conn:
+        with self._tx():
             before = self.conn.total_changes
 
             if not skip_pairs:
@@ -2766,14 +2791,14 @@ class DBManager:
     def add_onjoin_role(
         self, guild_id: int, role_id: int, added_by: int | None = None
     ) -> None:
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 "INSERT OR IGNORE INTO onjoin_roles(guild_id, role_id, added_by) VALUES (?,?,?)",
                 (int(guild_id), int(role_id), int(added_by) if added_by else None),
             )
 
     def remove_onjoin_role(self, guild_id: int, role_id: int) -> bool:
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 "DELETE FROM onjoin_roles WHERE guild_id=? AND role_id=?",
                 (int(guild_id), int(role_id)),
@@ -2791,7 +2816,7 @@ class DBManager:
         return True
 
     def clear_onjoin_roles(self, guild_id: int) -> int:
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 "DELETE FROM onjoin_roles WHERE guild_id=?",
                 (int(guild_id),),
@@ -2810,7 +2835,7 @@ class DBManager:
         run_id = run_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 INSERT INTO backfill_runs(
@@ -2951,7 +2976,7 @@ class DBManager:
 
     def get_clone_guild_ids(self, original_guild_id: int) -> List[int]:
         """All clone guild ids for a host guild."""
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 "SELECT cloned_guild_id FROM guild_mappings WHERE original_guild_id = ?;",
                 (original_guild_id,),
@@ -2960,7 +2985,7 @@ class DBManager:
 
     def get_host_guild_ids(self, cloned_guild_id: int) -> List[int]:
         """All host guild ids for a clone guild."""
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 "SELECT original_guild_id FROM guild_mappings WHERE cloned_guild_id = ?;",
                 (cloned_guild_id,),
@@ -3025,7 +3050,7 @@ class DBManager:
                     {update_sql}
         """
 
-        with self.conn:
+        with self._tx():
             self.conn.execute(
                 sql,
                 (
@@ -3066,7 +3091,7 @@ class DBManager:
             "sticker_mappings",
         ]
 
-        with self.conn:
+        with self._tx():
             for tbl in tables_to_clean:
                 try:
 
@@ -3229,7 +3254,7 @@ class DBManager:
         clone = int(clone_guild_id)
         out = {}
 
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.cursor()
 
             cur.execute(
@@ -3503,7 +3528,7 @@ class DBManager:
 
     def delete_config(self, key: str) -> None:
         """Remove a key from app_config; safe if it does not exist."""
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 "DELETE FROM app_config WHERE key = ?",
                 (key,),
@@ -3556,7 +3581,7 @@ class DBManager:
     def get_channel_mapping_for_mapping(
         self, original_channel_id: int, mapping_id: str
     ):
-        with self.conn:
+        with self._tx():
             return self.conn.execute(
                 """
                 SELECT cm.*
@@ -3777,7 +3802,7 @@ class DBManager:
         ogid = int(m["original_guild_id"] or 0)
         cgid = int(m["cloned_guild_id"] or 0)
 
-        with self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 DELETE FROM filters
@@ -3850,7 +3875,7 @@ class DBManager:
             if w2 not in cleaned:
                 cleaned.append(w2)
 
-        with self.conn:
+        with self._tx():
 
             self.conn.execute(
                 """
@@ -3914,7 +3939,7 @@ class DBManager:
             if p2 not in cleaned:
                 cleaned.append(p2)
 
-        with self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 DELETE FROM channel_name_blacklist
@@ -3989,7 +4014,7 @@ class DBManager:
     def delete_channel_mapping_pair(
         self, original_channel_id: int, cloned_guild_id: int
     ):
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 "DELETE FROM channel_mappings WHERE original_channel_id=? AND cloned_guild_id=?",
                 (int(original_channel_id), int(cloned_guild_id)),
@@ -4020,7 +4045,7 @@ class DBManager:
     def delete_forum_thread_mapping_for_clone(
         self, original_thread_id: int, cloned_guild_id: int
     ) -> None:
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 DELETE FROM threads
@@ -4033,7 +4058,7 @@ class DBManager:
     def delete_message_mapping_pair(
         self, original_message_id: int, cloned_guild_id: int
     ) -> int:
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 "DELETE FROM messages WHERE original_message_id=? AND cloned_guild_id=?",
                 (int(original_message_id), int(cloned_guild_id)),
@@ -4143,7 +4168,7 @@ class DBManager:
         self, original_category_id: int, cloned_guild_id: int
     ) -> Optional[sqlite3.Row]:
         """The category_mappings row for (original_category_id, cloned_guild_id), or None."""
-        with self.lock, self.conn:
+        with self._tx():
             return self.conn.execute(
                 """
                 SELECT *
@@ -4158,7 +4183,7 @@ class DBManager:
         self, original_category_id: int, cloned_guild_id: int
     ) -> list[sqlite3.Row]:
         """All channel_mappings in this clone whose original parent is the given category."""
-        with self.lock, self.conn:
+        with self._tx():
             rows = self.conn.execute(
                 """
                 SELECT *
@@ -4173,7 +4198,7 @@ class DBManager:
         self, original_channel_id: int, cloned_guild_id: int
     ) -> Optional[int]:
         """Delete the mapping for (original_channel_id, cloned_guild_id); returns the cloned_channel_id if one existed."""
-        with self.lock, self.conn:
+        with self._tx():
             row = self.conn.execute(
                 """
                 SELECT cloned_channel_id
@@ -4199,7 +4224,7 @@ class DBManager:
         self, original_category_id: int, cloned_guild_id: int
     ) -> int:
         """Set cloned_parent_category_id to NULL for channels under the category in this clone only. Returns rows affected."""
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 """
                 UPDATE channel_mappings
@@ -4214,7 +4239,7 @@ class DBManager:
         self, original_category_id: int, cloned_guild_id: int
     ) -> dict:
         """Delete one category mapping pair for this clone and return {'original_category_id', 'cloned_category_id'}; children are left to the caller."""
-        with self.lock, self.conn:
+        with self._tx():
             row = self.conn.execute(
                 """
                 SELECT original_category_id, cloned_category_id
@@ -4284,7 +4309,7 @@ class DBManager:
             except Exception:
                 continue
 
-        with self.conn:
+        with self._tx():
 
             self.clear_role_blocks(cloned_guild_id=cloned_gid)
 
@@ -4348,7 +4373,7 @@ class DBManager:
         ogid = int(m["original_guild_id"] or 0)
         cgid = int(m["cloned_guild_id"] or 0)
 
-        with self.conn:
+        with self._tx():
 
             self.conn.execute(
                 """
@@ -4449,7 +4474,7 @@ class DBManager:
         """Add a role mention configuration; True if newly created, False if it existed."""
         cfg_id = secrets.token_hex(4)
 
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 """
                 INSERT OR IGNORE INTO role_mentions
@@ -4474,7 +4499,7 @@ class DBManager:
         cloned_channel_id: int | None = None,
     ) -> bool:
         """Remove a role mention configuration."""
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 """
                 DELETE FROM role_mentions
@@ -4503,7 +4528,7 @@ class DBManager:
         role_mention_id: str,
     ) -> bool:
         """Remove a role mention configuration by its short ID."""
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 """
                 DELETE FROM role_mentions
@@ -4595,7 +4620,7 @@ class DBManager:
         webhook_avatar_url: str | None = None,
     ) -> None:
         """Set the custom webhook name and avatar used for all messages to a cloned channel."""
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 INSERT INTO channel_webhook_profiles
@@ -4647,7 +4672,7 @@ class DBManager:
         cloned_guild_id: int,
     ) -> bool:
         """Delete a cloned channel's webhook profile; True if a row was deleted."""
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 """
                 DELETE FROM channel_webhook_profiles
@@ -4694,7 +4719,7 @@ class DBManager:
     def update_mapping_status(self, mapping_id: str, status: str) -> None:
         """Update a mapping's status, normalized to 'active' or 'paused'."""
         status_norm = "paused" if str(status).lower() == "paused" else "active"
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 UPDATE guild_mappings
@@ -4730,7 +4755,7 @@ class DBManager:
             "sticker_mappings",
         ]
 
-        with self.lock, self.conn:
+        with self._tx():
             for tbl in tables_to_clean:
                 try:
                     if tbl == "role_blocks":
@@ -4869,7 +4894,7 @@ class DBManager:
         if not source_text:
             return False
 
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 """
                 SELECT 1
@@ -4915,7 +4940,7 @@ class DBManager:
         rewrite_id: int,
     ) -> bool:
         """Delete a rewrite rule for this mapping by numeric ID."""
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 """
                 DELETE FROM mapping_rewrites
@@ -5061,7 +5086,7 @@ class DBManager:
         cfg_js = json.dumps(config or {}, ensure_ascii=False)
         flt_js = json.dumps(filters or {}, ensure_ascii=False)
 
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 INSERT INTO message_forwarding (
@@ -5106,7 +5131,7 @@ class DBManager:
         return nid
 
     def delete_message_forward_rule(self, rule_id: str) -> None:
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 "DELETE FROM message_forwarding WHERE rule_id = ?",
                 (str(rule_id),),
@@ -5125,7 +5150,7 @@ class DBManager:
     ) -> str:
         """Record a forwarding send event. Returns the event_id."""
         eid = event_id or uuid.uuid4().hex
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 """
                 INSERT INTO forwarding_events(
@@ -5690,7 +5715,7 @@ class DBManager:
         token_id = uuid.uuid4().hex
         note = (note or "").strip() or None
 
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 "INSERT INTO backup_tokens(token_id, token_value, note) VALUES (?,?,?)",
                 (token_id, token_value, note),
@@ -5703,7 +5728,7 @@ class DBManager:
         if not token_id:
             return False
 
-        with self.lock, self.conn:
+        with self._tx():
             cur = self.conn.execute(
                 "DELETE FROM backup_tokens WHERE token_id = ?",
                 (token_id,),
@@ -5711,7 +5736,7 @@ class DBManager:
             return bool(cur.rowcount and cur.rowcount > 0)
 
     def mark_backup_token_used(self, token_id: str) -> None:
-        with self.lock, self.conn:
+        with self._tx():
             self.conn.execute(
                 "UPDATE backup_tokens SET last_used = CAST(strftime('%s','now') AS INTEGER) WHERE token_id = ?",
                 (token_id,),
