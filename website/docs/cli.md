@@ -127,6 +127,8 @@ Where the terminal cannot print these symbols (for example a Windows console on 
 
 Web addresses in the output (the dashboard address, the docs link) can be clicked in Windows Terminal, VS Code, iTerm2, kitty, WezTerm, Ghostty and GNOME Terminal and other VTE-based terminals. The full address is always printed, so you can still copy it anywhere else. Links are off when colors are off, and inside tmux or screen.
 
+Folders and files in the Copycord home can be clicked the same way to open them: the `Home:` line of the overview, the paths `copycord doctor` prints (such as the `.env` in "change PASSWORD in ...") and the "Your data is in" lines of `copycord uninstall`. The path is printed as before. These links are also off over SSH and inside Docker, where the folder is not on the computer in front of you, and with `--json`.
+
 ### JSON output {#json}
 
 `--json` makes a reporting command print exactly one JSON document on stdout, for scripts and monitoring. It works with `copycord --version`, `copycord doctor` (also with `--fix`), `copycord update status`, `copycord config get` and `copycord config export`, and can go before or after the command. With `--json` there is no banner, no color, no spinner and no question; any other message goes to stderr. The exit status is the same as without it.
