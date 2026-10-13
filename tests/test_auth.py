@@ -179,3 +179,78 @@ class TestLogout:
             follow_redirects=False,
         )
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Shared side menu and its Log out item
+# ---------------------------------------------------------------------------
+
+# path -> href of the menu item that should be highlighted
+PAGES = {
+    "/": "/",
+    "/channels": "/channels",
+    "/guilds": "/guilds",
+    "/forwarding": "/forwarding",
+    "/scraper": "/scraper",
+    "/system": "/system",
+    "/event-logs": "/event-logs",
+}
+
+
+def _get_page(tc, path, with_session):
+    headers = {"accept": "text/html"}
+    if with_session:
+        headers["cookie"] = f"{auth.ADMIN_COOKIE_NAME}={auth.make_session_token()}"
+    return tc.get(path, headers=headers, follow_redirects=False)
+
+
+class TestSidebar:
+
+    @pytest.mark.parametrize("path,active", PAGES.items())
+    def test_page_renders_menu_with_active_item(self, tc, path, active):
+        resp = _get_page(tc, path, with_session=False)
+        assert resp.status_code == 200
+        html = resp.text
+        assert 'id="side-menu"' in html
+        assert html.count('class="menu-item is-active"') == 1
+        assert f'class="menu-item is-active" href="{active}"' in html
+        assert "data-logout" not in html
+
+    def test_404_page_renders_menu(self, tc):
+        resp = _get_page(tc, "/no-such-page", with_session=False)
+        assert resp.status_code == 404
+        html = resp.text
+        assert 'id="side-menu"' in html
+        assert "is-active" not in html
+        assert 'href="/forwarding"' not in html  # 404 keeps its shorter menu
+
+    @pytest.mark.parametrize("path", PAGES)
+    def test_log_out_shown_with_password(self, tc, password, path):
+        resp = _get_page(tc, path, with_session=True)
+        assert resp.status_code == 200
+        assert "data-logout" in resp.text
+        assert ">Log out</span>" in resp.text
+
+    def test_log_out_hidden_without_password(self, tc):
+        assert not auth.ADMIN_PASSWORD
+        resp = _get_page(tc, "/system", with_session=False)
+        assert ">Log out</span>" not in resp.text
+
+    def test_log_out_then_dashboard_needs_login(self, tc, password):
+        token = auth.make_session_token()
+        resp = tc.post(
+            "/logout",
+            headers={
+                "origin": ORIGIN,
+                CSRF_HEADER: "1",
+                "cookie": f"{auth.ADMIN_COOKIE_NAME}={token}",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/login"
+        assert "Max-Age=0" in resp.headers["set-cookie"]
+        # The client now has no cookie, so the dashboard sends it to /login.
+        resp = tc.get("/system", headers={"accept": "text/html"}, follow_redirects=False)
+        assert resp.status_code in (302, 307)
+        assert resp.headers["location"].endswith("/login")
