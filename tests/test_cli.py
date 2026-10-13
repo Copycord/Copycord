@@ -971,14 +971,15 @@ def test_doctor_fix_recreates_the_env_file(doctor_env, capsys):
     assert ".env not found" not in out
     assert (f"✓ .env created with the default settings  {env.resolve()} (fixed)"
             in _after(out, "Settings"))
-    # The installer's file: the same template, the same live defaults.
-    assert env.read_text(encoding="utf-8") == envfile.template(env.resolve().parent)
-    # BACKUP_DIR is a commented example showing the folder the code uses.
+    # The installer's file: the same template with a random password, not the default.
+    password = envfile.get("PASSWORD", env)
+    assert password and password != envfile.DEFAULT_PASSWORD and len(password) >= 20
+    assert env.read_text(encoding="utf-8") == envfile.template(env.resolve().parent, password)
+    # BACKUP_DIR is the folder the code uses.
     from copycord.common.db import backups_dir
 
     lines = env.read_text(encoding="utf-8").splitlines()
-    assert f"#BACKUP_DIR={backups_dir()}" in lines
-    assert not any(x.startswith("BACKUP_DIR=") for x in lines)
+    assert f"BACKUP_DIR={envfile._quote(str(backups_dir()))}" in lines
     if sys.platform != "win32":
         assert (env.stat().st_mode & 0o777) == 0o600
     # The re-check runs after the fix; the real environment's PASSWORD still wins.
@@ -1243,8 +1244,7 @@ def test_doctor_flags_a_service_in_a_console_window(doctor_env, monkeypatch, cap
     assert "run it without a window" in out
 
 
-@pytest.mark.parametrize("password", [None, "copycord"])
-def test_run_refuses_a_network_dashboard_with_a_weak_password(data_dir, monkeypatch, capsys, password):
+def test_run_refuses_a_network_dashboard_with_the_default_password(data_dir, monkeypatch, capsys):
     from copycord import supervisor
 
     started = []
@@ -1254,8 +1254,7 @@ def test_run_refuses_a_network_dashboard_with_a_weak_password(data_dir, monkeypa
 
     monkeypatch.setattr(supervisor, "run", fake_run)
     monkeypatch.setenv("DASHBOARD_HOST", "0.0.0.0")
-    if password:
-        monkeypatch.setenv("PASSWORD", password)
+    monkeypatch.setenv("PASSWORD", "copycord")
     assert cli.main(["run"]) == 1
     assert started == []
     out = capsys.readouterr()
@@ -1278,10 +1277,54 @@ def test_run_allows_a_network_dashboard_with_a_real_password(data_dir, monkeypat
     monkeypatch.setenv("DASHBOARD_HOST", "0.0.0.0")
     monkeypatch.setenv("PASSWORD", "a-real-one")
     assert cli.main(["run"]) == 0
-    # The default address is local, so even no password starts.
-    monkeypatch.delenv("DASHBOARD_HOST")
-    monkeypatch.delenv("PASSWORD")
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0"])
+def test_run_without_a_password_saves_a_random_one(data_dir, monkeypatch, capsys, host):
+    from copycord import envfile, supervisor
+    from copycord.common import paths
+
+    started = []
+
+    async def fake_run():
+        started.append(os.environ["PASSWORD"])
+
+    monkeypatch.setattr(supervisor, "run", fake_run)
+    monkeypatch.setattr(paths, "in_docker", lambda: False)
+    monkeypatch.setenv("DASHBOARD_HOST", host)
+    monkeypatch.setenv("PASSWORD", "")
     assert cli.main(["run"]) == 0
+    env = envfile.env_path()
+    password = envfile.get("PASSWORD", env)
+    assert password and password != envfile.DEFAULT_PASSWORD and len(password) >= 20
+    assert started == [password]
+    if sys.platform != "win32":
+        assert (env.stat().st_mode & 0o777) == 0o600
+    out = capsys.readouterr().out
+    assert password in out and str(env) in out
+    # The next start keeps it and does not show it again.
+    assert cli.main(["run"]) == 0
+    assert envfile.get("PASSWORD", env) == password
+    assert password not in capsys.readouterr().out
+
+
+def test_run_in_docker_without_a_password_does_not_start(data_dir, monkeypatch, capsys):
+    from copycord import envfile, supervisor
+    from copycord.common import paths
+
+    started = []
+
+    async def fake_run():
+        started.append(True)
+
+    monkeypatch.setattr(supervisor, "run", fake_run)
+    monkeypatch.setattr(paths, "in_docker", lambda: True)
+    monkeypatch.setenv("PASSWORD", " ")
+    assert cli.main(["run"]) == 1
+    assert started == []
+    out = capsys.readouterr()
+    assert "Set PASSWORD" in out.out + out.err
+    assert envfile.get("PASSWORD") is None
 
 
 def test_doctor_fails_a_network_dashboard_with_the_default_password():
@@ -1703,30 +1746,32 @@ def test_env_template_sets_every_default(tmp_path):
     expected = {
         "PASSWORD": "copycord",
         "ADMIN_PORT": "8080",
+        "DASHBOARD_HOST": "127.0.0.1",
         "TZ": "UTC",
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "HUMAN",
+        "BACKUP_DIR": str(home.resolve() / "data" / "backups"),
         "BACKUP_AT": "03:17",
         "BACKUP_RETAIN": "14",
         "COPYCORD_NO_UPDATE_CHECK": "0",
     }
     active = [x for x in lines if x and not x.startswith("#")]
-    assert active == [f"{k}={v}" for k, v in expected.items()]
-    for key in expected:
-        above = lines[lines.index(f"{key}={expected[key]}") - 1]
-        assert above.startswith("# ") and len(above) > 4
-    # Copycord saves its own SECRET_KEY; the template says so instead of setting one.
-    assert not any(x.lstrip("#").startswith("SECRET_KEY=") for x in lines)
-    assert any(x.startswith("# SECRET_KEY") and "secret.key" in x for x in lines)
-    assert any(x.startswith("# SECRET_KEY") and "<home>/data/secret.key" in x for x in lines)
-    # BACKUP_DIR is left to the code default, <home>/data/backups, shown commented out.
-    assert f"#BACKUP_DIR={home.resolve() / 'data' / 'backups'}" in lines
+    assert active == [f"{k}={envfile._quote(v)}" for k, v in expected.items()]
+    # Two header lines, then one short comment line above each key.
+    assert lines[2] == ""
+    for key, value in expected.items():
+        at = lines.index(f"{key}={envfile._quote(value)}")
+        above = lines[at - 1]
+        assert above.startswith("# ") and len(above) > 4 and "(" not in above.replace("(HH:MM)", "")
+        assert lines[at - 2] == ""
+    # Copycord saves its own SECRET_KEY; the template leaves it out.
+    assert "SECRET_KEY" not in text
     assert "copycord restart" in text
-    # The dashboard stays on this computer unless DASHBOARD_HOST is uncommented.
-    assert "#DASHBOARD_HOST=127.0.0.1" in lines
-    at = lines.index("#DASHBOARD_HOST=127.0.0.1")
-    assert "0.0.0.0" in "\n".join(lines[at - 2:at])
-    assert set(envfile.ENV_KEYS) - {"SECRET_KEY", "BACKUP_DIR", "DASHBOARD_HOST"} <= set(expected)
+    assert "remove the #" not in text
+    # The dashboard stays on this computer, as a normal line.
+    assert "DASHBOARD_HOST=127.0.0.1" in lines
+    assert "0.0.0.0" in lines[lines.index("DASHBOARD_HOST=127.0.0.1") - 1]
+    assert set(envfile.ENV_KEYS) - {"SECRET_KEY"} <= set(expected)
 
     env = tmp_path / ".env"
     env.write_text(text, encoding="utf-8")
@@ -2213,6 +2258,6 @@ def test_backup_dir_defaults_to_the_data_folder(native, monkeypatch):
     home = (native / ".copycord").resolve()
     assert backups_dir() == home / "data" / "backups"
     assert envfile.default_backup_dir(home) == backups_dir()
-    assert f"#BACKUP_DIR={backups_dir()}" in envfile.template(home).splitlines()
+    assert f"BACKUP_DIR={envfile._quote(str(backups_dir()))}" in envfile.template(home).splitlines()
     monkeypatch.setenv("BACKUP_DIR", str(native / "elsewhere"))
     assert backups_dir() == (native / "elsewhere").resolve()

@@ -205,8 +205,10 @@ def password(monkeypatch):
 
 
 @pytest.fixture()
-def no_password(monkeypatch):
-    monkeypatch.setattr(auth, "ADMIN_PASSWORD", "")
+def logged_in(tc, monkeypatch):
+    # The dashboard always has a password; this client holds a valid session.
+    monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
+    tc.cookies.set(auth.ADMIN_COOKIE_NAME, auth.make_session_token())
 
 
 @pytest.fixture()
@@ -246,7 +248,7 @@ class TestBrowserSockets:
         _rejected(tc, path, headers)
 
     @pytest.mark.parametrize("path", ["/ws/ui", "/ws/out", "/ws/in"])
-    def test_bad_origin_rejected_without_password(self, tc, no_password, path):
+    def test_bad_origin_rejected_without_password(self, tc, logged_in, path):
         _rejected(tc, path, {"origin": "http://evil.example"})
 
     @pytest.mark.parametrize("path", ["/ws/ui", "/ws/in"])
@@ -258,7 +260,7 @@ class TestBrowserSockets:
         with tc.websocket_connect("/ws/ui", headers=headers):
             pass
 
-    def test_no_password_same_origin_accepted(self, tc, no_password):
+    def test_logged_in_same_origin_accepted(self, tc, logged_in):
         with tc.websocket_connect("/ws/ui", headers={"origin": ORIGIN}):
             pass
 
@@ -282,7 +284,7 @@ class TestInternalSockets:
     def test_bad_token_rejected(self, tc, internal_token, path):
         _rejected(tc, path, {INTERNAL_TOKEN_HEADER: "wrong"})
 
-    def test_token_required_even_without_password(self, tc, no_password, internal_token):
+    def test_token_required_even_without_password(self, tc, logged_in, internal_token):
         _rejected(tc, "/bus", {"origin": ORIGIN})
 
     def test_session_cookie_not_enough_for_bus(self, tc, password, internal_token):
@@ -431,7 +433,7 @@ class TestCSRF:
     @pytest.mark.parametrize(
         "origin", ["http://evil.example", "http://testserver.evil.example", "null"]
     )
-    def test_cross_origin_rejected(self, tc, no_password, origin):
+    def test_cross_origin_rejected(self, tc, logged_in, origin):
         resp = _post(tc, {"origin": origin, CSRF_HEADER: "1"})
         assert resp.status_code == 403
 
@@ -439,21 +441,21 @@ class TestCSRF:
         headers = {"origin": "http://evil.example", CSRF_HEADER: "1", "cookie": _session_cookie()}
         assert _post(tc, headers).status_code == 403
 
-    def test_missing_header_rejected(self, tc, no_password):
+    def test_missing_header_rejected(self, tc, logged_in):
         assert _post(tc, {"origin": ORIGIN}).status_code == 403
 
-    def test_wrong_header_value_rejected(self, tc, no_password):
+    def test_wrong_header_value_rejected(self, tc, logged_in):
         assert _post(tc, {"origin": ORIGIN, CSRF_HEADER: "0"}).status_code == 403
 
-    def test_no_origin_or_referer_rejected(self, tc, no_password):
+    def test_no_origin_or_referer_rejected(self, tc, logged_in):
         assert _post(tc, {CSRF_HEADER: "1"}).status_code == 403
 
     @pytest.mark.parametrize("method", ["put", "patch", "delete"])
-    def test_other_methods_checked(self, tc, no_password, method):
+    def test_other_methods_checked(self, tc, logged_in, method):
         resp = tc.request(method.upper(), "/api/event-logs/x", headers={"origin": "http://evil.example"})
         assert resp.status_code == 403
 
-    def test_same_origin_with_header_accepted(self, tc, no_password):
+    def test_same_origin_with_header_accepted(self, tc, logged_in):
         resp = _post(tc, {"origin": ORIGIN, CSRF_HEADER: "1"})
         assert resp.status_code == 200
 
@@ -461,13 +463,13 @@ class TestCSRF:
         headers = {"origin": ORIGIN, CSRF_HEADER: "1", "cookie": _session_cookie()}
         assert _post(tc, headers).status_code == 200
 
-    def test_referer_fallback(self, tc, no_password):
+    def test_referer_fallback(self, tc, logged_in):
         ok = _post(tc, {"referer": f"{ORIGIN}/channels", CSRF_HEADER: "1"})
         assert ok.status_code == 200
         bad = _post(tc, {"referer": "http://evil.example/x", CSRF_HEADER: "1"})
         assert bad.status_code == 403
 
-    def test_forwarded_host_accepted(self, tc, no_password):
+    def test_forwarded_host_accepted(self, tc, logged_in):
         headers = {
             "origin": "https://copycord.example.com",
             "x-forwarded-host": "copycord.example.com",
@@ -475,7 +477,7 @@ class TestCSRF:
         }
         assert _post(tc, headers).status_code == 200
 
-    def test_get_not_checked(self, tc, no_password):
+    def test_get_not_checked(self, tc, logged_in):
         resp = tc.get("/api/event-logs", headers={"origin": "http://evil.example"})
         assert resp.status_code == 200
 
@@ -488,12 +490,12 @@ class TestCSRF:
         assert resp.status_code == 403
         assert auth.ADMIN_COOKIE_NAME not in resp.cookies
 
-    def test_internal_token_accepted(self, tc, no_password, internal_token):
+    def test_internal_token_accepted(self, tc, logged_in, internal_token):
         assert _post(tc, {INTERNAL_TOKEN_HEADER: TOKEN}).status_code == 200
 
-    def test_bad_internal_token_rejected(self, tc, no_password, internal_token):
+    def test_bad_internal_token_rejected(self, tc, logged_in, internal_token):
         assert _post(tc, {INTERNAL_TOKEN_HEADER: "wrong"}).status_code == 403
 
-    def test_internal_token_unset_rejected(self, tc, no_password, monkeypatch):
+    def test_internal_token_unset_rejected(self, tc, logged_in, monkeypatch):
         monkeypatch.delenv(INTERNAL_TOKEN_ENV, raising=False)
         assert _post(tc, {INTERNAL_TOKEN_HEADER: ""}).status_code == 403
