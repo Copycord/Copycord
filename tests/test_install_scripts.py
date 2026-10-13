@@ -75,7 +75,7 @@ def test_saves_the_channel(path):
 def test_prints_next_steps(path):
     text = _text(path)
     assert "copycord update" in text
-    assert "localhost:" in text or 'HOST="localhost"' in text
+    assert "localhost:" in text or 'HOST="localhost"' in text or "$dashHost = 'localhost'" in text
     assert "Finish the setup in the dashboard" in text
     assert "onboard" not in text.lower()
 
@@ -83,9 +83,10 @@ def test_prints_next_steps(path):
 @pytest.mark.parametrize("path", [SH, PS1])
 def test_env_template_is_not_in_the_installer(path):
     text = _text(path)
-    # The installed CLI writes .env; the only PASSWORD line left is the box check.
+    # The installed CLI writes .env; the only PASSWORD line left is the sh box check
+    # for an older install that still has the default password.
     assert "ENVEOF" not in text and "$envTemplate" not in text
-    assert text.count("PASSWORD=copycord") == 1
+    assert text.count("PASSWORD=copycord") == (1 if path == SH else 0)
     assert "BACKUP_DIR" not in text
     assert "Keep in step with envfile" not in text
 
@@ -109,10 +110,14 @@ def test_success_box_names_the_env_file_and_what_needs_attention(path):
     assert "Settings: $ENV_FILE" in text or "Settings: $envFile" in text
     assert "Default dashboard password: copycord" not in text
     box = text[text.index("Needs your attention:"):]
+    assert "Finish the setup in the dashboard once it runs:" in box
+    if path == PS1:
+        # The password read back from the settings file is shown in the box.
+        assert 'BoxLine "    password: $password"' in box
+        return
     # Only while the default password is still set.
     assert "PASSWORD=copycord" in box[:box.index("Change the default dashboard password:")]
     assert "then run: copycord restart" in box
-    assert "Finish the setup in the dashboard once it runs:" in box
 
 
 @pytest.mark.parametrize("path", [SH, PS1])
