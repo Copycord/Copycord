@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { Guilds } from "./pages/Guilds";
 import { Forwarding } from "./pages/Forwarding";
+import { Scraper } from "./pages/Scraper";
 import { Kit } from "./pages/Kit";
 import { Logs } from "./pages/Logs";
 import { Placeholder } from "./pages/Placeholder";
@@ -23,6 +24,7 @@ export const PAGES = [
 const PAGE_ELEMENTS: Partial<Record<(typeof PAGES)[number]["path"], ReactNode>> = {
   "/guilds": <Guilds />,
   "/forwarding": <Forwarding />,
+  "/scraper": <Scraper />,
   "/system": <System />,
   "/logs": <Logs />,
 };
