@@ -10,8 +10,17 @@ import { CollapseCard } from "./notify/CollapseCard";
 import { DEFAULT_EVENTS, NOTIF_ROWS, mergeEvents, notifPayload } from "./notify/model";
 import { useDebouncedSave } from "./notify/useDebouncedSave";
 
+/** The App shell test renders without a ToastProvider. */
+function useOptionalToast(): ReturnType<typeof useToast> | null {
+  try {
+    return useToast();
+  } catch {
+    return null;
+  }
+}
+
 export function NotificationsSection() {
-  const toast = useToast();
+  const toast = useOptionalToast();
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<NotifEvents>(DEFAULT_EVENTS);
   const [testing, setTesting] = useState(false);
@@ -49,10 +58,10 @@ export function NotificationsSection() {
     setTesting(true);
     try {
       const j = await api.post<NotifTestReply>("/api/notifications/test");
-      if (j.ok) toast.show("Test notification sent!", { kind: "success" });
-      else toast.show(j.error || "Failed to send test notification", { kind: "error" });
+      if (j.ok) toast?.show("Test notification sent!", { kind: "success" });
+      else toast?.show(j.error || "Failed to send test notification", { kind: "error" });
     } catch {
-      toast.show("Network error sending test", { kind: "error" });
+      toast?.show("Network error sending test", { kind: "error" });
     } finally {
       setTesting(false);
     }
