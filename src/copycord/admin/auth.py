@@ -293,6 +293,9 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
     _session_secret = secret_key
     _session_signer = URLSafeTimedSerializer(secret_key, salt="copycord-admin")
 
+    # The side menu shows "Log out" only when there is a password to log out of.
+    templates.env.globals["logout_enabled"] = bool(ADMIN_PASSWORD)
+
     app.add_middleware(PasswordGuardMiddleware)
     # Added last so it runs first; security imports this module.
     from copycord.admin.security import CSRFMiddleware
