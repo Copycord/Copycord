@@ -67,14 +67,9 @@ def guild_scoped_slash_command(*dargs, **dkwargs):
 
 
 def _format_discord_timestamp(value) -> str:
-    """
-    Accepts:
-    - epoch int/float
-    - numeric string
-    - 'YYYY-MM-DD HH:MM:SS' or ISO-like strings
+    """Format a timestamp as Discord markup: <t:TIMESTAMP:f> (<t:TIMESTAMP:R>).
 
-    Returns Discord timestamp markup like:
-      <t:TIMESTAMP:f> (<t:TIMESTAMP:R>)
+    Accepts an epoch int/float, a numeric string, or a 'YYYY-MM-DD HH:MM:SS' or ISO-like string.
     """
     if not value:
         return "`?`"
@@ -143,10 +138,7 @@ class CloneCommands(commands.Cog):
         self.allowed_users = getattr(config, "COMMAND_USERS", []) or []
 
     async def cog_check(self, ctx: commands.Context):
-        """
-        Global check for all commands in this cog. Only users whose ID is set in config may execute commands.
-        Also logs *once* per executed command, skipping the bare group shell for group commands.
-        """
+        """Only users whose ID is set in config may run commands. Logs once per executed command, skipping the bare group shell."""
         cmd = ctx.command
         guild_name = ctx.guild.name if ctx.guild else "Unknown"
 
@@ -171,13 +163,7 @@ class CloneCommands(commands.Cog):
         return True
 
     def _refresh_command_guilds(self) -> list[int]:
-        """
-        Recompute which clone guilds should have our slash commands,
-        and update each command object's .guild_ids so sync_commands() will
-        register them everywhere.
-
-        Returns the new guild_ids list.
-        """
+        """Recompute which clone guilds get our slash commands and set each command's guild_ids. Returns the new list."""
         new_ids = []
         try:
             mappings = self.db.list_guild_mappings()
@@ -205,14 +191,7 @@ class CloneCommands(commands.Cog):
 
     @commands.Cog.listener()
     async def on_application_command_error(self, interaction, error):
-        """
-        Handle errors during slash‐command execution.
-
-        Unwraps the original exception if it was wrapped in an ApplicationCommandInvokeError,
-        silently ignores permission‐related CheckFailure errors to avoid log spam when
-        unauthorized users invoke protected commands, and logs all other exceptions
-        with full tracebacks for debugging.
-        """
+        """Unwrap ApplicationCommandInvokeError, ignore CheckFailure to avoid log spam, and log everything else with a traceback."""
         orig = getattr(error, "original", None)
         err = orig or error
 
@@ -250,12 +229,10 @@ class CloneCommands(commands.Cog):
         ephemeral: bool = True,
         mention_on_channel_fallback: bool = True,
     ) -> None:
-        """
-        DM-first delivery:
-        1) Try DM (uses bot token, no webhook expiry)
-        2) If DM blocked, try interaction response/followup (ephemeral)
-        3) If 401 (invalid/expired token) or other failure, try channel.send (optional @mention)
-        4) Log if everything fails
+        """DM-first delivery.
+
+        Falls back to the interaction response/followup (ephemeral), then channel.send
+        (optional @mention) if the token is invalid or expired, and logs if all fail.
         """
         user = getattr(ctx, "user", None) or getattr(ctx, "author", None)
 
@@ -511,14 +488,10 @@ class CloneCommands(commands.Cog):
     ) -> dict:
         """What actually leaves the machine for this token.
 
-        build_headers() is only our half of the request — curl_cffi's
-        impersonation profile adds and overrides headers on top of it, so the
-        configured dict does not tell you what Discord receives. This sends a
-        real request through the token's own session and proxy lease and
-        reports the headers as observed, plus the egress IP.
-
-        The Authorization value is swapped for a placeholder: this goes to a
-        third-party echo service, and the header is the account itself.
+        build_headers() is only our half: curl_cffi's impersonation profile adds and
+        overrides headers on top. This sends a real request through the token's own
+        session and proxy lease and reports the observed headers plus the egress IP.
+        The Authorization value is replaced by a placeholder before it goes to the echo service.
         """
         try:
             session = await get_tls_session(token, use_proxy=use_proxy)
@@ -3419,15 +3392,9 @@ class CloneCommands(commands.Cog):
             min_value=1,
         ),
     ):
-        """
-        Configure DB message retention via app_config.
+        """Configure DB message retention via app_config.
 
-        Canonical key:
-        - MESSAGE_RETENTION_DAYS
-
-        We still delete MESSAGE_RETENTION_SECONDS so that app_config
-        does not have conflicting values. Seconds remain supported as a
-        legacy read path in the server, but are no longer settable here.
+        MESSAGE_RETENTION_SECONDS is still deleted so app_config holds no conflicting value.
         """
         await ctx.defer(ephemeral=True)
 

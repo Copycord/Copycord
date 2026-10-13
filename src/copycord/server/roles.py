@@ -65,11 +65,7 @@ class RoleManager:
                 pass
 
     def _log(self, level: str, msg: str, *args) -> None:
-        """
-        Role sync logging with sync task context.
-        Adds the same prefix that structure sync uses so every
-        role create/update/delete line is tied to the sync task id.
-        """
+        """Role sync logging prefixed with the sync task context."""
         prefix = logctx.format_prefix()
 
         if level == "info":
@@ -82,11 +78,7 @@ class RoleManager:
             logger.debug(prefix + msg, *args)
 
     def _get_lock_for_clone(self, clone_gid: int) -> asyncio.Lock:
-        """
-        Get/create a lock dedicated to this clone guild.
-        Prevents overlapping role modifications *within the same* clone guild,
-        but allows different clone guilds to sync in parallel.
-        """
+        """Get/create the lock for this clone guild. Different clone guilds sync in parallel."""
         if clone_gid not in self._locks:
             self._locks[clone_gid] = asyncio.Lock()
         return self._locks[clone_gid]
@@ -262,10 +254,7 @@ class RoleManager:
 
     @staticmethod
     def _build_role_colours(colors: Optional[Dict]) -> Optional[discord.RoleColours]:
-        """
-        Build a py-cord RoleColours from the sitemap's raw colors dict
-        (primary/secondary/tertiary ints). Returns None when unusable.
-        """
+        """Build a py-cord RoleColours from the sitemap's colors dict, or None when unusable."""
         if not isinstance(colors, dict):
             return None
         try:
@@ -307,10 +296,7 @@ class RoleManager:
         clone_role_styles: bool = False,
         role_colors: Dict | None = None,
     ) -> Tuple[Optional[discord.Role], int, bool, bool]:
-        """
-        (unchanged logic, still per-clone safe)
-        Recreate a missing cloned role when DB mapping exists but the role was deleted.
-        """
+        """Recreate a cloned role whose DB mapping exists but whose role was deleted."""
         if not can_create:
             if not create_suppressed_logged:
                 self._log(
@@ -419,14 +405,7 @@ class RoleManager:
         clone_role_icons: bool = False,
         clone_role_styles: bool = False,
     ) -> Tuple[int, int, int]:
-        """
-        Mirror roles (name/color/hoist/mentionable + permissions if enabled)
-        from a single host guild into a single clone guild.
-
-        This version is multi-guild safe:
-        - it only reads mappings for (host_id, clone_id)
-        - it does not rely on shared state on self
-        """
+        """Mirror roles (and permissions if enabled) from one host guild into one clone guild."""
         me = guild.me
         bot_top = me.top_role.position if me and me.top_role else 0
 
@@ -788,9 +767,8 @@ class RoleManager:
                 if old_color != new_color:
                     changes.append(f"color: #{old_color:06X} -> #{new_color:06X}")
 
-                # Gradient/holographic styles: only diff secondary/tertiary when
-                # the clone supports them — Discord strips them otherwise and a
-                # comparison would re-trigger an edit on every sync.
+                # Gradient/holographic styles: only diff secondary/tertiary when the
+                # clone supports them, or Discord strips them and every sync re-edits.
                 if (
                     clone_role_styles
                     and styles_supported
@@ -983,22 +961,9 @@ class RoleManager:
         host_id: int | None,
         clone_id: int,
     ) -> int:
-        """
-        Rearrange cloned roles to match the host server's role order.
+        """Rearrange cloned roles to match the host's order.
 
-        Only roles below the bot's top role are reordered. Roles above the
-        bot (including any cloned roles manually moved there) are left
-        untouched.
-
-        Resulting hierarchy (top → bottom):
-        1. Roles above bot        — untouched
-        2. Bot role               — anchor point
-        3. Non-cloned roles       — preserve their relative order
-        4. Cloned roles           — mirroring host server order
-        5. @everyone              — bottom
-
-        Returns:
-            Number of roles repositioned
+        Only roles below the bot's top role move. Returns the number of roles repositioned.
         """
         me = guild.me
         if not me:
@@ -1028,7 +993,6 @@ class RoleManager:
                     cloned_role_ids.add(cloned_id)
                     original_to_cloned[orig_id] = cloned_id
 
-        # Check for cloned roles above the bot — skip them with a warning
         skipped_above = []
         for cloned_id in list(cloned_role_ids):
             cloned_role = guild.get_role(cloned_id)
@@ -1050,7 +1014,6 @@ class RoleManager:
                 role.name,
             )
 
-        # Collect non-cloned roles that are BELOW the bot role
         non_cloned_roles = []
         for role in guild.roles:
             if (
@@ -1081,14 +1044,9 @@ class RoleManager:
             self._log("debug", "[🧩] No cloned roles to rearrange")
             return 0
 
-        # Build the desired order: cloned roles (ascending host pos),
-        # then non-cloned roles (preserve relative order).
         desired_order = list(cloned_roles_ordered)
         desired_order.extend(reversed(non_cloned_roles))
 
-        # Check if the current relative order already matches.
-        # Sort roles below the bot by their current position and
-        # compare the ID sequence to the desired order.
         current_below_bot = sorted(
             [r for r in desired_order],
             key=lambda r: r.position,
@@ -1097,18 +1055,14 @@ class RoleManager:
             self._log("debug", "[🧩] All roles already in correct positions")
             return 0
 
-        # Assign positions starting from 1 upward.  We avoid using
-        # bot_position-1 downward because Discord's reported position
-        # for the bot role can be stale after role creation — the
-        # server-side position may be much lower than fetch_roles()
-        # reports, causing moves to high positions to fail with 50013.
+        # Count up from 1, not down from the bot role: its reported position can
+        # be stale after role creation and high moves then fail with 50013.
         positions = {}
         current_pos = 1
         for role in desired_order:
             positions[role] = current_pos
             current_pos += 1
 
-        # Build raw payload with string snowflake IDs
         payload = []
         for role, pos in positions.items():
             payload.append({"id": str(role.id), "position": pos})

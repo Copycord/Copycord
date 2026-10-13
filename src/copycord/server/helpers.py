@@ -148,17 +148,7 @@ class OnJoinService:
 
 
 class VerifyController:
-    """
-    Observability upgrades:
-      • Start/stop logs with task state
-      • Bus subscribe/publish success/failure + payload preview
-      • Per-request request_id to tie UI action → results
-      • Timings for list/delete operations (ms)
-      • Counts for orphans found / deleted
-      • Ratellimiter waits surfaced
-      • Clear logs on 'guild not found' / unknown actions
-      • Robust exception logs with action context
-    """
+    """Handles verify and orphan-cleanup requests from the UI over the bus."""
 
     def __init__(
         self,
@@ -520,10 +510,9 @@ class VerifyController:
     async def _delete_ids(
         self, guild: discord.Guild, targets: list[tuple[int, str]], *, req_id: str
     ):
-        """
-        Returns a list of dicts:
-        { id:int, kind:str, name:str, deleted:bool, reason:str }
-            reason ∈ {"protected","not_found","not_category","not_channel","error"}
+        """Returns a list of dicts: {id, kind, name, deleted, reason}.
+
+        reason is one of protected, not_found, not_category, not_channel, error.
         """
         results: list[dict] = []
         try:
@@ -666,11 +655,7 @@ class VerifyController:
         return results
 
     def _category_id_of(self, ch) -> Optional[int]:
-        """
-        Return the category ID for a discord channel/thread, if any.
-        - Text/Voice/Forum/Stage: ch.category_id
-        - Threads: ch.parent.category_id
-        """
+        """Return the category ID for a channel or thread, if any."""
 
         cid = getattr(ch, "category_id", None)
         if cid is not None:
@@ -689,9 +674,7 @@ class VerifyController:
         return None
 
     def _category_name_of(self, ch) -> Optional[str]:
-        """
-        Return the category name for a discord channel/thread, if any.
-        """
+        """Return the category name for a channel or thread, if any."""
         cat = getattr(ch, "category", None)
         if cat is not None and getattr(cat, "name", None):
             return cat.name
@@ -744,7 +727,7 @@ class PurgeAssetHelper:
             lg.debug(f"{msg} {extras}")
 
     async def _resolve_me_and_top(self, guild: discord.Guild):
-        """Resolve bot’s Member, its top role, and all roles."""
+        """Resolve the bot's Member, its top role, and all roles."""
         me = getattr(guild, "me", None) or guild.get_member(self.cog.bot.user.id)
         if me is None:
             try:
@@ -802,7 +785,7 @@ class WebhookDMExporter:
             self.logger.info("[Startup] WebhookDMExporter worker started.")
 
     async def stop(self) -> None:
-        """Prevent future sends and stop the worker. Safe to call multiple times."""
+        """Stop the worker and refuse further sends. Safe to call repeatedly."""
         if self._stopped:
             return
         self._stopped = True
@@ -835,10 +818,7 @@ class WebhookDMExporter:
             await self.start()
 
     async def handle_ws_export_dm_message(self, data: Dict[str, Any]) -> None:
-        """
-        Expects: {"webhook_url": str, "message": {...}, "user_id": int?}
-        Enqueue and return immediately.
-        """
+        """Enqueue a DM export message and return. Expects webhook_url, message and optional user_id."""
         if self._stopped:
             return
         webhook_url = data.get("webhook_url")
@@ -863,10 +843,7 @@ class WebhookDMExporter:
             self.logger.info(f"[📥] Exported all DMs from {uname}'s ({uid}) inbox.")
 
     async def handle_ws_export_message(self, data: Dict[str, Any]) -> None:
-        """
-        Expects: {"webhook_url": str, "message": {...}, "guild_id": int?, "channel_id": int?}
-        Enqueue and return immediately.
-        """
+        """Enqueue an export message and return. Expects webhook_url, message, optional guild_id and channel_id."""
         if self._stopped:
             return
         url = data.get("webhook_url")
@@ -890,10 +867,7 @@ class WebhookDMExporter:
         )
 
     async def _drain_queue(self) -> None:
-        """
-        Single worker draining the queue at a fixed cadence:
-        sleep(max(0, fixed_delay - send_time)) to keep ~constant spacing.
-        """
+        """Single worker draining the queue with roughly constant spacing between sends."""
         try:
             while not self._stopped:
                 item = await self._q.get()
@@ -926,12 +900,10 @@ class WebhookDMExporter:
         return wh
 
     async def forward_to_webhook(self, msg_data: dict, webhook_url: str) -> None:
-        """
-        Send one message to a Discord webhook using discord.py's Webhook client.
-        - Supports content + embeds
-        - First image attachment becomes embed.image
-        - Non-image attachments appended as links
-        - Skips empty payloads (prevents 400)
+        """Send one message to a Discord webhook.
+
+        The first image attachment becomes embed.image, other attachments are appended
+        as links, and empty payloads are skipped to avoid a 400.
         """
         if self._stopped:
             mid = msg_data.get("id")
@@ -1075,10 +1047,7 @@ class WebhookDMExporter:
         return s if len(s) <= n else (s[: n - 1] + "…")
 
     def _sanitize_embed(self, e: dict) -> Optional[dict]:
-        """
-        Keep only Discord-supported keys & strip None. Enforce size limits.
-        Input is a dict shaped like discord.py's Embed.to_dict().
-        """
+        """Keep only Discord-supported embed keys, strip None and enforce size limits."""
         if not isinstance(e, dict):
             return None
 
@@ -1175,10 +1144,7 @@ class WebhookDMExporter:
 
 
 class OnCloneJoin:
-    """
-    Assign configured on-join roles when members join a clone guild.
-    Also exposes a 'sync' helper that the slash command can reuse.
-    """
+    """Assign configured on-join roles when members join a clone guild; sync is also reused by the slash command."""
 
     def __init__(self, bot: commands.Bot, db):
         self.bot = bot
@@ -1257,9 +1223,7 @@ class OnCloneJoin:
         include_bots: bool = False,
         dry_run: bool = False,
     ) -> tuple[int, int, int, list[discord.Role]]:
-        """
-        Return (changed_users, changed_pairs, failed, skipped_roles)
-        """
+        """Return (changed_users, changed_pairs, failed, skipped_roles)."""
         t0 = time.perf_counter()
         role_ids = self.db.get_onjoin_roles(guild.id)
         roles = [guild.get_role(rid) for rid in role_ids if guild.get_role(rid)]
@@ -1346,7 +1310,7 @@ class OnCloneJoin:
 
 
 def _safe_preview(obj) -> str:
-    """Shorten & sanitize dicts for logs."""
+    """Shorten and sanitize dicts for logs."""
     try:
         s = (
             json.dumps(obj, ensure_ascii=False)
@@ -1358,7 +1322,6 @@ def _safe_preview(obj) -> str:
     return s if len(s) <= 500 else (s[:500] + "…")
 
 
-# ---- Image attachment detection & text length calc ----
 _IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif")
 
 def _is_image_att(att: dict) -> bool:
@@ -1373,7 +1336,6 @@ def _calc_text_len_with_urls(base_text: str, urls: list[str]) -> int:
     if not urls:
         return len(base_text or "")
     return len(base_text or "") + sum(1 + len(u) for u in urls)
-# -------------------------------------------------------
 
 def _safe_mid(msg: dict) -> int | None:
     try:
@@ -1384,17 +1346,11 @@ def _safe_mid(msg: dict) -> int | None:
 
 
 def host_message_needs_webhook(msg: dict) -> bool:
-    """True when a message should be sent via webhook rather than a user token.
+    """True when a message must go via webhook rather than a user token.
 
-    A real user account can't faithfully reproduce these, so routing them to a
-    token would look wrong:
-      * bot- or webhook-authored messages (the identity/embeds would be lost);
-      * messages carrying a *rich* embed (only bots/webhooks can post those; a
-        user token would flatten it to plain text).
-
-    Auto-generated link previews (embed type link/image/video/gifv/article) are
-    NOT rich embeds — the URL lives in the message text and the clone regenerates
-    the preview — so those still go via token.
+    Bot or webhook authors and rich embeds cannot be reproduced by a user account.
+    Auto-generated link previews (link/image/video/gifv/article) are not rich embeds:
+    the clone regenerates them from the URL in the text.
     """
     if not isinstance(msg, dict):
         return False
@@ -1406,9 +1362,6 @@ def host_message_needs_webhook(msg: dict) -> bool:
     return False
 
 
-# =============================================================================
-# User Anonymization
-# =============================================================================
 _ANON_ADJECTIVES = [
     "Swift", "Brave", "Clever", "Gentle", "Fierce", "Quiet", "Bold", "Calm",
     "Eager", "Happy", "Jolly", "Kind", "Lucky", "Merry", "Noble", "Proud",
@@ -1429,14 +1382,7 @@ _ANON_NOUNS = [
 
 
 def _anonymize_user(user_id: int | str) -> tuple[str, str]:
-    """
-    Generate a deterministic anonymous identity for a user.
-
-    Returns:
-        tuple of (anonymized_name, avatar_url)
-        - Name format: [Adjective][Noun][0-999]
-        - Avatar: Random image from picsum.photos (seeded by user_id)
-    """
+    """Deterministic anonymous identity for a user: ([Adjective][Noun][0-999], picsum avatar URL seeded by user_id)."""
     uid = int(user_id) if user_id else 0
     h = hashlib.sha256(str(uid).encode()).hexdigest()
 
@@ -1446,7 +1392,6 @@ def _anonymize_user(user_id: int | str) -> tuple[str, str]:
 
     name = f"{_ANON_ADJECTIVES[adj_idx]}{_ANON_NOUNS[noun_idx]}{num}"
 
-    # Use a seed for picsum to get consistent image per user
     avatar_seed = int(h[24:32], 16) % 1000000
     avatar_url = f"https://picsum.photos/seed/{avatar_seed}/200"
 

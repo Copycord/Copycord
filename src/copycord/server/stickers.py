@@ -100,11 +100,7 @@ class StickerManager:
         return self._state[clone_gid]
 
     def _get_lock_for_clone(self, clone_gid: int) -> asyncio.Lock:
-        """
-        Get/create the lock dedicated to this clone guild.
-        We serialize sticker writes per clone guild, but allow
-        different clone guilds to sync in parallel.
-        """
+        """Get/create the lock for this clone guild. Different clone guilds sync in parallel."""
         if clone_gid not in self._locks:
             self._locks[clone_gid] = asyncio.Lock()
         return self._locks[clone_gid]
@@ -115,17 +111,13 @@ class StickerManager:
         stickers: list[dict] | None,
         host_guild_id: int | None,
     ):
-        """
-        Record the latest upstream sticker sitemap for *this* clone guild.
-        """
+        """Record the latest upstream sticker sitemap for this clone guild."""
         st = self._ensure_state(int(clone_guild_id))
         st["sitemap"] = stickers or []
         st["host_id"] = int(host_guild_id) if host_guild_id else None
 
     async def refresh_cache(self, clone_gid: int) -> None:
-        """
-        Refresh the cached stickers list for a specific clone guild.
-        """
+        """Refresh the cached stickers list for a clone guild."""
         st = self._ensure_state(clone_gid)
 
         guild = self.bot.get_guild(clone_gid)
@@ -149,10 +141,7 @@ class StickerManager:
         *,
         validate_mapping: bool = True,
     ) -> None:
-        """
-        Start (or skip) a sync task for this specific clone guild.
-        Multiple clone guilds can sync in parallel.
-        """
+        """Start (or skip) a sync task for this clone guild."""
         clone_gid = int(target_clone_guild_id)
         st = self._ensure_state(clone_gid)
 
@@ -289,11 +278,7 @@ class StickerManager:
         stickers: list[dict],
         host_id: int | None,
     ) -> Tuple[int, int, int]:
-        """
-        Sync stickers for (host_id -> guild.id).
-        Only touch mappings where original_guild_id == host_id
-        AND cloned_guild_id == guild.id.
-        """
+        """Sync stickers for host_id -> guild.id, touching only mappings for that pair."""
         deleted = renamed = created = 0
         skipped_limit = size_failed = 0
 
@@ -543,9 +528,7 @@ class StickerManager:
         clone_gid: int,
         stickers: list[dict],
     ) -> Tuple[List[discord.StickerItem], List[str]]:
-        """
-        For this clone guild only, return StickerItem objects for the given upstream stickers.
-        """
+        """Return StickerItem objects in this clone guild for the given upstream stickers."""
         raw_rows = self.db.get_all_sticker_mappings()
         rows: dict[int, dict] = {}
         for r in raw_rows:
@@ -629,9 +612,7 @@ class StickerManager:
             return False
 
     def _is_image_url(self, u: str | None) -> bool:
-        """
-        Checks if the given URL corresponds to an image file based on its extension.
-        """
+        """True if the URL points at an image, judged by extension."""
         if not u:
             return False
         u = u.lower()
@@ -642,10 +623,7 @@ class StickerManager:
         clone_gid: int,
         stickers: list[dict],
     ) -> list[tuple[str, str]]:
-        """
-        For each incoming sticker (up to 3), try to find original CDN URLs
-        that we saw in that clone guild's last sitemap from its host.
-        """
+        """For each incoming sticker (up to 3), find the original CDN URLs from the clone guild's last sitemap."""
         st = self._ensure_state(clone_gid)
         last_map = st["sitemap"] or []
         if not last_map:
@@ -683,10 +661,7 @@ class StickerManager:
         return out
 
     def _backfill_suffix(self, receiver, source_id: int, msg: dict) -> str:
-        """
-        Format a '[N left]' or '[N sent]' suffix for sticker logs when running
-        under backfill. This does NOT mutate progress; it just reads it.
-        """
+        """Format a '[N left]' or '[N sent]' suffix for sticker logs during backfill."""
         try:
             bf = getattr(receiver, "backfill", None)
             if not bf or not msg.get("__backfill__"):
@@ -711,10 +686,10 @@ class StickerManager:
         msg: dict,
         source_id: int,
     ) -> bool:
-        """
-        Try to send stickers via cloned mapping -> standard/global -> webhook image-embed fallback.
-        Returns True if the message was sent or queued (no further action needed by caller).
-        Returns False if we prepared embeds in `msg` and the caller should continue with webhook send.
+        """Try cloned mapping, then standard/global stickers, then the webhook image-embed fallback.
+
+        True if the message was sent or queued; False if embeds were prepared in msg
+        and the caller should continue with the webhook send.
         """
 
         suppress_text = bool(msg.get("__stickers_no_text__"))
@@ -758,11 +733,7 @@ class StickerManager:
             )
 
         def _collect_pairs(sts: list[dict]) -> tuple[list[tuple[str, str]], bool]:
-            """
-            Returns (pairs, all_custom)
-            pairs: [(name, url)]
-            all_custom: True if every pair came from a custom/guild sticker
-            """
+            """Return (pairs, all_custom): (name, url) pairs, and whether every one is a custom guild sticker."""
             pairs: list[tuple[str, str]] = []
             all_custom = True
             for s in (sts or [])[:3]:

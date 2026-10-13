@@ -672,12 +672,7 @@ class UserTokenSender:
         return None
 
     def _filter_dead(self, tokens: list) -> list:
-        """Drop tokens already known revoked this run.
-
-        ``get_enabled_mapping_tokens`` normally excludes them anyway once
-        ``_mark_token_dead`` has flipped ``enabled`` in the DB; this covers
-        the window before that write lands (or if it failed).
-        """
+        """Drop tokens already known revoked this run, covering the window before the DB write lands."""
         if not self._dead_tokens:
             return tokens
         return [
@@ -687,8 +682,7 @@ class UserTokenSender:
         ]
 
     def _mark_token_dead(self, tok: dict) -> None:
-        """Bench a 401'd token for this run and disable it in the DB so it
-        stops being loaded at all and shows as disabled in the admin UI."""
+        """Bench a 401'd token for this run and disable it in the DB."""
         token_value = (tok.get("token_value") or "").strip()
         if token_value:
             self._dead_tokens.add(token_value)
@@ -765,30 +759,12 @@ class UserTokenSender:
             await asyncio.sleep(delay)
 
     async def reap_idle_state(self, idle_ttl: float = 3600) -> dict:
-        """Drop lock/cooldown/rotation bookkeeping for tokens, channels, and
-        sticky-author assignments untouched for ``idle_ttl`` seconds.
+        """Drop bookkeeping for tokens, channels and sticky authors idle for idle_ttl seconds.
 
-        Every dict this class keeps (token locks/cooldowns, per-channel
-        pace locks/round-robin cursors, sticky-author assignments) is keyed
-        by something that grows without bound over the process lifetime —
-        tokens added over time, channels ever paced, or distinct authors
-        ever seen — with nothing to shrink it. That's fine at small scale;
-        at thousands of tokens or a high-churn source server it isn't.
-
-        Nothing is lost permanently: a token/channel/author that becomes
-        active again after being reaped just gets fresh state, identical in
-        effect to its first-ever use (a round-robin cursor resets to 0, a
-        sticky author gets freshly reassigned to the least-used token).
-        Returns a dict of how many entries were reaped per category.
-
-        Safe by construction, not by locking: ``_token_lock``/``_chan_lock``
-        synchronously stamp last-seen to "now" *before* returning the lock
-        object, with no ``await`` in between — so any key genuinely in
-        concurrent use can never show up as stale here. The ``.locked()``
-        checks below are therefore a non-blocking belt-and-suspenders guard,
-        not something this ever needs to wait on; blocking on a held lock
-        (an earlier version of this did) risks stalling the whole periodic
-        sweep on one busy token.
+        These dicts grow without bound over the process lifetime. A reaped key just gets
+        fresh state on next use. _token_lock and _chan_lock stamp last-seen before returning
+        with no await, so a key in use is never stale here; the .locked() checks are a guard.
+        Returns how many entries were reaped per category.
         """
         tokens = self._reap_idle_token_state(idle_ttl)
         channels = self._reap_idle_channel_state(idle_ttl)
