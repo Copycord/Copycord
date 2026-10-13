@@ -94,7 +94,7 @@ You can optionally choose the platform (`linux/amd64`, `linux/arm64`, or both).
 
 ### `dependency-audit.yml` — Weekly (Monday 09:00 UTC) + manual trigger
 
-- **Python** — runs `pip-audit` against the dependencies in `pyproject.toml`
+- **Python**: runs `pip-audit` against the dependencies in `pyproject.toml`
 - **npm** — runs `npm audit` on the frontend
 
 Alerts you if any dependency has a known vulnerability.
