@@ -116,8 +116,8 @@ def test_subcommand_error_on_a_terminal_has_no_raw_prefix(data_dir, monkeypatch)
     assert exc.value.code == 2
     text = err.getvalue()
     assert "copycord update: error" not in text and "usage:" not in text
-    assert "\u2717 argument --channel: invalid choice" in text
-    assert "  Run copycord update --help to see its options." in text
+    assert text.startswith("\u2717 argument --channel: invalid choice")
+    assert text.rstrip().endswith("run copycord update --help for the options")
 
 
 def test_bare_copycord_prints_the_overview(data_dir, capsys):

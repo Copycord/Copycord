@@ -574,7 +574,25 @@ $ copycord service uninstall
 | `restart` | Restarts the service, the same as [`copycord restart`](#copycord-restart) |
 | `uninstall [--yes]` | Asks, then stops and removes the service. Your data is kept. Without a terminal it needs `--yes`. To remove Copycord itself too, use [`copycord uninstall`](#copycord-uninstall). |
 
-`start`, `stop`, `restart` and `uninstall` print `• The Copycord service is not installed` with the install command when there is no service; `start`, `stop` and `restart` then exit with 1. When the service manager reports an error, the command prints `✗ Could not stop Copycord` (or start, restart, install, remove) with the reason and exits with 1.
+In a terminal `status` is a box under the version line, with the next step on the last line; `install`, `start`, `stop`, `restart` and `uninstall` show their steps on the same line down the left. Without a service:
+
+```
+$ copycord service status
+
+Copycord v4.0.0 (1a2b3c4) · Ultimate Discord server mirroring and utility toolkit
+
+┌  Copycord service status
+│
+◇  Copycord service ──────────────────────────────╮
+│                                                 │
+│    Status  • not installed                      │
+│                                                 │
+├─────────────────────────────────────────────────╯
+│
+└  Install it with copycord service install
+```
+
+In a pipe, `start`, `stop`, `restart` and `uninstall` print `• The Copycord service is not installed` with the install command when there is no service; `start`, `stop` and `restart` then exit with 1. When the service manager reports an error, the command prints `✗ Could not stop Copycord` (or start, restart, install, remove) with the reason and exits with 1.
 
 The data directory is fixed when you install the service: the one given with `--data-dir` (or `DATA_DIR`), else the default for your user. To change it, run `copycord service install` again with the new `--data-dir`.
 
@@ -635,8 +653,21 @@ The service does not see variables you set in your terminal. The simplest way to
 Backs up the database now, the same archive the [daily backup](/docs/dashboard/backups) makes, and prints its path:
 
 ```
-$ copycord backup
+$ copycord backup | cat
 ✓ Database backed up  /home/you/.copycord/data/backups/2026-10-13_15-31-24.tar.gz
+```
+
+In a terminal the same step hangs off the line down the left, under the version line:
+
+```
+$ copycord backup
+
+Copycord v4.0.0 (1a2b3c4) · Ultimate Discord server mirroring and utility toolkit
+
+┌  Back up the database
+│
+✓  Database backed up  /home/you/.copycord/data/backups/2026-10-13_15-31-24.tar.gz
+└
 ```
 
 The archive holds `data.db`, `secret.key` (when there is one) and `manifest.json`, and goes into the backups folder (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)). The copy of the database is checked with SQLite's integrity check before it is saved; when the check fails, nothing is kept, the command says why and exits with status 1, and `copycord doctor` shows `last backup failed its check`. It works while Copycord is running. With `--json` it prints `{"ok": true, "file": ..., "size": ..., "includes_key": true}`.
@@ -798,7 +829,29 @@ When the install is already the newest on the saved channel (the same release ve
 
 On Windows, a running program's files cannot be deleted, but they can be renamed. So right before the install, `copycord update` stops the service if it is running and moves the running `python.exe`, the `copycord.exe` launcher and the other executable files of the install into `.copycord-old` in the Copycord home. Then it installs in the same window and returns when the update is done, like on Linux and macOS. The next update deletes `.copycord-old`. If the install fails before replacing the old files, they are put back. If Copycord is running in another window (for example `copycord run`), `copycord update` stops with `Copycord is running in another window (process N); stop it first, then run this again` and changes nothing. `copycord doctor --fix` reinstalls the same way.
 
-`status` also shows when Copycord last checked for an update and whether auto-update is on.
+`status` also shows when Copycord last checked for an update and whether auto-update is on. In a terminal the rows are a box under the version line:
+
+```
+$ copycord update status
+
+Copycord v4.0.0 (1a2b3c4) · Ultimate Discord server mirroring and utility toolkit
+
+┌  Copycord update status
+│
+◇  Copycord ──────────────────────────────────────╮
+│                                                 │
+│    current  4.0.0                               │
+│    channel  stable channel                      │
+│    method   uv tool                             │
+│    checked  2026-10-13 13:07:05                 │
+│    auto     off (AUTO_UPDATE=true turns it on)  │
+│    latest   4.0.0 (v4.0.0)                      │
+│                                                 │
+├─────────────────────────────────────────────────╯
+│
+✓  Copycord is up to date
+└
+```
 
 ### Confirming the update {#update-confirm}
 
