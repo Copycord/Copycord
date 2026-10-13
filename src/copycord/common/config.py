@@ -10,6 +10,7 @@
 import asyncio
 import os
 import logging
+import sqlite3
 from typing import Optional
 
 from copycord.common.db import DBManager
@@ -29,11 +30,13 @@ class Config:
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.DB_PATH = str(db_path())
         self.db = DBManager(self.DB_PATH)
+        _log = logger or logging.getLogger("common.config")
 
         def _get_from_db(key: str):
             try:
                 return self.db.get_config(key)
-            except Exception:
+            except sqlite3.Error:
+                _log.warning("Config %s: DB read failed, using the env value", key, exc_info=True)
                 return None
 
         def _str(key: str, env_default: Optional[str] = None) -> Optional[str]:
@@ -46,10 +49,13 @@ class Config:
             raw = _str(key, env_default)
             try:
                 return int(str(raw).strip())
-            except Exception:
+            except ValueError:
+                if raw not in (None, ""):
+                    _log.warning("Config %s=%r is not a number, using %s", key, raw, env_default)
                 try:
                     return int(env_default)
-                except Exception:
+                except ValueError:
+                    _log.debug("Config %s default %r is not a number either", key, env_default)
                     return 0
 
         self.RELEASE_CHECK_INTERVAL_SECONDS = 1810

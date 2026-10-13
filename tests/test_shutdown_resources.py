@@ -84,6 +84,26 @@ def test_apply_db_config_closes_its_db(monkeypatch, tmp_db_path):
     assert len(closed) == 1
 
 
+def test_config_logs_a_failed_db_read_and_a_bad_number(monkeypatch, tmp_db_path, caplog):
+    from copycord.common import db as dbmod
+    from copycord.common.config import Config
+
+    dbmod.DBManager(tmp_db_path, init_schema=True).close()
+    monkeypatch.setenv("DB_PATH", tmp_db_path)
+    monkeypatch.setenv("SYNC_INTERVAL_SECONDS", "soon")
+
+    def boom(self, key, default=""):
+        raise sqlite3.OperationalError("locked")
+
+    monkeypatch.setattr(dbmod.DBManager, "get_config", boom)
+    with caplog.at_level(logging.DEBUG):
+        cfg = Config(logger=logging.getLogger("test.config"))
+    assert cfg.SYNC_INTERVAL_SECONDS == 3600
+    assert "DB read failed" in caplog.text
+    assert "SYNC_INTERVAL_SECONDS='soon' is not a number" in caplog.text
+    cfg.db.close()
+
+
 def test_backup_scheduler_without_logger_uses_logging(tmp_path, caplog, capsys):
     cfg = BackupConfig(db_path=tmp_path / "data.db", backup_dir=tmp_path / "b")
     sched = DailySQLiteBackupScheduler(cfg)
