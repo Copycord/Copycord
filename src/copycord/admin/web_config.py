@@ -249,9 +249,7 @@ async def links_purge(request: Request):
     return {"ok": True}
 
 
-async def startup_links(
-    app, templates_env=None, *, set_jinja_global: bool = False
-) -> None:
+async def startup_links(app) -> None:
     base_app = _unwrap_starlette_app(app)
 
     # Its own session: it honours HTTP(S)_PROXY from the environment, the shared one does not.
@@ -267,10 +265,6 @@ async def startup_links(
     except Exception:
         await session.close()
         raise
-
-    if set_jinja_global and templates_env is not None:
-
-        templates_env.globals["links"] = mgr._cache
 
 
 async def shutdown_links(app) -> None:

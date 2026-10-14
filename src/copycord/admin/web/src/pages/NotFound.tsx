@@ -1,4 +1,4 @@
-// Unknown /app route: same message as templates/404.html, inside the normal shell.
+// Unknown route: the old 404 page message, inside the normal shell.
 
 import { Link } from "react-router";
 

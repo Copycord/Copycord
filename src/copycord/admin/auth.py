@@ -253,7 +253,7 @@ def decode_admin_session(token: str | None) -> Optional[Dict]:
 
 
 # The SPA build's hashed js and css; the login page needs them before sign-in.
-SPA_ASSETS_PREFIX = "/app/assets/"
+SPA_ASSETS_PREFIX = "/assets/"
 
 
 class PasswordGuardMiddleware(BaseHTTPMiddleware):

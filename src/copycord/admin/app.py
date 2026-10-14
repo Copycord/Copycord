@@ -62,7 +62,6 @@ from fastapi.responses import (
     HTMLResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.types import Scope, Receive, Send
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -356,33 +355,67 @@ mimetypes.add_type("text/css", ".css")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
-@app.get("/app", include_in_schema=False)
-@app.get("/app/{path:path}", include_in_schema=False)
-async def spa_page(path: str = ""):
-    """Serve the SPA: hashed files under assets/, index.html for every client route."""
-    if path.startswith("assets/"):
-        return spa.asset_response(path[len("assets/"):])
+# Dashboard pages, all rendered by the SPA (router basename "/").
+SPA_PAGES = ("/", "/channels", "/guilds", "/forwarding", "/scraper", "/system", "/logs")
+# First path segments that are never SPA pages: an unknown path under one is a plain 404.
+NON_PAGE_SEGMENTS = frozenset(
+    {"api", "ws", "bus", "logs", "static", "assets", "version", "health", "filters", "login", "logout"}
+)
+
+
+async def spa_page():
     return spa.index_response()
 
 
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-templates.env.globals.setdefault("links", {})
+for _page in SPA_PAGES:
+    app.add_api_route(_page, spa_page, methods=["GET"], include_in_schema=False)
+
+
+@app.get("/assets/{name:path}", include_in_schema=False)
+async def spa_asset(name: str):
+    return spa.asset_response(name)
+
+
+def _root_redirect(request: Request, path: str) -> RedirectResponse:
+    # Leading slashes are dropped so the target can never be //other-host.
+    target = "/" + path.lstrip("/\\")
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=307)
+
+
+@app.get("/event-logs", include_in_schema=False)
+async def event_logs_redirect(request: Request):
+    return _root_redirect(request, "logs")
+
+
+@app.get("/app", include_in_schema=False)
+@app.get("/app/{path:path}", include_in_schema=False)
+async def app_redirect(request: Request, path: str = ""):
+    """The SPA used to live under /app; old links land on the same page at the root."""
+    return _root_redirect(request, path)
+
+
 app.include_router(links_router)
 shutdown_event = asyncio.Event()
 init_admin_auth(app, DATA_DIR)
 
 
+def _is_page_path(path: str) -> bool:
+    first = path.lstrip("/").split("/", 1)[0]
+    return first not in NON_PAGE_SEGMENTS
+
+
 @app.exception_handler(StarletteHTTPException)
 async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
-    if exc.status_code == 404 and "text/html" in (request.headers.get("accept") or ""):
-        return templates.TemplateResponse(
-            "404.html",
-            {
-                "request": request,
-                "version": CURRENT_VERSION,
-            },
-            status_code=404,
-        )
+    if (
+        exc.status_code == 404
+        and request.method in ("GET", "HEAD")
+        and "text/html" in (request.headers.get("accept") or "")
+        and _is_page_path(request.url.path)
+    ):
+        # Unknown page: the SPA shows its NotFound page.
+        return spa.index_response(404)
     return JSONResponse(
         {"detail": exc.detail},
         status_code=exc.status_code,
@@ -1655,46 +1688,6 @@ def _bootstrap_legacy_mapping_if_needed() -> dict:
     }
 
 
-@app.get("/", response_class=None)
-async def index(request: Request):
-    env = _read_env()
-
-    s_server = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "status"})
-    s_client = await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "status"})
-
-    both_running = bool(s_server.get("running")) and bool(s_client.get("running"))
-
-    text_keys = [
-        k
-        for k in ALLOWED_ENV
-        if k not in ("LOG_LEVEL", "COPYCORD_AUTOSTART", "LOG_MAX_SIZE_MB")
-    ]
-
-    bool_keys = BOOL_KEYS
-    guild_mappings = db.list_guild_mappings()
-    mapping_bool_keys = BOOL_KEYS
-
-    current_log_level = (env.get("LOG_LEVEL") or "INFO").upper()
-
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "title": APP_TITLE,
-            "env": env,
-            "text_keys": text_keys,
-            "bool_keys": bool_keys,
-            "log_level": current_log_level,
-            "guild_mappings": guild_mappings,
-            "mapping_bool_keys": mapping_bool_keys,
-            "server_status": s_server,
-            "client_status": s_client,
-            "both_running": both_running,
-            "version": CURRENT_VERSION,
-        },
-    )
-
-
 @app.get("/health", response_class=PlainTextResponse)
 async def health():
     s1 = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "status"})
@@ -1965,7 +1958,7 @@ async def logs(which: str, tail: int = 20000):
 
 @_on_startup
 async def _startup_links():
-    await startup_links(app, templates_env=templates.env, set_jinja_global=True)
+    await startup_links(app)
 
 
 @_on_startup
@@ -2508,30 +2501,6 @@ async def backup_restore(
     return {"ok": True, "restored_from": arc.name}
 
 
-@app.get("/system")
-async def system_page(request: Request):
-    return templates.TemplateResponse(
-        "system.html",
-        {
-            "request": request,
-            "title": f"System · {APP_TITLE}",
-            "version": CURRENT_VERSION,
-        },
-    )
-
-
-@app.get("/event-logs")
-async def event_logs_page(request: Request):
-    return templates.TemplateResponse(
-        "logs.html",
-        {
-            "request": request,
-            "title": f"Logs · {APP_TITLE}",
-            "version": CURRENT_VERSION,
-        },
-    )
-
-
 @app.get("/api/event-log-types")
 async def api_get_event_log_types():
     """Lightweight endpoint that returns only the distinct event types."""
@@ -2636,23 +2605,6 @@ async def api_add_event_log(body: dict = Body(...)):
         }
     )
     return {"ok": True, "log_id": log_id}
-
-
-@app.get("/forwarding")
-async def forwarding_page(request: Request):
-    """
-    Render the Message Forwarding page.
-    """
-    env = _read_env()
-    return templates.TemplateResponse(
-        "forwarding.html",
-        {
-            "request": request,
-            "title": f"Forwarding · {APP_TITLE}",
-            "version": CURRENT_VERSION,
-            "log_level": env.get("LOG_LEVEL", "INFO"),
-        },
-    )
 
 
 @app.get("/logs/stream/{which}")
@@ -3382,24 +3334,6 @@ def _norm_bool_str(v: str) -> str:
     return "True" if str(v).strip().lower() in ("true", "1", "yes", "on") else "False"
 
 
-@app.get("/channels")
-async def channels_page(request: Request):
-    env = _read_env()
-    guild_mappings = db.list_guild_mappings()
-
-    return templates.TemplateResponse(
-        "channels.html",
-        {
-            "request": request,
-            "title": APP_TITLE + " – Channels",
-            "env": env,
-            "guild_mappings": guild_mappings,
-            "version": CURRENT_VERSION,
-            "log_level": env.get("LOG_LEVEL", "INFO"),
-        },
-    )
-
-
 @app.get("/api/channels", response_class=JSONResponse)
 async def api_channels(mapping_id: str | None = Query(default=None)):
 
@@ -3922,20 +3856,6 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
     )
 
 
-@app.get("/guilds")
-async def guilds_page(request: Request):
-    env = _read_env()
-    return templates.TemplateResponse(
-        "guilds.html",
-        {
-            "request": request,
-            "title": APP_TITLE,
-            "version": CURRENT_VERSION,
-            "log_level": env.get("LOG_LEVEL", "INFO"),
-        },
-    )
-
-
 @app.get("/api/guilds", response_class=JSONResponse)
 async def guilds_api():
     """
@@ -3958,21 +3878,6 @@ async def guilds_api():
 
 
 CLIENT_AGENT_TIMEOUT = int(os.getenv("CLIENT_AGENT_TIMEOUT", "10"))
-
-
-@app.get("/scraper")
-async def scraper_page(request: Request):
-    """Render the standalone scraper page."""
-    env = _read_env()
-    return templates.TemplateResponse(
-        "scraper.html",
-        {
-            "request": request,
-            "title": APP_TITLE,
-            "version": CURRENT_VERSION,
-            "log_level": env.get("LOG_LEVEL", "INFO"),
-        },
-    )
 
 
 @app.get("/api/scraper/tokens", response_class=JSONResponse)

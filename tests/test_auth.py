@@ -182,19 +182,10 @@ class TestLogout:
 
 
 # ---------------------------------------------------------------------------
-# Shared side menu and its Log out item
+# Dashboard pages: the SPA at the root, behind the login guard
 # ---------------------------------------------------------------------------
 
-# path -> href of the menu item that should be highlighted
-PAGES = {
-    "/": "/",
-    "/channels": "/channels",
-    "/guilds": "/guilds",
-    "/forwarding": "/forwarding",
-    "/scraper": "/scraper",
-    "/system": "/system",
-    "/event-logs": "/event-logs",
-}
+PAGES = ["/", "/channels", "/guilds", "/forwarding", "/scraper", "/system", "/logs"]
 
 
 def _get_page(tc, path, with_session):
@@ -204,31 +195,48 @@ def _get_page(tc, path, with_session):
     return tc.get(path, headers=headers, follow_redirects=False)
 
 
-class TestSidebar:
-
-    @pytest.mark.parametrize("path,active", PAGES.items())
-    def test_page_renders_menu_with_active_item(self, tc, password, path, active):
-        resp = _get_page(tc, path, with_session=True)
-        assert resp.status_code == 200
-        html = resp.text
-        assert 'id="side-menu"' in html
-        assert html.count('class="menu-item is-active"') == 1
-        assert f'class="menu-item is-active" href="{active}"' in html
-
-    def test_404_page_renders_menu(self, tc, password):
-        resp = _get_page(tc, "/no-such-page", with_session=True)
-        assert resp.status_code == 404
-        html = resp.text
-        assert 'id="side-menu"' in html
-        assert "is-active" not in html
-        assert 'href="/forwarding"' not in html  # 404 keeps its shorter menu
+class TestPages:
 
     @pytest.mark.parametrize("path", PAGES)
-    def test_log_out_shown_with_password(self, tc, password, path):
+    def test_page_serves_the_spa(self, tc, password, spa_build, path):
         resp = _get_page(tc, path, with_session=True)
         assert resp.status_code == 200
-        assert "data-logout" in resp.text
-        assert ">Log out</span>" in resp.text
+        assert resp.text == (spa_build / "index.html").read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize("path", PAGES + ["/no-such-page", "/event-logs", "/app/system"])
+    def test_logged_out_redirects_to_login(self, tc, password, path):
+        resp = _get_page(tc, path, with_session=False)
+        assert resp.status_code in (302, 307)
+        assert resp.headers["location"] == "/login"
+
+    def test_unknown_page_is_the_spa_with_404(self, tc, password, spa_build):
+        resp = _get_page(tc, "/no-such-page", with_session=True)
+        assert resp.status_code == 404
+        assert '<div id="root"></div>' in resp.text
+
+    @pytest.mark.parametrize("path", ["/api/no-such-route", "/logs/stream/nope/x", "/assets/nope.js", "/ws/nope"])
+    def test_unknown_api_path_is_plain_404(self, tc, password, path):
+        resp = _get_page(tc, path, with_session=True)
+        assert resp.status_code == 404
+        assert resp.headers["content-type"].startswith("application/json")
+
+    @pytest.mark.parametrize(
+        "path,target",
+        [
+            ("/event-logs", "/logs"),
+            ("/event-logs?type=x", "/logs?type=x"),
+            ("/app", "/"),
+            ("/app/", "/"),
+            ("/app/channels", "/channels"),
+            ("/app/logs?q=1", "/logs?q=1"),
+            ("/app//evil.example", "/evil.example"),
+            ("/app/%5C%5Cevil.example", "/evil.example"),
+        ],
+    )
+    def test_old_paths_redirect_to_the_root(self, tc, password, path, target):
+        resp = _get_page(tc, path, with_session=True)
+        assert resp.status_code == 307
+        assert resp.headers["location"] == target
 
     @pytest.mark.parametrize("pw", ["", "pw"])
     def test_login_always_required(self, tc, monkeypatch, pw):

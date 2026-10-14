@@ -28,14 +28,14 @@ def _cookie():
     return {"cookie": f"{auth.ADMIN_COOKIE_NAME}={auth.make_session_token()}"}
 
 
-@pytest.mark.parametrize("path", ["/app", "/app/", "/app/channels"])
+@pytest.mark.parametrize("path", ["/", "/channels", "/assets-not", "/system/deep"])
 def test_requires_login(tc, spa, path):
     resp = tc.get(path, headers={"accept": "text/html"}, follow_redirects=False)
     assert resp.status_code in (302, 307)
     assert resp.headers["location"] == "/login"
 
 
-@pytest.mark.parametrize("path", ["/app", "/app/", "/app/channels", "/app/system/deep/link"])
+@pytest.mark.parametrize("path", ["/", "/channels", "/logs"])
 def test_client_routes_get_index(tc, spa, path):
     resp = tc.get(path, headers=_cookie(), follow_redirects=False)
     assert resp.status_code == 200
@@ -45,7 +45,7 @@ def test_client_routes_get_index(tc, spa, path):
 
 
 def test_assets_served_with_long_cache(tc, spa):
-    resp = tc.get("/app/assets/index-abc123.js", headers=_cookie())
+    resp = tc.get("/assets/index-abc123.js", headers=_cookie())
     assert resp.status_code == 200
     assert resp.text == "console.log(1)"
     assert resp.headers["cache-control"] == spa_module.SPA_ASSET_CACHE
@@ -53,17 +53,17 @@ def test_assets_served_with_long_cache(tc, spa):
 
 
 def test_missing_asset_is_404(tc, spa):
-    assert tc.get("/app/assets/nope.js", headers=_cookie()).status_code == 404
+    assert tc.get("/assets/nope.js", headers=_cookie()).status_code == 404
 
 
 @pytest.mark.parametrize(
     "path",
     [
-        "/app/assets/..%2Fsecret.txt",
-        "/app/assets/..%2F..%2Fsecret.txt",
-        "/app/assets/%2e%2e/%2e%2e/secret.txt",
-        "/app/assets/..%5C..%5Csecret.txt",
-        "/app/assets/sub%2F..%2F..%2F..%2Fsecret.txt",
+        "/assets/..%2Fsecret.txt",
+        "/assets/..%2F..%2Fsecret.txt",
+        "/assets/%2e%2e/%2e%2e/secret.txt",
+        "/assets/..%5C..%5Csecret.txt",
+        "/assets/sub%2F..%2F..%2F..%2Fsecret.txt",
     ],
 )
 def test_path_traversal_rejected(tc, spa, path):
@@ -75,7 +75,7 @@ def test_path_traversal_rejected(tc, spa, path):
 def test_not_built_is_404(tc, tmp_path, monkeypatch):
     monkeypatch.setattr(spa_module, "SPA_DIRS", (tmp_path / "none",))
     monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
-    resp = tc.get("/app/", headers=_cookie())
+    resp = tc.get("/", headers=_cookie())
     assert resp.status_code == 404
     assert "npm run build" in resp.text
 
@@ -145,3 +145,11 @@ def test_login_success_and_cross_origin(tc, spa, limiter):
     assert resp.status_code == 302 and resp.headers["location"] == "/"
     assert auth.ADMIN_COOKIE_NAME in resp.cookies
     assert _login(tc, "pw", origin="http://evil.example").status_code == 403
+
+
+@pytest.mark.parametrize("path", ["/assets/..%2Fsecret.txt", "/assets/..%2F..%2Fsecret.txt", "/assets/..%5Cindex.html"])
+def test_logged_out_assets_cannot_escape(tc, spa, path):
+    resp = tc.get(path, follow_redirects=False)
+    assert "secret" not in resp.text
+    assert resp.status_code in (302, 307, 400, 404)
+    assert '<div id="root">' not in resp.text

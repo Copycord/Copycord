@@ -10,27 +10,25 @@ import { Kit } from "./pages/Kit";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { NotFound } from "./pages/NotFound";
-import { Placeholder } from "./pages/Placeholder";
 import { System } from "./pages/System";
 
-// Paths are relative to the router basename /app.
+// The server serves index.html at each of these paths (admin/app.py SPA_PAGES).
 export const PAGES = [
-  { path: "/", title: "Configuration", legacy: "/" },
-  { path: "/channels", title: "Channels", legacy: "/channels" },
-  { path: "/guilds", title: "Guilds", legacy: "/guilds" },
-  { path: "/forwarding", title: "Forwarding", legacy: "/forwarding" },
-  { path: "/scraper", title: "Scraper", legacy: "/scraper" },
-  { path: "/system", title: "System", legacy: "/system" },
-  { path: "/logs", title: "Logs", legacy: "/event-logs" },
+  { path: "/", title: "Configuration" },
+  { path: "/channels", title: "Channels" },
+  { path: "/guilds", title: "Guilds" },
+  { path: "/forwarding", title: "Forwarding" },
+  { path: "/scraper", title: "Scraper" },
+  { path: "/system", title: "System" },
+  { path: "/logs", title: "Logs" },
 ] as const;
 
-// Pages already ported to the SPA, one line each; the rest render a Placeholder linking to the old page.
-const PAGE_ELEMENTS: Partial<Record<(typeof PAGES)[number]["path"], ReactNode>> = {
+const PAGE_ELEMENTS: Record<(typeof PAGES)[number]["path"], ReactNode> = {
   "/": <Dashboard />,
+  "/channels": <Channels />,
   "/guilds": <Guilds />,
   "/forwarding": <Forwarding />,
   "/scraper": <Scraper />,
-  "/channels": <Channels />,
   "/system": <System />,
   "/logs": <Logs />,
 };
@@ -40,14 +38,13 @@ export function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<Layout />}>
-        {PAGES.map((p) => {
-          const element = PAGE_ELEMENTS[p.path] ?? <Placeholder title={p.title} legacyHref={p.legacy} />;
-          return p.path === "/" ? (
-            <Route key={p.path} index element={element} />
+        {PAGES.map((p) =>
+          p.path === "/" ? (
+            <Route key={p.path} index element={PAGE_ELEMENTS[p.path]} />
           ) : (
-            <Route key={p.path} path={p.path} element={element} />
-          );
-        })}
+            <Route key={p.path} path={p.path} element={PAGE_ELEMENTS[p.path]} />
+          ),
+        )}
         <Route path="/_kit" element={<Kit />} />
         <Route path="*" element={<NotFound />} />
       </Route>

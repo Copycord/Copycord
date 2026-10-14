@@ -1,4 +1,4 @@
-// /app/_kit: every shared component on one page, for page lanes and review.
+// /_kit: every shared component on one page, for page lanes and review.
 // Not linked from the sidebar.
 
 import { useState } from "react";

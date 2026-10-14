@@ -3,9 +3,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-// The SPA is served by FastAPI at /app; hashed files land in dist/assets.
+// FastAPI serves the SPA at the root; hashed files land in dist/assets, served at /assets.
 export default defineConfig({
-  base: "/app/",
+  base: "/",
   plugins: [react(), tailwindcss()],
   build: {
     outDir: "dist",
@@ -15,7 +15,7 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      "^/(api|login|logout|bus|logs|static|version|health)": "http://127.0.0.1:8080",
+      "^/(api/|login|logout|bus|logs/|static/|version|health|filters/|save|start|stop)": "http://127.0.0.1:8080",
       "/ws": { target: "ws://127.0.0.1:8080", ws: true },
     },
   },
