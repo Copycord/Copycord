@@ -26,11 +26,11 @@ export function modal(page: Page, id: string): Locator {
 }
 
 export async function expectOpen(m: Locator): Promise<void> {
-  await expect(m).toHaveClass(/(^|\s)show(\s|$)/);
+  await expect(m).toBeVisible();
 }
 
 export async function expectClosed(m: Locator): Promise<void> {
-  await expect(m).not.toHaveClass(/(^|\s)show(\s|$)/);
+  await expect(m).toBeHidden();
 }
 
 // Mapping card buttons are icon-only; these classes come from the card markup in app.js.
