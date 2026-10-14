@@ -51,11 +51,13 @@ export function ProviderIcon({ provider }: { provider: string }) {
   }
 }
 
-// The old .fwd-card-footer .btn: a 32px ghost button with a 12px label.
+// The old .fwd-card-footer .btn: a 32px ghost button with a 12px label; it grows to fill the
+// wrapped row under 640px and takes the full width under 480px.
 const FOOTER_BUTTON =
-  "inline-flex min-h-8 cursor-pointer items-center justify-center rounded-control border border-border bg-white/4 " +
+  "inline-flex min-h-8 cursor-pointer items-center justify-center rounded-control border border-border bg-[rgba(255,255,255,0.04)] " +
   "px-3 py-1.5 text-xs font-semibold leading-none select-none outline-none transition duration-200 " +
-  "focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-55";
+  "focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-55 " +
+  "max-[640px]:flex-auto max-[480px]:w-full";
 
 function FooterButton({
   danger = false,
@@ -69,8 +71,8 @@ function FooterButton({
       className={cx(
         FOOTER_BUTTON,
         danger
-          ? "text-accent enabled:hover:border-danger enabled:hover:bg-white/8 enabled:hover:text-danger"
-          : "text-accent enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-white/8 enabled:hover:shadow-soft",
+          ? "text-accent enabled:hover:border-danger enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:hover:text-danger"
+          : "text-accent enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:hover:shadow-soft",
         className,
       )}
       {...rest}
@@ -95,20 +97,20 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
     <article
       data-id={rule.rule_id}
       className={cx(
-        "fwd-card w-full self-start rounded-[14px] border border-border bg-linear-to-b from-[#1f1237] to-[#160b2a]",
-        "px-[18px] pt-4 pb-3.5 shadow-[0_2px_8px_rgba(0,0,0,0.2)] transition duration-200",
+        "fwd-card w-full self-start rounded-[14px] border border-border bg-[linear-gradient(180deg,#1f1237,#160b2a)]",
+        "px-[18px] pt-4 pb-3.5 [box-shadow:0_2px_8px_rgba(0,0,0,0.2)] transition duration-200 max-[480px]:p-3.5",
       )}
     >
-      <header className="flex items-start justify-between gap-3">
+      <header className="flex items-start justify-between gap-3 max-[640px]:flex-col max-[640px]:gap-2.5">
         <div className="flex min-h-7 min-w-0 flex-1 items-center">
           <h3 className="fwd-card-title m-0 line-clamp-1 text-[15px] leading-[1.3] font-semibold text-text">
             {rule.label}
           </h3>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 max-[640px]:w-full max-[640px]:justify-start">
           <span
             className={cx(
-              "inline-flex items-center gap-[5px] rounded-full border px-2.5 py-[3px] text-[11px] font-medium tracking-[0.03em] uppercase",
+              "inline-flex items-center gap-[5px] rounded-[999px] border px-2.5 py-[3px] text-[11px] font-medium tracking-[0.03em] uppercase",
               BADGE_TONE[provider] ?? "border-border bg-white/4 text-text-2",
             )}
           >
@@ -117,7 +119,7 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
           </span>
           <span
             className={cx(
-              "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] uppercase",
+              "inline-flex items-center rounded-[999px] border px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] uppercase",
               enabled
                 ? "border-[rgba(16,185,129,0.4)] bg-[rgba(16,185,129,0.12)] text-good"
                 : "border-[rgba(148,163,184,0.3)] bg-[rgba(148,163,184,0.1)] text-muted",
@@ -128,7 +130,7 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
         </div>
       </header>
 
-      <footer className="mt-3 flex flex-wrap items-center gap-2 pt-3">
+      <footer className="mt-3 flex items-center gap-2 pt-3 max-[640px]:flex-wrap max-[480px]:flex-col">
         <FooterButton className="fwd-edit-btn" onClick={onEdit}>
           Edit
         </FooterButton>
