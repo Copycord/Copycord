@@ -248,6 +248,8 @@ class ServerReceiver:
         self._pending_deletes: set[int] = set()
         self._bf_throttle: dict[int, dict] = {}
         self._task_for_channel: dict[int, str] = {}
+        self._bf_jobs: dict[str, dict] = {}
+        self._bf_job_by_channel: dict[int, str] = {}
         self._done_task_ids: set[str] = set()
         self._host_name_cache: dict[int, str] = {}
         self._task_display_id: dict[int, str] = {}
@@ -1237,6 +1239,99 @@ class ServerReceiver:
             return True
         return False
 
+    async def _bf_cleanup_job(self, orig: int) -> None:
+        """Run the end of stream cleanup for a channel, bracketed by backfill_job_cleanup and the job's delivered count."""
+        job_id = self._bf_job_by_channel.get(orig)
+        job = self._bf_jobs.get(job_id) if job_id else None
+        if job is not None and job.get("cleanup") is not None:
+            await asyncio.shield(job["cleanup"])
+            return
+        if job is not None:
+            job["cleanup"] = asyncio.get_running_loop().create_future()
+            with contextlib.suppress(Exception):
+                await self.bus.publish(
+                    "client",
+                    {
+                        "type": "backfill_job_cleanup",
+                        "data": {
+                            "job_id": job_id,
+                            "original_channel_id": str(orig),
+                            "state": "cleaning",
+                        },
+                    },
+                )
+        delivered = None
+        try:
+            delivered = await self._bf_finish_channel(orig)
+        finally:
+            if job is not None and not job["cleanup"].done():
+                job["cleanup"].set_result(int(delivered or 0))
+
+    async def _bf_finish_channel(self, orig: int) -> int | None:
+        """Existing end of stream flow: drain, temp webhook cleanup, buffer flush. Returns messages written."""
+        tid = None
+        if hasattr(self.backfill, "tracker"):
+            with contextlib.suppress(Exception):
+                tid = await self.backfill.tracker.get_task_id(str(orig))
+
+        written = await self.backfill.on_done(
+            orig,
+            wait_cleanup=True,
+            expected_task_id=(str(tid) if tid else None),
+        )
+
+        self._active_backfills.discard(orig)
+
+        try:
+            await self._flush_channel_buffer(orig)
+        except Exception:
+            logger.exception(
+                "[bf] Failed flushing queued live messages for #%s", orig
+            )
+
+        pending = self._bf_event_buffer.pop(orig, [])
+        if pending:
+            logger.info(
+                "[bf] Draining %d buffered edit/delete events for #%s",
+                len(pending),
+                orig,
+            )
+        for ev_typ, ev_data in pending:
+            if ev_typ in ("message_edit", "thread_message_edit"):
+                self._track(self.handle_message_edit(ev_data), name="bf-drain-edit")
+            elif ev_typ in ("message_delete", "thread_message_delete"):
+                self._track(self.handle_message_delete(ev_data), name="bf-drain-del")
+
+        try:
+            delivered, total_est = self.backfill.get_progress(orig)
+        except Exception:
+            delivered, total_est = (None, None)
+
+        if getattr(self, "_shutting_down", False):
+            return written
+
+        no_work = total_est is not None and int(total_est) == 0
+
+        try:
+            await self.bot.ws_manager.send(
+                {
+                    "type": "backfill_done",
+                    "data": {
+                        "channel_id": str(orig),
+                        "sent": delivered,
+                        "total": total_est,
+                        **({"no_work": True} if no_work else {}),
+                    },
+                }
+            )
+        except Exception:
+            logger.debug(
+                "[bf] failed WS notify backfill_done for #%s",
+                orig,
+                exc_info=True,
+            )
+        return written
+
     async def _on_ws(self, msg: dict):
         """Dispatch incoming WebSocket messages by type."""
         if self._shutting_down:
@@ -1486,71 +1581,65 @@ class ServerReceiver:
                     )
                     return
 
-                tid = None
-                if hasattr(self.backfill, "tracker"):
-                    with contextlib.suppress(Exception):
-                        tid = await self.backfill.tracker.get_task_id(str(orig))
+                await self._bf_cleanup_job(orig)
+                return
 
-                await self.backfill.on_done(
-                    orig,
-                    wait_cleanup=True,
-                    expected_task_id=(str(tid) if tid else None),
-                )
-
-                self._active_backfills.discard(orig)
-
-                try:
-                    await self._flush_channel_buffer(orig)
-                except Exception:
-                    logger.exception(
-                        "[bf] Failed flushing queued live messages for #%s", orig
-                    )
-
-                pending = self._bf_event_buffer.pop(orig, [])
-                if pending:
-                    logger.info(
-                        "[bf] Draining %d buffered edit/delete events for #%s",
-                        len(pending),
-                        orig,
-                    )
-                for ev_typ, ev_data in pending:
-                    if ev_typ in ("message_edit", "thread_message_edit"):
-                        self._track(
-                            self.handle_message_edit(ev_data), name="bf-drain-edit"
-                        )
-                    elif ev_typ in ("message_delete", "thread_message_delete"):
-                        self._track(
-                            self.handle_message_delete(ev_data), name="bf-drain-del"
-                        )
-
-                try:
-                    delivered, total_est = self.backfill.get_progress(orig)
-                except Exception:
-                    delivered, total_est = (None, None)
-
-                if getattr(self, "_shutting_down", False):
+            elif typ in ("backfill_job", "backfill_job_progress"):
+                data = msg.get("data") or {}
+                job_id = str(data.get("job_id") or "")
+                if not job_id:
                     return
+                if typ == "backfill_job" and data.get("state") == "running":
+                    try:
+                        orig = int(data.get("original_channel_id"))
+                    except (TypeError, ValueError):
+                        orig = None
+                    if orig is not None:
+                        self._bf_jobs[job_id] = {"channel": orig, "cleanup": None}
+                        self._bf_job_by_channel[orig] = job_id
+                await self.bus.publish("client", msg)
+                return
 
-                no_work = total_est is not None and int(total_est) == 0
-
-                try:
-                    await self.bot.ws_manager.send(
-                        {
-                            "type": "backfill_done",
-                            "data": {
-                                "channel_id": str(orig),
-                                "sent": delivered,
-                                "total": total_est,
-                                **({"no_work": True} if no_work else {}),
-                            },
-                        }
-                    )
-                except Exception:
-                    logger.debug(
-                        "[bf] failed WS notify backfill_done for #%s",
-                        orig,
-                        exc_info=True,
-                    )
+            elif typ == "backfill_job_end":
+                data = msg.get("data") or {}
+                job_id = str(data.get("job_id") or "")
+                if not job_id:
+                    return
+                job = self._bf_jobs.get(job_id) or {}
+                orig = job.get("channel")
+                if (
+                    job.get("cleanup") is None
+                    and orig is not None
+                    and self._bf_job_by_channel.get(orig) == job_id
+                    and orig in self._active_backfills
+                ):
+                    await self._bf_cleanup_job(orig)
+                delivered = 0
+                if job.get("cleanup") is not None:
+                    delivered = await asyncio.shield(job["cleanup"])
+                self._bf_jobs.pop(job_id, None)
+                if orig is not None and self._bf_job_by_channel.get(orig) == job_id:
+                    self._bf_job_by_channel.pop(orig, None)
+                orig_out = orig if orig is not None else data.get("original_channel_id")
+                last_id = data.get("last_orig_message_id")
+                await self.bus.publish(
+                    "client",
+                    {
+                        "type": "backfill_job_end",
+                        "data": {
+                            "job_id": job_id,
+                            "original_channel_id": (
+                                str(orig_out) if orig_out is not None else None
+                            ),
+                            "ok": bool(data.get("ok")),
+                            "error": data.get("error"),
+                            "delivered": int(delivered or 0),
+                            "last_orig_message_id": (
+                                str(last_id) if last_id is not None else None
+                            ),
+                        },
+                    },
+                )
                 return
 
             elif typ == "backfills_status_query":

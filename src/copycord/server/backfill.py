@@ -571,7 +571,8 @@ class BackfillManager:
         *,
         wait_cleanup: bool = False,
         expected_task_id: str | None = None,
-    ) -> None:
+    ) -> int | None:
+        """Drain, mark the run done, start temp webhook cleanup; returns messages written for the run."""
         cid = int(original_id)
 
         st = self._progress.get(cid) or {}
@@ -605,6 +606,7 @@ class BackfillManager:
 
         st = self._progress.get(cid) or {}
         delivered = int(st.get("delivered", 0))
+        written = delivered
         total = st.get("expected_total")
         try:
             total = int(total) if total is not None else None
@@ -689,7 +691,7 @@ class BackfillManager:
             await self.clear_sink(cid)
             await self.end_global_sync(cid)
             await self._wait_drain(cid, no_progress_timeout=stall)
-            return
+            return written
 
         created_ids_for_run = list(st.get("temp_created_ids") or [])
 
@@ -790,6 +792,7 @@ class BackfillManager:
                     cid, int(clone_id), created_ids_for_run, task_id_for_run
                 )
             )
+        return written
 
     def _on_task_done(self, cid: int, task: asyncio.Task) -> None:
         try:
