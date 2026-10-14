@@ -3,6 +3,8 @@ export type { BadgeTone, Status } from "./Badge";
 export { Button } from "./Button";
 export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button";
 export { Card } from "./Card";
+export { Checkbox, Radio } from "./Checkbox";
+export type { CheckboxProps } from "./Checkbox";
 export { ChipInput, mergeChips, splitChips } from "./ChipInput";
 export type { ChipMode } from "./ChipInput";
 export { ConfirmDialog, ConfirmProvider, useConfirm } from "./ConfirmDialog";
