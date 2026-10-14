@@ -13,6 +13,9 @@ import type {
 /** Debounce before a change is written, as on the old page. */
 export const SAVE_DELAY_MS = 600;
 
+export const NOTIF_HINT =
+  "Get notified via Discord webhook when something goes wrong \u2014 client goes offline, proxies die, tokens get revoked.";
+
 export const NOTIF_ROWS: Array<{ event: NotifEvent; label: string; hint: string }> = [
   { event: "CLIENT_OFFLINE", label: "Client Offline", hint: "When the client bot disconnects or stops" },
   { event: "SERVER_OFFLINE", label: "Server Offline", hint: "When the server bot disconnects or stops" },

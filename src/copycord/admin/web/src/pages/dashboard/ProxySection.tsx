@@ -15,7 +15,18 @@ import type {
 } from "../../types/dashboard-proxy";
 import { errorText } from "../../lib/api";
 import { useNotify, useSafeConfirm } from "../system/providers";
-import { CARD, Chevron, DocLink, GHOST_XS_GREEN, GHOST_XS_RED, SUMMARY, SUMMARY_TITLE } from "./parts";
+import {
+  CARD,
+  CHECK,
+  CHECK_LABEL,
+  Chevron,
+  DocLink,
+  GHOST_XS_GREEN,
+  GHOST_XS_RED,
+  PROXY_HINT,
+  SUMMARY,
+  SUMMARY_TITLE,
+} from "./parts";
 import { ProxyChips } from "./proxy/ProxyChips";
 import { FavHelpModal, ResultsModal, SettingsModal } from "./proxy/ProxyModals";
 import {
@@ -50,9 +61,8 @@ const SETTINGS_SAVE_MS = 600;
 /** The bus replays recent history on connect; test events in that window are old. */
 const REPLAY_MS = 1500;
 
-/** .srv-proxy-hint.srv-proxy-rotation-hint, and the code samples in the paste hint. */
+/** .srv-proxy-hint.srv-proxy-rotation-hint */
 const ROTATION_HINT = "m-0 mt-1.5 text-xs leading-normal text-muted";
-const CODE = "[&_code]:rounded-[4px] [&_code]:bg-white/6 [&_code]:px-[5px] [&_code]:py-px [&_code]:font-[monospace] [&_code]:text-[11px]";
 /** .input.srv-proxy-interval-input: the full width .input look at 34px, so it shrinks on phones like the old one. */
 const NUM =
   "h-[34px] w-full rounded-control border border-border bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] " +
@@ -78,12 +88,6 @@ function UnitSelect({ id, value, disabled, onChange }: { id: string; value: stri
     </div>
   );
 }
-/** .srv-proxy-check and its 18px box. */
-const CHECK_LABEL = "srv-proxy-check inline-flex cursor-pointer items-center gap-2 text-[13px] font-medium text-text select-none";
-const CHECK =
-  "relative m-0 size-[18px] shrink-0 cursor-pointer appearance-none rounded-[5px] border-[1.5px] border-border bg-[rgba(255,255,255,0.04)] " +
-  "transition hover:border-accent focus-visible:shadow-[0_0_0_3px_rgba(167,139,250,0.18)] focus-visible:outline-0 checked:border-primary checked:bg-primary " +
-  "checked:bg-[url(\"data:image/svg+xml,%3Csvg_xmlns='http://www.w3.org/2000/svg'_viewBox='0_0_24_24'_fill='none'_stroke='white'_stroke-width='3'_stroke-linecap='round'_stroke-linejoin='round'%3E%3Cpath_d='M20_6_9_17l-5-5'/%3E%3C/svg%3E\")] checked:bg-size-[12px] checked:bg-center checked:bg-no-repeat disabled:cursor-not-allowed";
 /** .srv-proxy-chip and its .is-on / .is-warn colors. */
 const CHIP_TONE = {
   on: "bg-[rgba(76,175,80,0.12)] text-[#4caf50]",
@@ -489,7 +493,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
           </div>
 
           <div className="srv-proxy-hint-row mb-2.5 flex items-start justify-between gap-3">
-            <p className={cx("m-0 text-xs leading-normal text-muted", CODE)}>
+            <p className={PROXY_HINT}>
               Paste one or more proxies &mdash; <code>host:port</code> &middot; <code>host:port:user:pass</code>{" "}
               &middot; <code>user:pass@host:port</code>
             </p>

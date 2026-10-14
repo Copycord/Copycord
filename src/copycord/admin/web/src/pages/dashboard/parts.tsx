@@ -82,6 +82,31 @@ export const PS_FIELD =
 /** .srv-proxy-hint */
 export const SECTION_HINT = "m-0 mb-2.5 text-xs leading-normal text-muted";
 
+/** .notif-webhook-input: 13px monospace on the dark control fill. */
+export const WEBHOOK_INPUT =
+  "flex-1 rounded-input border border-border bg-control px-3 py-[7px] font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace] text-[13px] text-text " +
+  "outline-0 transition-colors duration-150 placeholder:text-muted/40 focus:border-accent";
+
+/** .notif-event-row */
+export const EVENT_ROW =
+  "flex items-center justify-between gap-3.5 rounded-input border border-border bg-[rgba(255,255,255,0.02)] px-2.5 py-2 " +
+  "transition-colors duration-100 hover:bg-[rgba(255,255,255,0.04)]";
+
+/** .srv-proxy-check and its 18px box. */
+export const CHECK_LABEL = "srv-proxy-check inline-flex cursor-pointer items-center gap-2 text-[13px] font-medium text-text select-none";
+export const CHECK =
+  "relative m-0 size-[18px] shrink-0 cursor-pointer appearance-none rounded-[5px] border-[1.5px] border-border bg-[rgba(255,255,255,0.04)] " +
+  "transition hover:border-accent focus-visible:shadow-[0_0_0_3px_rgba(167,139,250,0.18)] focus-visible:outline-0 checked:border-primary checked:bg-primary " +
+  "checked:bg-[url(\"data:image/svg+xml,%3Csvg_xmlns='http://www.w3.org/2000/svg'_viewBox='0_0_24_24'_fill='none'_stroke='white'_stroke-width='3'_stroke-linecap='round'_stroke-linejoin='round'%3E%3Cpath_d='M20_6_9_17l-5-5'/%3E%3C/svg%3E\")] checked:bg-size-[12px] checked:bg-center checked:bg-no-repeat disabled:cursor-not-allowed";
+
+/** .srv-proxy-hint: the format line above the proxy list, with inline code chips. */
+export const PROXY_HINT =
+  "m-0 text-xs leading-normal text-muted [&_code]:rounded-[4px] [&_code]:bg-white/6 [&_code]:px-[5px] [&_code]:py-px [&_code]:font-[monospace] [&_code]:text-[11px]";
+
+/** .srv-proxy-chips, the bordered proxy list box. */
+export const PROXY_CHIPS =
+  "srv-proxy-chips flex max-h-[220px] min-h-[44px] flex-col gap-1 overflow-y-auto rounded-btn border border-border bg-control px-2.5 py-2 transition-[border-color,box-shadow] duration-150 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin] focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(167,139,250,0.12)]";
+
 /** .btn.btn-xs with .btn-ghost-green or .btn-ghost-red: 28px, 12px accent label that turns green or red on hover. */
 const GHOST_XS =
   "inline-flex min-h-7 cursor-pointer items-center justify-center rounded-btn border border-border bg-[rgba(255,255,255,0.04)] px-2.5 py-1.5 " +

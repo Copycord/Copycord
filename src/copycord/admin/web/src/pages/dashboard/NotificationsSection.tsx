@@ -6,19 +6,9 @@ import { useToast } from "../../components/Toast";
 import { api } from "../../lib/api";
 import type { NotifEvent, NotifEvents, NotifSettingsReply, NotifTestReply } from "../../types/dashboard-notify";
 import { CollapseCard } from "./notify/CollapseCard";
-import { DEFAULT_EVENTS, NOTIF_ROWS, mergeEvents, notifPayload } from "./notify/model";
+import { DEFAULT_EVENTS, NOTIF_HINT, NOTIF_ROWS, mergeEvents, notifPayload } from "./notify/model";
 import { useDebouncedSave } from "./notify/useDebouncedSave";
-import { GHOST_XS_GREEN, SECTION_HINT, SETTING_LABEL, SETTING_SUB, Switch } from "./parts";
-
-// .notif-webhook-input: 13px monospace on the dark control fill.
-const WEBHOOK_INPUT =
-  "flex-1 rounded-input border border-border bg-control px-3 py-[7px] font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace] text-[13px] text-text " +
-  "outline-0 transition-colors duration-150 placeholder:text-muted/40 focus:border-accent";
-
-// .notif-event-row
-const EVENT_ROW =
-  "flex items-center justify-between gap-3.5 rounded-input border border-border bg-[rgba(255,255,255,0.02)] px-2.5 py-2 " +
-  "transition-colors duration-100 hover:bg-[rgba(255,255,255,0.04)]";
+import { EVENT_ROW, GHOST_XS_GREEN, SECTION_HINT, SETTING_LABEL, SETTING_SUB, Switch, WEBHOOK_INPUT } from "./parts";
 
 /** The App shell test renders without a ToastProvider. */
 function useOptionalToast(): ReturnType<typeof useToast> | null {
@@ -84,10 +74,7 @@ export function NotificationsSection() {
       docsHref="https://copycord.github.io/Copycord/docs/configuration/advanced#notifications"
       storageKey="cpc.notifications-card-open"
     >
-      <p className={SECTION_HINT}>
-        Get notified via Discord webhook when something goes wrong — client goes offline, proxies die, tokens get
-        revoked.
-      </p>
+      <p className={SECTION_HINT}>{NOTIF_HINT}</p>
       <div className="notif-webhook-row mb-3.5 flex gap-2">
         <input
           type="text"

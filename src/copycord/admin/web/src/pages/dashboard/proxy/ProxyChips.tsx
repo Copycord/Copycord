@@ -8,6 +8,7 @@ import { useState } from "react";
 import type { ClipboardEvent, KeyboardEvent } from "react";
 import { cx } from "../../../components/ui";
 import type { ProxyChipResult } from "../../../types/dashboard-proxy";
+import { PROXY_CHIPS } from "../parts";
 
 export interface ProxyChipsProps {
   proxies: readonly string[];
@@ -64,7 +65,7 @@ export function ProxyChips({ proxies, favorites, results, onAdd, onRemove, onRem
   return (
     <div
       id="srv-proxy-chips"
-      className="srv-proxy-chips flex max-h-[220px] min-h-[44px] flex-col gap-1 overflow-y-auto rounded-btn border border-border bg-control px-2.5 py-2 transition-[border-color,box-shadow] duration-150 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin] focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(167,139,250,0.12)]"
+      className={PROXY_CHIPS}
     >
       {proxies.map((p) => {
         const fav = favorites.has(p);

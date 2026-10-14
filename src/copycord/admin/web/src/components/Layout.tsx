@@ -52,7 +52,8 @@ const BAR = "block h-0.5 w-5 rounded-[2px] bg-accent transition duration-200 gro
 
 export function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [version, setVersion] = useState<string | null>(null);
+  // undefined while /version loads, null when it has no version or fails.
+  const [version, setVersion] = useState<string | null | undefined>(undefined);
   const location = useLocation();
   const frame = FRAMES[location.pathname] ?? NOT_FOUND;
 
@@ -72,7 +73,7 @@ export function Layout() {
     api
       .get<{ current?: string }>("/version")
       .then((v) => live && setVersion(v.current || null))
-      .catch(() => undefined);
+      .catch(() => live && setVersion(null));
     return () => {
       live = false;
     };

@@ -7,24 +7,34 @@ import { Skeleton, cx } from "../../components/ui";
 import { FIELD_TIPS } from "./config/model";
 import { PromoCards } from "./config/PromoCards";
 import { FIELD_INPUT } from "./config/TokenInput";
+import { NOTIF_HINT, NOTIF_ROWS } from "./notify/model";
 import {
   BOT_ROLES,
   BOTS_CELL,
   BOTS_HEAD,
   BOTS_STATE,
   CARD,
+  CHECK,
+  CHECK_LABEL,
   Chevron,
+  EVENT_ROW,
   GC_FIELD,
   GC_HINT,
   GC_LABEL,
   GHOST,
+  GHOST_XS_GREEN,
+  GHOST_XS_RED,
+  PROXY_CHIPS,
+  PROXY_HINT,
   PS_UNIT,
+  SECTION_HINT,
   SETTING_LABEL,
   SETTING_ROW,
   SETTING_SUB,
   SettingRow,
   SUMMARY,
   SUMMARY_TITLE,
+  WEBHOOK_INPUT,
 } from "./parts";
 
 /** One placeholder tile while the list loads; the count is unknown until it lands. */
@@ -188,11 +198,59 @@ export function DashboardSkeleton() {
           </div>
         </div>
       </details>
-      {["Notifications", "Sync Settings", "Proxy"].map((title) => (
-        <details key={title} data-testid="card-skeleton" className={CARD}>
-          <Summary title={title} />
-        </details>
-      ))}
+      <details data-testid="card-skeleton" className={CARD}>
+        <Summary title="Notifications" />
+        <div className="srv-proxy-body mt-3.5">
+          <p className={SECTION_HINT}>{NOTIF_HINT}</p>
+          <div className="mb-3.5 flex gap-2">
+            <input
+              type="text"
+              disabled
+              tabIndex={-1}
+              aria-hidden="true"
+              placeholder="https://discord.com/api/webhooks/..."
+              className={WEBHOOK_INPUT}
+            />
+            <span className={GHOST_XS_GREEN}>Test</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {NOTIF_ROWS.map((r) => (
+              <div key={r.event} className={EVENT_ROW}>
+                <div className={SETTING_LABEL}>
+                  <span className="text-[13px] font-medium">{r.label}</span>
+                  <span className={SETTING_SUB}>{r.hint}</span>
+                </div>
+                <Bar className="h-[22px] w-[38px] rounded-[999px]" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
+      <details data-testid="card-skeleton" className={CARD}>
+        <Summary title="Sync Settings" />
+      </details>
+      <details data-testid="card-skeleton" className={CARD}>
+        <Summary title="Proxy" />
+        <div className="srv-proxy-body mt-3.5">
+          <div className="mb-3">
+            <span className={CHECK_LABEL}>
+              <span className={cx(CHECK, "inline-block")} />
+              <span>Enable proxies for client</span>
+            </span>
+          </div>
+          <div className="mb-2.5 flex items-start justify-between gap-3">
+            <p className={PROXY_HINT}>
+              Paste one or more proxies &mdash; <code>host:port</code> &middot; <code>host:port:user:pass</code>{" "}
+              &middot; <code>user:pass@host:port</code>
+            </p>
+            <div className="flex shrink-0 gap-1.5">
+              <span className={GHOST_XS_GREEN}>Test All</span>
+              <span className={GHOST_XS_RED}>Clear</span>
+            </div>
+          </div>
+          <div className={PROXY_CHIPS} />
+        </div>
+      </details>
     </div>
   );
 }
