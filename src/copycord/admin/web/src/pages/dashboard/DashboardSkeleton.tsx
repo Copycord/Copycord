@@ -211,7 +211,9 @@ export function DashboardSkeleton() {
               placeholder="https://discord.com/api/webhooks/..."
               className={WEBHOOK_INPUT}
             />
-            <span className={GHOST_XS_GREEN}>Test</span>
+            <button type="button" disabled tabIndex={-1} className={GHOST_XS_GREEN}>
+              Test
+            </button>
           </div>
           <div className="flex flex-col gap-1.5">
             {NOTIF_ROWS.map((r) => (
