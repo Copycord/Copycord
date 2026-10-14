@@ -83,6 +83,11 @@ async function states(browser: Browser, state: Awaited<ReturnType<typeof login>>
   const held: Route[] = [];
   let hold = true;
   await page.route(/\/(api\/|version)/, (r) => (hold ? void held.push(r) : void r.continue()));
+  // CHUNK=1 also holds the page chunk, so the skeleton state is the one the app shell shows while it downloads.
+  if (process.env.CHUNK)
+    await page.route(/\/assets\/(Dashboard|Channels|Guilds|Forwarding|Scraper|System|Logs)-[^/]*\.js$/, (r) =>
+      hold ? void held.push(r) : void r.continue(),
+    );
   await page.goto(path, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
   const skel = await blocks(page);
@@ -121,7 +126,7 @@ async function main(): Promise<void> {
   const browser = await chromium.launch();
   const state = await login(browser);
   await cls(browser, state, "/");
-  console.log(`SKELSHIFT ${BASE_URL} throttle=${process.env.THROTTLE ?? "none"}`);
+  console.log(`SKELSHIFT ${BASE_URL} throttle=${process.env.THROTTLE ?? "none"} chunk=${process.env.CHUNK ? "held" : "loaded"}`);
   for (const path of PATHS) {
     const got = await states(browser, state, path).catch((e: Error) => (console.log(`PAGE ${path} error ${e.message.split("\n")[0]}`), null));
     if (!got) continue;
