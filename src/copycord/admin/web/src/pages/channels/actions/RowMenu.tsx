@@ -83,9 +83,12 @@ export function RowMenu({ kind, items }: RowMenuProps) {
         aria-label={kind === "channel" ? "Channel menu" : "Category menu"}
         onClick={toggle}
         className={cx(
-          kind === "channel" ? "ch-menu-btn" : "cat-menu-trigger ml-1",
-          "inline-flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent",
-          "text-inherit hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none",
+          "cursor-pointer outline-none",
+          kind === "channel"
+            ? // .icon-btn.ch-menu-btn
+              "ch-menu-btn rounded-btn border border-border bg-control px-2 py-0.5 text-text"
+            : // .cat-menu-trigger
+              "cat-menu-trigger ml-1.5 border-0 bg-transparent px-1 text-[16px] leading-none text-inherit hover:text-[#8b8b8b] focus:text-[#8b8b8b]",
         )}
       >
         ⋯
@@ -98,7 +101,7 @@ export function RowMenu({ kind, items }: RowMenuProps) {
               role="menu"
               tabIndex={-1}
               style={{ position: "fixed", top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
-              className="z-50 flex min-w-44 flex-col gap-0.5 rounded-panel border border-border bg-card-solid p-1.5 text-sm text-text shadow-card outline-none"
+              className="z-50 max-h-[calc(100vh-24px)] min-w-[200px] overflow-y-auto rounded-control border border-border bg-control p-1.5 text-text shadow-[0_20px_56px_rgba(0,0,0,0.5)] outline-none"
             >
               {items.map((it) => (
                 <button
@@ -112,7 +115,8 @@ export function RowMenu({ kind, items }: RowMenuProps) {
                     it.onSelect();
                   }}
                   className={cx(
-                    "cursor-pointer rounded-md border-0 bg-transparent px-3 py-1.5 text-left hover:bg-white/8",
+                    // .ctxmenu-item
+                    "block w-full cursor-pointer rounded-lg border-0 bg-transparent px-2.5 py-2 text-left outline-none hover:bg-card-solid focus:bg-card-solid",
                     it.danger ? "text-danger" : "text-text",
                   )}
                 >

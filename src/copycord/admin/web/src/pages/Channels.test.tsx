@@ -77,7 +77,7 @@ describe("Channels page", () => {
   it("preselects the first mapping and loads its tree", async () => {
     const f = serve();
     renderPage();
-    expect(screen.getByRole("heading", { level: 1, name: "Channels" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Channels" })).toBeInTheDocument();
     await waitFor(() => expect(document.querySelectorAll("#channels-root article")).toHaveLength(3));
 
     const sel = el<HTMLSelectElement>("mapping-select");
@@ -164,7 +164,7 @@ describe("Channels page", () => {
     await waitFor(() => expect(screen.getByTestId("status-gate")).toBeInTheDocument());
     await waitFor(() => expect(f.mock.calls.some(([u]) => String(u) === "/api/guild-mappings")).toBe(true));
     expect(channelUrls(f)).toEqual([]);
-    expect(screen.queryByText("No channels found.")).toBeNull();
+    expect(el("channels-empty")).not.toBeVisible();
   });
 
   it("lists every channel when no mapping is configured", async () => {
