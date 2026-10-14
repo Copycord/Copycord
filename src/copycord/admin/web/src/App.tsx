@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { SkeletonSection } from "./components/ui/Skeleton";
 import { prefetch } from "./lib/api";
+import { ChannelsSkeleton } from "./pages/channels/ChannelsSkeleton";
 import { DashboardSkeleton } from "./pages/dashboard/DashboardSkeleton";
 import { ForwardingSkeleton } from "./pages/forwarding/ForwardingSkeleton";
 import { GuildsSkeleton } from "./pages/guilds/GuildsSkeleton";
@@ -48,7 +49,7 @@ const Dashboard = lazyPage(() => {
   prefetch(DASHBOARD_GETS);
   return import("./pages/Dashboard").then((m) => m.Dashboard);
 }, DashboardSkeleton);
-const Channels = lazyPage(() => import("./pages/Channels").then((m) => m.Channels));
+const Channels = lazyPage(() => import("./pages/Channels").then((m) => m.Channels), ChannelsSkeleton);
 const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds), GuildsSkeleton);
 const Forwarding = lazyPage(() => import("./pages/Forwarding").then((m) => m.Forwarding), ForwardingSkeleton);
 const Scraper = lazyPage(() => import("./pages/Scraper").then((m) => m.Scraper));
