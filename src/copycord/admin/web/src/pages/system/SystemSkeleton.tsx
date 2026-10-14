@@ -23,7 +23,9 @@ export function SystemSkeleton() {
           </button>
         </div>
         <div className="mt-1.5">
-          <table className="mt-2 w-full border-separate border-spacing-0 text-left md:table-fixed" />
+          <div className="overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <table className="mt-2 w-full border-separate border-spacing-0 text-left md:table-fixed" />
+          </div>
         </div>
       </Card>
     </div>
