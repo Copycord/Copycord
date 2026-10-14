@@ -144,108 +144,6 @@ class ClientUiController:
                     self.log.debug("Status response published | req_id=%s", req_id)
                     return
 
-                if action == "backfill":
-                    self.log.debug(
-                        "Backfill request received | req_id=%s raw=%s",
-                        req_id,
-                        _safe_preview(p),
-                    )
-
-                    ui_raw = p.get("clone_channel_id")
-                    if (
-                        ui_raw is None
-                        or str(ui_raw).strip() == ""
-                        or str(ui_raw).lower() == "null"
-                    ):
-                        raise ValueError("channel_id missing")
-
-                    any_id = int(ui_raw)
-
-                    orig_id, clone_id, src = (
-                        self.listener.db.resolve_original_from_any_id(any_id)
-                    )
-                    if orig_id is None:
-                        raise ValueError(f"Could not resolve original id from {any_id}")
-
-                    self.log.debug(
-                        "Backfill id resolved | src=%s ui_id=%s → original_id=%s clone_id=%s",
-                        src,
-                        any_id,
-                        orig_id,
-                        clone_id,
-                    )
-
-                    def _coerce_int(x):
-                        try:
-                            n = int(x)
-                            return n if n > 0 else None
-                        except Exception:
-                            return None
-
-                    rng = p.get("range") or {}
-
-                    after_iso = p.get("after_iso")
-                    if after_iso is None or (
-                        isinstance(after_iso, str) and after_iso.strip() == ""
-                    ):
-                        after_iso = rng.get("after")
-                        if (
-                            after_iso is None
-                            or (isinstance(after_iso, str) and after_iso.strip() == "")
-                        ) and (str(rng.get("mode") or "").lower() == "since"):
-                            after_iso = rng.get("value")
-                    if isinstance(after_iso, str) and after_iso.strip() == "":
-                        after_iso = None
-
-                    last_n = _coerce_int(p.get("last_n"))
-                    if last_n is None:
-                        if str(rng.get("mode") or "").lower() == "last":
-                            last_n = _coerce_int(rng.get("last_n") or rng.get("value"))
-                        else:
-                            last_n = _coerce_int(rng.get("last_n"))
-
-                    mode = "last_n" if last_n else ("since" if after_iso else "all")
-                    self.log.debug(
-                        "Backfill params | mode=%s after_iso=%r last_n=%r",
-                        mode,
-                        after_iso,
-                        last_n,
-                    )
-
-                    self.log.debug("Scheduling backfill task | original_id=%s", orig_id)
-                    asyncio.create_task(
-                        self.listener._backfill_channel(
-                            original_channel_id=orig_id,
-                            after_iso=after_iso,
-                            last_n=last_n,
-                        ),
-                        name=f"backfill:{orig_id}",
-                    )
-                    self.log.debug("Backfill task scheduled | original_id=%s", orig_id)
-
-                    await self._publish(
-                        {
-                            "kind": "client",
-                            "role": "client",
-                            "payload": {
-                                "type": "backfill_ack",
-                                "ok": True,
-                                "original_id": orig_id,
-                                "clone_id": clone_id,
-                                "after_iso": after_iso,
-                                "last_n": last_n,
-                            },
-                        }
-                    )
-                    self.log.debug(
-                        "ACK published to UI | original_id=%s clone_id=%s after_iso=%r last_n=%r",
-                        orig_id,
-                        clone_id,
-                        after_iso,
-                        last_n,
-                    )
-                    return
-
                 self.log.debug(
                     "Unknown client action from UI | action=%r req_id=%s",
                     action,
@@ -272,7 +170,7 @@ class ClientUiController:
                         "kind": "client",
                         "role": "client",
                         "payload": {
-                            "type": "backfill_ack" if action == "backfill" else "error",
+                            "type": "error",
                             "ok": False,
                             "error": str(e),
                         },

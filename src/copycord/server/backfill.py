@@ -52,102 +52,6 @@ class BackfillManager(BackfillWebhookPool):
         self._temp_prefix_canon = "Copycord"
         self.temp_webhook_max = 0
 
-    def _cleanup_meta_payload(
-        self, cid: int, *, st_override: dict | None = None
-    ) -> dict:
-        """Common metadata for cleanup WS messages, all ids coerced to strings."""
-        st = st_override or self._progress.get(int(cid)) or {}
-
-        def _to_str(val):
-            if val is None:
-                return None
-            try:
-                return str(int(val))
-            except Exception:
-                return str(val)
-
-        out = {}
-
-        if "mapping_id" in st and st["mapping_id"] is not None:
-            out["mapping_id"] = str(st["mapping_id"])
-
-        if "original_guild_id" in st and st["original_guild_id"] is not None:
-            out["original_guild_id"] = _to_str(st["original_guild_id"])
-        if "cloned_guild_id" in st and st["cloned_guild_id"] is not None:
-            out["cloned_guild_id"] = _to_str(st["cloned_guild_id"])
-        if "clone_channel_id" in st and st["clone_channel_id"] is not None:
-            out["clone_channel_id"] = _to_str(st["clone_channel_id"])
-
-        return out
-
-    def snapshot_in_progress(self) -> dict[str, dict]:
-        out: dict[str, dict] = {}
-        for cid_int, st in self._progress.items():
-            delivered = int(st.get("delivered", 0))
-            total = st.get("expected_total")
-            inflight = int(self._inflight.get(cid_int, 0))
-
-            if total is not None and delivered >= int(total) and inflight == 0:
-                continue
-
-            def _to_str(val):
-                if val is None:
-                    return None
-                try:
-                    return str(int(val))
-                except Exception:
-                    return str(val)
-
-            out[str(int(cid_int))] = {
-                "delivered": delivered,
-                "expected_total": (int(total) if total is not None else None),
-                "started_at": (
-                    st.get("started_dt").isoformat() if st.get("started_dt") else None
-                ),
-                "clone_channel_id": _to_str(st.get("clone_channel_id")),
-                "in_flight": inflight,
-                "run_id": st.get("run_id"),
-                "last_orig_message_id": st.get("last_orig_id"),
-                "last_orig_timestamp": st.get("last_ts"),
-                "cloned_guild_id": _to_str(st.get("cloned_guild_id")),
-                "mapping_id": (
-                    str(st.get("mapping_id"))
-                    if st.get("mapping_id") is not None
-                    else None
-                ),
-            }
-
-        return out
-
-    def attach_task(self, original_id: int, task: asyncio.Task) -> None:
-        cid = int(original_id)
-        if task in self._attached[cid]:
-            return
-        self._attached[cid].add(task)
-        self._inflight[cid] = self._inflight.get(cid, 0) + 1
-        loop = asyncio.get_event_loop()
-        self._attach_count[cid] = self._attach_count.get(cid, 0) + 1
-        self._last_attach_ts[cid] = loop.time()
-
-        def _done_cb(t: asyncio.Task, c=cid):
-            self._attached[c].discard(t)
-            self._on_task_done(c, t)
-
-        task.add_done_callback(_done_cb)
-
-    async def cancel_all_active(self) -> None:
-
-        all_tasks = [t for tasks in self._attached.values() for t in list(tasks)]
-
-        for t in all_tasks:
-            t.cancel()
-
-        if all_tasks:
-            await asyncio.gather(*all_tasks, return_exceptions=True)
-
-        self._attached.clear()
-        self._inflight.clear()
-
     def _ensure_cleanup_event(self, cid: int) -> asyncio.Event:
         ev = self._cleanup_events.get(cid)
         if ev is None:
@@ -160,30 +64,6 @@ class BackfillManager(BackfillWebhookPool):
         ev = self._ensure_cleanup_event(cid)
         if not ev.is_set():
             logger.info("[cleanup] waiting for webhook cleanup to finish for #%s", cid)
-
-            tid = self._cleanup_task_ids.get(cid)
-            if not tid and hasattr(self, "tracker"):
-                with contextlib.suppress(Exception):
-                    tid = await self.tracker.get_task_id(str(cid))
-
-            meta_block = self._cleanup_meta_payload(cid)
-
-            payload_data = {
-                "channel_id": str(cid),
-                "task_id": tid,
-                "state": "waiting",
-                **meta_block,
-            }
-
-            await self.r.bus.publish(
-                "client",
-                {
-                    "type": "backfill_cleanup",
-                    "channel_id": str(cid),
-                    "task_id": tid,
-                    "data": payload_data,
-                },
-            )
             await ev.wait()
 
     def _mark_cleanup_start(self, cid: int) -> None:
@@ -626,53 +506,6 @@ class BackfillManager(BackfillWebhookPool):
             with contextlib.suppress(Exception):
                 self.r.db.backfill_mark_done(run_id)
 
-        no_work = bool(st.get("no_work") or (total == 0))
-
-        try:
-            tid = (st or {}).get("task_id")
-            if not tid and hasattr(self, "tracker"):
-                with contextlib.suppress(Exception):
-                    tid = await self.tracker.get_task_id(str(cid))
-
-            mapping_id_val = st.get("mapping_id")
-            orig_gid_val = st.get("original_guild_id")
-            clone_gid_val = st.get("cloned_guild_id")
-            clone_chan_val = st.get("clone_channel_id")
-
-            def _to_str(val):
-                if val is None:
-                    return None
-                try:
-                    return str(int(val))
-                except Exception:
-                    return str(val)
-
-            await self.r.bus.publish(
-                "client",
-                {
-                    "type": "backfill_done",
-                    "channel_id": str(cid),
-                    "task_id": tid,
-                    "data": {
-                        "channel_id": str(cid),
-                        "task_id": tid,
-                        "sent": delivered,
-                        "total": total,
-                        "mapping_id": (
-                            str(mapping_id_val) if mapping_id_val is not None else None
-                        ),
-                        "original_guild_id": _to_str(orig_gid_val),
-                        "cloned_guild_id": _to_str(clone_gid_val),
-                        "clone_channel_id": _to_str(clone_chan_val),
-                        **({"no_work": True} if no_work else {}),
-                    },
-                },
-            )
-        except Exception:
-            logger.debug(
-                "[bf] failed to publish backfill_done for #%s", cid, exc_info=True
-            )
-
         self._flags.discard(cid)
         await self.r._flush_channel_buffer(cid)
 
@@ -696,28 +529,7 @@ class BackfillManager(BackfillWebhookPool):
         async def _cleanup_and_teardown(
             orig: int, clone: int, created_ids: list[int], task_id: str | None
         ):
-
-            meta_block = self._cleanup_meta_payload(orig)
-
-            payload_data = {
-                "channel_id": str(orig),
-                "task_id": task_id,
-                "state": "starting",
-                **meta_block,
-            }
-
             try:
-                with contextlib.suppress(Exception):
-                    await self.r.bus.publish(
-                        "client",
-                        {
-                            "type": "backfill_cleanup",
-                            "channel_id": str(orig),
-                            "task_id": task_id,
-                            "data": payload_data,
-                        },
-                    )
-
                 try:
                     stats = await self.delete_created_temps_for(
                         int(clone), created_ids=created_ids
@@ -731,33 +543,7 @@ class BackfillManager(BackfillWebhookPool):
                     logger.debug(
                         "[cleanup] temp deletion failed for #%s", clone, exc_info=True
                     )
-                    stats = {"deleted": None}
             finally:
-                meta_block = self._cleanup_meta_payload(orig)
-
-                payload_data = {
-                    "channel_id": str(orig),
-                    "task_id": task_id,
-                    "state": "finished",
-                    "deleted": (
-                        int(stats.get("deleted", 0))
-                        if isinstance(stats, dict)
-                        else None
-                    ),
-                    **meta_block,
-                }
-                with contextlib.suppress(Exception):
-
-                    await self.r.bus.publish(
-                        "client",
-                        {
-                            "type": "backfill_cleanup",
-                            "channel_id": str(orig),
-                            "task_id": task_id,
-                            "data": payload_data,
-                        },
-                    )
-
                 self._cleanup_task_ids.pop(orig, None)
                 self._mark_cleanup_end(orig)
                 self._rotate_pool.pop(int(clone), None)

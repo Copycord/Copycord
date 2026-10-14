@@ -1493,10 +1493,6 @@ class ServerReceiver:
                     self._task_for_channel[orig] = str(tid)
 
                 if orig in self._active_backfills:
-                    await self.bus.publish(
-                        "client",
-                        {"type": "backfill_busy", "data": {"channel_id": str(orig)}},
-                    )
                     return
 
                 is_resume = bool((msg.get("data") or {}).get("resume"))
@@ -1514,31 +1510,6 @@ class ServerReceiver:
                         "mapping_id": mapping_id,
                         "original_guild_id": original_gid,
                         "cloned_guild_id": cloned_gid,
-                    },
-                )
-
-                tid = None
-                try:
-                    st = self.backfill._progress.get(orig) or {}
-                    tid = st.get("task_id")
-                    if not tid and hasattr(self.backfill, "tracker"):
-                        with contextlib.suppress(Exception):
-                            tid = await self.backfill.tracker.get_task_id(str(orig))
-                except Exception:
-                    tid = None
-
-                await self.bus.publish(
-                    "client",
-                    {
-                        "type": "backfill_ack",
-                        "task_id": tid,
-                        "data": {
-                            "channel_id": str(orig),
-                            "task_id": tid,
-                            "mapping_id": mapping_id,
-                            "cloned_guild_id": str(cloned_gid),
-                        },
-                        "ok": True,
                     },
                 )
                 return
@@ -1641,20 +1612,6 @@ class ServerReceiver:
                     },
                 )
                 return
-
-            elif typ == "backfills_status_query":
-
-                logger.debug("Backfill status query received")
-                try:
-                    items = self.backfill.snapshot_in_progress()
-                except Exception as e:
-                    logger.exception("Failed to snapshot backfills: %s", e)
-                    items = {}
-
-                return {
-                    "type": "backfills_status",
-                    "data": {"items": items},
-                }
 
             elif typ == "member_joined":
                 asyncio.create_task(self.onjoin.handle_member_joined(data))

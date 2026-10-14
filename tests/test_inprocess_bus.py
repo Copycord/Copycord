@@ -359,8 +359,8 @@ def test_admin_request_hits_registered_agent(reg, loops):
         return {"ok": True, "type": msg["type"]}
 
     _serve(srv, handler)
-    reply = admin.run(inprocess.admin_request(URL, {"type": "backfills_status_query"}, 1.0))
-    assert reply["ok"] is True and reply["type"] == "backfills_status_query"
+    reply = admin.run(inprocess.admin_request(URL, {"type": "status_query"}, 1.0))
+    assert reply["ok"] is True and reply["type"] == "status_query"
 
 
 # --------------------------------------------------------------------------
