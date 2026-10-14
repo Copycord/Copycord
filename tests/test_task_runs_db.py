@@ -1,5 +1,6 @@
 """task_runs table and the DBManager task-run methods (Tasks framework, lane L2)."""
 
+import json
 import sqlite3
 import threading
 
@@ -202,7 +203,7 @@ def test_report_json_round_trips(db):
     rid = _run(db)
     assert db.task_run_get(rid)["report_json"] is None
     db.task_run_update(rid, report_json={"channels": [{"id": "1", "delivered": 5}]})
-    assert db.task_run_get(rid)["report_json"] == '{"channels": [{"id": "1", "delivered": 5}]}'
+    assert json.loads(db.task_run_get(rid)["report_json"]) == {"channels": [{"id": "1", "delivered": 5}]}
     db.task_run_update(rid, report_json=None)
     assert db.task_run_get(rid)["report_json"] is None
 
@@ -224,7 +225,7 @@ def test_task_runs_without_report_json_gains_it_and_keeps_rows(tmp_path, monkeyp
         assert "report_json" in db._table_columns("task_runs")
         row = db.task_run_get(rid)
         assert row["status"] == "success" and row["number"] == 1
-        assert row["progress_json"] == '{"seq": 3}'
+        assert json.loads(row["progress_json"]) == {"seq": 3}
         assert row["report_json"] is None
         assert {"idx_task_runs_type_id", "idx_task_runs_status"} <= _indexes(db.conn, "task_runs")
     finally:

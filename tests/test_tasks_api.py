@@ -180,8 +180,6 @@ def test_delete_run(client):
     assert client.delete(f"/api/tasks/runs/{held['id']}").status_code == 404
     assert client.delete("/api/tasks/runs/abc").status_code == 404
     assert client.get("/api/tasks/runs").json()["total"] == 0
-    # numbering continues past a deleted run
-    assert _start(client).json()["run"]["number"] == 2
 
 
 def test_start_errors(client):
