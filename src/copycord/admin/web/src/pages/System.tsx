@@ -16,7 +16,7 @@ import {
   restoreExisting,
   restoreUpload,
 } from "./system/backupApi";
-import { GhostButton, LinkButton } from "./system/buttons";
+import { CHEV, CHEV_BUTTON, GhostButton, LinkButton } from "./system/buttons";
 import { archiveLabel, fmtBackupWhen, fmtBytes, NO_VALUE, SHRUG } from "./system/format";
 import { useNotify, useSafeConfirm } from "./system/providers";
 
@@ -173,13 +173,13 @@ export function System() {
   }
 
   return (
-    <div id="adv-root" className="px-3 pt-3.5 md:px-0 md:pt-0">
+    <div id="adv-root">
       <h1 className="sr-only">System</h1>
       <Card
         id="adv-data-card"
         aria-label="Database"
         data-collapsed={open ? "false" : "true"}
-        className="md:mt-[18px]"
+        className="mt-[18px] max-w-full"
         onMouseDownCapture={onCardMouseDown}
         onClick={onCardClick}
         onDoubleClick={onCardDoubleClick}
@@ -187,7 +187,7 @@ export function System() {
         <div id="adv-collapse-header" className="mb-1.5 flex items-center justify-between gap-3 px-4 py-3">
           <div className="flex flex-col gap-1 leading-[normal]">
             <h2 className="my-[1em] text-[1.17em] font-bold">Database</h2>
-            <div id="adv-last-wrap" className="text-text/85">
+            <div id="adv-last-wrap" className="opacity-85">
               Last backup: <span id="adv-last-backup">{lastBackup}</span>
             </div>
           </div>
@@ -197,17 +197,13 @@ export function System() {
             aria-controls="adv-collapse-panel"
             aria-expanded={open}
             aria-label={open ? "Collapse panel" : "Expand panel"}
-            className={cx(
-              "inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control border border-border",
-              "bg-white/4 text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60",
-              "hover:-translate-y-0.5 hover:border-accent/30 hover:bg-white/8 hover:shadow-soft",
-            )}
+            className={CHEV_BUTTON}
             onClick={(e) => {
               e.stopPropagation();
               setOpen((v) => !v);
             }}
           >
-            <span aria-hidden="true" className="text-sm leading-none">
+            <span aria-hidden="true" className={CHEV}>
               {open ? "▾" : "▸"}
             </span>
           </button>
@@ -215,13 +211,14 @@ export function System() {
 
         <div id="adv-collapse-panel" className="mt-1.5">
           <div className="flex flex-wrap gap-2" hidden={!open}>
-            <GhostButton id="adv-backup-now" compact loading={backingUp} onClick={() => void onBackupNow()}>
+            <GhostButton id="adv-backup-now" loading={backingUp} onClick={() => void onBackupNow()}>
               Backup now
             </GhostButton>
             <LinkButton
               id="adv-download-latest"
               href={latest ? downloadUrl(latest.name) : undefined}
               disabled={!latest}
+              keepOpacity
               download
             >
               Download latest
