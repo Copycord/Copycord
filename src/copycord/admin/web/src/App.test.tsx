@@ -35,6 +35,7 @@ describe("App shell", () => {
     expect(labels).toEqual([
       "Configuration",
       "Channels",
+      "Tasks",
       "Guilds",
       "Forwarding",
       "Scraper",
@@ -43,6 +44,17 @@ describe("App shell", () => {
       "Log out",
     ]);
     expect(within(nav).getByText("Guilds").closest("a")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("renders the Tasks page at a run url, not NotFound, with Tasks lit in the menu", async () => {
+    renderAt("/tasks/runs/12");
+    expect(await screen.findByRole("heading", { level: 1, name: "Tasks" })).toBeInTheDocument();
+    expect(screen.queryByText(/Page not found/)).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Site menu" });
+    const item = within(nav).getByText("Tasks").closest("a");
+    expect(item).toHaveAttribute("href", "/tasks");
+    expect(item).toHaveAttribute("aria-current", "page");
+    expect(item?.querySelector("svg")).not.toBeNull();
   });
 
   it("opens and closes the mobile drawer", async () => {
