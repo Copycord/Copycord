@@ -18,8 +18,9 @@ import { useScraperLive } from "./scraper/useScraperLive";
 import { useNotify, useSafeConfirm } from "./system/providers";
 
 // .scraper-status-pill and its .pill-dot per data-status.
+const IDLE_PILL = { box: "border-border bg-[rgba(255,255,255,0.04)] text-muted", dot: "bg-muted" };
 const PILL: Record<string, { box: string; dot: string }> = {
-  idle: { box: "border-border bg-[rgba(255,255,255,0.04)] text-muted", dot: "bg-muted" },
+  idle: IDLE_PILL,
   running: {
     box: "border-[rgba(16,185,129,0.4)] bg-[rgba(16,185,129,0.08)] text-[#34d399]",
     dot: "bg-[#34d399] shadow-[0_0_8px_rgba(16,185,129,0.5)]",
@@ -40,7 +41,7 @@ export function Scraper() {
   const { running } = live;
   const busy = live.pill === "running";
 
-  const pill = PILL[live.pill] ?? PILL.idle;
+  const pill = PILL[live.pill] ?? IDLE_PILL;
 
   // min-w-fit: like the old .scraper-wide column, the page is never narrower than its widest
   // unbreakable row (the log card toolbar), so on phones it keeps the old one-line title.
