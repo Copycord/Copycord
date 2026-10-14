@@ -11,6 +11,10 @@ import { seedApi, seedDb } from "../lib/seed.ts";
 const PATH = process.argv[2] ?? "/";
 const RUNS = Number(process.argv[3] ?? "5");
 const BUSY = ".animate-spin, [data-skeleton], [aria-busy=true]";
+// THROTTLE=rtt_ms,kbps,cpu_factor emulates a slow link and CPU through CDP, e.g. 150,1600,4.
+const THROTTLE = process.env.THROTTLE
+  ? (([rtt, kbps, cpu]) => ({ rtt: rtt!, kbps: kbps!, cpu: cpu! }))(process.env.THROTTLE.split(",").map(Number))
+  : null;
 
 interface Run {
   fp: number;
@@ -41,6 +45,17 @@ async function login(browser: Browser) {
 async function once(browser: Browser, state: Awaited<ReturnType<typeof login>>): Promise<Run> {
   const ctx = await browser.newContext({ baseURL: BASE_URL, storageState: state, viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
+  if (THROTTLE) {
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send("Network.enable");
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: THROTTLE.rtt,
+      downloadThroughput: (THROTTLE.kbps * 1024) / 8,
+      uploadThroughput: (THROTTLE.kbps * 1024) / 8,
+    });
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: THROTTLE.cpu });
+  }
   await page.addInitScript((busySel: string) => {
     const w = window as unknown as { __lt: { rootFilled: number; busyCleared: number; sawBusy: boolean } };
     w.__lt = { rootFilled: 0, busyCleared: 0, sawBusy: false };
@@ -92,7 +107,7 @@ async function main(): Promise<void> {
   for (let i = 0; i < RUNS; i++) runs.push(await once(browser, state));
   await browser.close();
   const med = (k: keyof Run) => [...runs].map((r) => r[k] as number).sort((a, b) => a - b)[Math.floor(RUNS / 2)]!;
-  console.log(`LOADTIME ${BASE_URL}${PATH} runs=${RUNS} (median ms from navigation start)`);
+  console.log(`LOADTIME ${BASE_URL}${PATH} runs=${RUNS} throttle=${process.env.THROTTLE ?? "none"} (median ms from navigation start)`);
   console.log(`first-paint ${f(med("fp"))}  fcp ${f(med("fcp"))}  root-rendered ${f(med("rootFilled"))}  busy-cleared ${f(med("busyCleared"))}  settled ${f(med("settled"))}`);
   const m = [...runs].sort((a, b) => a.settled - b.settled)[Math.floor(RUNS / 2)]!;
   console.log("median run detail:");
