@@ -4,7 +4,7 @@
 // Like the old page it waits until both Server and Client are connected.
 
 import { useCallback, useMemo, useState } from "react";
-import { Card, Skeleton } from "../components/ui";
+import { Card } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useApi } from "../hooks/useApi";
 import { useStatusGate } from "../hooks/useStatusGate";
@@ -15,6 +15,9 @@ import { GuildCard } from "./guilds/GuildCard";
 import { GuildDetailsDialog } from "./guilds/GuildDetailsDialog";
 import { sortLabel, visibleGuilds } from "./guilds/model";
 import type { Point, SortDir } from "./guilds/model";
+import { GuildTileSkeletons } from "./guilds/GuildsSkeleton";
+
+export { GuildsSkeleton } from "./guilds/GuildsSkeleton";
 
 interface MenuState {
   guild: GuildSummary;
@@ -105,22 +108,7 @@ export function Guilds() {
             ))}
           </div>
 
-          {loading && !loaded ? (
-            <div
-              role="status"
-              aria-label="Loading guilds"
-              aria-busy="true"
-              className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4"
-            >
-              {Array.from({ length: 8 }, (_, i) => (
-                // The .guild-card box: 96 px icon tile, then the name line.
-                <div key={i} aria-hidden="true" className="flex flex-col items-center rounded-[12px] border border-border bg-card p-3">
-                  <Skeleton.Block width={96} height={96} rounded="rounded-[20px]" className="mt-1.5 mb-2.5" />
-                  <Skeleton.Line width="60%" height={14} className="mt-[3px] mb-[12px]" />
-                </div>
-              ))}
-            </div>
-          ) : null}
+          {loading && !loaded ? <GuildTileSkeletons /> : null}
 
           {error && !loaded ? (
             <div role="alert" className="flex flex-wrap items-center gap-3 px-2.5 py-2 text-sm text-muted">

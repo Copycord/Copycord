@@ -5,6 +5,7 @@ import { SkeletonSection } from "./components/ui/Skeleton";
 import { prefetch } from "./lib/api";
 import { DashboardSkeleton } from "./pages/dashboard/DashboardSkeleton";
 import { ForwardingSkeleton } from "./pages/forwarding/ForwardingSkeleton";
+import { GuildsSkeleton } from "./pages/guilds/GuildsSkeleton";
 import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 
@@ -48,7 +49,7 @@ const Dashboard = lazyPage(() => {
   return import("./pages/Dashboard").then((m) => m.Dashboard);
 }, DashboardSkeleton);
 const Channels = lazyPage(() => import("./pages/Channels").then((m) => m.Channels));
-const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds));
+const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds), GuildsSkeleton);
 const Forwarding = lazyPage(() => import("./pages/Forwarding").then((m) => m.Forwarding), ForwardingSkeleton);
 const Scraper = lazyPage(() => import("./pages/Scraper").then((m) => m.Scraper));
 const System = lazyPage(() => import("./pages/System").then((m) => m.System));
