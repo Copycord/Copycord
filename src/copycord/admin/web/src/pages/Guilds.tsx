@@ -4,7 +4,7 @@
 // Like the old page it waits until both Server and Client are connected.
 
 import { useCallback, useMemo, useState } from "react";
-import { Card, Input, Spinner } from "../components/ui";
+import { Card, Spinner } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useApi } from "../hooks/useApi";
 import { useStatusGate } from "../hooks/useStatusGate";
@@ -52,40 +52,45 @@ export function Guilds() {
   return (
     <>
       <StatusGate gate={gate}>
-        <Card className="shadow-card">
-          <header className="mb-1.5 flex flex-wrap items-center gap-3">
-            <h1 className="text-xl font-bold tracking-wide">Guilds</h1>
-            <div className="ml-auto flex flex-wrap items-center gap-2.5">
-              <Input
+        <Card className="mt-[18px]">
+          {/* .card-titlebar: the h2, then the search and the sort direction button (.titlebar-actions). */}
+          <header className="mb-1.5 block gap-3">
+            <h2 className="my-[0.83em] text-[24px] font-bold">Guilds</h2>
+            <span className="flex flex-wrap items-center gap-2.5">
+              <input
                 id="g-search"
                 type="text"
                 placeholder="Search guilds…"
                 aria-label="Search guilds"
                 value={query}
+                hidden={!booted}
                 onChange={(e) => setQuery(e.target.value)}
-                className="max-w-60"
+                className="w-[220px] max-w-[260px] rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[14px] text-[#e6e1ff] outline-none focus:border-primary"
               />
+              {/* .btn.btn-select */}
               <button
                 id="g-sortdir"
                 type="button"
                 aria-label="Toggle sort direction"
                 aria-pressed={dir === "desc"}
+                hidden={!booted}
                 onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))}
                 className={
-                  "min-h-[34px] cursor-pointer rounded-[10px] border border-border bg-[#140b26] px-2.5 py-2 text-[13px] " +
-                  "leading-none text-text outline-none hover:border-[#7c5cff] focus-visible:border-accent " +
-                  "focus-visible:shadow-[0_0_0_4px_rgba(167,139,250,0.18)]"
+                  "flex min-h-[34px] cursor-pointer items-center justify-center rounded-btn border border-border bg-control px-2.5 py-2 " +
+                  "text-[13px] leading-none font-semibold text-text outline-none hover:border-[#7c5cff] hover:shadow-[0_0_0_0.25px_#7c5cff] " +
+                  "focus-visible:border-accent focus-visible:shadow-[0_0_0_4px_rgba(167,139,250,0.18)]"
                 }
               >
                 {sortLabel(dir)}
               </button>
-            </div>
+            </span>
           </header>
 
           <div
             id="guilds-root"
             aria-live="polite"
-            className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4"
+            hidden={!booted}
+            className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4"
           >
             {guilds.map((g) => (
               <GuildCard key={g.id} guild={g} menuOpen={menu?.guild.id === g.id} onOpenMenu={openMenu} />
@@ -111,11 +116,9 @@ export function Guilds() {
             </div>
           ) : null}
 
-          {loaded && guilds.length === 0 ? (
-            <div id="guilds-empty" className="rounded-lg px-2.5 py-2 text-[0.9em] text-muted opacity-80">
-              No guilds found.
-            </div>
-          ) : null}
+          <div id="guilds-empty" hidden={!(loaded && guilds.length === 0)} className="text-[0.9em] text-muted opacity-80">
+            No guilds found.
+          </div>
         </Card>
       </StatusGate>
 
