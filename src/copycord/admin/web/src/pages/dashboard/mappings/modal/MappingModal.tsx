@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "../../../../components/ui";
-import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_OVERLAY, TipLabel } from "../../../../components/Modal";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_OVERLAY, TipLabel, useScrollLock } from "../../../../components/Modal";
 import type {
   DashboardMapping,
   MappingFormState,
@@ -91,6 +91,7 @@ function TextField(p: GuildFieldProps) {
 }
 
 export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalProps) {
+  useScrollLock(true);
   const notify = useNotify();
   const confirm = useSafeConfirm();
   const isEdit = mode === "edit";

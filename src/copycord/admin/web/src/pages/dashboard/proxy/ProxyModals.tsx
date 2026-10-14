@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ProxySettingKey, ProxyTestResult } from "../../../types/dashboard-proxy";
-import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE } from "../../../components/Modal";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE, useScrollLock } from "../../../components/Modal";
 import { GhostButton } from "../../system/buttons";
 import { PS_FIELD_INPUT } from "../parts";
 import { maskProxy, PS_DEFAULTS } from "./model";
@@ -21,6 +21,7 @@ interface ShellProps {
 }
 
 function Shell({ id, closeId, title, onClose, children }: ShellProps) {
+  useScrollLock(true);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {

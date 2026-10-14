@@ -4,7 +4,7 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE } from "../../../../components/Modal";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE, useScrollLock } from "../../../../components/Modal";
 import type { MappingSettings, MsgFeatureKey } from "../../../../types/dashboard-mappings";
 import { MSG_FEATURES, toBool } from "./model";
 import { Switch } from "./parts";
@@ -20,6 +20,7 @@ const MENTION = "cursor-default rounded-[3px] bg-[rgba(88,101,242,0.3)] px-[3px]
 const PLAIN = "text-[#dbdee1]";
 
 export function MsgFeaturesModal({ settings, onToggle, onClose }: Props) {
+  useScrollLock(true);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {

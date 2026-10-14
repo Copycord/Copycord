@@ -5,7 +5,7 @@
 
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE } from "../../../components/Modal";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE, useScrollLock } from "../../../components/Modal";
 import { cx } from "../../../components/ui";
 
 interface ShellProps {
@@ -24,6 +24,7 @@ interface ShellProps {
 }
 
 export function Shell({ id, closeId, titleId, title, onClose, cardClass, headerClass, titleClass, layer = 30, children }: ShellProps) {
+  useScrollLock(true);
   return createPortal(
     <div id={id} className={`modal show ${MODAL_OVERLAY}`} style={{ zIndex: layer }} aria-hidden="false">
       <div className={`modal-backdrop ${MODAL_BACKDROP}`} onMouseDown={onClose} />

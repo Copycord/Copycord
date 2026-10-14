@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE } from "../../components/Modal";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE, useScrollLock } from "../../components/Modal";
 import { Button, ChipInput, cx, Field, Input } from "../../components/ui";
 import { useFieldControl } from "../../components/ui/Field";
 import { useApi } from "../../hooks/useApi";
@@ -128,6 +128,7 @@ function GuildSelect({ value, onChange, children }: { value: string; onChange: (
 
 export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
   const open = request !== null;
+  useScrollLock(open);
   const notify = useNotify();
   const guilds = useApi<ClientGuildsResponse>(open ? CLIENT_GUILDS_URL : null);
   const [form, setForm] = useState<RuleForm>(EMPTY_FORM);

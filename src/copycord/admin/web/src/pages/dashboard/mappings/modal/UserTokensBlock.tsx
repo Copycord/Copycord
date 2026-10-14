@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../../../../lib/api";
 import { Button, cx } from "../../../../components/ui";
-import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY } from "../../../../components/Modal";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, useScrollLock } from "../../../../components/Modal";
 import type {
   BulkResponse,
   UserToken,
@@ -92,6 +92,7 @@ function ResultRow({ label, status, cls }: { label: string; status: string; cls:
 }
 
 function BulkModal({ mappingId, onClose, onChanged }: { mappingId: string; onClose: () => void; onChanged: () => void }) {
+  useScrollLock(true);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Status>({ text: "", kind: "" });

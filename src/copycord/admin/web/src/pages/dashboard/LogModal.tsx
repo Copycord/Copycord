@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "../../components/ui";
-import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_OVERLAY, MODAL_TITLE } from "../../components/Modal";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_OVERLAY, MODAL_TITLE, useScrollLock } from "../../components/Modal";
 import { logStream } from "../../lib/sse";
 import type { SseOptions } from "../../lib/sse";
 import type { LogStream } from "../../types/api";
@@ -26,6 +26,7 @@ export interface LogModalProps {
 }
 
 export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
+  useScrollLock(true);
   const notify = useNotify();
   const confirm = useSafeConfirm();
   const [lines, setLines] = useState<string[]>([]);

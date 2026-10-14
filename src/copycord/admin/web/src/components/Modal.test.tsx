@@ -65,3 +65,40 @@ describe("Modal", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
+
+describe("Modal scroll lock", () => {
+  function Pair({ a, b }: { a: boolean; b: boolean }) {
+    return (
+      <>
+        <Modal open={a} title="A" onClose={() => undefined}>
+          a
+        </Modal>
+        <Modal open={b} title="B" onClose={() => undefined}>
+          b
+        </Modal>
+      </>
+    );
+  }
+
+  it("hides body overflow while open and restores the previous value on close", () => {
+    document.body.style.overflow = "auto";
+    const view = render(<Pair a={false} b={false} />);
+    expect(document.body.style.overflow).toBe("auto");
+    view.rerender(<Pair a b={false} />);
+    expect(document.body.style.overflow).toBe("hidden");
+    view.rerender(<Pair a={false} b={false} />);
+    expect(document.body.style.overflow).toBe("auto");
+    view.unmount();
+    document.body.style.overflow = "";
+  });
+
+  it("stays locked while one of two open dialogs is still open", () => {
+    const view = render(<Pair a b />);
+    expect(document.body.style.overflow).toBe("hidden");
+    view.rerender(<Pair a={false} b />);
+    expect(document.body.style.overflow).toBe("hidden");
+    view.rerender(<Pair a={false} b={false} />);
+    expect(document.body.style.overflow).toBe("");
+    view.unmount();
+  });
+});

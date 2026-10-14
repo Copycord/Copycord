@@ -37,6 +37,27 @@ export interface ModalProps {
   closeId?: string;
 }
 
+// The old .body-lock-scroll / body.modal-open: the page behind an open dialog does not scroll.
+// Counted so closing the inner of two stacked dialogs keeps the lock; the last one restores
+// the overflow the body had before the first opened.
+let scrollLocks = 0;
+let overflowBeforeLock = "";
+
+export function useScrollLock(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    if (scrollLocks === 0) {
+      overflowBeforeLock = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    scrollLocks += 1;
+    return () => {
+      scrollLocks -= 1;
+      if (scrollLocks === 0) document.body.style.overflow = overflowBeforeLock;
+    };
+  }, [active]);
+}
+
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -57,6 +78,7 @@ export function Modal({
   const titleId = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
