@@ -49,7 +49,10 @@ from copycord.client.message_utils import (
 from copycord.common.websockets import WebsocketManager, AdminBus
 from copycord.client.helpers import ClientUiController, dump_message_debug
 from copycord.client.export_runners import (
+    _CURRENT_JOB,
     BackfillEngine,
+    BackfillJob,
+    BackfillJobCancelled,
     ExportMessagesRunner,
     DmHistoryExporter,
 )
@@ -157,6 +160,67 @@ class GatewayConnectTimeout(OSError):
     """The gateway did not come up in time."""
 
 
+def clone_messages_to_backfill_run(data: dict) -> dict:
+    """Translate the legacy clone_messages command into a backfill_run frame."""
+    data = data if isinstance(data, dict) else {}
+    chan_id = int(data.get("channel_id"))
+    rng = data.get("range") or {}
+    mode = (data.get("mode") or rng.get("mode") or "").lower()
+
+    after_iso = (
+        data.get("after_iso")
+        or data.get("since")
+        or (rng.get("value") if mode == "since" else None)
+    )
+    before_iso = (
+        data.get("before_iso")
+        or (rng.get("before") if mode in ("between", "range") else None)
+        or data.get("until")
+    )
+    _n = data.get("last_n") or (rng.get("value") if mode in ("last", "last_n") else None)
+    try:
+        last_n = int(_n) if _n is not None else None
+    except Exception:
+        last_n = None
+
+    after_id = data.get("after_id")
+    checkpoint = None
+    if data.get("resume"):
+        checkpoint = {"last_orig_message_id": str(after_id)} if after_id else {}
+
+    exclude_ids = [str(x) for x in (data.get("exclude_ids") or [])]
+    job_id = (
+        data.get("job_id")
+        or data.get("task_id")
+        or data.get("run_id")
+        or f"legacy-{chan_id}"
+    )
+    return {
+        "job_id": str(job_id),
+        "original_channel_id": str(chan_id),
+        "range": {
+            "mode": (
+                "last_n"
+                if last_n
+                else (
+                    "between"
+                    if (after_iso and before_iso)
+                    else ("since" if after_iso else "all")
+                )
+            ),
+            "since": after_iso,
+            "until": before_iso,
+            "last_n": last_n,
+        },
+        "exclude_ids": exclude_ids,
+        "checkpoint": checkpoint,
+        "ignore_cloned": bool(exclude_ids),
+        "mapping_id": data.get("mapping_id"),
+        "cloned_guild_id": data.get("cloned_guild_id"),
+        "original_guild_id": data.get("original_guild_id"),
+    }
+
+
 class ClientListener:
     def __init__(self):
         self.config = Config(logger=logger)
@@ -251,6 +315,7 @@ class ClientListener:
         self._bf_queued: set[int] = set()
         self._bf_worker_task: asyncio.Task | None = None
         self._bf_waiters: dict[int, asyncio.Event] = {}
+        self._bf_jobs: dict[str, BackfillJob] = {}
         self._bf_pull_gate = asyncio.Semaphore(1)
 
         loop = asyncio.get_event_loop()
@@ -439,45 +504,15 @@ class ClientListener:
             return {"ok": True}
 
         elif typ == "clone_messages":
-            chan_id = int(data.get("channel_id"))
-            rng = (data.get("range") or {}) if isinstance(data, dict) else {}
-            mode = (data.get("mode") or rng.get("mode") or "").lower()
-
-            after_iso = (
-                data.get("after_iso")
-                or data.get("since")
-                or (rng.get("value") if mode == "since" else None)
+            return await self._start_backfill_run(
+                clone_messages_to_backfill_run(data)
             )
-            before_iso = (
-                data.get("before_iso")
-                or (rng.get("before") if mode in ("between", "range") else None)
-                or data.get("until")
-            )
-            _n = data.get("last_n") or (
-                rng.get("value") if mode in ("last", "last_n") else None
-            )
-            try:
-                last_n = int(_n) if _n is not None else None
-            except Exception:
-                last_n = None
 
-            resume = bool(data.get("resume"))
-            after_id = data.get("after_id")
+        elif typ == "backfill_run":
+            return await self._start_backfill_run(data or {})
 
-            exclude_ids = data.get("exclude_ids")
-
-            params = {
-                "after_iso": after_iso,
-                "before_iso": before_iso,
-                "last_n": last_n,
-                "resume": resume,
-                "after_id": after_id,
-                "mapping_id": data.get("mapping_id"),
-                "cloned_guild_id": data.get("cloned_guild_id"),
-                "original_guild_id": data.get("original_guild_id"),
-                **({"exclude_ids": exclude_ids} if exclude_ids else {}),
-            }
-            return await self._enqueue_backfill(chan_id, params)
+        elif typ == "backfill_cancel":
+            return await self._cancel_backfill_job(str((data or {}).get("job_id")))
 
         elif typ == "backfill_done":
             data = msg.get("data") or {}
@@ -2371,16 +2406,27 @@ class ClientListener:
     async def _backfill_worker(self, worker_id: int):
         while True:
             chan_id, params = await self._bf_queue.get()
+            params = dict(params or {})
+            job: BackfillJob | None = params.pop("_job", None)
+            token = None
             try:
+                if job is not None and job.cancelled:
+                    continue
 
                 if chan_id in self._bf_active:
                     self._bf_queued.discard(chan_id)
+                    if job is not None:
+                        await self._end_backfill_job(job, ok=False, error="already running")
                     continue
 
                 self._bf_active.add(chan_id)
-                self._bf_active_meta[chan_id] = dict(params or {})
+                self._bf_active_meta[chan_id] = dict(params)
 
-                await self.backfill.run_channel(chan_id, **(params or {}))
+                if job is not None:
+                    await self._send_backfill_job(job, "running", 0)
+                    token = _CURRENT_JOB.set(job)
+
+                await self.backfill.run_channel(chan_id, **params)
 
                 await self.ws.send(
                     {
@@ -2388,11 +2434,18 @@ class ClientListener:
                         "data": {"channel_id": str(chan_id)},
                     }
                 )
+                if job is not None:
+                    await self._end_backfill_job(job, ok=job.error is None, error=job.error)
 
             except asyncio.CancelledError:
 
                 raise
-            except Exception:
+            except BackfillJobCancelled:
+                if job is not None:
+                    await self._end_backfill_job(job, ok=False, error="cancelled")
+            except Exception as e:
+                if job is not None:
+                    await self._end_backfill_job(job, ok=False, error=str(e) or type(e).__name__)
                 try:
                     logger.exception(
                         "[backfill] worker-%s failed for channel=%s", worker_id, chan_id
@@ -2404,22 +2457,103 @@ class ClientListener:
                         "[backfill] worker-%s failed for channel=%s", worker_id, chan_id
                     )
             finally:
+                if token is not None:
+                    _CURRENT_JOB.reset(token)
                 self._bf_queued.discard(chan_id)
                 self._bf_queue.task_done()
 
-    async def _enqueue_backfill(self, chan_id: int, params: dict) -> dict:
+    async def _enqueue_backfill(
+        self, chan_id: int, params: dict, job: BackfillJob | None = None
+    ) -> dict:
         await self._ensure_backfill_worker()
         if chan_id in self._bf_active or chan_id in self._bf_queued:
+            if job is not None and job.job_id not in self._bf_jobs:
+                await self._end_backfill_job(job, ok=False, error="already pending")
             return {
                 "ok": True,
                 "queued": True,
                 "position": None,
                 "note": "already pending",
             }
+        if job is not None:
+            self._bf_jobs[job.job_id] = job
+            params = {**params, "_job": job}
         await self._bf_queue.put((chan_id, params))
         self._bf_queued.add(chan_id)
         pos = self._bf_queue.qsize()
+        if job is not None:
+            await self._send_backfill_job(job, "queued", pos)
         return {"ok": True, "queued": True, "position": pos}
+
+    async def _start_backfill_run(self, run: dict) -> dict:
+        """Queue one backfill_run {job_id, original_channel_id, range, exclude_ids, checkpoint, ignore_cloned}."""
+        chan_id = int(run.get("original_channel_id"))
+        rng = run.get("range") or {}
+        checkpoint = run.get("checkpoint")
+        exclude_ids = [str(x) for x in (run.get("exclude_ids") or [])]
+        try:
+            last_n = int(rng["last_n"]) if rng.get("last_n") is not None else None
+        except Exception:
+            last_n = None
+        params = {
+            "after_iso": rng.get("since"),
+            "before_iso": rng.get("until"),
+            "last_n": last_n,
+            "resume": checkpoint is not None,
+            "after_id": (checkpoint or {}).get("last_orig_message_id"),
+            "mapping_id": run.get("mapping_id"),
+            "cloned_guild_id": run.get("cloned_guild_id"),
+            "original_guild_id": run.get("original_guild_id"),
+            **({"exclude_ids": exclude_ids} if exclude_ids else {}),
+        }
+        job = BackfillJob(run.get("job_id"), chan_id, self.ws.send)
+        return await self._enqueue_backfill(chan_id, params, job=job)
+
+    async def _cancel_backfill_job(self, job_id: str) -> dict:
+        """Drop a queued job, or flag a running one to stop at its next page."""
+        job = self._bf_jobs.get(job_id)
+        if job is None:
+            return {"ok": False, "job_id": job_id, "error": "unknown job"}
+        job.cancelled = True
+        pending = getattr(self._bf_queue, "_queue", None)
+        for item in list(pending or []):
+            if isinstance(item[1], dict) and item[1].get("_job") is job:
+                pending.remove(item)
+                self._bf_queue.task_done()
+                self._bf_queued.discard(item[0])
+                await self._end_backfill_job(job, ok=False, error="cancelled")
+                return {"ok": True, "job_id": job_id, "state": "queued"}
+        return {"ok": True, "job_id": job_id, "state": "running"}
+
+    async def _send_backfill_job(self, job: BackfillJob, state: str, position) -> None:
+        with contextlib.suppress(Exception):
+            await self.ws.send(
+                {
+                    "type": "backfill_job",
+                    "data": {
+                        "job_id": job.job_id,
+                        "original_channel_id": job.original_channel_id,
+                        "state": state,
+                        "queue_position": position,
+                    },
+                }
+            )
+
+    async def _end_backfill_job(self, job: BackfillJob, *, ok: bool, error) -> None:
+        if self._bf_jobs.get(job.job_id) is job:
+            del self._bf_jobs[job.job_id]
+        with contextlib.suppress(Exception):
+            await self.ws.send(
+                {
+                    "type": "backfill_job_end",
+                    "data": {
+                        "job_id": job.job_id,
+                        "ok": bool(ok),
+                        "error": None if ok else error,
+                        "last_orig_message_id": job.last_orig_message_id,
+                    },
+                }
+            )
 
     async def _shutdown(self):
         """Shut down the client."""

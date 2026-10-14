@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import json
 import os
 import shutil
@@ -1311,6 +1313,64 @@ class DmHistoryExporter:
         return dm, user
 
 
+_CURRENT_JOB: contextvars.ContextVar = contextvars.ContextVar(
+    "backfill_job", default=None
+)
+
+
+class BackfillJobCancelled(Exception):
+    """Raised at the next page (or message) once the running job is cancelled."""
+
+
+class BackfillJob:
+    """One backfill_run on the client: cancel flag, outcome and the only backfill_job_progress emitter."""
+
+    PROGRESS_MIN_INTERVAL = 0.5
+
+    def __init__(self, job_id, original_channel_id, send, *, clock=time.monotonic):
+        self.job_id = str(job_id)
+        self.original_channel_id = str(original_channel_id)
+        self._send = send
+        self._clock = clock
+        self.cancelled = False
+        self.error: str | None = None
+        self.pulled = 0
+        self.total_estimate: int | None = None
+        self.last_orig_message_id: str | None = None
+        self._last_progress_at: float | None = None
+
+    def check_cancelled(self) -> None:
+        if self.cancelled:
+            raise BackfillJobCancelled(self.job_id)
+
+    async def progress(self, *, pulled=None, total=None, last_id=None, force=False):
+        """Record progress; send at most every PROGRESS_MIN_INTERVAL per job, always when forced."""
+        if pulled is not None:
+            self.pulled = int(pulled)
+        if total is not None:
+            self.total_estimate = int(total)
+        if last_id is not None:
+            self.last_orig_message_id = str(last_id)
+        now = self._clock()
+        if (
+            not force
+            and self._last_progress_at is not None
+            and (now - self._last_progress_at) < self.PROGRESS_MIN_INTERVAL
+        ):
+            return
+        self._last_progress_at = now
+        await self._send(
+            {
+                "type": "backfill_job_progress",
+                "data": {
+                    "job_id": self.job_id,
+                    "pulled": self.pulled,
+                    "total_estimate": self.total_estimate,
+                },
+            }
+        )
+
+
 class BackfillEngine:
     """Pulls a channel's message history for backfill."""
 
@@ -1352,6 +1412,7 @@ class BackfillEngine:
         exclude_ids: list | None = None,
     ):
         """Backfill a single channel."""
+        job: BackfillJob | None = _CURRENT_JOB.get()
         loop = asyncio.get_running_loop()
         t0 = loop.time()
         sent = 0
@@ -1428,6 +1489,8 @@ class BackfillEngine:
                 "[backfill] ⛔ no accessible guild found for channel=%s",
                 original_channel_id,
             )
+            if job is not None:
+                job.error = "no accessible guild"
             await self._finish_progress_only(
                 original_channel_id,
                 sent,
@@ -1455,6 +1518,8 @@ class BackfillEngine:
                     original_channel_id,
                     e,
                 )
+                if job is not None:
+                    job.error = f"cannot fetch channel: {e}"
                 await self._finish_progress_only(
                     original_channel_id,
                     sent,
@@ -1528,6 +1593,9 @@ class BackfillEngine:
 
         async def _emit_msg(m):
             nonlocal sent, skipped, excluded, last_ping, last_log
+
+            if job is not None:
+                job.check_cancelled()
 
             if _exclude_set and str(getattr(m, "id", None)) in _exclude_set:
                 excluded += 1
@@ -1716,6 +1784,8 @@ class BackfillEngine:
 
             await self._safe_ws_send(payload)
             sent += 1
+            if job is not None:
+                await job.progress(pulled=sent, last_id=getattr(m, "id", None))
             await asyncio.sleep(0.02)
 
             now = loop.time()
@@ -1848,6 +1918,8 @@ class BackfillEngine:
                         "original_guild_id": original_guild_id,
                     }
                 )
+                if job is not None:
+                    await job.progress(total=total)
 
                 async for th in self._iter_all_threads(ch):
                     try:
@@ -1934,6 +2006,8 @@ class BackfillEngine:
                             },
                         }
                     )
+                    if job is not None:
+                        await job.progress(total=combined_total)
 
                     for m in reversed(buf):
                         await _emit_msg(m)
@@ -2018,6 +2092,8 @@ class BackfillEngine:
                             },
                         }
                     )
+                    if job is not None:
+                        await job.progress(total=combined_total)
 
                     for m in parent_buf:
                         await _emit_msg(m)
@@ -2043,13 +2119,22 @@ class BackfillEngine:
                                 e,
                             )
 
+        except BackfillJobCancelled:
+            self.logger.info(
+                "[backfill] cancelled | channel=%s sent=%d", original_channel_id, sent
+            )
+            raise
         except Forbidden as e:
             self.logger.debug(
                 "[backfill] history forbidden | channel=%s err=%s",
                 original_channel_id,
                 e,
             )
+            if job is not None:
+                job.error = f"history forbidden: {e}"
         except HTTPException as e:
+            if job is not None:
+                job.error = f"HTTP error: {e}"
             if self._should_retry_http(e):
                 self.logger.warning(
                     "[backfill] HTTP 5xx bubbled | channel=%s err=%s",
@@ -2068,7 +2153,12 @@ class BackfillEngine:
                 original_channel_id,
                 e,
             )
+            if job is not None:
+                job.error = str(e) or type(e).__name__
         finally:
+            if job is not None:
+                with contextlib.suppress(Exception):
+                    await job.progress(pulled=sent, force=True)
             try:
                 await self._safe_ws_send(
                     {
@@ -2314,6 +2404,9 @@ class BackfillEngine:
         used_initial_after_obj = False
 
         while True:
+            job = _CURRENT_JOB.get()
+            if job is not None:
+                job.check_cancelled()
             limit = 100 if remaining is None else min(remaining, 100)
             kw = {"limit": limit, "oldest_first": oldest_first}
 
