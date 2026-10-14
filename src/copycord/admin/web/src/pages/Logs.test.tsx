@@ -119,7 +119,7 @@ describe("Logs page", () => {
     await loaded();
     const select = screen.getByLabelText("Filter by type");
     await waitFor(() =>
-      expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      expect(within(select).getAllByRole("option", { hidden: true }).map((o) => o.textContent)).toEqual([
         "All Events",
         "Channel Created",
         "Channel Deleted",

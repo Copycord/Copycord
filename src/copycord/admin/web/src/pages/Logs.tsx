@@ -19,6 +19,7 @@ import type {
   EventLogTypesResponse,
 } from "../types/logs";
 import { LogsIcon } from "./logs/icons";
+import { ToolbarSelect } from "./channels/ToolbarSelect";
 import { COLS, LogRow } from "./logs/LogRow";
 import {
   DEFAULT_SORT,
@@ -46,7 +47,7 @@ function useOptional<T>(hook: () => T): T | null {
 const CONTROL =
   "rounded-lg border border-border bg-[rgba(20,10,40,0.6)] text-[13px] text-text outline-none transition-colors focus:border-accent";
 const ICON_BTN =
-  "inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-border bg-transparent text-muted " +
+  "inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-border bg-transparent px-1.5 py-px text-muted " +
   "transition-colors disabled:cursor-wait disabled:opacity-55 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none";
 const ICON_BTN_DANGER =
   "enabled:hover:border-[rgba(239,68,68,0.3)] enabled:hover:bg-[rgba(239,68,68,0.1)] enabled:hover:text-[#f87171]";
@@ -55,14 +56,14 @@ const PILL_BTN =
   "disabled:cursor-wait disabled:opacity-55 outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 
 const HEADERS: Array<{ key: SortColumn; label: string; className: string }> = [
-  { key: "created_at", label: "Timestamp", className: "w-[200px] max-md:w-[150px]" },
+  { key: "created_at", label: "Timestamp", className: "w-[200px] min-w-[200px] max-md:w-[130px]" },
   { key: "event_type", label: "Type", className: "w-[160px]" },
   { key: "guild_name", label: "Guild", className: "w-[140px] max-md:hidden" },
   { key: "details", label: "Details", className: "" },
 ];
 
 // Padding and alignment are per header so no two utilities fight over one property.
-const TH = "border-b border-border py-2.5 text-[11px] font-semibold tracking-[0.5px] whitespace-nowrap text-muted uppercase";
+const TH = "relative border-b border-b-border py-2.5 text-[11px] leading-[normal] font-semibold tracking-[0.5px] whitespace-nowrap text-muted uppercase";
 
 export function Logs() {
   const toast = useOptional(useToast);
@@ -128,7 +129,7 @@ export function Logs() {
     () => [...(typesApi.data?.types ?? []), ...(list.data?.types ?? [])],
     [typesApi.data, list.data],
   );
-  const options = useMemo(() => typeOptions(allTypes), [allTypes]);
+  const typeChoices = useMemo(() => [{ value: "", label: "All Events" }, ...typeOptions(allTypes)], [allTypes]);
 
   // The selected type disappears once its last log is deleted: fall back to all events.
   useEffect(() => {
@@ -213,17 +214,17 @@ export function Logs() {
   const firstLoad = list.loading && !list.data;
   const empty = !firstLoad && !list.error && logs.length === 0;
 
-  // On phones the extra side padding gives the 28px inset of the old .container, and the
-  // table height leaves room for the header and toolbar so the page fits the screen.
+  // The table height leaves room for the header and toolbar so the page fits the screen. On phones the
+  // table keeps the old fixed layout without Guild, so Details runs past the edge and the wrap scrolls.
   return (
     <section
       id="logs-root"
       ref={rootRef}
       aria-label="Event logs"
-      className="w-full scroll-mt-4 max-md:px-3"
+      className="w-full scroll-mt-4"
     >
       <h1 className="sr-only">Logs</h1>
-      <div className="mt-3 mb-3 flex items-center gap-3 max-md:mt-1">
+      <div className="my-3 flex items-center gap-3">
         <h2 className="m-0 text-[22px] font-bold text-text">Event Logs</h2>
       </div>
 
@@ -233,7 +234,7 @@ export function Logs() {
           "bg-linear-135 from-[rgba(27,16,48,0.6)] to-[rgba(20,10,40,0.4)] max-md:flex-col max-md:items-stretch",
         )}
       >
-        <div className="flex flex-wrap items-center gap-2.5 max-md:flex-col max-md:items-stretch">
+        <div className="flex flex-wrap items-center gap-2.5 max-md:flex-col">
           <div className="relative flex items-center">
             <LogsIcon name="search" size={15} className="pointer-events-none absolute left-2.5 text-muted" />
             <input
@@ -247,28 +248,21 @@ export function Logs() {
               onChange={(e) => setSearchInput(e.target.value)}
             />
           </div>
-          <select
-            id="logs-filter-type"
-            aria-label="Filter by type"
-            className={cx(CONTROL, "w-[300px] cursor-pointer px-3 py-[7px] max-md:w-full")}
-            value={type}
-            onChange={(e) => {
-              setType(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="" className="bg-card-solid">
-              All Events
-            </option>
-            {options.map((o) => (
-              <option key={o.value} value={o.value} className="bg-card-solid">
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <div className="w-[300px] min-w-[300px] [&_select]:w-[300px] [&_select]:max-w-[300px] [&>span]:block">
+            <ToolbarSelect
+              id="logs-filter-type"
+              label="Filter by type"
+              value={type}
+              options={typeChoices}
+              onChange={(v) => {
+                setType(v);
+                setPage(1);
+              }}
+            />
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-3">
           <span id="logs-count" className="text-xs whitespace-nowrap text-muted" aria-live="polite">
             {list.data ? countText(page, logs.length, total) : ""}
           </span>
@@ -321,12 +315,12 @@ export function Logs() {
       <div
         className={cx(
           "h-[calc(100vh-280px)] min-h-[400px] overflow-auto rounded-xl border border-border",
-          "bg-linear-to-b from-[rgba(27,16,48,0.5)] to-[rgba(15,8,30,0.6)] max-md:h-[calc(100vh-340px)] max-md:min-h-[300px]",
+          "bg-linear-to-b from-[rgba(27,16,48,0.5)] to-[rgba(15,8,30,0.6)] max-md:h-[calc(100vh-320px)] max-md:min-h-[300px]",
         )}
       >
-        <table id="logs-table" className="w-full table-fixed border-collapse max-md:min-w-[560px]" aria-busy={list.loading || undefined}>
+        <table id="logs-table" className="mt-2 w-full table-fixed border-collapse border-[gray]" aria-busy={list.loading || undefined}>
           <thead className="sticky top-0 z-[2]">
-            <tr className="bg-[rgba(20,10,40,0.95)] backdrop-blur-sm">
+            <tr className="border-[gray] bg-[rgba(20,10,40,0.95)] backdrop-blur-sm">
               {HEADERS.map((h) => {
                 const active = sort.column === h.key;
                 const touched = sort !== DEFAULT_SORT;
@@ -356,7 +350,7 @@ export function Logs() {
                   </th>
                 );
               })}
-              <th scope="col" className={cx(TH, "w-11 px-1")}>
+              <th scope="col" className={cx(TH, "w-11 px-3.5 text-center")}>
                 <span className="sr-only">Actions</span>
               </th>
             </tr>
