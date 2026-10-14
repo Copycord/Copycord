@@ -38,6 +38,9 @@ function renderAt(path: string) {
   );
 }
 
+/** The native select a ToolbarSelect keeps in the DOM, by filter key. */
+const sel = (key: string) => document.getElementById(`tasks-filter-${key}`) as HTMLSelectElement;
+
 const where = () => new URLSearchParams(screen.getByLabelText("where").textContent ?? "");
 
 afterEach(() => {
@@ -61,10 +64,10 @@ describe("filtersFromParams", () => {
 describe("RunFilters", () => {
   it("round trips the dropdowns through the URL and resets the page", () => {
     renderAt("/tasks?page=4&actor=admin");
-    expect(screen.getByRole("combobox", { name: "Actor", hidden: true })).toHaveValue("admin");
-    fireEvent.change(screen.getByRole("combobox", { name: "Status", hidden: true }), { target: { value: "failed" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Mapping", hidden: true }), { target: { value: "m1" } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Task type", hidden: true }), { target: { value: "backfill_channels" } });
+    expect(sel("actor")).toHaveValue("admin");
+    fireEvent.change(sel("status"), { target: { value: "failed" } });
+    fireEvent.change(sel("context"), { target: { value: "m1" } });
+    fireEvent.change(sel("type"), { target: { value: "backfill_channels" } });
     expect(Object.fromEntries(where())).toEqual({ actor: "admin", status: "failed", context: "m1", type: "backfill_channels" });
 
     fireEvent.click(screen.getByRole("button", { name: "next" }));
@@ -77,7 +80,7 @@ describe("RunFilters", () => {
 
   it("keeps a URL value the choices do not list", () => {
     renderAt("/tasks?actor=ghost");
-    expect(screen.getByRole("combobox", { name: "Actor", hidden: true })).toHaveValue("ghost");
+    expect(sel("actor")).toHaveValue("ghost");
   });
 
   it("debounces the search 300 ms before writing ?q=", () => {

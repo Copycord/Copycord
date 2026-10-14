@@ -65,6 +65,9 @@ function serve(runs: TaskRun[], opts: { total?: number; handle?: Handler } = {})
   return fn;
 }
 
+/** The native select a ToolbarSelect keeps in the DOM, by filter key. */
+const sel = (key: string) => document.getElementById(`tasks-filter-${key}`) as HTMLSelectElement;
+
 /** The list URLs fetched so far. */
 function listCalls(fn: ReturnType<typeof serve>): string[] {
   return fn.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith("/api/tasks/runs?"));
@@ -148,7 +151,7 @@ describe("Tasks page", () => {
     expect(Object.fromEntries(first)).toMatchObject({ status: "failed", actor: "admin", q: "general", context: "m1", page: "2" });
     expect(screen.getByRole("searchbox", { name: "Search runs" })).toHaveValue("general");
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Actor", hidden: true }), { target: { value: "bot" } });
+    fireEvent.change(sel("actor"), { target: { value: "bot" } });
     await waitFor(() => expect(listCalls(fn).at(-1)).toContain("actor=bot"));
     // A filter change goes back to page 1.
     expect(listCalls(fn).at(-1)).toContain("page=1");
