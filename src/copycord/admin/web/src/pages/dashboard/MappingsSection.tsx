@@ -9,6 +9,7 @@ import type { DashboardMapping } from "../../types/dashboard-mappings";
 import { useNotify, useSafeConfirm } from "../system/providers";
 import { MappingCard } from "./mappings/MappingCard";
 import { NewMappingIcon } from "./mappings/icons";
+import { CARD, Chevron, DocLink, SUMMARY, SUMMARY_TITLE } from "./parts";
 import {
   deleteBody,
   deleteMapping,
@@ -24,6 +25,8 @@ export interface MappingsSectionProps {
   /** A bot is running; the cards are locked like the old setGuildCardsLocked. */
   locked?: boolean;
 }
+
+const DOCS_URL = "https://copycord.github.io/Copycord/docs/configuration/cloning-options";
 
 const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 
@@ -80,71 +83,75 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
   const shown = filterMappings(mappings, query);
 
   return (
-    <details
-      id="guild-config-card"
-      open
-      className="rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text"
-    >
-      <summary className="mb-3 cursor-pointer list-none">
-        <h3 className="inline text-base font-semibold">Cloning Configuration</h3>
+    <details id="guild-config-card" open className={CARD}>
+      <summary className={SUMMARY}>
+        <h3 className={SUMMARY_TITLE}>Cloning Configuration</h3>
+        <DocLink href={DOCS_URL} />
+        <Chevron />
       </summary>
 
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <p className="m-0 max-w-[480px] min-w-[200px] flex-1 text-xs leading-[1.4] text-muted opacity-90">
-          Map a source server to a target server to enable cloning for that pair
-        </p>
-        <input
-          id="mappingSearchInput"
-          type="text"
-          placeholder="Search mappings…"
-          aria-label="Search mappings"
-          autoComplete="off"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              setQuery("");
-              e.currentTarget.blur();
-            }
-          }}
-          className="min-h-9 w-full max-w-[260px] rounded-control border border-border bg-white/4 px-3 py-1.5 text-sm text-text outline-none placeholder:text-muted focus:border-accent"
-        />
-      </div>
+      <div className="mt-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="m-0 max-w-[480px] min-w-[200px] flex-[1_1_auto] text-xs leading-[1.4] text-muted opacity-90">
+            Map a source server to a target server to enable cloning for that pair
+          </p>
+          <div className="ml-auto">
+            <input
+              id="mappingSearchInput"
+              type="text"
+              placeholder="Search mappings…"
+              aria-label="Search mappings"
+              autoComplete="off"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setQuery("");
+                  e.currentTarget.blur();
+                }
+              }}
+              className="ml-0 inline-block min-w-[220px] rounded-lg border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[13.3333px] text-[#e6e1ff] caret-[#7c5cff] outline-none transition placeholder:text-[#e6e1ff]/55 focus-visible:border-[#7c5cff]"
+            />
+          </div>
+        </div>
 
-      <div
-        id="guild-mapping-list"
-        className="guild-mapping-list grid max-h-80 min-h-[180px] grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 overflow-y-auto py-2 pr-1 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] sm:gap-4"
-      >
-        <button
-          id="new-mapping-card"
-          type="button"
-          aria-label="Add new mapping"
-          title="Add new mapping"
-          onClick={() => openMappingModal()}
-          className={cx(
-            "guild-card guild-card--new flex min-h-[120px] cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-white/2 p-4 text-muted transition",
-            "hover:-translate-y-0.5 hover:border-accent hover:bg-accent/8 hover:text-text focus:border-accent focus:bg-accent/8 focus:outline-none",
-            locked && "locked pointer-events-none opacity-50 grayscale-[0.4]",
-          )}
+        <div
+          id="guild-mapping-list"
+          className="guild-mapping-list mt-4 grid max-h-80 min-h-[180px] grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4 overflow-y-auto py-2 pr-1 max-[600px]:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] max-[600px]:gap-3"
         >
-          <span className="new-card-plus text-accent">
-            <NewMappingIcon />
-          </span>
-        </button>
-        {shown.map((m) => (
-          <MappingCard
-            key={m.mapping_id}
-            mapping={m}
-            locked={locked}
-            busy={busyId === m.mapping_id}
-            onEdit={openMappingModal}
-            onFilters={openFilters}
-            onToggle={(x) => void toggle(x)}
-            onClone={(x) => openMappingModal(x, { mode: "clone" })}
-            onDelete={(x) => void remove(x)}
-          />
-        ))}
+          <button
+            id="new-mapping-card"
+            type="button"
+            aria-label="Add new mapping"
+            title="Add new mapping"
+            onClick={() => openMappingModal()}
+            className={cx(
+              "guild-card guild-card--new group/new relative flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-[rgba(255,255,255,0.02)] p-4 text-left text-muted transition max-[600px]:min-h-[120px] max-[600px]:p-3.5",
+              "hover:-translate-y-0.5 hover:border-accent hover:bg-accent/8 hover:text-text focus:border-accent focus:bg-accent/8 focus:outline-none",
+              locked && "locked pointer-events-none opacity-50 grayscale-[0.4]",
+            )}
+          >
+            <span className="new-card-inner flex flex-col items-center text-center leading-none select-none">
+              <span className="new-card-plus leading-[0] text-accent select-none group-hover/new:text-text group-focus/new:text-text">
+                <NewMappingIcon />
+              </span>
+            </span>
+          </button>
+          {shown.map((m) => (
+            <MappingCard
+              key={m.mapping_id}
+              mapping={m}
+              locked={locked}
+              busy={busyId === m.mapping_id}
+              onEdit={openMappingModal}
+              onFilters={openFilters}
+              onToggle={(x) => void toggle(x)}
+              onClone={(x) => openMappingModal(x, { mode: "clone" })}
+              onDelete={(x) => void remove(x)}
+            />
+          ))}
+        </div>
       </div>
       <MappingModalHost onSaved={refresh} />
     </details>

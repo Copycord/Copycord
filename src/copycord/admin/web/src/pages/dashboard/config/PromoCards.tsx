@@ -6,12 +6,14 @@ import { cx } from "../../../components/ui";
 import { PROMO_LINKS } from "./model";
 
 const CARD =
-  "group relative flex cursor-pointer items-center gap-3.5 overflow-hidden rounded-[14px] border border-white/8 " +
-  "bg-linear-to-b from-white/4 to-white/2 px-[18px] py-4 text-text no-underline shadow-[0_8px_24px_rgba(0,0,0,0.25)] " +
-  "transition duration-200 hover:-translate-y-0.5 hover:border-[rgba(214,188,250,0.35)] " +
-  "hover:shadow-[0_12px_28px_rgba(0,0,0,0.32)] focus-visible:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none";
+  "group relative flex cursor-pointer items-center gap-3.5 overflow-hidden rounded-[14px] border border-[rgba(255,255,255,0.08)] " +
+  "bg-[linear-gradient(rgba(255,255,255,0.04),rgba(255,255,255,0.02))] px-[18px] py-4 text-inherit no-underline " +
+  "[box-shadow:0_8px_24px_rgba(0,0,0,0.25)] transition duration-200 outline-none " +
+  "hover:-translate-y-0.5 hover:border-[rgba(214,188,250,0.35)] hover:[box-shadow:0_12px_28px_rgba(0,0,0,0.32)] " +
+  "focus-visible:-translate-y-0.5 focus-visible:border-[rgba(214,188,250,0.35)] focus-visible:[box-shadow:0_12px_28px_rgba(0,0,0,0.32)]";
 
-const ICON = "relative grid size-[46px] flex-none place-items-center rounded-full text-white shadow-[inset_0_0_1px_rgba(255,255,255,0.35)]";
+const ICON =
+  "relative grid size-[46px] flex-none place-items-center rounded-[9999px] text-white [box-shadow:inset_0_0_1px_rgba(255,255,255,0.35)]";
 
 interface PromoProps {
   className: string;
@@ -30,7 +32,7 @@ function Promo({ className, href, title, sub, icon, iconClass, ariaLabel }: Prom
         {icon}
       </span>
       <span className="grid gap-0.5">
-        <span className="font-semibold leading-tight">{title}</span>
+        <span className="font-semibold leading-[1.15]">{title}</span>
         <span className="text-[0.92rem] opacity-80">{sub}</span>
       </span>
     </a>
@@ -53,7 +55,7 @@ const svg = (size: number, d: string) => (
 
 export function PromoCards() {
   return (
-    <section className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4" aria-label="Quick actions">
+    <section className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4" aria-label="Quick actions">
       <Promo
         className="promo-star"
         href={PROMO_LINKS.github}
@@ -63,8 +65,16 @@ export function PromoCards() {
         icon={
           <>
             {svg(22, GITHUB)}
-            <span className="absolute -right-1 -bottom-1 grid size-[18px] place-items-center rounded-full bg-[#ffd54f] text-[#3b2f00]">
-              {svg(12, STAR)}
+            <span className="promo-badge badge-star pointer-events-none absolute -top-[3px] -right-[3px] z-1">
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                aria-hidden="true"
+                className="block overflow-visible text-[#ffd54f] drop-shadow-[0_0_6px_rgba(255,213,79,0.55)]"
+              >
+                <path d={STAR} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+              </svg>
             </span>
           </>
         }

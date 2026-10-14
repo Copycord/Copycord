@@ -26,15 +26,21 @@ export interface DashboardProps {
 export function Dashboard({ WebSocketImpl, EventSourceImpl }: DashboardProps = {}) {
   const [logs, setLogs] = useState<LogStream | null>(null);
   const [running, setRunning] = useState(false);
+  const [startBlocked, setStartBlocked] = useState<string | null>(null);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col">
       {/* The old page has no visible title; this one is for screen readers and the shell test. */}
       <h1 className="sr-only">Configuration</h1>
       <UpdateNotice />
       <PromoCards />
-      <BotsPanel onViewLogs={setLogs} onRunningChange={setRunning} WebSocketImpl={WebSocketImpl} />
-      <GlobalConfigSection />
+      <BotsPanel
+        onViewLogs={setLogs}
+        onRunningChange={setRunning}
+        startBlocked={startBlocked}
+        WebSocketImpl={WebSocketImpl}
+      />
+      <GlobalConfigSection onStartBlockedChange={setStartBlocked} />
       <MappingsSection locked={running} />
       <NotificationsSection />
       <SyncSettingsSection />

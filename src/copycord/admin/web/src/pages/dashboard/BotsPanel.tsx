@@ -3,14 +3,14 @@
 // on load and after Start/Stop, then from the status pushes on /ws/ui.
 
 import { useCallback, useEffect, useState } from "react";
-import { Badge, cx } from "../../components/ui";
+import { Spinner, cx } from "../../components/ui";
 import { useWsMessages } from "../../hooks/useWsMessages";
 import type { UseWsOptions } from "../../hooks/useWsMessages";
 import { api } from "../../lib/api";
 import type { LogStream } from "../../types/api";
 import type { BotRole, BotStatuses, StatusResponse } from "../../types/dashboard";
-import { GhostButton } from "../system/buttons";
 import { useNotify } from "../system/providers";
+import { GHOST, GHOST_DISABLED } from "./parts";
 import {
   anyRunning,
   displayStatus,
@@ -28,8 +28,14 @@ const ROLES: Array<{ role: BotRole; label: string }> = [
   { role: "client", label: "Client" },
 ];
 
-const HEAD = "px-2 py-2 text-left font-semibold text-accent";
-const CELL = "border-t border-border px-2 py-2 align-middle";
+// The old .runtime-table: fixed layout, 110px State and 120px Uptime columns,
+// muted 0.9rem headers, a rule under every row, centered cells after the first.
+const HEAD = "border-b border-b-border px-3 py-2 align-middle text-[0.9rem] font-medium whitespace-nowrap text-muted";
+const CELL = "border-b border-b-border px-3 py-2 align-middle text-[0.95rem] whitespace-nowrap";
+
+// The old .runtime-table .badge with .badge-ok / .badge-stop.
+const STATE =
+  "inline-block rounded-[12px] border border-border px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
 
 export interface BotsPanelProps {
   onViewLogs: (which: LogStream) => void;
@@ -37,9 +43,11 @@ export interface BotsPanelProps {
   onRunningChange?: (running: boolean) => void;
   /** For tests. */
   WebSocketImpl?: UseWsOptions["WebSocketImpl"];
+  /** Why Start is off (missing or rejected tokens), like the old updateStartButtonOnly; null when it may start. */
+  startBlocked?: string | null;
 }
 
-export function BotsPanel({ onViewLogs, onRunningChange, WebSocketImpl }: BotsPanelProps) {
+export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, WebSocketImpl }: BotsPanelProps) {
   const notify = useNotify();
   const [statuses, setStatuses] = useState<BotStatuses>(EMPTY_STATUSES);
   const [busy, setBusy] = useState(false);
@@ -100,18 +108,18 @@ export function BotsPanel({ onViewLogs, onRunningChange, WebSocketImpl }: BotsPa
   };
 
   return (
-    <section className="rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text">
-      <header className="mb-3">
-        <h2 className="text-base font-semibold">Bots</h2>
+    <section className="mt-[18px] rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text">
+      <header>
+        <h2 className="my-[0.83em] text-[24px] leading-normal font-bold">Bots</h2>
       </header>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
+      <div className="w-full overflow-x-hidden">
+        <table className="mt-2 w-full table-fixed border-collapse border-[#808080] text-left [&_tr]:border-[#808080]">
           <thead>
             <tr>
-              <th className={HEAD}>Component</th>
-              <th className={HEAD}>State</th>
-              <th className={HEAD}>Uptime</th>
-              <th className={cx(HEAD, "w-full")}>Status</th>
+              <th className={cx(HEAD, "text-left")}>Component</th>
+              <th className={cx(HEAD, "w-[110px] text-center")}>State</th>
+              <th className={cx(HEAD, "w-[120px] text-center")}>Uptime</th>
+              <th className={cx(HEAD, "text-center")}>Status</th>
             </tr>
           </thead>
           <tbody id="runtime-body">
@@ -120,18 +128,21 @@ export function BotsPanel({ onViewLogs, onRunningChange, WebSocketImpl }: BotsPa
               const note = displayStatus(s.status);
               return (
                 <tr key={role}>
-                  <td className={CELL}>{label}</td>
-                  <td className={CELL}>
-                    <span id={`${role}-state`}>
-                      <Badge tone={s.running ? "good" : "bad"}>{s.running ? "running" : "stopped"}</Badge>
+                  <td className={cx(CELL, "text-left")}>{label}</td>
+                  <td className={cx(CELL, "text-center")}>
+                    <span
+                      id={`${role}-state`}
+                      className={cx(STATE, s.running ? "bg-[#183a2e] text-[#baf7d0]" : "bg-[#3a1c20] text-[#ffc5cf]")}
+                    >
+                      {s.running ? "running" : "stopped"}
                     </span>
                   </td>
-                  <td id={`${role}-uptime`} className={cx(CELL, "whitespace-nowrap")}>
+                  <td id={`${role}-uptime`} className={cx(CELL, "text-center")}>
                     {s.running && s.uptime_sec != null
                       ? formatUptime(s.uptime_sec + Math.max(0, Math.floor((now - stamps[role]) / 1000)))
                       : ""}
                   </td>
-                  <td className={cx(CELL, "max-w-0")}>
+                  <td className={cx(CELL, "text-center")}>
                     <span
                       id={`${role}-status`}
                       title={note}
@@ -139,7 +150,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, WebSocketImpl }: BotsPa
                       tabIndex={note ? 0 : -1}
                       onClick={() => setExpanded((x) => ({ ...x, [role]: !x[role] }))}
                       className={cx(
-                        "block cursor-pointer overflow-hidden text-ellipsis text-muted",
+                        "inline-block max-w-[200px] cursor-pointer overflow-hidden rounded-[20px] bg-[rgba(255,255,255,0.06)] px-2.5 py-[3px] align-middle text-[11px] font-medium text-ellipsis text-muted empty:hidden",
                         expanded[role] ? "whitespace-normal" : "whitespace-nowrap",
                       )}
                     >
@@ -153,26 +164,35 @@ export function BotsPanel({ onViewLogs, onRunningChange, WebSocketImpl }: BotsPa
         </table>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap gap-2.5 max-sm:grid max-sm:grid-cols-1">
         <form
           id="toggle-form"
+          className="inline max-sm:block"
           action={running ? "/stop" : "/start"}
           onSubmit={(e) => {
             e.preventDefault();
             void toggle();
           }}
         >
-          <GhostButton id="toggle-btn" type="submit" loading={busy}>
+          <button
+            id="toggle-btn"
+            type="submit"
+            disabled={busy || (!running && !!startBlocked)}
+            aria-busy={busy || undefined}
+            title={running ? undefined : (startBlocked ?? undefined)}
+            className={cx(GHOST, GHOST_DISABLED, "inline-flex max-sm:w-full")}
+          >
+            {busy ? <Spinner size="sm" label="Working" /> : null}
             {running ? "Stop" : "Start"}
-          </GhostButton>
+          </button>
         </form>
-        <span className="flex-1" />
-        <GhostButton data-log="server" onClick={() => onViewLogs("server")}>
+        <span className="flex-1 max-sm:hidden" />
+        <button type="button" data-log="server" onClick={() => onViewLogs("server")} className={cx(GHOST, "flex max-sm:w-full")}>
           View server logs
-        </GhostButton>
-        <GhostButton data-log="client" onClick={() => onViewLogs("client")}>
+        </button>
+        <button type="button" data-log="client" onClick={() => onViewLogs("client")} className={cx(GHOST, "flex max-sm:w-full")}>
           View client logs
-        </GhostButton>
+        </button>
       </div>
     </section>
   );

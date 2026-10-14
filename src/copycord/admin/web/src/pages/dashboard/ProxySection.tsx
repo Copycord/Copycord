@@ -15,6 +15,7 @@ import type {
 } from "../../types/dashboard-proxy";
 import { GhostButton } from "../system/buttons";
 import { useNotify, useSafeConfirm } from "../system/providers";
+import { CARD, Chevron, DocLink, SUMMARY, SUMMARY_TITLE } from "./parts";
 import { ProxyChips } from "./proxy/ProxyChips";
 import { FavHelpModal, ResultsModal, SettingsModal } from "./proxy/ProxyModals";
 import {
@@ -49,16 +50,24 @@ const SETTINGS_SAVE_MS = 600;
 /** The bus replays recent history on connect; test events in that window are old. */
 const REPLAY_MS = 1500;
 
-const SECTION =
-  "rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text";
 const HINT = "text-xs leading-relaxed text-muted";
 const NUM =
   "w-20 rounded-control border border-border bg-bg-2 px-2 py-1.5 text-sm text-text outline-none focus:border-accent disabled:opacity-50";
+/** .srv-proxy-check and its 18px box. */
+const CHECK_LABEL = "srv-proxy-check inline-flex cursor-pointer items-center gap-2 text-[13px] font-medium text-text select-none";
+const CHECK =
+  "relative m-0 size-[18px] shrink-0 cursor-pointer appearance-none rounded-[5px] border-[1.5px] border-border bg-[rgba(255,255,255,0.04)] " +
+  "transition hover:border-accent focus-visible:shadow-[0_0_0_3px_rgba(167,139,250,0.18)] focus-visible:outline-0 checked:border-primary checked:bg-primary " +
+  "checked:bg-[url(\"data:image/svg+xml,%3Csvg_xmlns='http://www.w3.org/2000/svg'_viewBox='0_0_24_24'_fill='none'_stroke='white'_stroke-width='3'_stroke-linecap='round'_stroke-linejoin='round'%3E%3Cpath_d='M20_6_9_17l-5-5'/%3E%3C/svg%3E\")] checked:bg-size-[12px] checked:bg-center checked:bg-no-repeat disabled:cursor-not-allowed";
+/** .srv-proxy-chip and its .is-on / .is-warn colors. */
 const CHIP_TONE = {
-  on: "border-good/50 text-good",
-  warn: "border-[#ff9800]/60 text-[#ff9800]",
-  off: "border-border text-muted",
+  on: "bg-[rgba(76,175,80,0.12)] text-[#4caf50]",
+  warn: "bg-[rgba(255,152,0,0.12)] text-[#ff9800]",
+  off: "bg-[rgba(255,255,255,0.06)] text-muted",
 } as const;
+const DOCS_URL = "https://copycord.github.io/Copycord/docs/configuration/advanced#proxy-support";
+const GEAR =
+  "M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z";
 
 const initialSettings = () =>
   Object.fromEntries(
@@ -379,7 +388,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
     <>
       <details
         id="srv-proxy-card"
-        className={cx(SECTION, "group")}
+        className={CARD}
         open={open}
         onToggle={(e) => {
           const o = e.currentTarget.open;
@@ -391,26 +400,33 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
           }
         }}
       >
-        <summary className="flex min-h-7 cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden">
-          <h2 className="m-0 text-[15px] font-bold">Proxy</h2>
+        <summary className={SUMMARY}>
+          <h3 className={SUMMARY_TITLE}>Proxy</h3>
+          <DocLink href={DOCS_URL} label="Proxy docs" />
           <span
             id="srv-proxy-status"
-            className={cx("srv-proxy-chip rounded-full border px-2.5 py-0.5 text-xs", CHIP_TONE[chip.tone])}
+            className={cx(
+              "srv-proxy-chip rounded-[20px] px-2.5 py-1 text-[11px] leading-none font-semibold empty:hidden",
+              CHIP_TONE[chip.tone],
+            )}
           >
             {chip.text}
           </span>
-          <span className="flex-1" />
           <button
             type="button"
             id="srv-proxy-settings-btn"
             title="Proxy Settings"
-            className="rounded-control border border-border px-2.5 py-1 text-xs text-accent hover:bg-white/8"
+            className="srv-proxy-settings-btn ml-1.5 inline-flex cursor-pointer items-center gap-[5px] rounded-lg border border-border bg-[rgba(255,255,255,0.04)] px-2.5 py-1 text-[11px] font-medium text-muted transition-colors duration-150 hover:border-[rgba(255,255,255,0.18)] hover:bg-[rgba(255,255,255,0.08)] hover:text-text"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
               openSettings();
             }}
           >
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d={GEAR} />
+              <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+            </svg>
             Settings
           </button>
           <button
@@ -418,7 +434,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
             id="srv-proxy-fav-help-btn"
             title="What do favorites do?"
             aria-label="What do favorites do?"
-            className="rounded-control border border-border px-2 py-1 text-custom-ink hover:bg-white/8"
+            className="srv-proxy-fav-help-btn inline-flex size-[26px] cursor-pointer items-center justify-center rounded-md border border-[rgba(255,255,255,0.1)] bg-transparent p-0 text-muted transition-colors duration-100 hover:border-[rgba(255,200,61,0.4)] hover:bg-[rgba(255,200,61,0.1)] hover:text-[#ffc83d]"
             onClick={(e) => {
               // The header is a <summary>; without this the click also toggles the card shut.
               e.preventDefault();
@@ -426,18 +442,19 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
               setHelpOpen(true);
             }}
           >
-            ★
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
           </button>
-          <span aria-hidden="true" className="text-muted transition group-open:rotate-180">
-            ▾
-          </span>
+          <Chevron />
         </summary>
 
-        <div className="mt-4 flex flex-col gap-4 border-t border-border pt-4">
-          <label className="flex w-fit cursor-pointer items-center gap-2 text-sm" htmlFor="srv-proxy-toggle">
+        <div className="srv-proxy-body mt-3.5 flex flex-col gap-3">
+          <label className={cx(CHECK_LABEL, "w-fit")} htmlFor="srv-proxy-toggle">
             <input
               id="srv-proxy-toggle"
               type="checkbox"
+              className={CHECK}
               checked={enabled}
               onChange={(e) => void toggleEnabled(e.target.checked)}
             />
@@ -499,10 +516,11 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
             {...lockedProps}
           >
             <div className="flex flex-wrap items-center gap-3">
-              <label className="flex cursor-pointer items-center gap-2 text-sm" htmlFor="srv-proxy-rotation-toggle">
+              <label className={CHECK_LABEL} htmlFor="srv-proxy-rotation-toggle">
                 <input
                   id="srv-proxy-rotation-toggle"
                   type="checkbox"
+                  className={CHECK}
                   disabled={locked}
                   checked={rotOn}
                   onChange={(e) => {
@@ -561,10 +579,11 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
             {...lockedProps}
           >
             <div className="flex flex-wrap items-center gap-3">
-              <label className="flex cursor-pointer items-center gap-2 text-sm" htmlFor="srv-proxy-fav-recheck-toggle">
+              <label className={CHECK_LABEL} htmlFor="srv-proxy-fav-recheck-toggle">
                 <input
                   id="srv-proxy-fav-recheck-toggle"
                   type="checkbox"
+                  className={CHECK}
                   disabled={locked}
                   checked={recheckOn}
                   onChange={(e) => {
