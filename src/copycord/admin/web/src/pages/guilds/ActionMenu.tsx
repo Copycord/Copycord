@@ -89,7 +89,7 @@ export function ActionMenu({ at, anchor, items, onClose, label }: ActionMenuProp
       aria-label={label}
       onKeyDown={onKeyDown}
       style={{ left: pos?.x ?? 0, top: pos?.y ?? 0, visibility: pos ? "visible" : "hidden" }}
-      className="fixed z-50 w-max max-w-[min(92vw,360px)] min-w-[180px] rounded-xl border border-border bg-[#140b26] p-1.5 shadow-[0_4px_12px_rgba(0,0,0,0.25),0_12px_40px_rgba(0,0,0,0.45)]"
+      className="fixed z-50 w-max max-w-[min(92vw,360px)] min-w-[180px] rounded-xl border border-border bg-control p-1.5"
     >
       {items.map((item) => (
         <button
@@ -101,7 +101,7 @@ export function ActionMenu({ at, anchor, items, onClose, label }: ActionMenuProp
             onClose();
             item.onSelect();
           }}
-          className="block w-full cursor-pointer truncate rounded-lg px-3.5 py-2.5 text-left text-sm text-text outline-none hover:bg-[#1b1030] focus-visible:bg-[#1b1030]"
+          className="block w-full max-w-full cursor-pointer truncate rounded-lg px-3.5 py-2.5 text-left font-sans text-base text-text outline-none hover:bg-[#1b1030] focus-visible:bg-[#1b1030]"
         >
           {item.label}
         </button>

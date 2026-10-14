@@ -77,7 +77,7 @@ describe("Guilds grid", () => {
   it("loads once both sides are up and lists the guilds A to Z", async () => {
     const f = serve();
     renderPage();
-    expect(screen.getByRole("heading", { level: 1, name: "Guilds" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Guilds" })).toBeInTheDocument();
     await screen.findByRole("button", { name: "Alpha" });
     expect(cardNames()).toEqual(["Alpha", "beta <b>bold</b>", "Gamma"]);
     expect(calls(f, "/api/guilds")).toHaveLength(1);
