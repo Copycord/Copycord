@@ -3,7 +3,7 @@
 // scraper.js. The page owns the list request so a finished run can reload it.
 
 import { useState } from "react";
-import { Button, Card, cx } from "../../components/ui";
+import { Button, Card, cx, SkeletonSection } from "../../components/ui";
 import type { ScraperScrape, ScraperScrapesResponse } from "../../types/scraper";
 import type { Confirm, Notify } from "../system/providers";
 import { DownloadIcon, RefreshIcon, TrashIcon, UsersIcon } from "./icons";
@@ -32,9 +32,11 @@ export interface PastScrapesCardProps {
   reload: () => void;
   notify: Notify;
   confirm: Confirm;
+  /** First load still running: skeleton rows instead of the empty state. */
+  loading?: boolean;
 }
 
-export function PastScrapesCard({ data, reload, notify, confirm }: PastScrapesCardProps) {
+export function PastScrapesCard({ data, reload, notify, confirm, loading = false }: PastScrapesCardProps) {
   const [deleting, setDeleting] = useState<string | null>(null);
   const all = data?.ok ? (data.scrapes ?? []) : [];
   const list = all.filter((s) => !s.error);
@@ -70,7 +72,8 @@ export function PastScrapesCard({ data, reload, notify, confirm }: PastScrapesCa
         </Button>
       </div>
       <div id="sc-scrapes-body" className="mt-3">
-        <div id="sc-scrapes-empty" hidden={all.length > 0} className="px-4 py-6 text-center text-muted">
+        {loading ? <SkeletonSection rows={2} rowHeight={44} label="Loading saved scrapes" /> : null}
+        <div id="sc-scrapes-empty" hidden={loading || all.length > 0} className="px-4 py-6 text-center text-muted">
           <p className="m-0 mb-1 text-sm font-semibold">No saved scrapes yet</p>
           <small className="text-xs">Completed scrapes are automatically saved here</small>
         </div>

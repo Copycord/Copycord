@@ -5,6 +5,7 @@ import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../lib/api";
 import type { ScraperToken } from "../types/scraper";
+import { holdFetch } from "../test/holdFetch";
 import { Scraper } from "./Scraper";
 import { displayMask, maskToken } from "./scraper/mask";
 import { FakeSource, FakeWs } from "./scraper/testFakes";
@@ -304,5 +305,18 @@ describe("Scraper proxies card", () => {
     expect(new Headers(init.headers).get(CSRF_HEADER)).toBe("1");
     expect(JSON.parse(init.body as string)).toEqual({ proxies: ["10.0.0.1:3128", "http://u:p@10.0.0.2:8080"] });
     await waitFor(() => expect(save).toBeDisabled());
+  });
+});
+
+describe("Scraper loading", () => {
+  it("shows token skeleton rows, not the empty state, until the tokens arrive", async () => {
+    server(baseRoutes());
+    const release = holdFetch("/api/scraper/tokens");
+    renderPage();
+    expect(await screen.findByRole("status", { name: "Loading tokens" })).toBeInTheDocument();
+    expect(document.getElementById("sc-token-empty")).toBeNull();
+    release();
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Loading tokens" })).toBeNull());
+    expect(document.getElementById("sc-token-list")!.textContent).not.toBe("");
   });
 });

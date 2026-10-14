@@ -5,6 +5,7 @@ import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../lib/api";
 import type { EventLog } from "../types/logs";
+import { holdFetch } from "../test/holdFetch";
 import { Logs } from "./Logs";
 
 function entry(id: string, over: Partial<EventLog> = {}): EventLog {
@@ -258,5 +259,23 @@ describe("Logs page", () => {
     // No providers here, like the App shell test: the page must still render.
     render(<Logs />);
     expect(await screen.findByText("Could not load event logs: boom")).toBeInTheDocument();
+  });
+});
+
+describe("Logs loading", () => {
+  it("shows skeleton rows until the first page arrives", async () => {
+    server(SEED);
+    const release = holdFetch("/api/event-logs");
+    render(
+      <ToastProvider>
+        <ConfirmProvider>
+          <Logs />
+        </ConfirmProvider>
+      </ToastProvider>,
+    );
+    expect(await screen.findByRole("status", { name: "Loading event logs" })).toBeInTheDocument();
+    release();
+    await loaded();
+    expect(screen.queryByRole("status", { name: "Loading event logs" })).toBeNull();
   });
 });
