@@ -59,6 +59,44 @@ describe("Login", () => {
     );
   });
 
+  it("ignores the space key and drops typed spaces", async () => {
+    const user = userEvent.setup();
+    render(<Login />);
+    const input = screen.getByLabelText("Password") as HTMLInputElement;
+    await user.type(input, "ab cd");
+    expect(input.value).toBe("abcd");
+    await user.keyboard(" ");
+    expect(input.value).toBe("abcd");
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
+  });
+
+  it("strips whitespace from a pasted password and submits it without spaces", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Login />);
+    const input = screen.getByLabelText("Password") as HTMLInputElement;
+    await user.click(input);
+    await user.paste("abc 123 ");
+    expect(input.value).toBe("abc123");
+    let sent: FormDataEntryValue | null = null;
+    const form = container.querySelector("#login-form") as HTMLFormElement;
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      sent = new FormData(form).get("password");
+    });
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(sent).toBe("abc123");
+  });
+
+  it("does not enable Sign in for a pasted run of spaces", async () => {
+    const user = userEvent.setup();
+    render(<Login />);
+    const input = screen.getByLabelText("Password") as HTMLInputElement;
+    await user.click(input);
+    await user.paste("  \t ");
+    expect(input.value).toBe("");
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
+  });
+
   it("toggles the password between hidden and shown", async () => {
     const user = userEvent.setup();
     render(<Login />);

@@ -24,6 +24,8 @@ export function readVersion(doc: Document = document): string | null {
   return readMeta(VERSION_META, doc) || null;
 }
 
+const stripSpace = (value: string) => value.replace(/\s+/g, "");
+
 export function Login() {
   const [error] = useState(readLoginError);
   const [version] = useState(readVersion);
@@ -75,7 +77,19 @@ export function Login() {
                   autoComplete="current-password"
                   autoFocus
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  // Passwords never hold whitespace: the space key does nothing and pasted or typed spaces are dropped.
+                  onKeyDown={(e) => {
+                    if (e.key === " ") e.preventDefault();
+                  }}
+                  onPaste={(e) => {
+                    e.preventDefault();
+                    const el = e.currentTarget;
+                    const start = el.selectionStart ?? el.value.length;
+                    const end = el.selectionEnd ?? el.value.length;
+                    const text = stripSpace(e.clipboardData.getData("text"));
+                    setPassword(stripSpace(el.value.slice(0, start) + text + el.value.slice(end)));
+                  }}
+                  onChange={(e) => setPassword(stripSpace(e.target.value))}
                   className="w-full rounded-btn border border-border bg-bg-3 py-2.5 pr-10 pl-3 text-[0.95rem] text-text outline-none transition-[border-color,background-color] duration-150 focus:border-primary focus:bg-bg-2"
                 />
                 <button
