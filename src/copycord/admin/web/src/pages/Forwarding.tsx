@@ -131,14 +131,13 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
   const empty = loaded && items.length === 0;
 
   return (
-    <div id="fwd-root" className="forwarding-page w-full pt-3.5 md:pt-0">
-      <h1 className="sr-only">Forwarding</h1>
-      <Card className="md:mt-[18px]">
-        <header className="mb-3">
-          <h2 className="text-[1.17em] font-bold">Forwarding</h2>
+    <div id="fwd-root" className="forwarding-page w-full">
+      <Card className="mt-[18px]">
+        <header>
+          <h2 className="mb-1 text-[18px] font-bold">Forwarding</h2>
         </header>
 
-        <div>
+        <div className="mt-1.5">
           <div
             id="forwarding-empty"
             hidden={!empty}
@@ -165,7 +164,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
           <div
             id="forwarding-list"
             className={cx(
-              "fwd-list grid grid-cols-1 items-start gap-3.5",
+              "fwd-list grid grid-cols-[1fr] items-start gap-3.5",
               "min-[701px]:grid-cols-[repeat(2,minmax(260px,1fr))]",
               "min-[1101px]:grid-cols-[repeat(3,minmax(260px,1fr))]",
               "min-[1501px]:grid-cols-[repeat(4,minmax(260px,1fr))]",
@@ -175,34 +174,42 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
             {items.length > 0 ? (
               <>
                 <div className="col-span-full mb-2 flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <input
-                      id="fwdSearchInput"
-                      type="text"
-                      value={query}
-                      placeholder="Search rules…"
-                      autoComplete="off"
-                      spellCheck={false}
-                      aria-label="Search forwarding rules"
-                      onChange={(e) => setQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          setQuery("");
-                        }
-                      }}
-                      className={cx(
-                        "w-[min(420px,100%)] rounded-control border border-border bg-bg-2 px-3 py-2 text-sm text-text",
-                        "placeholder:text-text-2 outline-none focus:border-primary",
-                      )}
-                    />
-                    <div id="forwarding-count" role="status" aria-live="polite" className="mt-2 mb-3 whitespace-nowrap opacity-60">
-                      <span>Total Forwarded:</span> <span id="fwdTotalCount">{totalLabel}</span>
+                  <div className="flex flex-col">
+                    <div className="flex min-w-0 flex-auto items-center gap-2.5">
+                      <input
+                        id="fwdSearchInput"
+                        type="text"
+                        value={query}
+                        placeholder="Search rules…"
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-label="Search forwarding rules"
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setQuery("");
+                          }
+                        }}
+                        className={cx(
+                          "w-[min(420px,100%)] min-w-[220px] rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5",
+                          "text-[13px] text-[#e6e1ff] caret-[#7c5cff] outline-none transition-colors",
+                          "placeholder:text-[#e6e1ff]/55 placeholder:opacity-75 focus:border-[#7c5cff]",
+                        )}
+                      />
+                    </div>
+                    <div id="forwarding-count" role="status" aria-live="polite" className="mt-2 mb-3">
+                      <span className="opacity-60">Total Forwarded:</span>{" "}
+                      <span id="fwdTotalCount" className="opacity-60">
+                        {totalLabel}
+                      </span>
                     </div>
                   </div>
-                  <Button variant="primary" className="fwd-add-btn" onClick={() => openRuleEditor({ mode: "create" })}>
-                    New Forward
-                  </Button>
+                  <div className="flex items-center">
+                    <Button variant="primary" className="fwd-add-btn" onClick={() => openRuleEditor({ mode: "create" })}>
+                      New Forward
+                    </Button>
+                  </div>
                 </div>
 
                 {shown.map((rule) => (
@@ -241,6 +248,8 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
           ) : null}
         </div>
       </Card>
+      {/* After the card so the visible "Forwarding" h2 comes first, as on the old page. */}
+      <h1 className="sr-only">Forwarding</h1>
       {openOverride ? null : <RuleModal request={editor} onClose={() => setEditor(null)} onSaved={onSaved} />}
     </div>
   );
