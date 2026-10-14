@@ -88,6 +88,11 @@ from copycord.common.selfbot_headers import (
 )
 from copycord.admin.web_config import router as links_router
 from copycord.admin.web_config import startup_links, shutdown_links
+import copycord.admin.tasks  # noqa: F401  task types register at import
+from copycord.admin.tasks import routes as task_routes
+from copycord.admin.tasks.logstore import LogStore
+from copycord.admin.tasks.repo import SqliteTaskRepo
+from copycord.admin.tasks.service import TaskService
 from contextlib import suppress
 from time import perf_counter
 import sys as _sys, json as _json, contextvars
@@ -356,7 +361,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
 # Dashboard pages, all rendered by the SPA (router basename "/").
-SPA_PAGES = ("/", "/channels", "/guilds", "/forwarding", "/scraper", "/system", "/logs")
+SPA_PAGES = ("/", "/channels", "/guilds", "/forwarding", "/scraper", "/system", "/logs", "/tasks")
 # First path segments that are never SPA pages: an unknown path under one is a plain 404.
 NON_PAGE_SEGMENTS = frozenset(
     {"api", "ws", "bus", "logs", "static", "assets", "version", "health", "filters", "login", "logout"}
@@ -369,6 +374,8 @@ async def spa_page():
 
 for _page in SPA_PAGES:
     app.add_api_route(_page, spa_page, methods=["GET"], include_in_schema=False)
+# Deep links such as /tasks/runs/12 reload into the SPA.
+app.add_api_route("/tasks/{rest:path}", spa_page, methods=["GET"], include_in_schema=False)
 
 
 @app.get("/assets/{name:path}", include_in_schema=False)
@@ -404,6 +411,7 @@ async def app_redirect(request: Request, path: str = ""):
 
 
 app.include_router(links_router)
+app.include_router(task_routes.router)
 shutdown_event = asyncio.Event()
 init_admin_auth(app, DATA_DIR)
 
@@ -1966,6 +1974,36 @@ async def logs(which: str, tail: int = 20000):
 @_on_startup
 async def _startup_links():
     await startup_links(app)
+
+
+async def _publish_task_event(event: dict) -> None:
+    """task.run.updated on /ws/out; BusHub._normalize makes it
+    {kind: "task.run.updated", role: "unknown", payload: {type, run, steps}}."""
+    await hub.broadcast({
+        "type": "task.run.updated",
+        "run": event.get("run"),
+        "steps": event.get("steps") or [],
+    })
+
+
+@_on_startup
+async def _startup_tasks():
+    service = TaskService(SqliteTaskRepo(db), LogStore(), publish=_publish_task_event)
+    task_routes.set_service(service)
+    try:
+        recovered = service.recover()
+        pruned = service.prune()
+        if recovered or pruned:
+            LOGGER.info("Tasks: %d interrupted runs marked failed, %d old runs pruned", recovered, pruned)
+    except Exception:
+        LOGGER.exception("Tasks: recover or prune failed")
+
+
+@_on_shutdown
+async def _shutdown_tasks():
+    service = task_routes.get_service()
+    if service is not None:
+        await service.shutdown()
 
 
 @_on_startup
