@@ -7,7 +7,6 @@ import type { ComponentType, FormEvent, ReactNode } from "react";
 import { Modal } from "../../../components/Modal";
 import { Button } from "../../../components/ui/Button";
 import { Field, Input, Select } from "../../../components/ui/Field";
-import type { TaskType } from "../../../types/tasks";
 import { BackfillForm } from "./backfill/BackfillForm";
 import { useStartRun, type TaskFormProps } from "./start";
 
@@ -122,14 +121,17 @@ export function schemaFields(schema: Record<string, unknown>): SchemaField[] {
   return Object.entries(props).map(([key, p]) => {
     const inner = p.anyOf?.find((a) => a.type !== "null") ?? p;
     const kind = kindOf(p);
+    const options = (inner.enum ?? []).map(String);
+    // A required enum has no blank option, so it starts on its first choice.
+    const blank = kind === "boolean" ? false : kind === "enum" && required.has(key) ? (options[0] ?? "") : "";
     return {
       key,
       label: p.title ?? humanize(key),
       kind,
       required: required.has(key),
-      options: (inner.enum ?? []).map(String),
+      options,
       help: p.description,
-      initial: p.default ?? (kind === "boolean" ? false : ""),
+      initial: p.default ?? blank,
     };
   });
 }
