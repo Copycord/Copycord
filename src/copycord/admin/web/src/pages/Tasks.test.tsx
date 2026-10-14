@@ -118,7 +118,7 @@ describe("Tasks page", () => {
     expect(within(rail).getByRole("link", { name: /All tasks/ })).toHaveAttribute("aria-current", "page");
     expect(within(rail).getByRole("link", { name: /Backfill channels/ })).toHaveAttribute("href", "/tasks?type=backfill_channels");
     expect(within(rail).getByLabelText("1 active")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run task" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run task" })).toBeEnabled();
   });
 
   it("shows the empty state when there are no runs", async () => {
@@ -180,7 +180,7 @@ describe("Tasks page", () => {
     fireEvent.click(clears[clears.length - 1]!);
     expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
     expect(listCalls(fn).at(-1)).not.toContain("status=");
-    expect(screen.getAllByRole("button", { name: "Run task" }).every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getAllByRole("button", { name: "Run task" }).every((b) => !(b as HTMLButtonElement).disabled)).toBe(true);
   });
 
   it("cancels an active run after confirming and patches the row from the response", async () => {

@@ -97,3 +97,32 @@ export interface RunFilters {
 }
 
 export const ACTIVE_STATUSES: readonly RunStatus[] = ["queued", "running"];
+
+/** One channel of GET /api/tasks/types/backfill_channels/options. */
+export interface BackfillOptionChannel {
+  id: string;
+  name: string;
+  orphan: boolean;
+  /** Set while another run holds this channel. */
+  busy: { run_id: string; number: number } | null;
+  /** Set when an unfinished checkpoint exists. */
+  resumable: { checkpoint_at: string | null } | null;
+}
+
+export interface BackfillOptionCategory {
+  /** null for "Uncategorized". */
+  id: string | null;
+  name: string;
+  channels: BackfillOptionChannel[];
+}
+
+export interface BackfillOptionsResponse {
+  mapping_id: string;
+  categories: BackfillOptionCategory[];
+  error?: string;
+}
+
+/** A 422 from POST /api/tasks/runs: one message per input field. */
+export interface TaskInputErrors {
+  errors: Record<string, string>;
+}

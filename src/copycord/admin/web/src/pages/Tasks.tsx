@@ -1,7 +1,8 @@
 // Tasks: every long job the app runs, in the layout of GitHub Actions "All workflows". The rail picks a
 // task type (?type=), the list shows its runs live, and /tasks/runs/:id opens one run.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useToast } from "../components/Toast";
 import { Button } from "../components/ui/Button";
@@ -16,6 +17,7 @@ import { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS, RunList, RunMenu, type RunActio
 import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
 import { MAIN, PAGE, TasksHeading } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
+import { entryFor, TaskTypeForm } from "./tasks/types";
 
 function readAutoRefresh(): string {
   try {
@@ -27,36 +29,143 @@ function readAutoRefresh(): string {
   return "30";
 }
 
+export interface RunTaskButtonProps {
+  /** One type opens its form directly; several show a menu of types. */
+  runnable: TaskType[];
+  onRun: (type: TaskType) => void;
+}
+
+/** "Run task": on a type page it opens that type's form, on All tasks a menu of types. */
+export function RunTaskButton({ runnable, onRun }: RunTaskButtonProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const none = runnable.length === 0;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <Button
+        variant="primary"
+        disabled={none}
+        title={none ? "No task types yet" : undefined}
+        aria-haspopup={runnable.length > 1 || undefined}
+        aria-expanded={runnable.length > 1 ? open : undefined}
+        onClick={() => (runnable.length === 1 ? onRun(runnable[0]!) : setOpen((o) => !o))}
+      >
+        Run task
+      </Button>
+      {open ? (
+        <ul role="menu" aria-label="Task types" className="absolute right-0 z-30 mt-1 min-w-48 list-none rounded-control border border-border bg-card p-1 shadow-card">
+          {runnable.map((t) => (
+            <li key={t.key} role="none">
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full cursor-pointer items-center gap-2 rounded-btn border-0 bg-transparent px-3 py-2 text-left text-sm text-text hover:bg-rail-hover"
+                onClick={() => {
+                  setOpen(false);
+                  onRun(t);
+                }}
+              >
+                {entryFor(t.key).icon}
+                {t.title}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 export interface TasksHeaderProps {
   title: string;
   description: string;
-  /** Start forms exist for these types; with none the button stays disabled. */
-  runnable: TaskType[];
+  action: ReactNode;
 }
 
-export function TasksHeader({ title, description, runnable }: TasksHeaderProps) {
-  const none = runnable.length === 0;
+export function TasksHeader({ title, description, action }: TasksHeaderProps) {
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
       <div className="min-w-0">
         <h2 className="m-0 text-[22px] font-bold text-text">{title}</h2>
         <p className="mt-1 mb-0 text-sm text-muted">{description}</p>
       </div>
-      <Button variant="primary" disabled={none} title={none ? "No task type has a start form yet" : undefined}>
-        Run task
-      </Button>
+      {action}
     </div>
   );
 }
 
+interface OpenForm {
+  type: TaskType;
+  prefill: TaskRun | null;
+  /** Remounts the form so each open starts from a clean state. */
+  nonce: number;
+}
+
 export function Tasks() {
   const { id } = useParams<{ id: string }>();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const typeKey = params.get("type") ?? "";
+  const rerun = params.get("rerun") ?? "";
   const { data } = useApi<TaskTypesResponse>("/api/tasks/types");
-  const types = data?.types ?? [];
+  const types = useMemo(() => data?.types ?? [], [data]);
   const selected = types.find((t) => t.key === typeKey);
   const typeTitle = useCallback((key: string) => types.find((t) => t.key === key)?.title ?? key, [types]);
+  const runnable = selected ? [selected] : types;
+  const toast = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const [form, setForm] = useState<OpenForm | null>(null);
+  const openForm = useCallback((type: TaskType, prefill: TaskRun | null = null) => {
+    setForm((f) => ({ type, prefill, nonce: (f?.nonce ?? 0) + 1 }));
+  }, []);
+
+  // ?rerun=<id> opens the run's type form prefilled from the run, then leaves the URL.
+  useEffect(() => {
+    if (!rerun || types.length === 0) return;
+    let live = true;
+    api
+      .get<TaskRunResponse>(runUrl(rerun))
+      .then((res) => {
+        if (!live) return;
+        const type = types.find((t) => t.key === res.run.type);
+        if (type) openForm(type, res.run);
+        else toastRef.current.show(`Unknown task type ${res.run.type}`, { kind: "error" });
+      })
+      .catch((e) => {
+        if (live) toastRef.current.show(errorText(e, "Could not load the run to re-run"), { kind: "error" });
+      })
+      .finally(() => {
+        if (!live) return;
+        setParams(
+          (p) => {
+            const next = new URLSearchParams(p);
+            next.delete("rerun");
+            return next;
+          },
+          { replace: true },
+        );
+      });
+    return () => {
+      live = false;
+    };
+  }, [rerun, types, openForm, setParams]);
 
   return (
     <section className="w-full">
@@ -71,13 +180,14 @@ export function Tasks() {
               <TasksHeader
                 title={selected?.title ?? "All tasks"}
                 description={selected?.description ?? "Showing runs from all task types"}
-                runnable={[]}
+                action={<RunTaskButton runnable={runnable} onRun={(t) => openForm(t)} />}
               />
-              <RunsView types={types} typeTitle={typeTitle} />
+              <RunsView types={types} typeTitle={typeTitle} runAction={<RunTaskButton runnable={runnable} onRun={(t) => openForm(t)} />} />
             </>
           )}
         </div>
       </div>
+      {form ? <TaskTypeForm key={form.nonce} type={form.type} prefill={form.prefill} open onClose={() => setForm(null)} /> : null}
     </section>
   );
 }
@@ -85,7 +195,15 @@ export function Tasks() {
 /** Poll this often while the socket is down and auto-refresh is Off, so the list still moves. */
 const SOCKET_DOWN_POLL_S = 30;
 
-function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: string) => string }) {
+function RunsView({
+  types,
+  typeTitle,
+  runAction,
+}: {
+  types: TaskType[];
+  typeTitle: (key: string) => string;
+  runAction: ReactNode;
+}) {
   const { filters, active, set, setPage, clear } = useRunFilters();
   const { runs, total, loading, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
@@ -108,7 +226,7 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
     if (act === "view") {
       navigate(`/tasks/runs/${encodeURIComponent(run.id)}`);
     } else if (act === "rerun") {
-      // L10 opens the type's form prefilled from this run; until then the list keeps the hint in the URL.
+      // Tasks reads ?rerun= and opens the type's form prefilled from this run.
       navigate(`/tasks?type=${encodeURIComponent(run.type)}&rerun=${encodeURIComponent(run.id)}`);
     } else if (act === "cancel") {
       const ok = await confirm({
@@ -166,15 +284,7 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
       }
     />
   ) : (
-    <EmptyState
-      title="No task runs yet"
-      className="m-4"
-      action={
-        <Button variant="primary" disabled title="No task type has a start form yet">
-          Run task
-        </Button>
-      }
-    />
+    <EmptyState title="No task runs yet" className="m-4" action={runAction} />
   );
 
   const footer =
