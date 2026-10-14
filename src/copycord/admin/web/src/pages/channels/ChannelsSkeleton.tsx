@@ -29,7 +29,7 @@ export function ChannelsSkeleton() {
               </button>
             </span>
           </header>
-          <ChannelRowsSkeleton />
+
         </Card>
       </div>
     </div>
