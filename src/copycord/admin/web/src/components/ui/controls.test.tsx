@@ -41,7 +41,7 @@ describe("Button", () => {
 
   it("applies variant classes", () => {
     render(<Button variant="danger">Delete</Button>);
-    expect(screen.getByRole("button").className).toContain("from-danger");
+    expect(screen.getByRole("button").className).toContain("bg-[linear-gradient(180deg,#ef4444,#b91c1c)]");
   });
 });
 

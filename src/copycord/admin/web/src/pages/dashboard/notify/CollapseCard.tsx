@@ -39,10 +39,10 @@ export function CollapseCard({ id, title, docsHref, storageKey, children }: Coll
       id={id}
       open={open}
       onToggle={onToggle}
-      className="group rounded-card border border-border bg-linear-to-b from-card to-[rgba(20,10,40,0.45)] text-text"
+      className="group rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text"
     >
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-[18px] py-3 [&::-webkit-details-marker]:hidden">
-        <h3 className="text-base font-semibold">{title}</h3>
+      <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+        <h3 className="m-0 text-[15px] font-bold">{title}</h3>
         <a
           href={docsHref}
           target="_blank"
@@ -60,7 +60,7 @@ export function CollapseCard({ id, title, docsHref, storageKey, children }: Coll
           &#9662;
         </span>
       </summary>
-      <div className="flex flex-col gap-3 px-[18px] pb-[18px]">{children}</div>
+      <div className="mt-3 flex flex-col gap-3">{children}</div>
     </details>
   );
 }

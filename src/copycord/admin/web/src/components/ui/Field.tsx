@@ -38,12 +38,12 @@ export function Field({ label, help, error, id, className, children }: FieldProp
   return (
     <FieldContext.Provider value={{ id: controlId, describedBy, invalid: Boolean(error) }}>
       <div className={cx("flex flex-col gap-1.5", className)}>
-        <label htmlFor={controlId} className="text-sm font-semibold text-text-1">
+        <label htmlFor={controlId} className="ml-0.5 text-xs text-muted">
           {label}
         </label>
         {children}
         {help ? (
-          <p id={helpId} className="text-xs text-text-2">
+          <p id={helpId} className="mx-0.5 text-xs text-muted opacity-90">
             {help}
           </p>
         ) : null}
@@ -68,10 +68,15 @@ export function useFieldControl(props: { id?: string; "aria-describedby"?: strin
   };
 }
 
-export const CONTROL_CLASS =
-  "w-full rounded-control border border-border bg-linear-to-b from-[#1a1030] to-[#140b26] px-3 py-2.5 text-sm text-text " +
+// The old .input and select.input: 12px 14px padding, 12px radius, dark gradient, 14px text;
+// the select draws its own caret.
+const CONTROL_BASE =
+  "w-full rounded-control border border-border px-3.5 py-3 text-sm text-text " +
   "placeholder:text-text-2/70 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/30 " +
   "disabled:cursor-not-allowed disabled:opacity-55 aria-invalid:border-danger";
+
+export const CONTROL_CLASS = `${CONTROL_BASE} bg-(image:--control-gradient)`;
+const SELECT_CLASS = `${CONTROL_BASE} cursor-pointer appearance-none pr-[42px] [background:var(--select-bg)]`;
 
 export function Input({ className, ref, ...rest }: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement> }) {
   const aria = useFieldControl(rest);
@@ -102,9 +107,9 @@ export function Select({
 }: SelectHTMLAttributes<HTMLSelectElement> & { options?: SelectOption[]; ref?: Ref<HTMLSelectElement> }) {
   const aria = useFieldControl(rest);
   return (
-    <select ref={ref} {...rest} {...aria} className={cx(CONTROL_CLASS, "cursor-pointer", className)}>
+    <select ref={ref} {...rest} {...aria} className={cx(SELECT_CLASS, className)}>
       {options?.map((o) => (
-        <option key={o.value} value={o.value} disabled={o.disabled} className="bg-card-solid">
+        <option key={o.value} value={o.value} disabled={o.disabled} className="bg-[#0f0820]">
           {o.label}
         </option>
       ))}

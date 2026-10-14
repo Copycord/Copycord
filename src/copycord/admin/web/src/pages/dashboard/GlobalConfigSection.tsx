@@ -138,7 +138,7 @@ export function GlobalConfigSection() {
     <details
       id="global-config-card"
       open
-      className="group rounded-card border border-border bg-linear-to-b from-card to-[rgba(20,10,40,0.45)] p-[18px] text-text"
+      className="group rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text"
     >
       <summary className="flex cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden">
         <h2 className="text-base font-semibold">Global Configuration</h2>

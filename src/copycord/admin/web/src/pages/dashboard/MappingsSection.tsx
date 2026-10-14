@@ -83,7 +83,7 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
     <details
       id="guild-config-card"
       open
-      className="rounded-card border border-border bg-linear-to-b from-card to-[rgba(20,10,40,0.45)] p-[18px] text-text"
+      className="rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text"
     >
       <summary className="mb-3 cursor-pointer list-none">
         <h3 className="inline text-base font-semibold">Cloning Configuration</h3>

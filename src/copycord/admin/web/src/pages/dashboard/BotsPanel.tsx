@@ -100,7 +100,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, WebSocketImpl }: BotsPa
   };
 
   return (
-    <section className="rounded-card border border-border bg-linear-to-b from-card to-[rgba(20,10,40,0.45)] p-[18px] text-text">
+    <section className="rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text">
       <header className="mb-3">
         <h2 className="text-base font-semibold">Bots</h2>
       </header>
