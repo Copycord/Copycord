@@ -44,8 +44,6 @@ export interface RowActionsInput {
   setOrphans: (next: (cur: Orphans) => Orphans) => void;
   /** Reloads the channel list after a save. */
   reload: () => void;
-  /** Extra items for a channel's menu, appended after the built-in ones (the clone action). */
-  extraItems?: (channel: TreeChannel) => MenuItem[];
 }
 
 export interface RowActions {
@@ -61,7 +59,7 @@ type Dialog =
   | { kind: "category"; name: string; initial: string }
   | null;
 
-export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, reload, extraItems }: RowActionsInput): RowActions {
+export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, reload }: RowActionsInput): RowActions {
   const toast = useToast();
   const confirm = useConfirm();
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -211,10 +209,9 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
           onSelect: () => void copy(c.clonedId, "Copied clone channel ID to clipboard.", "Could not copy channel ID."),
         });
       }
-      if (extraItems) items.push(...extraItems(c));
       return <RowMenu kind="channel" items={items} />;
     },
-    [blacklist, copy, deleteOrphan, extraItems],
+    [blacklist, copy, deleteOrphan],
   );
 
   const categoryActions = useCallback(

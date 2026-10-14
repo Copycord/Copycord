@@ -128,7 +128,7 @@ export interface DeletedResult {
   success?: boolean;
 }
 
-// Lane 24: verify results and clone history (backfill).
+// Lane 24: verify results.
 
 /** The "orphans" verify event on /ws/out. */
 export interface OrphansEvent {
@@ -136,118 +136,4 @@ export interface OrphansEvent {
   mapping_id?: string | number;
   categories?: OrphanCategory[];
   channels?: OrphanChannel[];
-}
-
-export type BackfillMode = "all" | "since" | "between" | "last";
-
-/** POST /api/backfill/start. The single form sends `since`; a resume sends the run and checkpoint. */
-export interface BackfillStartBody {
-  channel_id: string;
-  mapping_id: string;
-  mode?: BackfillMode;
-  since?: string;
-  before_iso?: string;
-  last_n?: number;
-  ignore_cloned?: boolean;
-  resume?: boolean;
-  run_id?: string;
-  checkpoint?: unknown;
-}
-
-/** POST /api/backfill/start-batch. The batch form sends `after_iso` instead of `since`. */
-export interface BackfillBatchBody {
-  channel_ids: string[];
-  mapping_id: string;
-  mode: BackfillMode;
-  after_iso?: string;
-  before_iso?: string;
-  last_n?: number;
-  ignore_cloned?: boolean;
-  resume: false;
-}
-
-export interface BackfillStartResponse {
-  ok?: boolean;
-  error?: string;
-  state?: string;
-}
-
-export interface BackfillBatchResponse {
-  ok?: boolean;
-  error?: string;
-  results?: Array<{ ok?: boolean }>;
-  counts?: { started?: number; locked?: number; failed?: number };
-}
-
-/** GET /api/backfills/resume-info; the payload is under `resume` or `data`. */
-export interface ResumeInfo {
-  available?: boolean;
-  resumable?: boolean;
-  run_id?: string | null;
-  delivered?: number | null;
-  expected_total?: number | null;
-  started_at?: string | null;
-  started_dt?: string | null;
-  updated_at?: string | null;
-  checkpoint?: { last_orig_timestamp?: string | null } | null;
-}
-
-export interface ResumeInfoResponse {
-  ok?: boolean;
-  resume?: ResumeInfo | null;
-  data?: ResumeInfo | null;
-}
-
-/** GET /api/backfills/inflight: items keyed by original channel id. */
-export interface InflightItem {
-  delivered?: number | null;
-  expected_total?: number | null;
-}
-
-export interface InflightResponse {
-  ok?: boolean;
-  items?: Record<string, InflightItem>;
-}
-
-/** GET /api/backfills/queue. */
-export interface QueueItem {
-  channel_id: string | number;
-  state: "active" | "queued" | string;
-  position?: number;
-}
-
-export interface QueueResponse {
-  ok?: boolean;
-  items?: QueueItem[];
-}
-
-/** What a card shows for a clone in progress. */
-export type CloneStage = "launching" | "queued" | "pulling" | "cloning" | "cleaning";
-
-export interface CloneState {
-  stage: CloneStage;
-  delivered: number | null;
-  total: number | null;
-  position?: number;
-}
-
-/** A backfill_* event on /ws/out (client kind). */
-export interface BackfillEvent {
-  type?: string;
-  task_id?: string | number;
-  channel_id?: string | number;
-  data?: {
-    channel_id?: string | number;
-    original_channel_id?: string | number;
-    mapping_id?: string | number;
-    state?: string;
-    reason?: string;
-    no_work?: boolean;
-    delivered?: number;
-    applied?: number;
-    count?: number;
-    expected_total?: number;
-    total?: number;
-    expected?: number;
-  };
 }

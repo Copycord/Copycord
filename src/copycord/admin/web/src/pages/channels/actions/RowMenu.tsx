@@ -8,7 +8,7 @@ import { cx } from "../../../components/ui";
 export interface MenuItem {
   /** The old data-act value. */
   act: string;
-  /** Optional element id, e.g. the old #ctx-backfill. */
+  /** Optional element id. */
   id?: string;
   label: string;
   onSelect: () => void;

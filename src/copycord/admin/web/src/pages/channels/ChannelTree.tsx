@@ -33,7 +33,7 @@ export interface ChannelTreeProps extends ChannelTreeSlots {
   hidden?: boolean;
 }
 
-export function ChannelTree({ tree, hidden, channelActions, categoryActions, channelStatus }: ChannelTreeProps) {
+export function ChannelTree({ tree, hidden, channelActions, categoryActions }: ChannelTreeProps) {
   return (
     <div id="channels-root" aria-live="polite" hidden={hidden} className="grid gap-6 xl:gap-7">
       {tree.sections.map((s) => (
@@ -60,12 +60,7 @@ export function ChannelTree({ tree, hidden, channelActions, categoryActions, cha
             }
           >
             {s.channels.map((c) => (
-              <ChannelCard
-                key={c.id}
-                channel={c}
-                actions={channelActions?.(c, s)}
-                status={channelStatus?.(c)}
-              />
+              <ChannelCard key={c.id} channel={c} actions={channelActions?.(c, s)} />
             ))}
           </div>
         </section>
@@ -77,10 +72,9 @@ export function ChannelTree({ tree, hidden, channelActions, categoryActions, cha
 interface ChannelCardProps {
   channel: TreeChannel;
   actions: ReactNode;
-  status: ReactNode;
 }
 
-const ChannelCard = memo(function ChannelCard({ channel: c, actions, status }: ChannelCardProps) {
+const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCardProps) {
   return (
     <article
       data-cid={c.id}
@@ -132,7 +126,6 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions, status }: C
           </span>
         ) : null}
       </div>
-      {status}
     </article>
   );
 });

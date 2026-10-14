@@ -1,10 +1,10 @@
 // Channels page, ported from templates/channels.html and frontend/src/js/channels.js:
 // the mapping select, the tree of categories and channels (GET /api/channels)
-// with search, filter and sort. Row actions (lane 23), the orphan scan and the
-// backfill modal plug into the ChannelTree slots.
+// with search, filter and sort. Row actions (lane 23) and the orphan scan plug
+// into the ChannelTree slots. Cloning messages lives on the Tasks page.
 // Like the old page it waits until both Server and Client are connected.
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Card } from "../components/ui";
 import { ChannelRowsSkeleton } from "./channels/ChannelsSkeleton";
 
@@ -14,8 +14,8 @@ import { useApi } from "../hooks/useApi";
 import { useStatusGate } from "../hooks/useStatusGate";
 import type { ChannelListResponse, ChannelRow, GuildMappingListResponse } from "../types/channels";
 import { useRowActions } from "./channels/actions/useRowActions";
-import { useBackfill } from "./channels/backfill/useBackfill";
 import { ChannelTree } from "./channels/ChannelTree";
+import { clearLegacyCloneStorageOnce } from "./channels/legacyStorage";
 import { ToolbarSelect } from "./channels/ToolbarSelect";
 import { orphanStore, useOrphans } from "./channels/verify/orphanStore";
 import { useVerify } from "./channels/verify/useVerify";
@@ -65,16 +65,8 @@ export function Channels() {
   );
 
   useEffect(() => () => orphanStore.set(NO_ORPHANS), []);
-
-  const nameOf = useCallback(
-    (cid: string) => {
-      const r = rows?.find((x) => x.original_channel_id === cid);
-      return r ? r.clone_channel_name || r.original_channel_name : "";
-    },
-    [rows],
-  );
-  // The clone action and live clone progress sit on the channel menu and the card status slot.
-  const backfill = useBackfill({ mappingId, nameOf });
+  // Drops the bf:* keys the old "Clone messages" UI left in storage.
+  useEffect(() => clearLegacyCloneStorageOnce(), []);
 
   const actions = useRowActions({
     mappingId,
@@ -83,7 +75,6 @@ export function Channels() {
     orphans,
     setOrphans: (next) => setOrphans(next),
     reload: channels.reload,
-    extraItems: backfill.items,
   });
 
   const onMapping = (id: string) => {
@@ -174,10 +165,8 @@ export function Channels() {
           hidden={!booted}
           channelActions={actions.channelActions}
           categoryActions={actions.categoryActions}
-          channelStatus={backfill.channelStatus}
         />
         {actions.dialogs}
-        {backfill.dialogs}
 
         {channels.loading && !loaded ? <ChannelRowsSkeleton /> : null}
 
