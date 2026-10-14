@@ -50,7 +50,7 @@ const SETTINGS_SAVE_MS = 600;
 const REPLAY_MS = 1500;
 
 const SECTION =
-  "rounded-card border border-border bg-linear-to-b from-card to-[rgba(20,10,40,0.45)] text-text";
+  "rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text";
 const HINT = "text-xs leading-relaxed text-muted";
 const NUM =
   "w-20 rounded-control border border-border bg-bg-2 px-2 py-1.5 text-sm text-text outline-none focus:border-accent disabled:opacity-50";
@@ -391,18 +391,8 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
           }
         }}
       >
-        <summary className="flex cursor-pointer list-none items-center gap-3 px-[18px] py-3 [&::-webkit-details-marker]:hidden">
-          <h2 className="text-base font-semibold">Proxy</h2>
-          <a
-            href="https://copycord.github.io/Copycord/docs/configuration/advanced#proxy-support"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="View docs"
-            className="text-xs text-accent hover:underline"
-            onClick={(e) => e.stopPropagation()}
-          >
-            Docs
-          </a>
+        <summary className="flex min-h-7 cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden">
+          <h2 className="m-0 text-[15px] font-bold">Proxy</h2>
           <span
             id="srv-proxy-status"
             className={cx("srv-proxy-chip rounded-full border px-2.5 py-0.5 text-xs", CHIP_TONE[chip.tone])}
@@ -443,7 +433,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
           </span>
         </summary>
 
-        <div className="flex flex-col gap-4 border-t border-border px-[18px] py-4">
+        <div className="mt-4 flex flex-col gap-4 border-t border-border pt-4">
           <label className="flex w-fit cursor-pointer items-center gap-2 text-sm" htmlFor="srv-proxy-toggle">
             <input
               id="srv-proxy-toggle"
