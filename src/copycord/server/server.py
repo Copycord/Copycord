@@ -65,7 +65,7 @@ from copycord.server.token_identity import TokenIdentityManager
 from copycord.server.emojis import EmojiManager
 from copycord.server.stickers import StickerManager
 from copycord.server.roles import RoleManager
-from copycord.server.backfill import BackfillManager, BackfillTracker
+from copycord.server.backfill import BackfillManager
 from copycord.server.helpers import (
     OnJoinService,
     VerifyController,
@@ -277,12 +277,6 @@ class ServerReceiver:
 
         self._identity_cleaned: set[str] = set()
         self.backfill = BackfillManager(self, ratelimit=self.ratelimit)
-        self.backfills = BackfillTracker(
-            bus=self.bus,
-            on_done_cb=self.backfill.on_done,
-            progress_provider=self.backfill.get_progress,
-        )
-        self.backfill.tracker = self.backfills
         self.emojis = EmojiManager(
             bot=self.bot,
             db=self.db,
@@ -1269,10 +1263,7 @@ class ServerReceiver:
 
     async def _bf_finish_channel(self, orig: int) -> int | None:
         """Existing end of stream flow: drain, temp webhook cleanup, buffer flush. Returns messages written."""
-        tid = None
-        if hasattr(self.backfill, "tracker"):
-            with contextlib.suppress(Exception):
-                tid = await self.backfill.tracker.get_task_id(str(orig))
+        tid = (self.backfill._progress.get(orig) or {}).get("task_id")
 
         written = await self.backfill.on_done(
             orig,
@@ -1510,6 +1501,7 @@ class ServerReceiver:
                         "mapping_id": mapping_id,
                         "original_guild_id": original_gid,
                         "cloned_guild_id": cloned_gid,
+                        "job_id": data.get("job_id"),
                     },
                 )
                 return

@@ -1479,6 +1479,7 @@ class BackfillEngine:
                     "mapping_id": mapping_id,
                     "cloned_guild_id": cloned_guild_id,
                     "original_guild_id": original_guild_id,
+                    "job_id": job.job_id if job is not None else None,
                 },
             }
         )

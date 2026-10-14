@@ -9,7 +9,6 @@
 
 import asyncio
 import contextlib
-from dataclasses import dataclass, field
 import json
 import logging
 from collections import defaultdict
@@ -169,49 +168,15 @@ class BackfillManager(BackfillWebhookPool):
             if clone:
                 st["clone_channel_id"] = int(clone)
 
-        meta_out = dict(st.get("meta") or {})
-
-        def _set_stringified(k: str):
-            v = st.get(k)
-            if v is None:
-                return
-
-            if k == "mapping_id":
-                meta_out[k] = str(v)
-                return
-
-            if k in ("clone_channel_id", "original_guild_id", "cloned_guild_id"):
-                try:
-                    meta_out[k] = str(int(v))
-                except Exception:
-                    meta_out[k] = str(v)
-                return
-
-            meta_out[k] = v
-
-        for key in (
-            "clone_channel_id",
-            "mapping_id",
-            "original_guild_id",
-            "cloned_guild_id",
-        ):
-            _set_stringified(key)
-
-        if hasattr(self, "tracker"):
-            desired_id = st.get("run_id") if (is_resume and reused) else None
-            t = await self.tracker.start(str(cid), meta_out, task_id=desired_id)
-            if t is not None:
-                st["task_id"] = t.id
-                if not reused:
-                    st["run_id"] = t.id
-                self._finalized_by_channel.pop(cid, None)
-            else:
-                with contextlib.suppress(Exception):
-                    st["task_id"] = await self.tracker.get_task_id(str(cid)) or st.get(
-                        "task_id"
-                    )
-
+        # The admin's job id names the run; it already inserted the backfill_runs row.
+        job_id = (meta or {}).get("job_id")
+        desired_id = st.get("run_id") if (is_resume and reused) else None
+        st["task_id"] = str(desired_id or job_id or uuid.uuid4())
         if not reused:
+            st["run_id"] = st["task_id"]
+        self._finalized_by_channel.pop(cid, None)
+
+        if not reused and not job_id:
             try:
                 m = st.get("meta") or {}
                 rng = (m.get("range") or {}) if isinstance(m.get("range"), dict) else {}
@@ -306,9 +271,6 @@ class BackfillManager(BackfillWebhookPool):
 
         self._progress.pop(cid, None)
         self._flags.discard(cid)
-        if hasattr(self, "tracker"):
-            with contextlib.suppress(Exception):
-                await self.tracker.cancel(str(cid))
 
     async def on_progress(self, original_id: int, count: int) -> None:
         st = self._progress.get(int(original_id))
@@ -455,9 +417,6 @@ class BackfillManager(BackfillWebhookPool):
 
         st = self._progress.get(cid) or {}
         live_tid = (st or {}).get("task_id")
-        if not live_tid and hasattr(self, "tracker"):
-            with contextlib.suppress(Exception):
-                live_tid = await self.tracker.get_task_id(str(cid))
 
         if expected_task_id and live_tid and expected_task_id != live_tid:
             logger.debug(
@@ -492,12 +451,6 @@ class BackfillManager(BackfillWebhookPool):
             total = None
         if isinstance(total, int) and delivered < total:
             delivered = total
-
-        if hasattr(self, "tracker"):
-            with contextlib.suppress(Exception):
-                await self.tracker.publish_progress(
-                    str(cid), delivered=delivered, total=total
-                )
 
         shutting_down = getattr(self.r, "_shutting_down", False)
 
@@ -558,9 +511,6 @@ class BackfillManager(BackfillWebhookPool):
                 await self._wait_drain(orig, no_progress_timeout=120.0)
 
         task_id_for_run = (st or {}).get("task_id")
-        if not task_id_for_run and hasattr(self, "tracker"):
-            with contextlib.suppress(Exception):
-                task_id_for_run = await self.tracker.get_task_id(str(cid))
 
         self._mark_cleanup_start(cid)
         if task_id_for_run:
@@ -671,204 +621,3 @@ class BackfillManager(BackfillWebhookPool):
                 break
 
             await asyncio.sleep(0.05)
-
-
-
-@dataclass
-class BackfillTask:
-    id: str
-    channel_id: str
-    started_at: float = field(default_factory=time.time)
-    processed: int = 0
-    in_flight: int = 0
-    client_done: bool = False
-    meta: dict = field(default_factory=dict)
-
-
-class BackfillTracker:
-    def __init__(self, bus, on_done_cb=None, progress_provider=None):
-        self._bus = bus
-        self._by_channel: dict[str, BackfillTask] = {}
-        self._lock = asyncio.Lock()
-        self._on_done_cb = on_done_cb
-        self._progress_provider = progress_provider
-        self._pumps: dict[str, asyncio.Task] = {}
-        self._last_id_by_channel: dict[str, str] = {}
-
-    async def start(
-        self, channel_id: str, meta: dict, task_id: str | None = None
-    ) -> BackfillTask | None:
-        async with self._lock:
-            if channel_id in self._by_channel:
-                return None
-
-            t = BackfillTask(id=(task_id or str(uuid.uuid4())), channel_id=channel_id)
-            t.meta = dict(meta or {})
-
-            self._by_channel[channel_id] = t
-            self._last_id_by_channel[channel_id] = t.id
-
-            data_out = {"channel_id": channel_id}
-            data_out.update(meta or {})
-
-            await self._bus.publish(
-                "client",
-                {
-                    "type": "backfill_started",
-                    "task_id": t.id,
-                    "data": data_out,
-                },
-            )
-
-        if self._progress_provider and channel_id not in self._pumps:
-            self._pumps[channel_id] = asyncio.create_task(
-                self._progress_pump(channel_id, t.id)
-            )
-        return t
-
-    async def get_task_id(self, channel_id: str) -> str | None:
-        async with self._lock:
-            t = self._by_channel.get(channel_id)
-            if t:
-                return t.id
-            return self._last_id_by_channel.get(channel_id)
-
-    async def cancel(self, channel_id: str):
-        async with self._lock:
-            t = self._by_channel.pop(channel_id, None)
-            if t:
-
-                self._last_id_by_channel[channel_id] = t.id
-        self._stop_pump(channel_id)
-
-    async def publish_progress(
-        self,
-        channel_id: str,
-        *,
-        delivered: int | None,
-        total: int | None,
-    ):
-        task_id = await self.get_task_id(channel_id)
-
-        async with self._lock:
-            t = self._by_channel.get(channel_id)
-            meta = dict(getattr(t, "meta", {}) or {})
-
-        data_out = {
-            "channel_id": channel_id,
-        }
-
-        if delivered is not None:
-            data_out["delivered"] = delivered
-
-            data_out["sent"] = delivered
-        if total is not None:
-            data_out["total"] = total
-
-        def _copy_stringified(k: str):
-            if k not in meta:
-                return
-            v = meta[k]
-            if k == "mapping_id":
-                data_out[k] = str(v)
-            else:
-
-                try:
-                    data_out[k] = str(int(v))
-                except Exception:
-                    data_out[k] = str(v)
-
-        for k in (
-            "mapping_id",
-            "original_guild_id",
-            "cloned_guild_id",
-            "clone_channel_id",
-        ):
-            _copy_stringified(k)
-
-        payload = {
-            "type": "backfill_progress",
-            "data": data_out,
-        }
-        if task_id:
-            payload["task_id"] = task_id
-
-        await self._bus.publish("client", payload)
-
-    async def _progress_pump(self, channel_id: str, task_id: str):
-        last_delivered = None
-        idle_ticks = 0
-        try:
-            while True:
-                async with self._lock:
-                    t = self._by_channel.get(channel_id)
-                    if not t:
-                        break
-
-                    in_flight = t.in_flight
-                    client_done = t.client_done
-                    meta = dict(getattr(t, "meta", {}) or {})
-
-                delivered = total = None
-                if self._progress_provider:
-                    try:
-                        delivered, total = self._progress_provider(int(channel_id))
-                    except Exception:
-                        delivered, total = None, None
-
-                changed = delivered is not None and delivered != last_delivered
-                heartbeat = in_flight > 0
-
-                if changed or (heartbeat and idle_ticks >= 8):
-                    data_out = {
-                        "channel_id": channel_id,
-                    }
-                    if delivered is not None:
-                        data_out["delivered"] = delivered
-                        data_out["sent"] = delivered
-                    if total is not None:
-                        data_out["total"] = total
-
-                    def _copy_stringified(k: str):
-                        if k not in meta:
-                            return
-                        v = meta[k]
-                        if k == "mapping_id":
-                            data_out[k] = str(v)
-                        else:
-                            try:
-                                data_out[k] = str(int(v))
-                            except Exception:
-                                data_out[k] = str(v)
-
-                    for k in (
-                        "mapping_id",
-                        "original_guild_id",
-                        "cloned_guild_id",
-                        "clone_channel_id",
-                    ):
-                        _copy_stringified(k)
-
-                    payload = {
-                        "type": "backfill_progress",
-                        "task_id": task_id,
-                        "data": data_out,
-                    }
-
-                    if ("delivered" in data_out) or ("total" in data_out) or heartbeat:
-                        await self._bus.publish("client", payload)
-
-                    if changed:
-                        last_delivered = delivered
-                    idle_ticks = 0
-                else:
-                    idle_ticks += 1
-
-                await asyncio.sleep(0.25)
-        finally:
-            self._pumps.pop(channel_id, None)
-
-    def _stop_pump(self, channel_id: str):
-        t = self._pumps.pop(channel_id, None)
-        if t:
-            t.cancel()

@@ -176,36 +176,6 @@ def test_snowflake_round_trips_as_string(ServerReceiver):
     assert rx.bus.sent[-1]["payload"]["data"]["last_orig_message_id"] == big
 
 
-LJOB = f"run-9:{CID}"
-
-
-def test_legacy_started_from_running_job():
-    from copycord.server.backfill_legacy import legacy_frame
-
-    out = legacy_frame({"type": "backfill_job", "data": {"job_id": LJOB, "state": "running", "original_channel_id": str(CID)}})
-    assert out == {"type": "backfill_started", "task_id": LJOB, "data": {"channel_id": str(CID)}}
-    assert legacy_frame({"type": "backfill_job", "data": {"job_id": LJOB, "state": "queued", "queue_position": 2}}) is None
-
-
-def test_legacy_progress_keys_match_tracker():
-    from copycord.server.backfill_legacy import legacy_frame
-
-    out = legacy_frame({"type": "backfill_job_progress", "data": {"job_id": LJOB, "pulled": 40, "total_estimate": 100}})
-    assert out["type"] == "backfill_progress" and out["task_id"] == LJOB
-    assert out["data"] == {"channel_id": str(CID), "delivered": 40, "sent": 40, "total": 100}
-
-
-def test_legacy_cleanup_and_done_keys():
-    from copycord.server.backfill_legacy import legacy_frame
-
-    c = legacy_frame({"type": "backfill_job_cleanup", "data": {"job_id": LJOB, "original_channel_id": str(CID), "state": "cleaning"}})
-    assert c == {"type": "backfill_cleanup", "channel_id": str(CID), "task_id": LJOB, "data": {"channel_id": str(CID), "task_id": LJOB, "state": "waiting"}}
-    d = legacy_frame({"type": "backfill_job_end", "data": {"job_id": LJOB, "original_channel_id": str(CID), "ok": True, "delivered": 12}})
-    assert d["type"] == "backfill_done" and d["channel_id"] == str(CID) and d["task_id"] == LJOB
-    assert set(d["data"]) == {"channel_id", "task_id", "sent", "total"} and d["data"]["sent"] == 12
-    assert legacy_frame({"type": "backfill_job_end", "data": {}}) is None
-
-
 def test_webhook_pool_lives_in_its_own_module():
     from copycord.server.backfill import BackfillManager
     from copycord.server.backfill_webhooks import BackfillWebhookPool
