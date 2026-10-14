@@ -173,7 +173,7 @@ export function System() {
   }
 
   return (
-    <div id="adv-root" className="mx-auto max-w-[1120px] px-3 pt-3.5 md:px-0 md:pt-0 xl:max-w-[1240px]">
+    <div id="adv-root" className="px-3 pt-3.5 md:px-0 md:pt-0">
       <h1 className="sr-only">System</h1>
       <Card
         id="adv-data-card"

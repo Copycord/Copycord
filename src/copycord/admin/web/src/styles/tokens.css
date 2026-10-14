@@ -26,12 +26,27 @@
   --color-good: #10b981;
   --color-custom-ink: #facc15;
   --color-progress: #22c55e;
+  --color-control: #140b26;
+  --color-rail-hover: rgba(167, 139, 250, 0.16);
+  --color-rail-active: rgba(167, 139, 250, 0.28);
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
     "Noto Sans", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
+  /* The old stylesheet never set a line height on text, so every size uses
+     the browser's normal one. */
+  --text-xs--line-height: normal;
+  --text-sm--line-height: normal;
+  --text-base--line-height: normal;
+  --text-lg--line-height: normal;
+  --text-xl--line-height: normal;
+  --text-2xl--line-height: normal;
+  --text-3xl--line-height: normal;
+
   --radius-rail: 4px;
+  --radius-input: 8px;
+  --radius-btn: 10px;
   --radius-control: 12px;
   --radius-panel: 16px;
   --radius-card: 18px;
@@ -46,15 +61,53 @@
   --spacing-page: 28px;
   --spacing-control: 34px;
   --spacing-menu-btn: 36px;
+  --spacing-drawer: min(320px, 86vw);
+}
+
+:root {
+  /* .card and .side-menu background, plain sRGB like the old stylesheet. */
+  --card-gradient: linear-gradient(180deg, #1b1030aa 0, rgba(20, 10, 40, 0.45) 100%);
+  /* .input and select.input background. */
+  --control-gradient: linear-gradient(180deg, #1a1030 0%, #140b26 100%);
+  --select-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23a78bfa' d='M1.41 0L6 4.58 10.59 0 12 1.41l-6 6-6-6z'/%3E%3C/svg%3E")
+      no-repeat right 14px center,
+    var(--control-gradient);
 }
 
 @layer base {
+  /* Old body: a flex column with the content column growing to push the
+     footer down, 28px side padding, header and footer room top and bottom. */
   html,
   body {
-    min-height: 100%;
+    min-height: 100vh;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    line-height: normal;
+  }
+  html {
+    background: var(--color-page);
+  }
+  body {
+    margin: 0;
+    padding: 0 28px;
     background: var(--color-page);
     color: var(--color-text);
     font-family: var(--font-sans);
+  }
+  body:has(#menu-toggle) {
+    padding-top: calc(var(--spacing-header) + 12px);
+    padding-bottom: calc(var(--spacing-footer) + max(24px, env(safe-area-inset-bottom)));
+  }
+  #root {
+    display: contents;
+  }
+  /* The old pages left form controls on the browser font. */
+  button,
+  input,
+  select,
+  textarea {
+    font: revert;
   }
   a {
     color: var(--color-accent);

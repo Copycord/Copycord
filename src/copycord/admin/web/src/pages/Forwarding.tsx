@@ -131,7 +131,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
   const empty = loaded && items.length === 0;
 
   return (
-    <div id="fwd-root" className="forwarding-page w-full px-3 pt-3.5 md:px-5 md:pt-0">
+    <div id="fwd-root" className="forwarding-page w-full pt-3.5 md:pt-0">
       <h1 className="sr-only">Forwarding</h1>
       <Card className="md:mt-[18px]">
         <header className="mb-3">
