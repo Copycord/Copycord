@@ -1,5 +1,7 @@
 // Toast stack shared by every page: useToast().show("Saved") or
-// show("Failed", { kind: "error" }).
+// show("Failed", { kind: "error" }). Matches the old showToast in app.js and
+// the .toast rules in main.css: top right under the header, a coloured bar on
+// the left, fades and drops in, and a click anywhere on it closes it.
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -10,6 +12,7 @@ export interface Toast {
   id: number;
   message: string;
   kind: ToastKind;
+  shown: boolean;
 }
 
 interface ToastApi {
@@ -19,24 +22,40 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi | null>(null);
 
-const KIND_CLASS: Record<ToastKind, string> = {
-  info: "border-border",
-  success: "border-good",
-  error: "border-danger",
+// The old close() dropped .show, then removed the element 200 ms later.
+const LEAVE_MS = 200;
+
+// .toast-info / .toast-success / .toast-error .toast-bar
+const BAR_CLASS: Record<ToastKind, string> = {
+  info: "bg-[linear-gradient(180deg,var(--color-accent),#5a27c9_80%)]",
+  success: "bg-[linear-gradient(180deg,var(--color-good),#0b8a69_80%)]",
+  error: "bg-[linear-gradient(180deg,#ef4444,#b91c1c_80%)]",
 };
+
+const TOAST =
+  "toast pointer-events-auto relative w-auto min-w-[280px] max-w-[440px] cursor-pointer overflow-hidden " +
+  "rounded-[8px] border border-border border-l-transparent bg-[#1a1030] px-4 py-3.5 text-text " +
+  "[transition:transform_0.18s_ease,opacity_0.18s_ease,box-shadow_0.18s_ease,border-color_0.18s_ease] " +
+  "max-[520px]:w-[calc(100vw-32px)] max-[520px]:min-w-0 max-[520px]:max-w-none";
+const HIDDEN = "[transform:translateY(-10px)_scale(0.96)] opacity-0";
+const SHOWN = "show [transform:translateY(0)_scale(1)] opacity-100";
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
 
   const dismiss = useCallback((id: number) => {
-    setToasts((list) => list.filter((t) => t.id !== id));
+    setToasts((list) => list.map((t) => (t.id === id ? { ...t, shown: false } : t)));
+    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), LEAVE_MS);
   }, []);
 
   const show = useCallback<ToastApi["show"]>(
     (message, opts = {}) => {
       const id = nextId.current++;
-      setToasts((list) => [...list, { id, message, kind: opts.kind ?? "info" }]);
+      setToasts((list) => [...list, { id, message, kind: opts.kind ?? "info", shown: false }]);
+      requestAnimationFrame(() =>
+        setToasts((list) => list.map((t) => (t.id === id ? { ...t, shown: true } : t))),
+      );
       const timeout = opts.timeout ?? 4000;
       if (timeout > 0) setTimeout(() => dismiss(id), timeout);
       return id;
@@ -50,25 +69,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={value}>
       {children}
       <div
-        className="pointer-events-none fixed right-4 bottom-4 z-50 flex flex-col gap-2"
+        id="toast-root"
+        className="toast-root pointer-events-none fixed top-[calc(var(--spacing-header)+16px)] right-4 z-[2147483647] flex flex-col items-end gap-2.5"
         aria-live="polite"
-        role="status"
+        aria-atomic="true"
       >
         {toasts.map((t) => (
           <div
             key={t.id}
-            role={t.kind === "error" ? "alert" : undefined}
-            className={`pointer-events-auto flex items-center gap-3 rounded-control border bg-card-solid px-4 py-3 text-sm text-text shadow-card ${KIND_CLASS[t.kind]}`}
+            role={t.kind === "error" ? "alert" : "status"}
+            className={`${TOAST} toast-${t.kind} ${t.shown ? SHOWN : HIDDEN}`}
+            onClick={() => dismiss(t.id)}
           >
-            <span>{t.message}</span>
-            <button
-              type="button"
-              className="ml-auto text-muted hover:text-text"
-              aria-label="Dismiss"
-              onClick={() => dismiss(t.id)}
-            >
-              x
-            </button>
+            <div
+              className={`toast-bar absolute top-0 bottom-0 left-0 w-1.5 rounded-l-[8px] ${BAR_CLASS[t.kind]}`}
+            />
+            <div className="toast-msg pl-3 text-[14px] leading-[1.4] font-medium whitespace-pre-line [word-break:break-word] text-text">
+              {t.message}
+            </div>
           </div>
         ))}
       </div>
