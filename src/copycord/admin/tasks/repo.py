@@ -36,6 +36,7 @@ def _row_fields(run: TaskRun) -> dict:
         "finished_at": run.finished_at,
         "updated_at": run.updated_at,
         "error": run.error,
+        "report_json": run.report,
     }
 
 
@@ -57,6 +58,8 @@ def run_from_row(row: dict) -> TaskRun:
         error=row.get("error"),
     )
     run.load_progress(_loads(row.get("progress_json"), {}))
+    report = _loads(row.get("report_json"), None)
+    run.report = report if isinstance(report, dict) else None
     return run
 
 

@@ -237,11 +237,11 @@ def _in_tx(method):
 TASK_RUN_COLUMNS = (
     "id", "type", "number", "status", "title", "context_json", "trigger", "actor",
     "inputs_json", "progress_json", "created_at", "started_at", "finished_at",
-    "updated_at", "error",
+    "updated_at", "error", "report_json",
 )
 # columns task_run_update may write; id, type and number are fixed at insert
 _TASK_RUN_MUTABLE = frozenset(TASK_RUN_COLUMNS) - {"id", "type", "number"}
-_TASK_RUN_JSON = frozenset({"context_json", "inputs_json", "progress_json"})
+_TASK_RUN_JSON = frozenset({"context_json", "inputs_json", "progress_json", "report_json"})
 
 
 def _task_run_value(col: str, value):
@@ -1484,7 +1484,7 @@ class DBManager:
             ],
         )
 
-        # Tasks framework: one row per run of any task type; the log lives in a file (admin/tasks/logstore.py)
+        # Tasks framework: one row per run of any task type; the short log rides in progress_json, the result in report_json
         self._ensure_table(
             name="task_runs",
             create_sql_template="""
@@ -1503,7 +1503,8 @@ class DBManager:
                     started_at     TEXT,
                     finished_at    TEXT,
                     updated_at     TEXT NOT NULL,
-                    error          TEXT
+                    error          TEXT,
+                    report_json    TEXT
                 );
             """,
             required_columns=set(TASK_RUN_COLUMNS),
@@ -3193,7 +3194,7 @@ class DBManager:
             where.append("(" + " OR ".join(ors) + ")")
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         page = max(1, int(page))
-        # no upper cap here: TaskService.prune pages by its keep count (500); the route caps
+        # no upper cap here; the route caps
         per_page = max(1, int(per_page))
         with self._tx():
             total = self.conn.execute(
@@ -3224,35 +3225,8 @@ class DBManager:
         return ids
 
     @_in_tx
-    def task_runs_prune(self, keep_per_type: int = 500) -> list[int]:
-        """Delete finished runs older than the newest keep_per_type of each type;
-        returns the deleted ids so the caller removes their log files."""
-        ids = [
-            int(r[0])
-            for r in self.conn.execute(
-                """
-                SELECT id FROM (
-                    SELECT id, status,
-                           ROW_NUMBER() OVER (PARTITION BY type ORDER BY id DESC) AS rn
-                    FROM task_runs
-                )
-                WHERE rn > ? AND status NOT IN ('queued', 'running')
-                ORDER BY id
-                """,
-                (max(0, int(keep_per_type)),),
-            ).fetchall()
-        ]
-        for i in range(0, len(ids), 500):
-            chunk = ids[i : i + 500]
-            self.conn.execute(
-                f"DELETE FROM task_runs WHERE id IN ({', '.join('?' * len(chunk))})",
-                chunk,
-            )
-        return ids
-
-    @_in_tx
     def task_run_delete(self, run_id: int) -> bool:
-        """Delete one run row; True when it existed (the caller removes its log file)."""
+        """Delete one run row; True when it existed."""
         cur = self.conn.execute("DELETE FROM task_runs WHERE id = ?", (int(run_id),))
         return cur.rowcount > 0
 

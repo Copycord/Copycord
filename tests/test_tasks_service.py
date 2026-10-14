@@ -1,5 +1,5 @@
 """Tasks framework core: registry, TaskService outcomes, cancel, slots,
-recover, prune, wire shape and the RunContext write and publish throttles."""
+recover, the in-row log and report, wire shape and the RunContext write and publish throttles."""
 import asyncio
 
 import pytest
@@ -9,7 +9,7 @@ from copycord.admin.tasks import registry
 from copycord.admin.tasks.context import RunContext
 from copycord.admin.tasks.service import (
     INTERRUPTED,
-    MemoryLogSink,
+    LOG_KEEP,
     MemoryRunRepo,
     RunFinished,
     TaskRun,
@@ -110,7 +110,7 @@ def svc(events):
     async def publish(event):
         events.append(event)
 
-    return TaskService(MemoryRunRepo(), MemoryLogSink(), publish, cancel_grace=0.1)
+    return TaskService(MemoryRunRepo(), publish, cancel_grace=0.1)
 
 
 async def _settled(svc, run_id, timeout=3.0):
@@ -141,10 +141,12 @@ async def test_start_to_success(svc, events):
     assert row.summary == {"done": 3}
     assert row.steps[0]["state"] == "success" and row.steps[0]["done"] == 3
     assert row.steps[0]["note"] == "ok"
-    lines = svc.log_sink.lines[run.id]
-    assert len(lines) == 1 and row.log_lines == 1
-    seq, ts, level, step, msg = lines[0].split("\t")
-    assert (seq, level, step, msg) == ("1", "info", "work", "did the work")
+    assert row.log_count == 1 and len(row.log_lines) == 1
+    line = row.log_lines[0]
+    assert (line["n"], line["level"], line["step"], line["msg"]) == (1, "info", "work", "did the work")
+    assert line["ts"].endswith("Z")
+    assert row.progress()["log_lines"] == row.log_lines
+    assert row.report is None
     statuses = [e["run"]["status"] for e in events]
     assert statuses[0] == "queued" and "running" in statuses and statuses[-1] == "success"
     seqs = [e["run"]["seq"] for e in events]
@@ -179,7 +181,7 @@ async def test_cancel_mid_run(svc):
     done = await _settled(svc, run.id)
     assert done.status == "cancelled" and done.error is None
     assert done.steps[0]["state"] == "cancelled"
-    assert any("Cancel requested" in line for line in svc.log_sink.lines[run.id])
+    assert any(ln["msg"] == "Cancel requested" and ln["level"] == "warning" for ln in done.log_lines)
     with pytest.raises(RunFinished):
         await svc.cancel(run.id)
     with pytest.raises(KeyError):
@@ -230,7 +232,7 @@ def _row(repo, type_key, status, number):
 
 def test_recover_marks_interrupted():
     repo = MemoryRunRepo()
-    svc = TaskService(repo, MemoryLogSink())
+    svc = TaskService(repo)
     q = _row(repo, "t_noop", "queued", 1)
     r = _row(repo, "t_noop", "running", 2)
     ok = _row(repo, "t_noop", "success", 3)
@@ -243,21 +245,49 @@ def test_recover_marks_interrupted():
     assert svc.recover() == 0
 
 
-def test_prune_keeps_newest_500_per_type():
-    repo, sink = MemoryRunRepo(), MemoryLogSink()
-    svc = TaskService(repo, sink)
-    many = [_row(repo, "t_noop", "success", i + 1) for i in range(505)]
-    few = [_row(repo, "t_boom", "failed", i + 1) for i in range(3)]
-    for run in many[:6]:
-        sink.append(run.id, "1\tts\tinfo\t\tx")
-    assert svc.prune() == 5
-    _, total = repo.list_runs({"type": "t_noop"})
-    assert total == 500
-    assert all(repo.get_run(run.id) is None for run in many[:5])
-    assert repo.get_run(many[5].id) is not None
-    assert all(repo.get_run(run.id) is not None for run in few)
-    assert set(sink.lines) == {many[5].id}
-    assert svc.prune() == 0
+def test_service_has_no_prune():
+    assert not hasattr(TaskService, "prune")
+
+
+@pytest.mark.asyncio
+async def test_log_keeps_newest_lines_and_cleans_text():
+    repo = MemoryRunRepo()
+    run = TaskRun(type="t_noop", number=1, status="running", title="x", trigger="manual",
+                  actor="admin", inputs={})
+    run.id = repo.insert_run(run)
+    ctx = RunContext(run, repo, lambda e: asyncio.sleep(0), lambda: 1000.0)
+    await ctx.log("multi\nline\ttext", level="warning", step="a")
+    for i in range(LOG_KEEP + 4):
+        await ctx.log(f"x{i}")
+    await ctx.flush()
+    row = repo.get_run(run.id)
+    assert row.log_count == LOG_KEEP + 5 and len(row.log_lines) == LOG_KEEP
+    assert row.log_lines[0]["n"] == 6 and row.log_lines[-1]["msg"] == f"x{LOG_KEEP + 3}"
+    first = TaskRun(type="t", number=1, status="running", title="", trigger="manual",
+                    actor="admin", inputs={})
+    first.load_progress({"log_lines": 3})  # rows written before log_lines was a list
+    assert first.log_lines == [] and first.log_count == 0
+
+
+@pytest.mark.asyncio
+async def test_report_dict_or_fields(svc):
+    run = await svc.start("t_noop", {})
+    ctx = svc._active[run.id][0]
+    await ctx.report({"channels": [{"channel_id": 2**60 + 1, "delivered": 3}]}, took_s=1.5)
+    assert ctx.run.report == {"channels": [{"channel_id": 2**60 + 1, "delivered": 3}], "took_s": 1.5}
+    await ctx.report(ok=True)
+    assert ctx.run.report == {"ok": True}
+    await ctx.report({"data": 1}, data=2)
+    assert ctx.run.report == {"data": 2}
+    done = await _settled(svc, run.id)
+    assert svc.repo.get_run(run.id).report == {"data": 2}
+    detail = done.to_wire(detail=True)
+    assert detail["report"] == {"data": 2}
+    assert [ln["msg"] for ln in detail["log_lines"]] == ["did the work"]
+    plain = done.to_wire()
+    assert "report" not in plain and "log_lines" not in plain and plain["log_count"] == 1
+    done.report = {"channel_id": 2**60 + 1}
+    assert done.to_wire(detail=True)["report"] == {"channel_id": str(2**60 + 1)}
 
 
 @pytest.mark.asyncio
@@ -272,7 +302,7 @@ async def test_to_wire_ids_are_strings(svc):
     assert wire["inputs"]["n"] == 1
     assert set(wire) >= {"id", "type", "number", "title", "context", "status", "trigger", "actor",
                          "inputs", "created_at", "started_at", "finished_at", "error", "summary",
-                         "log_lines", "steps", "seq"}
+                         "log_count", "steps", "seq"}
     runs, total = svc.list({"type": "t_noop"})
     assert total == 1
     listed = runs[0].to_wire(include_steps=False)
@@ -290,7 +320,7 @@ async def test_publish_throttle_transitions_immediate_progress_coalesced():
     run = TaskRun(type="t_noop", number=1, status="running", title="x", trigger="manual",
                   actor="admin", inputs={})
     run.id = repo.insert_run(run)
-    ctx = RunContext(run, repo, MemoryLogSink(), publish, lambda: now[0])
+    ctx = RunContext(run, repo, publish, lambda: now[0])
     step = ctx.step("a", "A")
     await step.start()
     assert len(events) == 1 and repo.writes == 1

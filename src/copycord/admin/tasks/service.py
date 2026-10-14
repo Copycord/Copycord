@@ -7,11 +7,12 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""TaskService: start, cancel, list, recover and prune task runs.
+"""TaskService: start, cancel, list and recover task runs.
 
-Storage sits behind RunRepo (task_runs rows) and LogSink (per run log
-files); both are Protocols so the SQLite and file implementations live with
-the DB code and tests use the in-memory ones below."""
+Storage sits behind RunRepo (task_runs rows), a Protocol so the SQLite
+implementation lives with the DB code and tests use the in-memory one below.
+The run's short log rides in progress_json (newest LOG_KEEP lines); nothing
+is pruned, the user deletes runs."""
 
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ from typing import Any, Awaitable, Callable, Optional, Protocol
 from pydantic import BaseModel, ValidationError
 
 from . import registry
-from .context import RunContext, TaskCancelled, iso
+from .context import LOG_KEEP, RunContext, TaskCancelled, iso
 from .registry import TaskType
 
 log = logging.getLogger("copycord.tasks")
@@ -35,7 +36,6 @@ ACTIVE = ("queued", "running")
 FINAL = ("success", "failed", "cancelled")
 CANCEL_GRACE = 30.0
 INTERRUPTED = "Interrupted by restart"
-KEEP_PER_TYPE = 500
 
 
 def _ids_to_str(value: Any, key: str = "") -> Any:
@@ -64,7 +64,9 @@ class TaskRun:
     id: Optional[int] = None
     steps: list = field(default_factory=list)
     summary: dict = field(default_factory=dict)
-    log_lines: int = 0
+    log_lines: list = field(default_factory=list)
+    log_count: int = 0
+    report: Optional[dict] = None
     created_at: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
@@ -75,16 +77,21 @@ class TaskRun:
     def progress(self) -> dict:
         """What goes in progress_json."""
         return {"steps": [dict(s) for s in self.steps], "summary": dict(self.summary),
-                "log_lines": self.log_lines, "seq": self.seq}
+                "log_lines": [dict(ln) for ln in self.log_lines], "log_count": self.log_count,
+                "seq": self.seq}
 
     def load_progress(self, data: Optional[dict]) -> None:
         data = data or {}
         self.steps = [dict(s) for s in data.get("steps") or []]
         self.summary = dict(data.get("summary") or {})
-        self.log_lines = int(data.get("log_lines") or 0)
+        lines = data.get("log_lines")
+        self.log_lines = [dict(ln) for ln in lines if isinstance(ln, dict)] if isinstance(lines, list) else []
+        self.log_count = int(data.get("log_count") or len(self.log_lines))
         self.seq = int(data.get("seq") or 0)
 
-    def to_wire(self, include_steps: bool = True, include_inputs: bool = True) -> dict:
+    def to_wire(self, include_steps: bool = True, include_inputs: bool = True,
+                detail: bool = False) -> dict:
+        """List rows and events carry log_count; detail adds log_lines and report."""
         wire = {
             "id": None if self.id is None else str(self.id),
             "type": self.type,
@@ -100,13 +107,16 @@ class TaskRun:
             "finished_at": self.finished_at,
             "error": self.error,
             "summary": _ids_to_str(self.summary),
-            "log_lines": self.log_lines,
+            "log_count": self.log_count,
             "seq": self.seq,
         }
         if not include_inputs:
             del wire["inputs"]
         if include_steps:
             wire["steps"] = [dict(s) for s in self.steps]
+        if detail:
+            wire["log_lines"] = [dict(ln) for ln in self.log_lines]
+            wire["report"] = None if self.report is None else _ids_to_str(self.report)
         return wire
 
 
@@ -122,13 +132,6 @@ class RunRepo(Protocol):
     def next_number(self, type_key: str) -> int: ...
     def delete_run(self, run_id: int) -> None: ...
     def list_types(self) -> list[str]: ...
-
-
-class LogSink(Protocol):
-    """Per run log. line is "seq<TAB>iso<TAB>level<TAB>step<TAB>msg" without a newline."""
-
-    def append(self, run_id: int, line: str) -> None: ...
-    def delete(self, run_id: int) -> None: ...
 
 
 class RunFinished(Exception):
@@ -196,17 +199,6 @@ class MemoryRunRepo:
         return sorted({r.type for r in self.rows.values()})
 
 
-class MemoryLogSink:
-    def __init__(self):
-        self.lines: dict[int, list[str]] = {}
-
-    def append(self, run_id: int, line: str) -> None:
-        self.lines.setdefault(run_id, []).append(line)
-
-    def delete(self, run_id: int) -> None:
-        self.lines.pop(run_id, None)
-
-
 def _input_errors(exc: ValidationError) -> dict:
     errors: dict[str, str] = {}
     for err in exc.errors():
@@ -223,14 +215,12 @@ class TaskService:
     def __init__(
         self,
         repo: RunRepo,
-        log_sink: LogSink,
         publish: Optional[Callable[[dict], Awaitable[None]]] = None,
         clock: Callable[[], float] = time.time,
         lookups: Any = None,
         cancel_grace: float = CANCEL_GRACE,
     ):
         self.repo = repo
-        self.log_sink = log_sink
         self._publish = publish or _noop_publish
         self._clock = clock
         self._lookups = lookups
@@ -260,7 +250,7 @@ class TaskService:
             context=context, created_at=stamp, updated_at=stamp,
         )
         run.id = self.repo.insert_run(run)
-        ctx = RunContext(run, self.repo, self.log_sink, self._publish, self._clock)
+        ctx = RunContext(run, self.repo, self._publish, self._clock)
         await ctx.flush()
         task = asyncio.ensure_future(self._execute(task_type, ctx, inputs))
         self._active[run.id] = (ctx, task)
@@ -419,26 +409,6 @@ class TaskService:
                 self.repo.update_run(run)
                 fixed += 1
 
-    def prune(self, keep: int = KEEP_PER_TYPE) -> int:
-        """Keep the newest `keep` runs per type; older rows and their logs go."""
-        if keep < 1:
-            raise ValueError("keep must be at least 1")
-        removed = 0
-        for type_key in self.repo.list_types():
-            while True:
-                older, _ = self.repo.list_runs({"type": type_key}, 2, keep)
-                victims = [r for r in older if r.id not in self._active]
-                if not victims:
-                    break
-                for run in victims:
-                    self.repo.delete_run(run.id)
-                    try:
-                        self.log_sink.delete(run.id)
-                    except Exception:
-                        log.exception("task run %s: log delete failed", run.id)
-                    removed += 1
-        return removed
-
     async def shutdown(self) -> None:
         """Stop every active run (app shutdown); recover() marks them on next boot otherwise."""
         tasks = [task for _, task in self._active.values()] + list(self._watchdogs.values())
@@ -449,6 +419,6 @@ class TaskService:
 
 
 __all__ = (
-    "TaskRun", "RunRepo", "LogSink", "RunFinished", "MemoryRunRepo", "MemoryLogSink",
-    "TaskService", "TaskCancelled", "INTERRUPTED", "CANCEL_GRACE", "KEEP_PER_TYPE",
+    "TaskRun", "RunRepo", "RunFinished", "MemoryRunRepo",
+    "TaskService", "TaskCancelled", "INTERRUPTED", "CANCEL_GRACE", "LOG_KEEP",
 )

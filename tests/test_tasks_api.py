@@ -14,7 +14,6 @@ from copycord.admin.app import app
 from copycord.admin.security import CSRF_HEADER
 from copycord.admin.tasks import registry
 from copycord.admin.tasks import routes as task_routes
-from copycord.admin.tasks.logstore import LogStore
 from copycord.admin.tasks.repo import SqliteTaskRepo
 from copycord.admin.tasks.service import TaskService
 
@@ -24,13 +23,19 @@ ORIGIN = "http://testserver"
 
 class Inputs(BaseModel):
     n: int = Field(1, ge=1)
+    report: bool = True
+    hold: bool = False
 
 
 async def _run(ctx, inputs):
     step = ctx.step("work", "Work")
     await step.start()
+    while inputs.hold and not ctx.cancelled.is_set():
+        await asyncio.sleep(0.01)
     for i in range(inputs.n):
         await ctx.log(f"line {i + 1}", step="work")
+    if inputs.report:
+        await ctx.report({"lines": inputs.n}, guild_id=2 ** 60)
     await step.finish("success", "ok")
 
 
@@ -53,8 +58,7 @@ def client(db, tmp_path, monkeypatch, events):
     async def publish(event):
         events.append(event)
 
-    task_routes.set_service(TaskService(SqliteTaskRepo(db), LogStore(tmp_path / "logs"),
-                                        publish=publish))
+    task_routes.set_service(TaskService(SqliteTaskRepo(db), publish=publish))
     monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
     # One event loop for every request so started runs progress between calls;
     # the real startup hooks (agents, schedulers) stay off.
@@ -96,7 +100,7 @@ def test_options(client):
     assert client.get("/api/tasks/types/nope/options").status_code == 404
 
 
-def test_start_get_list_cancel_and_log(client, events):
+def test_start_get_list_cancel_and_detail(client, events):
     resp = _start(client, {"n": 3})
     assert resp.status_code == 201
     run = resp.json()["run"]
@@ -105,7 +109,11 @@ def test_start_get_list_cancel_and_log(client, events):
 
     done = _finished(client, run["id"])
     assert done["status"] == "success" and done["steps"][0]["state"] == "success"
-    assert done["log_lines"] == 3
+    assert done["log_count"] == 3
+    assert [ln["msg"] for ln in done["log_lines"]] == ["line 1", "line 2", "line 3"]
+    assert done["log_lines"][0] == {"n": 1, "ts": done["log_lines"][0]["ts"], "level": "info",
+                                    "step": "work", "msg": "line 1"}
+    assert done["report"] == {"lines": 3, "guild_id": str(2 ** 60)}
 
     second = _start(client, trigger="rerun").json()["run"]
     assert second["number"] == 2 and second["trigger"] == "rerun"
@@ -115,6 +123,8 @@ def test_start_get_list_cancel_and_log(client, events):
     assert body["total"] == 2 and body["page"] == 1
     assert [r["id"] for r in body["runs"]] == [second["id"], run["id"]]
     assert "steps" not in body["runs"][0]
+    assert "log_lines" not in body["runs"][0] and "report" not in body["runs"][0]
+    assert body["runs"][0]["log_count"] == 1
     assert body["actors"] == ["admin"] and body["contexts"] == ["Ctx"]
 
     body = client.get("/api/tasks/runs", params={"q": "#1"}).json()
@@ -132,16 +142,46 @@ def test_start_get_list_cancel_and_log(client, events):
     assert client.get("/api/tasks/runs/999").status_code == 404
     assert client.get("/api/tasks/runs/abc").status_code == 404
 
-    log = client.get(f"/api/tasks/runs/{run['id']}/log").json()
-    assert [ln["msg"] for ln in log["lines"]] == ["line 1", "line 2", "line 3"]
-    assert log["lines"][0] == {"n": 1, "ts": log["lines"][0]["ts"], "level": "info",
-                               "step": "work", "msg": "line 1"}
-    assert log["next"] == 3 and log["complete"] is True
-    log = client.get(f"/api/tasks/runs/{run['id']}/log", params={"after": 2, "step": "work"}).json()
-    assert [ln["n"] for ln in log["lines"]] == [3]
+    assert client.get(f"/api/tasks/runs/{run['id']}/log").status_code == 404
 
     assert events and all(e["type"] == "task.run.updated" for e in events)
-    assert all("inputs" not in e["run"] for e in events)
+    assert all("inputs" not in e["run"] and "log_lines" not in e["run"]
+               and "report" not in e["run"] for e in events)
+
+
+def test_report_download(client):
+    run = _start(client, {"n": 2}).json()["run"]
+    _finished(client, run["id"])
+    resp = client.get(f"/api/tasks/runs/{run['id']}/report.json")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/json")
+    assert resp.headers["content-disposition"] == 'attachment; filename="noop-api-1.json"'
+    assert json.loads(resp.text) == {"lines": 2, "guild_id": str(2 ** 60)}
+
+    bare = _start(client, {"report": False}).json()["run"]
+    done = _finished(client, bare["id"])
+    assert done["report"] is None
+    assert client.get(f"/api/tasks/runs/{bare['id']}/report.json").status_code == 404
+    assert client.get("/api/tasks/runs/999/report.json").status_code == 404
+    assert client.get("/api/tasks/runs/abc/report.json").status_code == 404
+
+
+def test_delete_run(client):
+    held = _start(client, {"hold": True}).json()["run"]
+    resp = client.delete(f"/api/tasks/runs/{held['id']}")
+    assert resp.status_code == 409
+    assert resp.json()["run"]["status"] in ("queued", "running")
+    assert client.post(f"/api/tasks/runs/{held['id']}/cancel").status_code == 200
+    assert _finished(client, held["id"])["status"] == "cancelled"
+
+    resp = client.delete(f"/api/tasks/runs/{held['id']}")
+    assert resp.status_code == 204 and resp.content == b""
+    assert client.get(f"/api/tasks/runs/{held['id']}").status_code == 404
+    assert client.delete(f"/api/tasks/runs/{held['id']}").status_code == 404
+    assert client.delete("/api/tasks/runs/abc").status_code == 404
+    assert client.get("/api/tasks/runs").json()["total"] == 0
+    # numbering continues past a deleted run
+    assert _start(client).json()["run"]["number"] == 2
 
 
 def test_start_errors(client):

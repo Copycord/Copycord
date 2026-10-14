@@ -14,8 +14,6 @@ Task types register here at import once they exist (backfill_channels next)."""
 from .context import RunContext, Step, TaskCancelled
 from .registry import TaskType, register
 from .service import (
-    LogSink,
-    MemoryLogSink,
     MemoryRunRepo,
     RunFinished,
     RunRepo,
@@ -24,6 +22,6 @@ from .service import (
 )
 
 __all__ = (
-    "LogSink", "MemoryLogSink", "MemoryRunRepo", "RunContext", "RunFinished", "RunRepo",
+    "MemoryRunRepo", "RunContext", "RunFinished", "RunRepo",
     "Step", "TaskCancelled", "TaskRun", "TaskService", "TaskType", "register",
 )

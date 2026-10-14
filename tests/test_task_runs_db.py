@@ -30,7 +30,7 @@ def test_fresh_db_has_task_runs_and_indexes(db):
     assert {
         "id", "type", "number", "status", "title", "context_json", "trigger", "actor",
         "inputs_json", "progress_json", "created_at", "started_at", "finished_at",
-        "updated_at", "error",
+        "updated_at", "error", "report_json",
     } <= cols
     assert {"idx_task_runs_type_id", "idx_task_runs_status", "idx_task_runs_created"} <= _indexes(
         db.conn, "task_runs"
@@ -198,20 +198,37 @@ def test_recover_marks_queued_and_running_failed(db):
     assert db.task_runs_recover() == []
 
 
-def test_prune_keeps_newest_500_per_type(db):
-    a = [_run(db, "a") for _ in range(503)]
-    b = [_run(db, "b") for _ in range(3)]
-    for i in a + b:
-        db.task_run_update(i, status="success")
-    # an old run still going is never pruned
-    db.task_run_update(a[0], status="running")
-    deleted = db.task_runs_prune()
-    assert deleted == a[1:3]
-    assert db.task_runs_list(type="a")[1] == 501
-    assert db.task_runs_list(type="b")[1] == 3
-    assert db.task_run_get(a[0]) is not None
-    assert db.task_run_get(a[-500]) is not None
-    assert db.task_runs_prune(keep_per_type=2) == sorted(a[-500:-2] + b[:1])
+def test_report_json_round_trips(db):
+    rid = _run(db)
+    assert db.task_run_get(rid)["report_json"] is None
+    db.task_run_update(rid, report_json={"channels": [{"id": "1", "delivered": 5}]})
+    assert db.task_run_get(rid)["report_json"] == '{"channels": [{"id": "1", "delivered": 5}]}'
+    db.task_run_update(rid, report_json=None)
+    assert db.task_run_get(rid)["report_json"] is None
+
+
+def test_task_runs_without_report_json_gains_it_and_keeps_rows(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKUP_DIR", str(tmp_path / "backups"))
+    path = tmp_path / "l2.db"
+    db = DBManager(str(path), init_schema=True)
+    rid = _run(db, status="success", progress_json={"seq": 3})
+    db.close()
+    # the task_runs shape before report_json existed
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE task_runs DROP COLUMN report_json")
+    conn.commit()
+    conn.close()
+
+    db = DBManager(str(path), init_schema=True)
+    try:
+        assert "report_json" in db._table_columns("task_runs")
+        row = db.task_run_get(rid)
+        assert row["status"] == "success" and row["number"] == 1
+        assert row["progress_json"] == '{"seq": 3}'
+        assert row["report_json"] is None
+        assert {"idx_task_runs_type_id", "idx_task_runs_status"} <= _indexes(db.conn, "task_runs")
+    finally:
+        db.close()
 
 
 def test_actors_and_contexts(db):

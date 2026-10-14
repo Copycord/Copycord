@@ -7,13 +7,14 @@ on the wire is a string; ids in paths are accepted as strings."""
 from __future__ import annotations
 
 import functools
+import json
 from typing import Any, Optional
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from . import registry
-from .service import RunFinished, TaskService, _ids_to_str
+from .service import ACTIVE, RunFinished, TaskService, _ids_to_str
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -190,7 +191,39 @@ async def get_run(run_id: str):
     run = svc.get(rid) if rid is not None else None
     if run is None:
         return _error(404, "Unknown run")
-    return {"run": run.to_wire()}
+    return {"run": run.to_wire(detail=True)}
+
+
+@router.delete("/runs/{run_id}")
+@_guard
+async def delete_run(run_id: str):
+    svc = _svc()
+    rid = _run_id(run_id)
+    run = svc.get(rid) if rid is not None else None
+    if run is None:
+        return _error(404, "Unknown run")
+    if run.status in ACTIVE or any(r.id == rid for r in svc.active_runs()):
+        return _error(409, f"Run is {run.status}; cancel it first", run=run.to_wire())
+    svc.repo.delete_run(rid)
+    return Response(status_code=204)
+
+
+@router.get("/runs/{run_id}/report.json")
+@_guard
+async def run_report(run_id: str):
+    svc = _svc()
+    rid = _run_id(run_id)
+    run = svc.get(rid) if rid is not None else None
+    if run is None:
+        return _error(404, "Unknown run")
+    if run.report is None:
+        return _error(404, "No report yet")
+    filename = f"{run.type.replace('_', '-')}-{run.number}.json"
+    return Response(
+        json.dumps(_ids_to_str(run.report), indent=2, ensure_ascii=False) + "\n",
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/runs/{run_id}/cancel")
@@ -207,26 +240,3 @@ async def cancel_run(run_id: str):
     except RunFinished as exc:
         return _error(409, f"Run already {exc.run.status}", run=exc.run.to_wire())
     return {"run": run.to_wire()}
-
-
-@router.get("/runs/{run_id}/log")
-@_guard
-async def run_log(run_id: str, request: Request):
-    svc = _svc()
-    rid = _run_id(run_id)
-    if rid is None or svc.get(rid) is None:
-        return _error(404, "Unknown run")
-    reader = getattr(svc.log_sink, "read", None)
-    if reader is None:
-        return {"lines": [], "next": 0, "complete": True}
-    qp = request.query_params
-    after = _int(qp.get("after"), 0, 0)
-    limit = _int(qp.get("limit"), 500, 1, 2000)
-    step = (qp.get("step") or "").strip() or None
-    lines, nxt, complete = reader(rid, after=after, step=step, limit=limit)
-    return {
-        "lines": [{"n": ln["seq"], "ts": ln["ts"], "level": ln["level"], "step": ln["step"],
-                   "msg": ln["msg"]} for ln in lines],
-        "next": nxt,
-        "complete": complete,
-    }

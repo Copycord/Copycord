@@ -22,11 +22,12 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
 
 if TYPE_CHECKING:
-    from .service import LogSink, RunRepo, TaskRun
+    from .service import RunRepo, TaskRun
 
 log = logging.getLogger("copycord.tasks")
 
 WRITE_INTERVAL = 1.0
+LOG_KEEP = 500
 PUBLISH_INTERVAL = 0.5
 STEP_STATES = ("queued", "running", "success", "failed", "skipped", "cancelled")
 STEP_FINAL = ("success", "failed", "skipped", "cancelled")
@@ -88,13 +89,11 @@ class RunContext:
         self,
         run: "TaskRun",
         repo: "RunRepo",
-        log_sink: "LogSink",
         publish: Callable[[dict], Awaitable[None]],
         clock: Callable[[], float],
     ):
         self.run = run
         self._repo = repo
-        self._sink = log_sink
         self._publish = publish
         self._clock = clock
         self.cancelled = asyncio.Event()
@@ -114,13 +113,13 @@ class RunContext:
     # runner API
 
     async def log(self, msg: Any, level: str = "info", step: Optional[str] = None) -> None:
-        self.run.log_lines += 1
-        line = "\t".join((str(self.run.log_lines), iso(self._clock()), _clean(level),
-                          _clean(step or ""), _clean(msg)))
-        try:
-            self._sink.append(self.run.id, line)
-        except Exception:
-            log.exception("task run %s: log append failed", self.run.id)
+        """Append a friendly line to progress_json.log_lines; the newest LOG_KEEP stay."""
+        self.run.log_count += 1
+        self.run.log_lines.append({
+            "n": self.run.log_count, "ts": iso(self._clock()), "level": _clean(level),
+            "step": step or None, "msg": _clean(msg),
+        })
+        del self.run.log_lines[:-LOG_KEEP]
         await self._changed(False)
 
     def step(self, key: str, title: Optional[str] = None) -> Step:
@@ -137,6 +136,13 @@ class RunContext:
 
     async def summary(self, **counts: Any) -> None:
         self.run.summary.update(counts)
+        await self._changed(False)
+
+    async def report(self, data: Optional[dict] = None, /, **fields: Any) -> None:
+        """Set the run's JSON report (report_json): ctx.report({...}) or ctx.report(k=v)."""
+        report = dict(data or {})
+        report.update(fields)
+        self.run.report = report
         await self._changed(False)
 
     def check_cancelled(self) -> None:

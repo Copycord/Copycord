@@ -90,7 +90,6 @@ from copycord.admin.web_config import router as links_router
 from copycord.admin.web_config import startup_links, shutdown_links
 import copycord.admin.tasks  # noqa: F401  task types register at import
 from copycord.admin.tasks import routes as task_routes
-from copycord.admin.tasks.logstore import LogStore
 from copycord.admin.tasks.repo import SqliteTaskRepo
 from copycord.admin.tasks.service import TaskService
 from contextlib import suppress
@@ -1988,15 +1987,14 @@ async def _publish_task_event(event: dict) -> None:
 
 @_on_startup
 async def _startup_tasks():
-    service = TaskService(SqliteTaskRepo(db), LogStore(), publish=_publish_task_event)
+    service = TaskService(SqliteTaskRepo(db), publish=_publish_task_event)
     task_routes.set_service(service)
     try:
         recovered = service.recover()
-        pruned = service.prune()
-        if recovered or pruned:
-            LOGGER.info("Tasks: %d interrupted runs marked failed, %d old runs pruned", recovered, pruned)
+        if recovered:
+            LOGGER.info("Tasks: %d interrupted runs marked failed", recovered)
     except Exception:
-        LOGGER.exception("Tasks: recover or prune failed")
+        LOGGER.exception("Tasks: recover failed")
 
 
 @_on_shutdown
