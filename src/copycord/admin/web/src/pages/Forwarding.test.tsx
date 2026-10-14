@@ -5,7 +5,7 @@ import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../lib/api";
 import type { ForwardingRule } from "../types/forwarding";
-import { Forwarding } from "./Forwarding";
+import { CLIENT_TOKEN_MESSAGE, Forwarding } from "./Forwarding";
 import type { OpenRuleEditor } from "./forwarding/editor";
 import { filterRules, toList } from "./forwarding/forwardingApi";
 
@@ -28,7 +28,9 @@ type Handler = (init: RequestInit) => Response;
 
 function server(routes: Record<string, Handler>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const handler = routes[`${init.method ?? "GET"} ${String(input)}`];
+    const key = `${init.method ?? "GET"} ${String(input)}`;
+    // A configured client token unless a test says otherwise.
+    const handler = routes[key] ?? (key === "GET /api/client-guilds" ? () => jsonResponse({ items: [] }) : undefined);
     return handler ? handler(init) : new Response("not found", { status: 404 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -227,5 +229,31 @@ describe("forwarding helpers", () => {
     expect(filterRules(rules, "BETA")).toHaveLength(1);
     expect(filterRules(rules, "telegram")).toHaveLength(1);
     expect(filterRules(rules, "gamma")).toHaveLength(0);
+  });
+});
+
+describe("Forwarding client token gate", () => {
+  it("dims the page with the old message while no client token is configured", async () => {
+    server({ ...listRoutes(), "GET /api/client-guilds": () => jsonResponse({ detail: "client-token-missing" }, 400) });
+    renderPage();
+    const gate = await screen.findByTestId("status-gate");
+    expect(gate).toHaveTextContent(CLIENT_TOKEN_MESSAGE);
+    expect(gate).toHaveClass("fixed", "top-header", "bottom-0");
+    expect(within(gate).getByRole("status")).toHaveTextContent("Open the Configuration page, add your tokens");
+    expect(document.getElementById("fwd-root")!.querySelector("[inert]")).not.toBeNull();
+  });
+
+  it("dims the page when the configured client token is rejected", async () => {
+    server({ ...listRoutes(), "GET /api/client-guilds": () => jsonResponse({ detail: "client-token-invalid" }, 502) });
+    renderPage();
+    expect(await screen.findByTestId("status-gate")).toHaveTextContent(CLIENT_TOKEN_MESSAGE);
+  });
+
+  it("shows no gate when the client guilds load", async () => {
+    server({ ...listRoutes(), "GET /api/client-guilds": () => jsonResponse({ items: [{ id: "1", name: "G" }] }) });
+    renderPage();
+    await waitFor(() => expect(document.querySelectorAll(".fwd-card")).toHaveLength(2));
+    expect(screen.queryByTestId("status-gate")).toBeNull();
+    expect(document.getElementById("fwd-root")!.querySelector("[inert]")).toBeNull();
   });
 });
