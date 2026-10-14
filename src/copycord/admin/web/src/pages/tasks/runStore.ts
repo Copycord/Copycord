@@ -81,9 +81,10 @@ export interface ListState {
 /** A list page with a frame applied: patch the row, insert at the top, or leave it alone. */
 export function mergeIntoList(state: ListState, frame: TaskRunUpdated, filters: RunFilters): ListState {
   const i = state.runs.findIndex((r) => r.id === frame.run.id);
-  if (i >= 0) {
-    const next = applyFrame(state.runs[i], frame);
-    if (next === state.runs[i]) return state;
+  const held = state.runs[i];
+  if (held) {
+    const next = applyFrame(held, frame);
+    if (next === held) return state;
     const runs = [...state.runs];
     runs[i] = next;
     return { ...state, runs };

@@ -26,12 +26,15 @@ const CONTAINER = `${COLUMN} max-w-[1100px]`;
 // .channels-page / .guilds-page .container.wide and body.page-forwarding .container: full width, 20px sides.
 const WIDE = "flex w-full flex-1 flex-col px-5";
 
+// The Tasks list and its run pages (/tasks/runs/:id) share one frame.
+const TASKS_FRAME: Frame = { main: WIDE };
+
 const FRAMES: Record<string, Frame> = {
   "/": { main: CONTAINER, footerInside: true },
   "/channels": { main: `${WIDE} max-sm:px-3` },
   "/guilds": { main: WIDE },
   "/forwarding": { main: WIDE, footerInside: true },
-  "/tasks": { main: WIDE },
+  "/tasks": TASKS_FRAME,
   // .scraper-wide
   "/scraper": { main: `${COLUMN} max-w-[1200px] px-5 pb-20`, sidebarFooter: "social" },
   // .adv-wide
@@ -56,7 +59,7 @@ export function Layout() {
   // undefined while /version loads, null when it has no version or fails.
   const [version, setVersion] = useState<string | null | undefined>(undefined);
   const location = useLocation();
-  const frame = FRAMES[location.pathname] ?? (location.pathname.startsWith("/tasks/") ? FRAMES["/tasks"] : NOT_FOUND);
+  const frame = FRAMES[location.pathname] ?? (location.pathname.startsWith("/tasks/") ? TASKS_FRAME : NOT_FOUND);
 
   useEffect(() => setDrawerOpen(false), [location.pathname]);
 

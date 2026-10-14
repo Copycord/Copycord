@@ -77,12 +77,12 @@ describe("Tasks page", () => {
     const rows = within(list).getAllByRole("listitem");
     expect(rows).toHaveLength(2);
     expect(screen.getByText("2 task runs")).toBeInTheDocument();
-    expect(within(rows[0]).getByRole("link", { name: "Backfill #general" })).toHaveAttribute("href", "/tasks/runs/12");
-    expect(within(rows[0]).getByRole("img", { name: "Success" })).toBeInTheDocument();
-    expect(within(rows[1]).getByRole("img", { name: "Failed" })).toBeInTheDocument();
-    expect(await within(rows[0]).findByText("Backfill channels #12: Manual run by admin")).toBeInTheDocument();
-    expect(within(rows[0]).getByText("Main mapping")).toBeInTheDocument();
-    expect(within(rows[0]).getByText("48s")).toBeInTheDocument();
+    expect(within(rows[0]!).getByRole("link", { name: "Backfill #general" })).toHaveAttribute("href", "/tasks/runs/12");
+    expect(within(rows[0]!).getByRole("img", { name: "Success" })).toBeInTheDocument();
+    expect(within(rows[1]!).getByRole("img", { name: "Failed" })).toBeInTheDocument();
+    expect(await within(rows[0]!).findByText("Backfill channels #12: Manual run by admin")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("Main mapping")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("48s")).toBeInTheDocument();
 
     const rail = screen.getByRole("navigation", { name: "Task types" });
     expect(within(rail).getByRole("link", { name: /All tasks/ })).toHaveAttribute("aria-current", "page");

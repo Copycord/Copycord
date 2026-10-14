@@ -102,12 +102,12 @@ describe("runStore hooks", () => {
   it("useTaskRuns merges live frames and refetches after a reconnect", async () => {
     const { result } = renderHook(() => useTaskRuns({}));
     await waitFor(() => expect(result.current.runs).toHaveLength(1));
-    const ws = FakeWs.all[0];
+    const ws = FakeWs.all[0]!;
     act(() => ws.open());
     act(() => ws.emit(frame(makeRun({ id: "2", number: 2, seq: 1, status: "queued" }))));
     expect(result.current.runs.map((r) => r.id)).toEqual(["2", "1"]);
     act(() => ws.emit(frame(makeRun({ id: "1", seq: 2, status: "success" }))));
-    expect(result.current.runs[1].status).toBe("success");
+    expect(result.current.runs[1]?.status).toBe("success");
 
     const calls = fetchMock.mock.calls.length;
     act(() => ws.onclose?.());
@@ -118,7 +118,7 @@ describe("runStore hooks", () => {
   it("useTaskRun follows frames for its run only", async () => {
     const { result } = renderHook(() => useTaskRun("1"));
     await waitFor(() => expect(result.current.run?.id).toBe("1"));
-    const ws = FakeWs.all[0];
+    const ws = FakeWs.all[0]!;
     act(() => ws.open());
     act(() => ws.emit(frame(makeRun({ id: "9", seq: 5, status: "failed" }))));
     expect(result.current.run?.status).toBe("running");
