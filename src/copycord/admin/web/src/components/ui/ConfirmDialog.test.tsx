@@ -65,9 +65,9 @@ describe("useConfirm", () => {
   it("renders Cancel then a ghost-red confirm button for danger, with no focus ring", async () => {
     const user = setup(true);
     await user.click(screen.getByText("Ask"));
-    const [cancel, ok] = screen.getAllByRole("button").filter((b) => /^(Cancel|Delete)$/.test(b.textContent ?? ""));
-    expect(cancel).toHaveTextContent("Cancel");
-    expect(ok).toHaveTextContent("Delete");
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    const ok = screen.getByRole("button", { name: "Delete" });
+    expect(cancel.compareDocumentPosition(ok) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(ok.className).toContain("enabled:hover:text-danger");
     expect(ok.className).not.toContain("#ef4444");
     expect(ok.className).toContain("ring-0!");
