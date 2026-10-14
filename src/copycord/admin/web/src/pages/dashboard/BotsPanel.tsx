@@ -110,7 +110,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
   return (
     <section className="mt-[18px] rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text">
       <header>
-        <h2 className="my-[0.83em] text-[24px] leading-normal font-bold">Bots</h2>
+        <h2 className="my-[0.83em] text-[24px] leading-[normal] font-bold">Bots</h2>
       </header>
       <div className="w-full overflow-x-hidden">
         <table className="mt-2 w-full table-fixed border-collapse border-[#808080] text-left [&_tr]:border-[#808080]">
