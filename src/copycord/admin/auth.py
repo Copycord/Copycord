@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional, Dict
 
 from fastapi import FastAPI, Request, Form, status
-from fastapi.responses import RedirectResponse, PlainTextResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, PlainTextResponse, HTMLResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
@@ -259,7 +259,9 @@ SPA_ASSETS_PREFIX = "/assets/"
 
 class PasswordGuardMiddleware(BaseHTTPMiddleware):
     """Single-password gate: everything except /login, /health and static or SPA assets needs a valid session cookie.
-    Unauthenticated GET/HEAD requests redirect to /login; others get a 401."""
+    Unauthenticated /api/ requests get a JSON 401 for every method, so the client sees an
+    expired session instead of following a redirect to the login page's HTML.
+    Other unauthenticated GET/HEAD requests (pages) redirect to /login; the rest get a 401."""
 
     async def dispatch(self, request: Request, call_next):
 
@@ -279,6 +281,11 @@ class PasswordGuardMiddleware(BaseHTTPMiddleware):
         if sess and sess.get("ok") is True:
             return await call_next(request)
 
+        if path == "/api" or path.startswith("/api/"):
+            return JSONResponse(
+                {"detail": "Unauthorized"},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
         if request.method in ("GET", "HEAD"):
             return RedirectResponse(url="/login")
         return PlainTextResponse(

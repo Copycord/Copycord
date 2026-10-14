@@ -60,8 +60,7 @@ class TestApiConfig:
     @pytest.mark.asyncio
     async def test_logged_out_is_rejected(self, anon):
         resp = await anon.get("/api/config")
-        assert resp.status_code in (302, 307)
-        assert resp.headers["location"].endswith("/login")
+        assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_values_match_what_save_stored(self, client):

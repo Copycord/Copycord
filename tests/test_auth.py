@@ -149,8 +149,32 @@ class TestSessions:
         resp = tc.get("/login", headers={"cookie": cookie}, follow_redirects=False)
         assert resp.status_code == 200  # login page, not a redirect to the dashboard
         resp = tc.get("/api/event-logs", headers={"cookie": cookie}, follow_redirects=False)
+        assert resp.status_code == 401
+        resp = tc.get("/system", headers={"cookie": cookie}, follow_redirects=False)
         assert resp.status_code in (302, 307)
         assert resp.headers["location"].endswith("/login")
+
+
+class TestGuardApi:
+
+    @pytest.mark.parametrize("method", ["GET", "HEAD", "POST", "PUT", "DELETE"])
+    def test_logged_out_api_is_401_json(self, tc, password, method):
+        headers = {"origin": ORIGIN, CSRF_HEADER: "1"}
+        resp = tc.request(method, "/api/x", headers=headers, follow_redirects=False)
+        assert resp.status_code == 401
+        assert "location" not in resp.headers
+        assert resp.headers["content-type"].startswith("application/json")
+        if method != "HEAD":
+            assert resp.json() == {"detail": "Unauthorized"}
+
+    def test_logged_out_page_get_redirects(self, tc, password):
+        resp = tc.get("/somepage", headers={"accept": "text/html"}, follow_redirects=False)
+        assert resp.status_code in (302, 307)
+        assert resp.headers["location"] == "/login"
+
+    def test_logged_out_page_post_stays_401(self, tc, password):
+        resp = tc.post("/somepage", headers={"origin": ORIGIN, CSRF_HEADER: "1"}, follow_redirects=False)
+        assert resp.status_code == 401
 
 
 class TestLogout:
