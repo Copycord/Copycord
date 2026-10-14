@@ -1,19 +1,30 @@
 // Confirm dialog on top of Modal. Pages call
 //   const confirm = useConfirm();
-//   if (await confirm({ title: "Delete mapping?", danger: true })) ...
+//   if (await confirm({ title: "Delete mapping?", confirmVariant: "ghost-red" })) ...
 // The promise resolves true on Confirm and false on Cancel, Escape, the close
 // button or an overlay click. ConfirmProvider must sit above the page.
+//
+// Like the old openConfirm: Cancel then the confirm button at the right, 8px
+// apart, both sized as #confirm-modal .btns .btn with no focus ring; the
+// confirm button is "OK" in .btn-ghost unless the caller passes confirmClass,
+// here confirmVariant.
 
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Modal } from "../Modal";
 import { Button } from "./Button";
+import type { ButtonVariant } from "./Button";
 
 export interface ConfirmOptions {
   title: string;
   body?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** The old confirmClass; default "ghost" (.btn-ghost). */
+  confirmVariant?: ButtonVariant;
+  /** The old btnClassCancel; default "ghost". */
+  cancelVariant?: ButtonVariant;
+  /** Alias for confirmVariant "ghost-red" when confirmVariant is not set. */
   danger?: boolean;
 }
 
@@ -27,24 +38,27 @@ export function ConfirmDialog({
   onResult,
   title,
   body,
-  confirmLabel = "Confirm",
+  confirmLabel = "OK",
   cancelLabel = "Cancel",
+  confirmVariant,
+  cancelVariant = "ghost",
   danger = false,
 }: ConfirmDialogProps) {
+  const okVariant = confirmVariant ?? (danger ? "ghost-red" : "ghost");
   return (
     <Modal
       open={open}
       title={title}
       onClose={() => onResult(false)}
       footer={
-        <>
-          <Button variant="ghost" onClick={() => onResult(false)}>
+        <div className="flex gap-2">
+          <Button variant={cancelVariant} size="confirm" flat onClick={() => onResult(false)}>
             {cancelLabel}
           </Button>
-          <Button variant={danger ? "danger" : "primary"} onClick={() => onResult(true)}>
+          <Button variant={okVariant} size="confirm" flat onClick={() => onResult(true)}>
             {confirmLabel}
           </Button>
-        </>
+        </div>
       }
     >
       {body ? <div className="text-sm text-text-2">{body}</div> : null}

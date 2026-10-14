@@ -62,6 +62,48 @@ describe("useConfirm", () => {
     expect(results).toEqual([false]);
   });
 
+  it("renders Cancel then a ghost-red confirm button for danger, with no focus ring", async () => {
+    const user = setup(true);
+    await user.click(screen.getByText("Ask"));
+    const [cancel, ok] = screen.getAllByRole("button").filter((b) => /^(Cancel|Delete)$/.test(b.textContent ?? ""));
+    expect(cancel).toHaveTextContent("Cancel");
+    expect(ok).toHaveTextContent("Delete");
+    expect(ok.className).toContain("enabled:hover:text-danger");
+    expect(ok.className).not.toContain("#ef4444");
+    expect(ok.className).toContain("ring-0!");
+    expect(cancel.className).toContain("bg-[rgba(255,255,255,0.04)]");
+  });
+
+  it("defaults to an OK ghost button and honours confirmVariant and cancelVariant", async () => {
+    const user = userEvent.setup();
+    function Variant() {
+      const confirm = useConfirm();
+      return (
+        <>
+          <button onClick={() => void confirm({ title: "Plain" })}>Plain</button>
+          <button
+            onClick={() => void confirm({ title: "Done?", confirmLabel: "Done", confirmVariant: "primary", cancelVariant: "ghost-red", danger: true })}
+          >
+            Primary
+          </button>
+        </>
+      );
+    }
+    render(
+      <ConfirmProvider>
+        <Variant />
+      </ConfirmProvider>,
+    );
+    await user.click(screen.getByText("Plain"));
+    const ok = screen.getByRole("button", { name: "OK" });
+    expect(ok.className).toContain("enabled:hover:border-[rgba(167,139,250,0.3)]");
+    expect(ok.className).not.toContain("hover:text-danger");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByText("Primary"));
+    expect(screen.getByRole("button", { name: "Done" }).className).toContain("var(--color-primary)");
+    expect(screen.getByRole("button", { name: "Cancel" }).className).toContain("enabled:hover:text-danger");
+  });
+
   it("throws outside the provider", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() => render(<Asker />)).toThrow(/ConfirmProvider/);
