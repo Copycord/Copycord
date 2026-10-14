@@ -4,7 +4,7 @@
 // the box hangs 6vh below the header instead of being centered, and the
 // MODAL_* classes let the dialogs with their own shell match it.
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -139,5 +139,87 @@ export function Modal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+const BUBBLE_ALIGN = {
+  /** The old .tip-bubble: under the label's left edge, one line. */
+  start:
+    "left-0 max-w-[80vw] overflow-x-auto whitespace-nowrap after:left-3.5 " +
+    "-translate-y-1 data-[open=true]:translate-y-0",
+  /** #mapping-modal .tip-bubble: centered 60px right of the label, wraps at 240px. */
+  center:
+    "left-1/2 max-w-[min(240px,calc(100vw-32px))] translate-x-[calc(-50%+60px)] -translate-y-1 overflow-x-hidden break-words whitespace-normal " +
+    "after:left-[calc(50%-60px)] after:-translate-x-1/2 data-[open=true]:translate-y-0",
+} as const;
+
+export interface TipLabelProps {
+  htmlFor?: string;
+  text: ReactNode;
+  tip: ReactNode;
+  /** The "i" button's accessible name, e.g. "What is Mapping Name?". */
+  tipLabel?: string;
+  tipId?: string;
+  align?: keyof typeof BUBBLE_ALIGN;
+  className?: string;
+}
+
+/**
+ * The old label.has-tip: 12px muted label text, the round "i" .info-dot and its
+ * .tip-bubble. Click the dot to show the tip; another click, a click elsewhere
+ * or Escape hides it.
+ */
+export function TipLabel({ htmlFor, text, tip, tipLabel, tipId, align = "start", className }: TipLabelProps) {
+  const auto = useId();
+  const id = tipId ?? `tip${auto}`;
+  const [open, setOpen] = useState(false);
+  const dotRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (dotRef.current?.contains(t) || document.getElementById(id)?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, id]);
+
+  return (
+    <label
+      htmlFor={htmlFor}
+      className={`has-tip relative mt-0 mr-0 mb-1.5 ml-0.5 inline-flex items-center gap-1.5 text-xs text-muted ${className ?? ""}`}
+    >
+      <span className="label-text leading-none">{text}</span>
+      <button
+        ref={dotRef}
+        type="button"
+        className="info-dot inline-flex size-[18px] cursor-pointer touch-manipulation items-center justify-center rounded-full border border-border bg-white/6 p-0 font-sans text-[11px] leading-none font-bold text-accent outline-0 transition-[border-color] duration-150 before:-translate-y-[0.5px] before:content-['i'] hover:border-accent focus-visible:border-accent"
+        aria-label={tipLabel}
+        aria-describedby={id}
+        aria-expanded={open}
+        onClick={(e) => {
+          e.preventDefault();
+          setOpen((o) => !o);
+        }}
+      />
+      <span
+        id={id}
+        role="tooltip"
+        aria-hidden={!open}
+        data-open={open}
+        className={`tip-bubble pointer-events-none absolute top-[calc(100%+8px)] z-[60] w-max scale-[0.98] rounded-control border border-border bg-[#0f0820] px-3 py-2.5 text-[12.5px] leading-[1.45] text-text opacity-0 shadow-[0_12px_40px_rgba(0,0,0,0.45)] transition-[opacity,translate,scale] duration-150 after:absolute after:-top-1.5 after:border-[6px] after:border-solid after:border-transparent after:border-b-[#0f0820] after:content-[''] data-[open=true]:pointer-events-auto data-[open=true]:scale-100 data-[open=true]:opacity-100 ${BUBBLE_ALIGN[align]}`}
+      >
+        {tip}
+      </span>
+    </label>
   );
 }

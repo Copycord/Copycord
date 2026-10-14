@@ -1,11 +1,13 @@
 // #mapping-modal / #mapping-form: name, host and clone guild IDs, the per mapping
 // settings with search, the Message Features sub-modal and create, edit or clone save.
-// The user tokens section is the UserTokensBlock slot (next lane).
+// The look is the old 720px #mapping-modal: labels with "i" tips, a sticky search
+// toolbar, uppercase section rows with a round chevron and a sticky footer.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { Toggle, cx } from "../../../../components/ui";
+import { cx } from "../../../../components/ui";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_OVERLAY, TipLabel } from "../../../../components/Modal";
 import type {
   DashboardMapping,
   MappingFormState,
@@ -15,6 +17,7 @@ import type {
 import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
 import { MsgFeaturesModal } from "./MsgFeaturesModal";
+import { SECTION, SectionSummary, ToggleRow } from "./parts";
 import { UserTokensBlock } from "./UserTokensBlock";
 import {
   DISABLED_SETTINGS,
@@ -37,48 +40,52 @@ export interface MappingModalProps {
   onSaved: () => void | Promise<void>;
 }
 
+// .field > input, .field-readonly and the red flash of a missing field.
 const INPUT =
-  "w-full rounded-control border border-border bg-bg-2 px-3 py-2 text-sm text-text outline-none focus:border-accent aria-invalid:border-danger read-only:opacity-60";
-const HINT = "text-xs leading-relaxed text-muted";
+  "w-full rounded-control border border-border bg-control p-3 text-text outline-0 transition-[border] duration-200 focus:border-accent aria-invalid:border-danger";
+const READONLY =
+  "field-readonly cursor-not-allowed border-white/6! bg-[#1a102d]! text-muted opacity-60 transition-none focus:border-white/6!";
+const SEARCH_ICON =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239e95b7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E\")";
 
 interface GuildFieldProps {
   id: string;
   name: MappingField;
   label: string;
   tip: string;
+  tipLabel: string;
+  tipId: string;
   value: string;
   placeholder?: string;
   maxLength?: number;
   readOnly?: boolean;
   title?: string;
   invalid: boolean;
+  className?: string;
   onChange: (v: string) => void;
   inputRef: (el: HTMLInputElement | null) => void;
 }
 
-function TextField({ id, name, label, tip, value, placeholder, maxLength, readOnly, title, invalid, onChange, inputRef }: GuildFieldProps) {
+function TextField(p: GuildFieldProps) {
   return (
-    <div className="field flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-sm font-semibold" title={tip}>
-        {label}
-      </label>
+    <div className="field relative mb-4">
+      <TipLabel htmlFor={p.id} text={p.label} tip={p.tip} tipLabel={p.tipLabel} tipId={p.tipId} align="center" />
       <input
-        ref={inputRef}
-        id={id}
-        name={name}
+        ref={p.inputRef}
+        id={p.id}
+        name={p.name}
         type="text"
-        inputMode={name === "mapping_name" ? undefined : "numeric"}
-        maxLength={maxLength}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        aria-readonly={readOnly || undefined}
-        aria-invalid={invalid || undefined}
-        title={title}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={cx(INPUT, readOnly && "field-readonly")}
+        inputMode={p.name === "mapping_name" ? undefined : "numeric"}
+        maxLength={p.maxLength}
+        placeholder={p.placeholder}
+        readOnly={p.readOnly}
+        aria-readonly={p.readOnly || undefined}
+        aria-invalid={p.invalid || undefined}
+        title={p.title}
+        value={p.value}
+        onChange={(e) => p.onChange(e.target.value)}
+        className={cx(INPUT, p.readOnly && READONLY, p.className)}
       />
-      <span className={HINT}>{tip}</span>
     </div>
   );
 }
@@ -163,82 +170,92 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
   const noResults = q !== "" && sections.every((s) => s.shown.length === 0);
 
   return createPortal(
-    <div id="mapping-modal" className="modal show fixed inset-0 z-40 flex items-center justify-center p-4" aria-hidden="false">
-      <div className="modal-backdrop absolute inset-0 bg-black/60" onMouseDown={() => void tryClose()} />
+    <div id="mapping-modal" className={`modal show ${MODAL_OVERLAY}`} aria-hidden="false">
+      <div className={`modal-backdrop ${MODAL_BACKDROP}`} onMouseDown={() => void tryClose()} />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="mapping-title"
-        className="modal-content relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card-solid text-text shadow-card"
+        className={`modal-content ${MODAL_CARD} w-[min(720px,92vw)] overflow-hidden`}
       >
-        <div className="modal-header flex items-center justify-between border-b border-border px-5 py-3">
-          <div className="modal-title-wrap">
-            <div id="mapping-title" className="modal-title-main text-lg font-semibold">
+        <div className="modal-header flex shrink-0 items-center justify-between px-6 pt-5 pb-3.5">
+          <div className="modal-title-wrap flex flex-col leading-[1.2]">
+            <div id="mapping-title" className="modal-title-main flex items-center text-sm font-semibold tracking-[-0.03em] text-text">
               Clone Mapping
             </div>
             {isEdit && mapping ? (
-              <div id="mapping-id-subtle" className="modal-title-subtle text-xs text-muted">
+              <div
+                id="mapping-id-subtle"
+                className="modal-title-subtle mt-[3px] max-w-[220px] overflow-hidden text-[11px] font-normal text-ellipsis whitespace-nowrap text-text opacity-40 select-text"
+              >
                 {mapping.mapping_id}
               </div>
             ) : null}
           </div>
-          <button
-            type="button"
-            id="mapping-close"
-            aria-label="Close"
-            onClick={() => void tryClose()}
-            className="verify-close rounded-control px-2 py-1 text-muted hover:text-text"
-          >
+          <button type="button" id="mapping-close" aria-label="Close" onClick={() => void tryClose()} className={`verify-close ${MODAL_CLOSE}`}>
             ✕
           </button>
         </div>
 
-        <form id="mapping-form" autoComplete="off" noValidate onSubmit={(e) => void submit(e)} className="mapping-form flex min-h-0 flex-1 flex-col">
+        <form
+          id="mapping-form"
+          autoComplete="off"
+          noValidate
+          onSubmit={(e) => void submit(e)}
+          className="mapping-form min-h-0 flex-auto overflow-x-hidden overflow-y-auto px-6 pt-5 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]"
+        >
           <input type="hidden" id="map_mapping_id" name="mapping_id" value={form.mapping_id} readOnly />
-          <div className="flex-1 space-y-4 overflow-y-auto p-5">
-            <div className="mapping-section space-y-3">
+          <div className="mapping-section border-b border-border py-3.5">
+            <TextField
+              id="map_mapping_name"
+              name="mapping_name"
+              label="Mapping Name"
+              tip="A friendly label for this clone pair. Shown on the dashboard cards."
+              tipLabel="What is Mapping Name?"
+              tipId="tip-mapping_name"
+              maxLength={64}
+              value={form.mapping_name}
+              invalid={bad.includes("mapping_name")}
+              className="block max-w-[320px]"
+              onChange={(v) => setField("mapping_name", v)}
+              inputRef={(el) => (refs.current.mapping_name = el)}
+            />
+            <div className="mapping-guild-row mt-2.5 grid grid-cols-2 gap-3">
               <TextField
-                id="map_mapping_name"
-                name="mapping_name"
-                label="Mapping Name"
-                tip="A friendly label for this clone pair. Shown on the dashboard cards."
-                maxLength={64}
-                value={form.mapping_name}
-                invalid={bad.includes("mapping_name")}
-                onChange={(v) => setField("mapping_name", v)}
-                inputRef={(el) => (refs.current.mapping_name = el)}
+                id="map_original_guild_id"
+                name="original_guild_id"
+                label="Host Guild"
+                tip={SETTING_TIPS.HOST_GUILD_ID!}
+                tipLabel="What is HOST_GUILD_ID?"
+                tipId="tip-HOST_GUILD_ID"
+                placeholder="Server ID to mirror from"
+                value={form.original_guild_id}
+                readOnly={isEdit}
+                title={isEdit ? "HOST_GUILD_ID cannot be changed after the mapping is created." : undefined}
+                invalid={bad.includes("original_guild_id")}
+                onChange={(v) => setField("original_guild_id", v)}
+                inputRef={(el) => (refs.current.original_guild_id = el)}
               />
-              <div className="mapping-guild-row grid gap-3 sm:grid-cols-2">
-                <TextField
-                  id="map_original_guild_id"
-                  name="original_guild_id"
-                  label="Host Guild"
-                  tip={SETTING_TIPS.HOST_GUILD_ID!}
-                  placeholder="Server ID to mirror from"
-                  value={form.original_guild_id}
-                  readOnly={isEdit}
-                  title={isEdit ? "HOST_GUILD_ID cannot be changed after the mapping is created." : undefined}
-                  invalid={bad.includes("original_guild_id")}
-                  onChange={(v) => setField("original_guild_id", v)}
-                  inputRef={(el) => (refs.current.original_guild_id = el)}
-                />
-                <TextField
-                  id="map_cloned_guild_id"
-                  name="cloned_guild_id"
-                  label="Clone Guild"
-                  tip={SETTING_TIPS.CLONE_GUILD_ID!}
-                  placeholder="Server ID to mirror to"
-                  value={form.cloned_guild_id}
-                  readOnly={isEdit}
-                  title={isEdit ? "CLONE_GUILD_ID cannot be changed after the mapping is created." : undefined}
-                  invalid={bad.includes("cloned_guild_id")}
-                  onChange={(v) => setField("cloned_guild_id", v)}
-                  inputRef={(el) => (refs.current.cloned_guild_id = el)}
-                />
-              </div>
+              <TextField
+                id="map_cloned_guild_id"
+                name="cloned_guild_id"
+                label="Clone Guild"
+                tip={SETTING_TIPS.CLONE_GUILD_ID!}
+                tipLabel="What is CLONE_GUILD_ID?"
+                tipId="tip-CLONE_GUILD_ID"
+                placeholder="Server ID to mirror to"
+                value={form.cloned_guild_id}
+                readOnly={isEdit}
+                title={isEdit ? "CLONE_GUILD_ID cannot be changed after the mapping is created." : undefined}
+                invalid={bad.includes("cloned_guild_id")}
+                onChange={(v) => setField("cloned_guild_id", v)}
+                inputRef={(el) => (refs.current.cloned_guild_id = el)}
+              />
             </div>
+          </div>
 
-            <div className="mapping-toolbar flex items-center gap-3">
+          <div className="mapping-toolbar sticky top-0 z-[2] -mx-5 flex items-center gap-2 bg-[#0f0820] px-5 py-2.5">
+            <div className="mapping-search-row min-w-0 flex-1">
               <input
                 id="mappingSettingsSearch"
                 type="text"
@@ -247,91 +264,84 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
                 autoComplete="off"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className={cx(INPUT, "mapping-search-input flex-1")}
+                style={{ backgroundImage: SEARCH_ICON }}
+                className="mapping-search-input w-full rounded-input border border-border bg-control bg-[position:10px_center] bg-no-repeat py-[7px] pr-3 pl-8 text-[13px] text-text outline-0 transition-[border-color] duration-150 placeholder:text-muted placeholder:opacity-50 focus:border-accent"
               />
-              <button
-                type="button"
-                id="msg-features-open"
-                onClick={() => setFeaturesOpen(true)}
-                className="mapping-msg-features-btn shrink-0 rounded-control border border-border bg-white/4 px-3 py-2 text-sm font-semibold text-accent hover:bg-white/8"
-              >
-                Message Features
-              </button>
             </div>
-            {noResults ? (
-              <div id="mapping-no-results" className="mapping-no-results text-sm text-muted">
-                No settings match your search
-              </div>
-            ) : null}
-
-            {sections.map((s) => {
-              if (s.shown.length === 0) return null;
-              const open = q !== "" || openSections.has(s.name);
-              return (
-                <details
-                  key={s.name}
-                  open={open}
-                  onToggle={(e) => {
-                    const isOpen = e.currentTarget.open;
-                    if (q !== "" || isOpen === openSections.has(s.name)) return;
-                    setOpenSections((cur) => {
-                      const next = new Set(cur);
-                      if (isOpen) next.add(s.name);
-                      else next.delete(s.name);
-                      return next;
-                    });
-                  }}
-                  className="mapping-section mapping-settings-section rounded-control border border-border"
-                >
-                  <summary className="mapping-section-header cursor-pointer select-none px-3 py-2 text-sm font-semibold">
-                    {s.name}
-                  </summary>
-                  <div className="mapping-section-body flex flex-col gap-3 border-t border-border p-3">
-                    {s.shown.map((k) => {
-                      const reason = DISABLED_SETTINGS[k];
-                      return (
-                        <div
-                          key={k}
-                          className={cx("mapping-toggle-row mapping-setting-field", reason && "is-disabled")}
-                          data-setting-key={k.toLowerCase()}
-                        >
-                          <Toggle
-                            id={`map_${k}`}
-                            label={<span className="mapping-toggle-name">{FRIENDLY_NAMES[k] ?? k}</span>}
-                            description={
-                              <>
-                                {SETTING_TIPS[k] ? <span className="mapping-toggle-desc">{SETTING_TIPS[k]}</span> : null}
-                                {reason ? <span className="mapping-toggle-desc mapping-toggle-disabled-note block">{reason}</span> : null}
-                              </>
-                            }
-                            disabled={Boolean(reason)}
-                            checked={form.settings[k] === true}
-                            onChange={(v) => setSetting(k, v)}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </details>
-              );
-            })}
-
-            {/* Slot for the user tokens lane (inventory item 21); renders nothing until then. */}
-            <UserTokensBlock
-              mappingId={isEdit ? form.mapping_id : null}
-              settings={form.settings}
-              setSetting={setSetting}
-              search={search}
-            />
+            <button
+              type="button"
+              id="msg-features-open"
+              onClick={() => setFeaturesOpen(true)}
+              className="mapping-msg-features-btn inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-input border border-border bg-white/[0.03] px-3 py-[7px] text-xs font-medium whitespace-nowrap text-muted transition-colors duration-150 hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-text"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-accent">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              Message Features
+            </button>
           </div>
+          {noResults ? (
+            <div id="mapping-no-results" className="mapping-no-results py-10 text-center text-[13px] text-muted opacity-60">
+              No settings match your search
+            </div>
+          ) : null}
 
-          <div className="mapping-form-footer flex justify-end gap-2 border-t border-border px-5 py-3">
+          {sections.map((s) => {
+            if (s.shown.length === 0) return null;
+            const open = q !== "" || openSections.has(s.name);
+            return (
+              <details
+                key={s.name}
+                open={open}
+                onToggle={(e) => {
+                  const isOpen = e.currentTarget.open;
+                  if (q !== "" || isOpen === openSections.has(s.name)) return;
+                  setOpenSections((cur) => {
+                    const next = new Set(cur);
+                    if (isOpen) next.add(s.name);
+                    else next.delete(s.name);
+                    return next;
+                  });
+                }}
+                className={SECTION}
+              >
+                <SectionSummary>{s.name}</SectionSummary>
+                <div className="mapping-section-body pt-1">
+                  {s.shown.map((k) => {
+                    const reason = DISABLED_SETTINGS[k];
+                    return (
+                      <ToggleRow
+                        key={k}
+                        id={`map_${k}`}
+                        settingKey={k.toLowerCase()}
+                        name={FRIENDLY_NAMES[k] ?? k}
+                        desc={SETTING_TIPS[k]}
+                        note={reason}
+                        disabled={Boolean(reason)}
+                        checked={form.settings[k] === true}
+                        onChange={(v) => setSetting(k, v)}
+                      />
+                    );
+                  })}
+                </div>
+              </details>
+            );
+          })}
+
+          <UserTokensBlock
+            mappingId={isEdit ? form.mapping_id : null}
+            settings={form.settings}
+            setSetting={setSetting}
+            search={search}
+          />
+
+          <div className="mapping-form-footer sticky bottom-0 z-[3] -mx-5 -mb-5 flex justify-end gap-2 rounded-b-panel bg-[#0f0820] px-5 py-3.5">
             {dirty ? (
-              <GhostButton type="button" id="mapping-cancel-btn" onClick={() => setForm(baseline)}>
+              <GhostButton type="button" id="mapping-cancel-btn" className="gap-[normal]!" onClick={() => setForm(baseline)}>
                 Cancel
               </GhostButton>
             ) : null}
-            <GhostButton type="submit" id="mapping-save-btn" disabled={saving}>
+            <GhostButton type="submit" id="mapping-save-btn" className="gap-[normal]!" disabled={saving}>
               {saving ? "Saving…" : "Save Mapping"}
             </GhostButton>
           </div>
