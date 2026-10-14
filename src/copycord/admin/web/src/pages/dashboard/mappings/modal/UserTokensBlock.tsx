@@ -8,7 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../../../../lib/api";
-import { Toggle, cx } from "../../../../components/ui";
+import { Button, cx } from "../../../../components/ui";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY } from "../../../../components/Modal";
 import type {
   BulkResponse,
   UserToken,
@@ -18,6 +19,7 @@ import type { MappingSettingValue, MappingSettings } from "../../../../types/das
 import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
 import { normalizeStrategy, toBool } from "./model";
+import { DESC, ROW, SECTION, SectionSummary, Switch, ToggleRow } from "./parts";
 import {
   BULK_LABELS,
   STRATEGY_DESCS,
@@ -42,10 +44,17 @@ export interface UserTokensBlockProps {
   search: string;
 }
 
-const INPUT =
-  "rounded-control border border-border bg-bg-2 px-3 py-2 text-sm text-text outline-none focus:border-accent";
-const DESC = "mapping-toggle-desc text-xs leading-relaxed text-muted";
-const ROW = "mapping-toggle-row";
+// .user-token-num, .user-token-menu-item and .user-token-bulk-results.
+const NUM =
+  "user-token-num w-[72px] rounded-btn border border-border bg-control px-2.5 py-2 text-[13px] text-text outline-0 focus:border-accent";
+const MENU_ITEM =
+  "user-token-menu-item flex w-full cursor-pointer items-center gap-[9px] rounded-input border-0 bg-transparent px-2.5 py-2 text-left text-[13px] font-medium text-text hover:bg-white/6";
+const RESULTS =
+  "user-token-bulk-results mt-2.5 flex max-h-[180px] flex-col gap-1 overflow-y-auto [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]";
+const SEARCH_ICON =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239e95b7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E\")";
+const GEAR =
+  "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z";
 
 interface Status {
   text: string;
@@ -58,8 +67,12 @@ function StatusText({ id, status }: { id: string; status: Status }) {
       id={id}
       aria-live="polite"
       className={cx(
-        "user-token-status text-xs",
-        status.kind === "error" ? "is-error text-danger" : status.kind === "ok" ? "is-ok text-success" : "text-muted",
+        "user-token-status min-w-0 flex-auto text-[11px] leading-[1.4]",
+        status.kind === "error"
+          ? "is-error text-[#f4a3a3]"
+          : status.kind === "ok"
+            ? "is-ok text-[#86efac]"
+            : "text-muted opacity-85",
       )}
     >
       {status.text}
@@ -67,11 +80,13 @@ function StatusText({ id, status }: { id: string; status: Status }) {
   );
 }
 
+const BSTATUS: Record<string, string> = { added: "text-[#86efac]", duplicate: "text-muted" };
+
 function ResultRow({ label, status, cls }: { label: string; status: string; cls: string }) {
   return (
-    <div className="user-token-bulk-row flex items-center justify-between gap-3 py-1 text-xs">
-      <span className="btok truncate font-mono">{label}</span>
-      <span className={cx("bstatus shrink-0", cls, cls === "added" ? "text-success" : "text-danger")}>{status}</span>
+    <div className="user-token-bulk-row flex items-center gap-2 px-0.5 py-1 text-xs">
+      <span className="btok truncate font-mono text-muted">{label}</span>
+      <span className={cx("bstatus ml-auto shrink-0 font-semibold", cls, BSTATUS[cls] ?? "text-[#f4a3a3]")}>{status}</span>
     </div>
   );
 }
@@ -119,32 +134,28 @@ function BulkModal({ mappingId, onClose, onChanged }: { mappingId: string; onClo
   };
 
   return createPortal(
-    <div id="user-token-bulk-modal" className="modal show fixed inset-0 z-[60] flex items-center justify-center p-4" aria-hidden="false">
-      <div className="modal-backdrop absolute inset-0 bg-black/60" onClick={onClose} />
+    <div id="user-token-bulk-modal" className={`modal show ${MODAL_OVERLAY} z-[60]!`} aria-hidden="false">
+      <div className={`modal-backdrop ${MODAL_BACKDROP}`} onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="user-token-bulk-title"
-        className="user-token-bulk-content relative max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-card-solid text-text shadow-card"
+        className={`modal-content user-token-bulk-content ${MODAL_CARD} w-[94vw] max-w-[620px]`}
       >
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div id="user-token-bulk-title" className="modal-title-main text-base font-semibold">
-            Bulk add user tokens
+        <div className={`modal-header ${MODAL_HEADER}`}>
+          <div className="modal-title-wrap flex flex-col leading-[1.2]">
+            <div id="user-token-bulk-title" className="modal-title-main">
+              Bulk add user tokens
+            </div>
           </div>
-          <button
-            type="button"
-            id="user-token-bulk-close"
-            aria-label="Close"
-            onClick={onClose}
-            className="verify-close rounded-control px-2 py-1 text-muted hover:text-text"
-          >
+          <button type="button" id="user-token-bulk-close" aria-label="Close" onClick={onClose} className={`verify-close ${MODAL_CLOSE}`}>
             ✕
           </button>
         </div>
-        <div className="user-token-bulk-body flex flex-col gap-3 p-4">
+        <div className="user-token-bulk-body min-h-0 overflow-y-auto px-4 pt-3 pb-4">
           <textarea
             id="user_token_bulk_input"
-            className={cx(INPUT, "user-token-bulk-textarea min-h-32 w-full font-mono")}
+            className="user-token-bulk-textarea h-[132px] w-full resize-none overflow-auto rounded-btn border border-border bg-control px-3 py-2.5 font-mono text-xs leading-[1.6] whitespace-pre text-text outline-0 focus:border-accent"
             rows={6}
             spellCheck={false}
             autoComplete="off"
@@ -153,13 +164,13 @@ function BulkModal({ mappingId, onClose, onChanged }: { mappingId: string; onClo
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
-          <div className="user-token-bulk-actions flex items-center gap-3">
-            <GhostButton type="button" id="user-token-bulk-submit" loading={busy} onClick={() => void submit()}>
+          <div className="user-token-bulk-actions mt-2.5 flex items-center gap-2.5">
+            <Button variant="primary" id="user-token-bulk-submit" loading={busy} onClick={() => void submit()}>
               Verify &amp; add
-            </GhostButton>
+            </Button>
             <StatusText id="user-token-bulk-status" status={status} />
           </div>
-          <div id="user-token-bulk-results" className="user-token-bulk-results flex flex-col">
+          <div id="user-token-bulk-results" className={RESULTS}>
             {results.map((r, i) => (
               <ResultRow key={i} label={bulkResultLabel(r)} status={BULK_LABELS[r.status] ?? r.status} cls={r.status} />
             ))}
@@ -324,12 +335,12 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     }
     const body: ReactNode = (
       <div id="user-token-verify-results">
-        <div className="user-token-verify-summary mb-2 text-xs">
-          <span className="uv-ok text-success">{j.working} working</span>
-          <span className="uv-sep mx-1">·</span>
-          <span className="uv-bad text-danger">{j.broken} not working</span>
+        <div className="user-token-verify-summary mb-2.5 flex items-center gap-2 text-xs font-semibold">
+          <span className="uv-ok text-[#86efac]">{j.working} working</span>
+          <span className="uv-sep font-normal text-muted">·</span>
+          <span className="uv-bad text-[#f4a3a3]">{j.broken} not working</span>
         </div>
-        <div className="user-token-bulk-results user-token-verify-list flex max-h-64 flex-col overflow-y-auto">
+        <div className={cx(RESULTS, "user-token-verify-list mt-0! max-h-[260px]! pr-1")}>
           {orderVerify(j.results ?? []).map((r) => (
             <ResultRow
               key={r.id}
@@ -374,71 +385,75 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
   };
 
   const switchRow = (key: string, name: string, desc: string, settingKey: string) => (
-    <div className={ROW} data-setting-key={settingKey}>
-      <Toggle
-        id={`map_${key}`}
-        label={<span className="mapping-toggle-name">{name}</span>}
-        description={<span className={DESC}>{desc}</span>}
-        checked={on(key)}
-        onChange={(v) => setSetting(key, v)}
-      />
-    </div>
+    <ToggleRow
+      id={`map_${key}`}
+      settingKey={settingKey}
+      field={false}
+      name={name}
+      desc={desc}
+      checked={on(key)}
+      onChange={(v) => setSetting(key, v)}
+    />
   );
 
   const hasTokens = (tokens?.length ?? 0) > 0;
 
   return (
-    <details id="user-tokens-section" className="mapping-section mapping-settings-section rounded-control border border-border">
-      <summary className="mapping-section-header cursor-pointer select-none px-3 py-2 text-sm font-semibold">
-        Token Message Cloning
-      </summary>
-      <div className="mapping-section-body flex flex-col gap-3 border-t border-border p-3">
-        <div className="user-token-disclaimer rounded-control border border-danger/40 bg-danger/10 p-3 text-xs leading-relaxed">
-          <strong>Warning:</strong> This feature uses user tokens. Discord may rate limit your accounts or permanently ban
-          them at any time. Only use accounts you are willing to lose.
+    <details id="user-tokens-section" className={SECTION}>
+      <SectionSummary>Token Message Cloning</SectionSummary>
+      <div className="mapping-section-body pt-1">
+        <div className="user-token-disclaimer mb-3 rounded-input border border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.08)] px-3 py-2.5 text-xs leading-normal text-text">
+          <strong className="text-[#f4a3a3]">Warning:</strong> This feature uses user tokens. Discord may rate limit your
+          accounts or permanently ban them at any time. Only use accounts you are willing to lose.
         </div>
 
-        <div className={cx(ROW, "mapping-setting-field")} data-setting-key="use_user_tokens">
-          <Toggle
-            id="map_USE_USER_TOKENS"
-            label={<span className="mapping-toggle-name">Send messages as users</span>}
-            description={
-              <span className={DESC}>
-                Send cloned messages from real user accounts instead of webhooks. Accounts must be in the clone server.
-              </span>
-            }
-            checked={on("USE_USER_TOKENS")}
-            onChange={(v) => setSetting("USE_USER_TOKENS", v)}
-          />
-        </div>
+        <ToggleRow
+          id="map_USE_USER_TOKENS"
+          settingKey="use_user_tokens"
+          name="Send messages as users"
+          desc="Send cloned messages from real user accounts instead of webhooks. Accounts must be in the clone server."
+          checked={on("USE_USER_TOKENS")}
+          onChange={(v) => setSetting("USE_USER_TOKENS", v)}
+        />
 
-        <div id="user-token-options" className="user-token-options flex flex-col gap-3">
-          <div className={cx(ROW, "flex items-center justify-between gap-3")}>
-            <div className="mapping-toggle-info flex flex-col">
-              <label htmlFor="ut_strategy" className="mapping-toggle-name text-sm font-semibold">
+        <div id="user-token-options" className="user-token-options mt-1.5">
+          <div className={ROW}>
+            <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
+              <label htmlFor="ut_strategy" className="mapping-toggle-name text-[13px] font-medium text-text">
                 Account selection
               </label>
               <span id="ut_strategy_desc" className={DESC}>
                 {STRATEGY_DESCS[strategy]}
               </span>
             </div>
-            <select
-              id="ut_strategy"
-              className={cx(INPUT, "user-token-select cursor-pointer")}
-              value={strategy}
-              onChange={(e) => setSetting("USER_TOKEN_STRATEGY", e.target.value)}
-            >
-              <option value="round_robin" className="bg-card-solid">
-                Rotate evenly
-              </option>
-              <option value="sticky_author" className="bg-card-solid">
-                Sticky per author
-              </option>
-            </select>
+            <div className="dd relative w-[200px] max-w-[55%] flex-none">
+              <select
+                id="ut_strategy"
+                className="user-token-select dd-toggle relative min-h-[34px] w-full cursor-pointer appearance-none rounded-btn border border-border bg-control py-2 pr-9 pl-2.5 text-left font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus:border-accent"
+                value={strategy}
+                onChange={(e) => setSetting("USER_TOKEN_STRATEGY", e.target.value)}
+              >
+                <option value="round_robin" className="bg-[#0f0820]">
+                  Rotate evenly
+                </option>
+                <option value="sticky_author" className="bg-[#0f0820]">
+                  Sticky per author
+                </option>
+              </select>
+              <span
+                aria-hidden="true"
+                className="dd-caret pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-sm leading-none text-accent"
+              >
+                ▾
+              </span>
+            </div>
           </div>
 
           {sticky ? (
-            <div id="user-token-sticky-options" className="user-token-sticky-options flex flex-col gap-3 pl-3">
+            <div
+              id="user-token-sticky-options"
+              className="user-token-sticky-options mt-0.5 mr-0 mb-0.5 ml-2.5 border-l-2 border-border pl-3"
+            >
               {switchRow(
                 "USER_TOKEN_STICKY_NICKNAME",
                 "Mirror author nickname",
@@ -485,9 +500,9 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
             "user_token_use_proxies",
           )}
 
-          <div className={cx(ROW, "flex items-center justify-between gap-3")}>
-            <div className="mapping-toggle-info flex flex-col">
-              <span className="mapping-toggle-name text-sm font-semibold">Send delay</span>
+          <div className={ROW}>
+            <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
+              <span className="mapping-toggle-name text-[13px] font-medium text-text">Send delay</span>
               <span className={DESC}>Random pause before each message, in seconds.</span>
             </div>
             <div className="user-token-delay flex items-center gap-2">
@@ -495,7 +510,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                 type="number"
                 id="ut_min_delay"
                 aria-label="Minimum send delay"
-                className={cx(INPUT, "user-token-num w-20")}
+                className={NUM}
                 min={0}
                 max={30}
                 step={0.5}
@@ -508,7 +523,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                 type="number"
                 id="ut_max_delay"
                 aria-label="Maximum send delay"
-                className={cx(INPUT, "user-token-num w-20")}
+                className={NUM}
                 min={0}
                 max={30}
                 step={0.5}
@@ -520,49 +535,74 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
           </div>
         </div>
 
-        <div id="user-tokens-manager" className="user-tokens-manager flex flex-col gap-3">
+        <div
+          id="user-tokens-manager"
+          className="user-tokens-manager mt-2 rounded-btn border border-border bg-white/[0.02] p-3"
+        >
           {!mappingId ? (
-            <div id="user-tokens-save-first" className="user-tokens-hint text-xs text-muted">
+            <div id="user-tokens-save-first" className="user-tokens-hint px-0.5 py-1 text-xs text-muted opacity-85">
               Save this mapping first, then reopen it to add user tokens.
             </div>
           ) : (
-            <div id="user-tokens-editor" className="flex flex-col gap-3">
-              <div className="user-token-add flex flex-col gap-2">
-                <div className="user-token-add-label text-sm font-semibold">Add user token</div>
-                <div className="token-wrap relative">
-                  <input
-                    type={reveal ? "text" : "password"}
-                    id="user_token_value"
-                    autoComplete="off"
-                    spellCheck={false}
-                    className={cx(INPUT, "token-input w-full pr-10")}
-                    placeholder="Paste a user (self-bot) token"
-                    value={value}
-                    onChange={(e) => setValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void addToken();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="reveal-btn token-user-btn absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted hover:text-text"
-                    data-target="user_token_value"
-                    aria-pressed={reveal}
-                    title={reveal ? "Hide" : "Show"}
-                    aria-label={reveal ? "Hide token" : "Show token"}
-                    onClick={() => setReveal((r) => !r)}
-                  >
-                    {reveal ? "Hide" : "Show"}
-                  </button>
+            <div id="user-tokens-editor">
+              <div className="user-token-add">
+                <div className="user-token-add-label mb-1.5 text-xs font-semibold text-text">Add user token</div>
+                <div className="field field-token user-token-input-wrap relative m-0">
+                  <div className="token-wrap relative w-full max-w-full">
+                    <input
+                      type={reveal ? "text" : "password"}
+                      id="user_token_value"
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="token-input w-full rounded-control border border-border bg-control py-3 pr-9 pl-3 text-[13px] text-text outline-0 transition-[border,box-shadow] duration-200 focus:border-accent"
+                      placeholder="Paste a user (self-bot) token"
+                      value={value}
+                      onChange={(e) => setValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void addToken();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="reveal-btn token-user-btn absolute top-1/2 right-2 -translate-y-1/2 cursor-pointer border-0 bg-transparent p-0 leading-[0] text-text opacity-60 outline-none hover:opacity-100 focus:opacity-100"
+                      data-target="user_token_value"
+                      aria-pressed={reveal}
+                      title={reveal ? "Hide" : "Show"}
+                      aria-label={reveal ? "Hide token" : "Show token"}
+                      onClick={() => setReveal((r) => !r)}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="pointer-events-none block size-4 text-text">
+                        {reveal ? (
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
+                        ) : (
+                          <>
+                            <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </>
+                        )}
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                <div className="user-token-add-row flex items-center gap-2">
-                  <GhostButton type="button" id="user-token-add" loading={adding} onClick={() => void addToken()}>
+                <div className="user-token-add-row mt-2.5 flex items-center gap-2.5">
+                  <Button
+                    variant="primary"
+                    id="user-token-add"
+                    loading={adding}
+                    className="user-token-add-btn min-w-[108px] flex-none whitespace-nowrap"
+                    onClick={() => void addToken()}
+                  >
                     Add token
-                  </GhostButton>
-                  <GhostButton type="button" id="user-token-bulk-open" onClick={() => setBulkOpen(true)}>
+                  </Button>
+                  <GhostButton
+                    type="button"
+                    id="user-token-bulk-open"
+                    className="user-token-bulk-btn flex-none whitespace-nowrap"
+                    onClick={() => setBulkOpen(true)}
+                  >
                     Bulk add
                   </GhostButton>
                   <StatusText id="user-token-status" status={status} />
@@ -574,51 +614,71 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                   <input
                     type="text"
                     id="user_tokens_search"
-                    className={cx(INPUT, "mapping-search-input user-tokens-search")}
+                    style={{ backgroundImage: SEARCH_ICON }}
+                    className="mapping-search-input user-tokens-search mt-3 w-full rounded-input border border-border bg-control bg-[position:10px_center] bg-no-repeat py-[7px] pr-3 pl-8 text-[13px] text-text outline-0 transition-[border-color] duration-150 placeholder:text-muted placeholder:opacity-50 focus:border-accent"
                     placeholder="Search tokens…"
                     autoComplete="off"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                   />
-                  <div id="user-tokens-list-header" className="user-tokens-list-header flex items-center justify-between">
-                    <div id="user-tokens-count" className="user-tokens-count text-xs text-muted">
+                  <div
+                    id="user-tokens-list-header"
+                    className="user-tokens-list-header mx-0.5 mt-3 mb-1.5 flex items-center justify-between gap-2.5"
+                  >
+                    <div
+                      id="user-tokens-count"
+                      className="user-tokens-count m-0 text-[11px] font-semibold tracking-[0.04em] text-muted uppercase"
+                    >
                       {countLabel(tokens?.length ?? 0)}
                     </div>
-                    <div ref={menuRef} className="user-token-settings relative">
+                    <div ref={menuRef} className="user-token-settings relative flex-none">
                       <button
                         type="button"
                         id="user-token-settings-open"
-                        className="user-token-settings-btn rounded-control border border-border px-2 py-1 text-sm text-accent hover:bg-white/8"
+                        className="user-token-settings-btn inline-flex size-[26px] cursor-pointer items-center justify-center rounded-[7px] border border-border bg-transparent p-0 text-muted hover:border-accent hover:text-text aria-expanded:border-accent aria-expanded:text-accent"
                         title="Token options"
                         aria-haspopup="true"
                         aria-expanded={menuOpen}
                         aria-label="Token options"
                         onClick={() => setMenuOpen((o) => !o)}
                       >
-                        ⚙
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                          <circle cx="12" cy="12" r="3" />
+                          <path d={GEAR} />
+                        </svg>
                       </button>
                       {menuOpen ? (
                         <div
                           id="user-token-settings-menu"
                           role="menu"
-                          className="user-token-settings-menu absolute right-0 z-10 mt-1 flex min-w-44 flex-col rounded-control border border-border bg-card-solid p-1 shadow-card"
+                          className="user-token-settings-menu absolute top-[calc(100%+6px)] right-0 z-40 flex min-w-[184px] flex-col gap-0.5 rounded-btn border border-border bg-card-solid p-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)]"
                         >
                           <button
                             type="button"
                             id="user-token-verify"
                             role="menuitem"
-                            className="user-token-menu-item rounded-control px-3 py-2 text-left text-sm hover:bg-white/8"
+                            className={MENU_ITEM}
                             onClick={() => void verifyAll()}
                           >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="flex-none opacity-85">
+                              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                              <polyline points="22 4 12 14.01 9 11.01" />
+                            </svg>
                             <span>Verify tokens</span>
                           </button>
                           <button
                             type="button"
                             id="user-token-delete-all"
                             role="menuitem"
-                            className="user-token-menu-item is-danger rounded-control px-3 py-2 text-left text-sm text-danger hover:bg-white/8"
+                            className={cx(MENU_ITEM, "is-danger text-[#f4a3a3] hover:bg-[rgba(244,163,163,0.12)]")}
                             onClick={() => void deleteAll()}
                           >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="flex-none opacity-85">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                              <line x1="10" y1="11" x2="10" y2="17" />
+                              <line x1="14" y1="11" x2="14" y2="17" />
+                            </svg>
                             <span>Delete all tokens</span>
                           </button>
                         </div>
@@ -628,30 +688,42 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                 </>
               ) : null}
 
-              <div id="userTokensList" className="user-tokens-list flex flex-col gap-2">
-                {verifying ? <div className={cx(DESC, "user-token-verify-loading")}>Verifying tokens…</div> : null}
+              <div
+                id="userTokensList"
+                className="user-tokens-list mt-1.5 flex max-h-[216px] flex-col gap-1.5 overflow-y-auto overscroll-contain pr-1 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]"
+              >
+                {verifying ? (
+                  <div className="user-token-verify-loading flex items-center justify-center gap-2.5 px-2 py-[26px] text-[13px] text-muted">
+                    <span aria-hidden="true" className="uv-spinner size-4 animate-spin rounded-full border-2 border-accent border-r-transparent" />
+                    <span>Verifying tokens…</span>
+                  </div>
+                ) : null}
                 {tokens === null && !loadError ? <div className={DESC}>Loading…</div> : null}
                 {loadError ? <div className={DESC}>Failed to load tokens.</div> : null}
                 {tokens !== null && !hasTokens ? <div className={DESC}>No user tokens yet. Add one above.</div> : null}
                 {shown.map((t) => (
                   <div
                     key={t.id}
-                    className="user-token-row flex items-center justify-between gap-3 rounded-control border border-border px-3 py-2"
+                    className="user-token-row flex items-center justify-between gap-2.5 rounded-input border border-border bg-white/[0.03] px-2.5 py-2"
                     data-token-id={t.id}
                   >
-                    <div className="user-token-meta flex min-w-0 flex-col">
-                      <span className="user-token-name truncate text-sm font-semibold">{tokenName(t)}</span>
-                      <span className={cx(DESC, "user-token-sub truncate")}>{tokenSub(t)}</span>
+                    <div className="user-token-meta flex min-w-0 flex-col gap-0.5">
+                      <span className="user-token-name truncate text-[13px] font-medium text-text">{tokenName(t)}</span>
+                      <span className={cx(DESC, "user-token-sub font-mono")}>{tokenSub(t)}</span>
                     </div>
-                    <div className="user-token-actions flex items-center gap-3">
-                      <Toggle
+                    <div className="user-token-actions flex shrink-0 items-center gap-2.5">
+                      <Switch
                         id={`user-token-enabled-${t.id}`}
                         label={`Enable ${tokenName(t)}`}
-                        hideLabel
                         checked={t.enabled}
                         onChange={(v) => void toggleToken(t, v)}
                       />
-                      <GhostButton type="button" danger compact className="user-token-remove" onClick={() => void removeToken(t)}>
+                      <GhostButton
+                        type="button"
+                        danger
+                        className="user-token-remove min-h-[30px]! px-3! py-1! text-xs!"
+                        onClick={() => void removeToken(t)}
+                      >
                         Remove
                       </GhostButton>
                     </div>
