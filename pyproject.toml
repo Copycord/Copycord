@@ -51,6 +51,7 @@ exclude = [
     "**/__pycache__",
     "**/*.pyc",
     "**/tests",
+    "**/node_modules",
     "src/copycord/admin/web",
     "src/copycord/admin/data",
 ]
@@ -65,7 +66,7 @@ include = [
 exclude = [
     "**/__pycache__",
     "**/*.pyc",
-    "src/copycord/admin/web/node_modules",
+    "**/node_modules",
     "src/copycord/admin/data",
 ]
 
