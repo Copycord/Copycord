@@ -35,8 +35,8 @@ export function GuildCard({ guild, menuOpen, onOpenMenu }: GuildCardProps) {
       data-gid={guild.id}
       className={cx(
         "relative flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-border bg-card p-3 text-left text-text",
-        "shadow-[0_4px_12px_rgba(0,0,0,0.4)] transition-[border-color,box-shadow,transform,background-color] duration-150",
-        "hover:-translate-y-0.5 hover:border-accent hover:bg-[rgba(27,16,48,0.6)] hover:shadow-[0_8px_20px_rgba(0,0,0,0.6)]",
+        "[box-shadow:0_4px_12px_rgba(0,0,0,0.4)] transition-[border-color,box-shadow,transform,background-color] duration-150",
+        "hover:-translate-y-0.5 hover:border-accent hover:bg-[rgba(27,16,48,0.6)] hover:[box-shadow:0_8px_20px_rgba(0,0,0,0.6)]",
       )}
     >
       <button
@@ -44,7 +44,7 @@ export function GuildCard({ guild, menuOpen, onOpenMenu }: GuildCardProps) {
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         onClick={open}
-        className="block w-full min-w-0 cursor-pointer rounded-lg after:absolute after:inset-0 after:content-[''] border-0 bg-transparent p-0 text-left font-sans text-base text-text outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        className="block w-full min-w-0 cursor-pointer after:absolute after:inset-0 after:content-[''] border-0 bg-transparent p-0 text-left font-sans text-base text-text outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       >
         <span
           className={
