@@ -24,6 +24,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from copycord.logging_setup import get_logger
+from copycord.common.config import CURRENT_VERSION
 from copycord.common.private_file import write_private_file
 
 LOGGER = get_logger("copycord")
@@ -311,6 +312,7 @@ def init_admin_auth(app: FastAPI, data_dir: Path) -> None:
         return spa.index_response(
             status.HTTP_429_TOO_MANY_REQUESTS,
             login_error=f"Too many failed attempts. Try again in {wait} seconds.",
+            version=CURRENT_VERSION,
             headers={"Retry-After": str(wait)},
         )
 
@@ -325,7 +327,7 @@ def init_admin_auth(app: FastAPI, data_dir: Path) -> None:
             )
             return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
 
-        return spa.index_response()
+        return spa.index_response(version=CURRENT_VERSION)
 
     @app.post("/login", response_class=HTMLResponse)
     async def login_submit(
@@ -375,6 +377,7 @@ def init_admin_auth(app: FastAPI, data_dir: Path) -> None:
         return spa.index_response(
             status.HTTP_401_UNAUTHORIZED,
             login_error="Incorrect password. Please try again.",
+            version=CURRENT_VERSION,
         )
 
     @app.post("/logout")

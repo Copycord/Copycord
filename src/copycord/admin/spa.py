@@ -25,6 +25,8 @@ SPA_DIRS = (BASE_DIR / "web_static", BASE_DIR / "web" / "dist")
 SPA_ASSET_CACHE = "public, max-age=31536000, immutable"
 # The login page reads a failed attempt's message from this meta tag.
 LOGIN_ERROR_META = "copycord-login-error"
+# /version sits behind the password, so the login page reads the footer version from this one.
+VERSION_META = "copycord-version"
 NOT_BUILT = "The dashboard is not built (run `npm ci && npm run build` in src/copycord/admin/web)."
 
 
@@ -39,18 +41,22 @@ def index_response(
     status_code: int = 200,
     *,
     login_error: Optional[str] = None,
+    version: Optional[str] = None,
     headers: Optional[Mapping[str, str]] = None,
 ) -> Response:
-    """index.html, uncached; login_error goes in an escaped meta tag."""
+    """index.html, uncached; version and login_error go in escaped meta tags."""
     root = spa_dir()
     if root is None:
         return PlainTextResponse(NOT_BUILT, status_code=404)
     hdrs = {"Cache-Control": "no-cache", **(headers or {})}
     index = root / "index.html"
-    if not login_error:
+    tags = [(VERSION_META, version), (LOGIN_ERROR_META, login_error)]
+    meta = "".join(
+        f'<meta name="{name}" content="{html.escape(value, quote=True)}" />' for name, value in tags if value
+    )
+    if not meta:
         return FileResponse(index, status_code=status_code, headers=hdrs, media_type="text/html")
     page = index.read_text(encoding="utf-8")
-    meta = f'<meta name="{LOGIN_ERROR_META}" content="{html.escape(login_error, quote=True)}" />'
     page = page.replace("</head>", meta + "</head>", 1) if "</head>" in page else meta + page
     return HTMLResponse(page, status_code=status_code, headers=hdrs)
 

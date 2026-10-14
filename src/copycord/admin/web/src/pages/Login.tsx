@@ -6,15 +6,27 @@ import { useState } from "react";
 import { Footer } from "../components/Footer";
 
 export const LOGIN_ERROR_META = "copycord-login-error";
+// /version sits behind the password, so the server puts the footer version in the login page too.
+export const VERSION_META = "copycord-version";
+
+function readMeta(name: string, doc: Document): string {
+  const meta = doc.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
+  return meta?.content.trim() ?? "";
+}
 
 /** The error the server put in the page, or "" when there is none. */
 export function readLoginError(doc: Document = document): string {
-  const meta = doc.querySelector<HTMLMetaElement>(`meta[name="${LOGIN_ERROR_META}"]`);
-  return meta?.content.trim() ?? "";
+  return readMeta(LOGIN_ERROR_META, doc);
+}
+
+/** The version the server put in the page, or null when there is none. */
+export function readVersion(doc: Document = document): string | null {
+  return readMeta(VERSION_META, doc) || null;
 }
 
 export function Login() {
   const [error] = useState(readLoginError);
+  const [version] = useState(readVersion);
   const [password, setPassword] = useState("");
   const [shown, setShown] = useState(false);
   const empty = password.trim().length === 0;
@@ -96,8 +108,7 @@ export function Login() {
           </section>
         </div>
       </div>
-      {/* The version endpoint sits behind the password, so before sign-in the pill reads "dev". */}
-      <Footer version={null} />
+      <Footer version={version} />
     </>
   );
 }

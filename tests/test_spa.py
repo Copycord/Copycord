@@ -9,6 +9,7 @@ from starlette.testclient import TestClient
 from copycord.admin import auth
 from copycord.admin import spa as spa_module
 from copycord.admin.app import app
+from copycord.common.config import CURRENT_VERSION
 from tests.conftest import SPA_INDEX as INDEX
 
 
@@ -96,11 +97,23 @@ def _login(tc, pw, **headers):
     return tc.post("/login", data={"password": pw}, headers={"origin": ORIGIN, **headers}, follow_redirects=False)
 
 
+def _version_meta(version=CURRENT_VERSION):
+    return f'<meta name="{spa_module.VERSION_META}" content="{version}" />'
+
+
 def test_login_page_is_the_spa(tc, spa):
     resp = tc.get("/login", follow_redirects=False)
     assert resp.status_code == 200
-    assert resp.text == INDEX
+    assert resp.text == INDEX.replace("</head>", _version_meta() + "</head>")
     assert resp.headers["cache-control"] == "no-cache"
+
+
+def test_login_page_carries_only_the_version(tc, spa, limiter):
+    # The footer version shows before sign-in; pages behind the password get the plain index.
+    assert _version_meta() in tc.get("/login").text
+    assert _version_meta() in _login(tc, "nope").text
+    assert spa_module.VERSION_META not in tc.get("/", headers=_cookie()).text
+    assert tc.get("/version", follow_redirects=False).status_code in (302, 307, 401)
 
 
 def test_login_page_redirects_when_signed_in(tc, spa):
