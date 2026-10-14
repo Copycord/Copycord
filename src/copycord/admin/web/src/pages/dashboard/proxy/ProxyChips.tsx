@@ -64,7 +64,7 @@ export function ProxyChips({ proxies, favorites, results, onAdd, onRemove, onRem
   return (
     <div
       id="srv-proxy-chips"
-      className="srv-proxy-chips flex min-h-[44px] flex-wrap items-center gap-1.5 rounded-control border border-border bg-bg-2 p-2"
+      className="srv-proxy-chips flex max-h-[220px] min-h-[44px] flex-col gap-1 overflow-y-auto rounded-btn border border-border bg-control px-2.5 py-2 transition-[border-color,box-shadow] duration-150 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin] focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(167,139,250,0.12)]"
     >
       {proxies.map((p) => {
         const fav = favorites.has(p);
@@ -74,9 +74,9 @@ export function ProxyChips({ proxies, favorites, results, onAdd, onRemove, onRem
             key={p}
             data-proxy={p}
             className={cx(
-              "srv-proxy-chip-item inline-flex max-w-full items-center gap-1.5 rounded-full border bg-white/4 py-0.5 pl-1.5 pr-2 text-xs",
+              "srv-proxy-chip-item inline-flex max-w-full items-center gap-1.5 self-start rounded-md border bg-white/6 py-1 pr-2 pl-2.5 font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace] text-xs leading-[1.3] text-text",
               res ? `test-${res.state}` : "",
-              res ? TONE[res.state] : "border-border",
+              res ? TONE[res.state] : "border-white/10",
               fav && "is-favorite",
             )}
           >
@@ -103,7 +103,7 @@ export function ProxyChips({ proxies, favorites, results, onAdd, onRemove, onRem
             >
               <Star />
             </span>
-            <span className="srv-proxy-chip-text min-w-0 truncate font-mono">{p}</span>
+            <span className="srv-proxy-chip-text min-w-0 truncate">{p}</span>
             {res ? (
               <span className="srv-proxy-chip-ms text-[11px] text-muted">
                 {res.state === "loading" ? "testing…" : res.label}
@@ -136,7 +136,7 @@ export function ProxyChips({ proxies, favorites, results, onAdd, onRemove, onRem
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
-        className="srv-proxy-chips-input min-w-[200px] flex-1 bg-transparent px-1 py-1 text-sm text-text outline-none"
+        className="srv-proxy-chips-input w-full shrink-0 border-0 bg-transparent p-1 font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace] text-xs text-text outline-none placeholder:text-muted/50"
       />
     </div>
   );

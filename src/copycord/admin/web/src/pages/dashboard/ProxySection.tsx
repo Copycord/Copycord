@@ -13,9 +13,8 @@ import type {
   ProxyTestEvent,
   ProxyTestResult,
 } from "../../types/dashboard-proxy";
-import { GhostButton } from "../system/buttons";
 import { useNotify, useSafeConfirm } from "../system/providers";
-import { CARD, Chevron, DocLink, SUMMARY, SUMMARY_TITLE } from "./parts";
+import { CARD, Chevron, DocLink, GHOST_XS_GREEN, GHOST_XS_RED, SUMMARY, SUMMARY_TITLE } from "./parts";
 import { ProxyChips } from "./proxy/ProxyChips";
 import { FavHelpModal, ResultsModal, SettingsModal } from "./proxy/ProxyModals";
 import {
@@ -50,9 +49,33 @@ const SETTINGS_SAVE_MS = 600;
 /** The bus replays recent history on connect; test events in that window are old. */
 const REPLAY_MS = 1500;
 
-const HINT = "text-xs leading-relaxed text-muted";
+/** .srv-proxy-hint.srv-proxy-rotation-hint, and the code samples in the paste hint. */
+const ROTATION_HINT = "m-0 mt-1.5 text-xs leading-normal text-muted";
+const CODE = "[&_code]:rounded-[4px] [&_code]:bg-white/6 [&_code]:px-[5px] [&_code]:py-px [&_code]:text-[11px]";
+/** .input.srv-proxy-interval-input: the .input look at 34px, sized by the browser like the old one. */
 const NUM =
-  "w-20 rounded-control border border-border bg-bg-2 px-2 py-1.5 text-sm text-text outline-none focus:border-accent disabled:opacity-50";
+  "h-[34px] rounded-control border border-border bg-(image:--control-gradient) px-3.5 text-center text-sm text-text outline-0 transition-[border-color] " +
+  "[appearance:textfield] focus:border-accent disabled:opacity-50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+/** The .dd toggle the old page turned select.srv-proxy-interval-select into; the caret sits on top. */
+const UNIT =
+  "dd-toggle relative min-h-[34px] cursor-pointer appearance-none rounded-btn border border-border bg-control py-2 pr-9 pl-2.5 text-left font-sans text-[13px] " +
+  "text-text outline-0 transition-[border,box-shadow,background] duration-200 focus-visible:border-accent disabled:opacity-50";
+/** .srv-proxy-rotation-section */
+const ROTATION_SECTION = "mt-4 border-t border-border pt-3.5";
+
+function UnitSelect({ id, value, disabled, onChange }: { id: string; value: string; disabled: boolean; onChange: (v: IntervalUnit) => void }) {
+  return (
+    <div className="dd relative">
+      <select id={id} disabled={disabled} value={value} className={UNIT} onChange={(e) => onChange(e.target.value as IntervalUnit)}>
+        <option value="60">minutes</option>
+        <option value="3600">hours</option>
+      </select>
+      <span aria-hidden="true" className="dd-caret pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-sm leading-none text-accent">
+        ▾
+      </span>
+    </div>
+  );
+}
 /** .srv-proxy-check and its 18px box. */
 const CHECK_LABEL = "srv-proxy-check inline-flex cursor-pointer items-center gap-2 text-[13px] font-medium text-text select-none";
 const CHECK =
@@ -449,49 +472,51 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
           <Chevron />
         </summary>
 
-        <div className="srv-proxy-body mt-3.5 flex flex-col gap-3">
-          <label className={cx(CHECK_LABEL, "w-fit")} htmlFor="srv-proxy-toggle">
-            <input
-              id="srv-proxy-toggle"
-              type="checkbox"
-              className={CHECK}
-              checked={enabled}
-              onChange={(e) => void toggleEnabled(e.target.checked)}
-            />
-            <span>Enable proxies for client</span>
-          </label>
+        <div className="srv-proxy-body mt-3.5">
+          <div className="srv-proxy-toggle-row mb-3">
+            <label className={CHECK_LABEL} htmlFor="srv-proxy-toggle">
+              <input
+                id="srv-proxy-toggle"
+                type="checkbox"
+                className={CHECK}
+                checked={enabled}
+                onChange={(e) => void toggleEnabled(e.target.checked)}
+              />
+              <span>Enable proxies for client</span>
+            </label>
+          </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className={HINT}>
+          <div className="srv-proxy-hint-row mb-2.5 flex items-start justify-between gap-3">
+            <p className={cx("m-0 text-xs leading-normal text-muted", CODE)}>
               Paste one or more proxies &mdash; <code>host:port</code> &middot; <code>host:port:user:pass</code>{" "}
               &middot; <code>user:pass@host:port</code>
             </p>
-            <div className="flex gap-2">
-              <GhostButton
+            <div className="srv-proxy-hint-actions flex shrink-0 gap-1.5">
+              <button
                 id="srv-proxy-test"
-                compact
-                danger={running}
+                type="button"
                 disabled={stopping}
                 onClick={() => void runTest()}
+                className={running ? GHOST_XS_RED : GHOST_XS_GREEN}
               >
                 {running ? "Stop" : "Test All"}
-              </GhostButton>
-              <GhostButton id="srv-proxy-clear" compact danger onClick={() => void clearAll()}>
+              </button>
+              <button id="srv-proxy-clear" type="button" onClick={() => void clearAll()} className={GHOST_XS_RED}>
                 Clear
-              </GhostButton>
+              </button>
             </div>
           </div>
 
           {progress ? (
-            <div id="srv-proxy-progress" className="flex items-center gap-3">
-              <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/8">
+            <div id="srv-proxy-progress" className="srv-proxy-progress mb-2.5 flex items-center gap-2.5">
+              <div className="srv-proxy-progress-bar h-1.5 flex-1 overflow-hidden rounded-[3px] bg-white/6">
                 <div
                   id="srv-proxy-progress-fill"
-                  className="h-full bg-progress transition-[width]"
+                  className="h-full rounded-[3px] bg-[linear-gradient(90deg,var(--color-primary),var(--color-accent))] transition-[width] duration-300"
                   style={{ width: `${progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0}%` }}
                 />
               </div>
-              <span id="srv-proxy-progress-text" className="text-xs text-muted">
+              <span id="srv-proxy-progress-text" className="min-w-[70px] text-right text-[11px] whitespace-nowrap text-muted">
                 {progress.text ?? `${progress.current} / ${progress.total}`}
               </span>
             </div>
@@ -512,10 +537,10 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
 
           <div
             id="srv-proxy-rotation-section"
-            className={cx("flex flex-col gap-1.5", locked && "is-locked opacity-50")}
+            className={cx(ROTATION_SECTION, locked && "is-locked opacity-50")}
             {...lockedProps}
           >
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="srv-proxy-rotation-row flex items-center gap-2.5">
               <label className={CHECK_LABEL} htmlFor="srv-proxy-rotation-toggle">
                 <input
                   id="srv-proxy-rotation-toggle"
@@ -531,7 +556,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
                 />
                 <span>Rotate every</span>
               </label>
-              <div id="srv-proxy-rotation-controls" className={cx("flex gap-2", !rotOn && "hidden")}>
+              <div id="srv-proxy-rotation-controls" className={cx("srv-proxy-interval-inline flex items-center gap-1.5", !rotOn && "hidden")}>
                 <input
                   id="srv-proxy-interval"
                   type="number"
@@ -551,23 +576,19 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
                     scheduleSave();
                   }}
                 />
-                <select
+                <UnitSelect
                   id="srv-proxy-interval-unit"
                   disabled={locked}
                   value={rotUnit}
-                  className={NUM}
-                  onChange={(e) => {
-                    setRotUnit(e.target.value as IntervalUnit);
-                    latest.current = { ...latest.current, rotUnit: e.target.value as IntervalUnit };
+                  onChange={(unit) => {
+                    setRotUnit(unit);
+                    latest.current = { ...latest.current, rotUnit: unit };
                     scheduleSave();
                   }}
-                >
-                  <option value="60">minutes</option>
-                  <option value="3600">hours</option>
-                </select>
+                />
               </div>
             </div>
-            <p className={HINT}>
+            <p className={ROTATION_HINT}>
               Automatically switches to the next proxy after the set duration. When off, one proxy is used until it
               fails.
             </p>
@@ -575,10 +596,10 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
 
           <div
             id="srv-proxy-fav-section"
-            className={cx("flex flex-col gap-1.5", locked && "is-locked opacity-50")}
+            className={cx(ROTATION_SECTION, locked && "is-locked opacity-50")}
             {...lockedProps}
           >
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="srv-proxy-rotation-row flex items-center gap-2.5">
               <label className={CHECK_LABEL} htmlFor="srv-proxy-fav-recheck-toggle">
                 <input
                   id="srv-proxy-fav-recheck-toggle"
@@ -595,7 +616,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
               </label>
               <div
                 id="srv-proxy-fav-recheck-controls"
-                className={cx("flex gap-2", !recheckOn && "pointer-events-none opacity-45")}
+                className={cx("srv-proxy-interval-inline flex items-center gap-1.5", !recheckOn && "pointer-events-none opacity-45")}
               >
                 <input
                   id="srv-proxy-fav-recheck-interval"
@@ -611,23 +632,19 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
                     later("recheck", SAVE_MS, () => void saveRecheckNow());
                   }}
                 />
-                <select
+                <UnitSelect
                   id="srv-proxy-fav-recheck-unit"
                   disabled={locked}
                   value={recheckUnit}
-                  className={NUM}
-                  onChange={(e) => {
-                    setRecheckUnit(e.target.value as IntervalUnit);
-                    latest.current = { ...latest.current, recheckUnit: e.target.value as IntervalUnit };
+                  onChange={(unit) => {
+                    setRecheckUnit(unit);
+                    latest.current = { ...latest.current, recheckUnit: unit };
                     later("recheck", SAVE_MS, () => void saveRecheckNow());
                   }}
-                >
-                  <option value="60">minutes</option>
-                  <option value="3600">hours</option>
-                </select>
+                />
               </div>
             </div>
-            <p className={HINT}>
+            <p className={ROTATION_HINT}>
               While the client is on a proxy you have not starred, re-test the favorites on this interval and switch
               back as soon as one works again.
             </p>

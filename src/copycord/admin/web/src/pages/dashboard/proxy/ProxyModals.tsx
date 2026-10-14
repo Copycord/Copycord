@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import type { ProxySettingKey, ProxyTestResult } from "../../../types/dashboard-proxy";
 import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE } from "../../../components/Modal";
 import { GhostButton } from "../../system/buttons";
+import { PS_FIELD_INPUT } from "../parts";
 import { maskProxy, PS_DEFAULTS } from "./model";
 
 interface ShellProps {
@@ -67,10 +68,6 @@ export function FavHelpModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-// The old .input.ps-input: .input padding, gradient and 14px text, .ps-input height and centered value.
-const INPUT =
-  "h-8 w-full rounded-control border border-border bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] hover:border-accent/30 hover:bg-[linear-gradient(180deg,#1f1237_0%,#160b2a_100%)] focus:border-accent focus:bg-[linear-gradient(180deg,#1f1237_0%,#160b2a_100%)] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
-
 interface FieldRowProps {
   id: string;
   label: string;
@@ -99,7 +96,7 @@ function FieldRow({ id, label, sub, unit, min, max, value, onChange, onCommit }:
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onCommit}
-          className={INPUT}
+          className={PS_FIELD_INPUT}
         />
         <span className="text-[11px] text-muted">{unit}</span>
       </div>

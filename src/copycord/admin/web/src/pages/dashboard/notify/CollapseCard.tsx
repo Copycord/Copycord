@@ -42,7 +42,7 @@ export function CollapseCard({ id, title, docsHref, storageKey, children }: Coll
         <DocLink href={docsHref} label={`${title} docs`} />
         <Chevron />
       </summary>
-      <div className="mt-3.5 flex flex-col gap-3">{children}</div>
+      <div className="srv-proxy-body mt-3.5">{children}</div>
     </details>
   );
 }

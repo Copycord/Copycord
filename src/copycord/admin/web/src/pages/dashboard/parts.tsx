@@ -44,6 +44,26 @@ export const PS_INPUT =
 /** .proxy-settings-unit */
 export const PS_UNIT = "text-[11px] text-muted";
 
+/** .input.ps-input: .input padding, gradient and 14px text, .ps-input height and centered value. */
+export const PS_FIELD_INPUT =
+  "h-8 w-full rounded-control border border-border bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] hover:border-accent/30 hover:bg-[linear-gradient(180deg,#1f1237_0%,#160b2a_100%)] focus:border-accent focus:bg-[linear-gradient(180deg,#1f1237_0%,#160b2a_100%)] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+/** .proxy-settings-field: a borderless 13px row, label on the left and the control on the right. */
+export const PS_FIELD =
+  "flex items-center justify-between gap-4 rounded-input bg-white/[0.02] px-2.5 py-1.5 text-[13px] text-text transition-colors hover:bg-white/[0.04]";
+
+/** .srv-proxy-hint */
+export const SECTION_HINT = "m-0 mb-2.5 text-xs leading-normal text-muted";
+
+/** .btn.btn-xs with .btn-ghost-green or .btn-ghost-red: 28px, 12px accent label that turns green or red on hover. */
+const GHOST_XS =
+  "inline-flex min-h-7 cursor-pointer items-center justify-center rounded-btn border border-border bg-[rgba(255,255,255,0.04)] px-2.5 py-1.5 " +
+  "text-xs leading-none font-semibold text-accent outline-none transition-colors duration-150 " +
+  "enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:active:bg-[rgba(255,255,255,0.1)] " +
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28 disabled:cursor-not-allowed disabled:opacity-60";
+export const GHOST_XS_GREEN = `${GHOST_XS} enabled:hover:border-good enabled:hover:text-good`;
+export const GHOST_XS_RED = `${GHOST_XS} enabled:hover:border-danger enabled:hover:text-danger`;
+
 const BOOK =
   "M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z";
 

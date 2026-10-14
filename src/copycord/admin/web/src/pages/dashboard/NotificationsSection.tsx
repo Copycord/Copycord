@@ -3,12 +3,22 @@
 
 import { useEffect, useState } from "react";
 import { useToast } from "../../components/Toast";
-import { Button, Input, Toggle } from "../../components/ui";
 import { api } from "../../lib/api";
 import type { NotifEvent, NotifEvents, NotifSettingsReply, NotifTestReply } from "../../types/dashboard-notify";
 import { CollapseCard } from "./notify/CollapseCard";
 import { DEFAULT_EVENTS, NOTIF_ROWS, mergeEvents, notifPayload } from "./notify/model";
 import { useDebouncedSave } from "./notify/useDebouncedSave";
+import { GHOST_XS_GREEN, SECTION_HINT, SETTING_LABEL, SETTING_SUB, Switch } from "./parts";
+
+// .notif-webhook-input: 13px monospace on the dark control fill.
+const WEBHOOK_INPUT =
+  "flex-1 rounded-input border border-border bg-control px-3 py-[7px] font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace] text-[13px] text-text " +
+  "outline-0 transition-colors duration-150 placeholder:text-muted/40 focus:border-accent";
+
+// .notif-event-row
+const EVENT_ROW =
+  "flex items-center justify-between gap-3.5 rounded-input border border-border bg-[rgba(255,255,255,0.02)] px-2.5 py-2 " +
+  "transition-colors duration-100 hover:bg-[rgba(255,255,255,0.04)]";
 
 /** The App shell test renders without a ToastProvider. */
 function useOptionalToast(): ReturnType<typeof useToast> | null {
@@ -74,12 +84,12 @@ export function NotificationsSection() {
       docsHref="https://copycord.github.io/Copycord/docs/configuration/advanced#notifications"
       storageKey="cpc.notifications-card-open"
     >
-      <p className="text-sm text-text-2">
+      <p className={SECTION_HINT}>
         Get notified via Discord webhook when something goes wrong — client goes offline, proxies die, tokens get
         revoked.
       </p>
-      <div className="flex items-center gap-2">
-        <Input
+      <div className="notif-webhook-row mb-3.5 flex gap-2">
+        <input
           type="text"
           id="notif-webhook-url"
           aria-label="Webhook URL"
@@ -87,21 +97,28 @@ export function NotificationsSection() {
           spellCheck={false}
           value={url}
           onChange={(e) => changeUrl(e.target.value)}
+          className={WEBHOOK_INPUT}
         />
-        <Button id="notif-test-btn" variant="ghost" size="sm" disabled={testing} onClick={sendTest}>
+        <button id="notif-test-btn" type="button" disabled={testing} onClick={sendTest} className={GHOST_XS_GREEN}>
           {testing ? "Sending…" : "Test"}
-        </Button>
+        </button>
       </div>
-      <div className="flex flex-col gap-3">
+      <div className="notif-events-list flex flex-col gap-1.5">
         {NOTIF_ROWS.map((r) => (
-          <Toggle
-            key={r.event}
-            id={`notif-toggle-${r.event}`}
-            label={r.label}
-            description={r.hint}
-            checked={events[r.event]}
-            onChange={(on) => changeEvent(r.event, on)}
-          />
+          <div key={r.event} className={EVENT_ROW}>
+            <div className={SETTING_LABEL}>
+              <span className="text-[13px] font-medium">{r.label}</span>
+              <span className={SETTING_SUB}>{r.hint}</span>
+            </div>
+            <Switch
+              id={`notif-toggle-${r.event}`}
+              label={r.label}
+              checked={events[r.event]}
+              onChange={(on) => changeEvent(r.event, on)}
+              data={{ "data-event": r.event }}
+              className="notif-toggle shrink-0"
+            />
+          </div>
         ))}
       </div>
     </CollapseCard>
