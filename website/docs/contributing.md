@@ -64,7 +64,7 @@ v4 has no `ROLE` variable and no separate `admin`, `server` and `client` service
 The Docker build compiles the frontend for you. To check frontend changes on their own:
 
 ```bash
-cd src/copycord/admin/frontend
+cd src/copycord/admin/web
 npm ci
 npm run build
 ```
@@ -98,7 +98,7 @@ Every pull request against `main` (and every push to `main`) runs the **Tests** 
 | Lint & syntax check | `ruff check src/` and `py_compile` on every Python file |
 | DB unit tests | `tests/test_db.py` on Python 3.12 and 3.14 |
 | Unit tests | The rest of `tests/` on Python 3.12 and 3.14 |
-| Frontend build | `npm ci` and `npm run build` in `src/copycord/admin/frontend` |
+| Frontend build | `npm ci` and `npm run build` in `src/copycord/admin/web` |
 | Wheel build & smoke test | Builds the wheel with the frontend, installs it in a fresh environment and runs `copycord --version` and `copycord doctor` |
 
 Other workflows:

@@ -5,12 +5,12 @@
 # src/copycord/node_runtime.py.
 
 FROM node:22.12.0-slim AS webbuild
-WORKDIR /frontend
+WORKDIR /web
 
-COPY src/copycord/admin/frontend/package*.json ./
+COPY src/copycord/admin/web/package*.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked,id=npm-${TARGETPLATFORM} npm ci
 
-COPY src/copycord/admin/frontend/ .
+COPY src/copycord/admin/web/ .
 RUN --mount=type=cache,target=/root/.npm,sharing=locked,id=npm-${TARGETPLATFORM} npm run build
 
 
@@ -28,11 +28,11 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venvs/copycord \
 WORKDIR /src
 COPY pyproject.toml uv.lock hatch_build.py README.md LICENSE ./
 COPY src/ ./src/
-COPY --from=webbuild /frontend/dist/ ./src/copycord/admin/frontend/dist/
+COPY --from=webbuild /web/dist/ ./src/copycord/admin/web/dist/
 
 # One venv for admin, server and client, installed from uv.lock (the same
-# versions CI tested). The built frontend goes where hatch_build.py picks it
-# up and ships it as admin/static.
+# versions CI tested). The built SPA goes where hatch_build.py picks it up
+# and ships it as admin/web_static.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked,id=uv-copycord-${TARGETPLATFORM} \
     uv sync --frozen --no-dev --no-editable
 

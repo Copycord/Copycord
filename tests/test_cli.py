@@ -913,8 +913,7 @@ def test_check_db(tmp_path):
 def test_check_frontend(tmp_path):
     missing = cli.check_frontend(tmp_path)
     assert missing.status == cli.FAIL and missing.name == "web UI missing"
-    (tmp_path / "assets").mkdir()
-    (tmp_path / "assets" / "main.js").write_text("")
+    (tmp_path / "index.html").write_text("")
     assert cli.check_frontend(tmp_path).status == cli.PASS
 
 

@@ -912,30 +912,32 @@ def check_python(version_info=None) -> Check:
     return Check(FAIL, f"Python {found}", f"Copycord needs Python {low} to {high}")
 
 
-def admin_static_dir() -> Optional[Path]:
-    """The admin static dir, found without importing copycord.admin.app."""
+def admin_spa_dirs() -> list[Path]:
+    """Where the built dashboard can be (web_static in a wheel, web/dist in a
+    checkout), found without importing copycord.admin.app."""
     try:
         spec = importlib.util.find_spec("copycord.admin")
     except (ImportError, ValueError):
-        return None
+        return []
     if spec is None or not spec.submodule_search_locations:
-        return None
-    return Path(list(spec.submodule_search_locations)[0]) / "static"
+        return []
+    admin = Path(list(spec.submodule_search_locations)[0])
+    return [admin / "web_static", admin / "web" / "dist"]
 
 
-def check_frontend(static_dir: Optional[Path] = None) -> Check:
-    static_dir = admin_static_dir() if static_dir is None else static_dir
-    if static_dir is None:
+def check_frontend(spa_dir: Optional[Path] = None) -> Check:
+    dirs = admin_spa_dirs() if spa_dir is None else [spa_dir]
+    if not dirs:
         return Check(FAIL, "web UI missing", "the admin package cannot be found", fix="reinstall")
-    main_js = static_dir / "assets" / "main.js"
-    if main_js.is_file():
-        return Check(PASS, "web UI included", path=str(static_dir))
+    for d in dirs:
+        if (d / "index.html").is_file():
+            return Check(PASS, "web UI included", path=str(d))
     return Check(
         FAIL,
         "web UI missing",
         "the dashboard will not load; reinstall Copycord (a git install needs npm "
         "to build it)",
-        str(main_js),
+        str(dirs[0] / "index.html"),
         "reinstall",
     )
 

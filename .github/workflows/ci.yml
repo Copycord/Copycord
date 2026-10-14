@@ -154,10 +154,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: src/copycord/admin/frontend/package-lock.json
+          cache-dependency-path: src/copycord/admin/web/package-lock.json
 
       - name: Install & build frontend
-        working-directory: src/copycord/admin/frontend
+        working-directory: src/copycord/admin/web
         run: |
           npm ci
           npm run build 2>&1 | tee /tmp/frontend-build.txt
@@ -185,10 +185,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: src/copycord/admin/frontend/package-lock.json
+          cache-dependency-path: src/copycord/admin/web/package-lock.json
 
       - name: Build frontend
-        working-directory: src/copycord/admin/frontend
+        working-directory: src/copycord/admin/web
         run: |
           npm ci
           npm run build

@@ -8,9 +8,9 @@
 # =============================================================================
 
 """
-Hatch build hook: puts the built admin frontend in the wheel as
-copycord/admin/static, building it with npm when dist is missing, and
-writes copycord/_build.json with the source commit.
+Hatch build hook: puts the built dashboard (the React SPA in admin/web) in
+the wheel as copycord/admin/web_static, building it with npm when dist is
+missing, and writes copycord/_build.json with the source commit.
 """
 
 from __future__ import annotations
@@ -25,9 +25,6 @@ from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
-FRONTEND = Path("src") / "copycord" / "admin" / "frontend"
-DIST = FRONTEND / "dist"
-# The new SPA, served at /app; ships as copycord/admin/web_static.
 WEB = Path("src") / "copycord" / "admin" / "web"
 WEB_DIST = WEB / "dist"
 SKIP_ENV = "COPYCORD_SKIP_FRONTEND"
@@ -41,24 +38,22 @@ class FrontendBuildHook(BuildHookInterface):
     PLUGIN_NAME = "custom"
 
     def initialize(self, version: str, build_data: dict) -> None:
-        # Editable installs serve src/copycord/admin/static straight from the checkout.
+        # Editable installs serve src/copycord/admin/web/dist straight from the checkout.
         if self.target_name == "wheel" and version == "editable":
             return
         if self.target_name == "wheel":
             self.stamp_commit(build_data)
-        builds = ((FRONTEND, DIST, "copycord/admin/static"), (WEB, WEB_DIST, "copycord/admin/web_static"))
-        for src, out, wheel_target in builds:
-            dist = Path(self.root) / out
-            if not _has_files(dist):
-                self.build_frontend(src)
-            if not _has_files(dist):
-                self.app.display_warning(
-                    f"{out} not found: building without it "
-                    f"(run `npm run build` in {src.as_posix()}; `copycord doctor` will warn)"
-                )
-                continue
-            target = wheel_target if self.target_name == "wheel" else out.as_posix()
-            build_data["force_include"][str(dist)] = target
+        dist = Path(self.root) / WEB_DIST
+        if not _has_files(dist):
+            self.build_frontend()
+        if not _has_files(dist):
+            self.app.display_warning(
+                f"{WEB_DIST.as_posix()} not found: building without it "
+                f"(run `npm run build` in {WEB.as_posix()}; `copycord doctor` will warn)"
+            )
+            return
+        target = "copycord/admin/web_static" if self.target_name == "wheel" else WEB_DIST.as_posix()
+        build_data["force_include"][str(dist)] = target
 
     def stamp_commit(self, build_data: dict) -> None:
         """Ship copycord/_build.json with the commit this wheel is built from."""
@@ -78,7 +73,7 @@ class FrontendBuildHook(BuildHookInterface):
         out.write_text(json.dumps({"commit": commit}), encoding="utf-8")
         build_data["force_include"][str(out)] = "copycord/_build.json"
 
-    def build_frontend(self, src: Path = FRONTEND) -> None:
+    def build_frontend(self, src: Path = WEB) -> None:
         """Run npm ci and npm run build in src; fails unless COPYCORD_SKIP_FRONTEND=1."""
         frontend = Path(self.root) / src
         if not (frontend / "package.json").is_file():

@@ -84,7 +84,7 @@ Tests the FastAPI admin endpoints using `httpx.AsyncClient`. WebSocket control c
 - **Lint & syntax check**: ruff + py_compile on all Python files
 - **DB unit tests**: pytest `test_db.py`
 - **API endpoint tests**: pytest `test_api.py`
-- **Frontend build**: `npm ci && npm run build` in `src/copycord/admin/frontend/`
+- **Frontend build**: `npm ci && npm run build` in `src/copycord/admin/web/` (the React dashboard)
 
 ### `docker-build-test.yml`, Manual trigger
 

@@ -51,7 +51,7 @@ exclude = [
     "**/__pycache__",
     "**/*.pyc",
     "**/tests",
-    "src/copycord/admin/frontend",
+    "src/copycord/admin/web",
     "src/copycord/admin/data",
 ]
 
@@ -65,10 +65,10 @@ include = [
 exclude = [
     "**/__pycache__",
     "**/*.pyc",
-    "src/copycord/admin/frontend/node_modules",
+    "src/copycord/admin/web/node_modules",
     "src/copycord/admin/data",
 ]
 
-# Adds the built frontend (src/copycord/admin/frontend/dist) when present; see hatch_build.py.
+# Adds the built SPA (src/copycord/admin/web/dist) as copycord/admin/web_static; see hatch_build.py.
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
