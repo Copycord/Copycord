@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 import { api } from "../lib/api";
 import type { SidebarItem } from "../types/api";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Footer } from "./Footer";
 import { Sidebar } from "./Sidebar";
 
@@ -155,7 +156,9 @@ export function Layout() {
       </aside>
 
       <main className={frame.main}>
-        <Outlet />
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
         {frame.footerInside ? footer : null}
       </main>
       {frame.footerInside ? null : footer}
