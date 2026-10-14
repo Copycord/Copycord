@@ -4,11 +4,30 @@ Discord snowflakes run past 2**53, so an int id loses digits in the browser's
 JSON.parse and the admin SPA cannot match the busy notice to the row it holds.
 """
 import asyncio
+import importlib
 import json
+import logging
 
-from copycord.server.server import ServerReceiver
+import pytest
 
 CID = 1521898853337403511
+
+
+@pytest.fixture
+def ServerReceiver():
+    # server.py sets up root logging and library levels on import; put them back
+    # so later logging tests see the tree they expect.
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    levels = {n: lg.level for n, lg in logging.root.manager.loggerDict.items() if isinstance(lg, logging.Logger)}
+    try:
+        yield importlib.import_module("copycord.server.server").ServerReceiver
+    finally:
+        root.handlers[:] = handlers
+        root.setLevel(level)
+        for n, lg in list(logging.root.manager.loggerDict.items()):
+            if isinstance(lg, logging.Logger):
+                lg.setLevel(levels.get(n, logging.NOTSET))
 
 
 class FakeBus:
@@ -19,7 +38,7 @@ class FakeBus:
         self.sent.append({"kind": kind, "role": "server", "payload": payload})
 
 
-def test_backfill_busy_round_trips_string_channel_id():
+def test_backfill_busy_round_trips_string_channel_id(ServerReceiver):
     rx = ServerReceiver.__new__(ServerReceiver)
     rx._shutting_down = False
     rx._resolve_guild_label = lambda typ, data: None
