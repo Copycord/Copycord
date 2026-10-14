@@ -7,6 +7,7 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ProxySettingKey, ProxyTestResult } from "../../../types/dashboard-proxy";
+import { Checkbox } from "../../../components/ui";
 import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE, useScrollLock } from "../../../components/Modal";
 import { GhostButton } from "../../system/buttons";
 import { PS_FIELD_INPUT } from "../parts";
@@ -269,9 +270,8 @@ export function ResultsModal(p: ResultsModalProps) {
         <div className="flex flex-col gap-2 text-sm">
           {p.failed.length ? (
             <label className="flex cursor-pointer items-center gap-2">
-              <input
+              <Checkbox
                 id="ptr-remove-failed"
-                type="checkbox"
                 checked={p.removeFailed}
                 onChange={(e) => p.onRemoveFailed(e.target.checked)}
               />
@@ -282,9 +282,8 @@ export function ResultsModal(p: ResultsModalProps) {
           ) : null}
           {p.slow.length ? (
             <label className="flex cursor-pointer items-center gap-2">
-              <input
+              <Checkbox
                 id="ptr-remove-slow"
-                type="checkbox"
                 checked={p.removeSlow}
                 onChange={(e) => p.onRemoveSlow(e.target.checked)}
               />

@@ -4,7 +4,7 @@
 // selection back on Apply.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "../../../components/ui";
+import { Button, Checkbox } from "../../../components/ui";
 import type { GuildObject, GuildRole, PickerKey } from "../../../types/dashboard-filters";
 import {
   categoryNames,
@@ -28,11 +28,16 @@ const SEARCH =
   "log-search-input w-full rounded-control border border-border bg-bg-2 px-3 py-2 text-sm text-text outline-none focus:border-accent";
 
 function SelectAll({ id, state, onChange, label }: { id: string; state: "none" | "some" | "all"; onChange: (on: boolean) => void; label: string }) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = state === "some";
-  }, [state]);
-  return <input ref={ref} id={id} type="checkbox" aria-label={label} checked={state === "all"} onChange={(e) => onChange(e.target.checked)} />;
+  return (
+    <Checkbox
+      id={id}
+      className="align-middle"
+      aria-label={label}
+      indeterminate={state === "some"}
+      checked={state === "all"}
+      onChange={(e) => onChange(e.target.checked)}
+    />
+  );
 }
 
 function Message({ cols, children, danger }: { cols: number; children: string; danger?: boolean }) {
@@ -160,9 +165,8 @@ export function ObjectPicker({ mappingId, listKey, initial, onApply, onClose }: 
                       }}
                     >
                       <td className={TD}>
-                        <input
-                          type="checkbox"
-                          className="filter-obj-toggle"
+                        <Checkbox
+                          className="filter-obj-toggle align-middle"
                           data-obj-id={id}
                           aria-label={`Select ${o.name || id}`}
                           checked={selected.has(id)}
@@ -277,9 +281,8 @@ export function RolePicker({ mappingId, initial, onApply, onClose, onStatus }: R
                       }}
                     >
                       <td className={TD}>
-                        <input
-                          type="checkbox"
-                          className="role-block-toggle"
+                        <Checkbox
+                          className="role-block-toggle align-middle"
                           data-role-id={id}
                           aria-label={`Block ${r.name || id}`}
                           checked={selected.has(id)}
