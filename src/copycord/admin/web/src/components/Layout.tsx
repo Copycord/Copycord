@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import type { SidebarItem } from "../types/api";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Footer } from "./Footer";
+import { Z } from "./ui/cx";
 import { Sidebar } from "./Sidebar";
 
 interface Frame {
@@ -83,7 +84,7 @@ export function Layout() {
     <>
       <header
         role="banner"
-        className="fixed inset-x-0 top-0 z-30 flex h-header items-center gap-2.5 border-b border-b-border bg-page px-4"
+        className={`fixed inset-x-0 top-0 ${Z.header} flex h-header items-center gap-2.5 border-b border-b-border bg-page px-4`}
       >
         <button
           type="button"
@@ -135,14 +136,14 @@ export function Layout() {
         data-testid="menu-backdrop"
         aria-hidden="true"
         hidden={!drawerOpen}
-        className="fixed inset-x-0 top-header bottom-0 z-30 bg-[rgba(0,0,0,0.6)]"
+        className={`fixed inset-x-0 top-header bottom-0 ${Z.drawer} bg-[rgba(0,0,0,0.6)]`}
         onClick={() => setDrawerOpen(false)}
       />
 
       <aside
         id="side-menu"
         aria-label="Site menu"
-        className={`fixed top-header bottom-0 left-0 z-30 flex w-drawer flex-col overflow-hidden border-r border-r-border bg-(image:--card-gradient) transition-transform duration-[220ms] ${
+        className={`fixed top-header bottom-0 left-0 ${Z.drawer} flex w-drawer flex-col overflow-hidden border-r border-r-border bg-(image:--card-gradient) transition-transform duration-[220ms] ${
           drawerOpen ? "visible translate-x-0" : "invisible -translate-x-full"
         }`}
         data-open={drawerOpen ? "true" : "false"}

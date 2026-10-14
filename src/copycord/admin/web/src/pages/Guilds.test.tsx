@@ -125,6 +125,10 @@ describe("Guilds grid", () => {
     renderPage();
     expect(await screen.findByText("Waiting for Server and Client connection...")).toBeInTheDocument();
     expect(calls(f, "/api/guilds")).toHaveLength(0);
+    // The old #status-gate: fixed over the whole page under the header, not just the card.
+    const gate = screen.getByTestId("status-gate");
+    expect(gate).toHaveClass("fixed", "inset-x-0", "top-header", "bottom-0");
+    expect(gate).not.toHaveClass("absolute");
   });
 });
 

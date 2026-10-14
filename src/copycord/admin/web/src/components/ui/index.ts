@@ -17,4 +17,4 @@ export { Tabs } from "./Tabs";
 export type { TabItem } from "./Tabs";
 export { Toggle } from "./Toggle";
 export { Tooltip } from "./Tooltip";
-export { cx } from "./cx";
+export { cx, Z } from "./cx";

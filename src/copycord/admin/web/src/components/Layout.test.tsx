@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { Layout } from "./Layout";
+import { StatusGate } from "./ui/StatusGate";
 
 function Boom(): never {
   throw new Error("boom");
@@ -15,6 +16,14 @@ function renderAt(path: string) {
         <Route element={<Layout />}>
           <Route path="/" element={<h1>Fine page</h1>} />
           <Route path="/boom" element={<Boom />} />
+          <Route
+            path="/gated"
+            element={
+              <StatusGate gate={{ gated: true, ready: false, serverReady: false, clientReady: false, message: "Waiting" }}>
+                <h1>Gated page</h1>
+              </StatusGate>
+            }
+          />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -46,5 +55,21 @@ describe("Layout error boundary", () => {
     await userEvent.click(screen.getByRole("link", { name: "Copycord" }));
     expect(screen.getByRole("heading", { level: 1, name: "Fine page" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("Layout stacking", () => {
+  const layer = (el: Element) => Number(/(?:^|\s)z-(\d+)(?:\s|$)/.exec(el.className)?.[1]);
+
+  it("opens the side menu drawer and its backdrop above the status gate dim", async () => {
+    renderAt("/gated");
+    const gate = screen.getByTestId("status-gate");
+    await userEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    const drawer = document.getElementById("side-menu")!;
+    const backdrop = screen.getByTestId("menu-backdrop");
+    expect(drawer).toHaveAttribute("data-open", "true");
+    expect(layer(drawer)).toBeGreaterThan(layer(gate));
+    expect(layer(backdrop)).toBeGreaterThan(layer(gate));
+    expect(layer(screen.getByRole("banner"))).toBeGreaterThan(layer(gate));
   });
 });
