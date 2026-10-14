@@ -58,7 +58,19 @@ class LogStore:
             tail = f.read().decode("utf-8", "replace").rstrip("\n")
         return tail.endswith("\t" + TRUNCATED_MSG)
 
-    def append(self, run_id: int, seq: int, ts, level: str, step: Optional[str], msg) -> bool:
+    def append(self, run_id: int, line: str) -> bool:
+        """LogSink form: one preformatted "seq<TAB>iso<TAB>level<TAB>step<TAB>msg"
+        line (RunContext.log). Tabs past the fourth stay in msg and are flattened."""
+        parts = str(line).rstrip("\r\n").split("\t", 4)
+        parts += [""] * (5 - len(parts))
+        seq, ts, level, step, msg = parts
+        try:
+            seq_n = int(seq)
+        except ValueError:
+            seq_n = 0
+        return self.append_fields(run_id, seq_n, ts or None, level, step or None, msg)
+
+    def append_fields(self, run_id: int, seq: int, ts, level: str, step: Optional[str], msg) -> bool:
         """Write one line; False when the run's log is past the cap and the line was dropped."""
         run_id = int(run_id)
         line = "\t".join(

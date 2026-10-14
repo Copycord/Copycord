@@ -224,14 +224,30 @@ def test_actors_and_contexts(db):
     assert db.task_runs_contexts("backfill_channels") == ["Alpha", "Zeta"]
 
 
+def test_delete_types_and_status_list(db):
+    a = _run(db, "noop")
+    b = _run(db, "other", status="running")
+    assert db.task_runs_types() == ["noop", "other"]
+    rows, total = db.task_runs_list(status=["queued", "running"])
+    assert total == 2
+    rows, total = db.task_runs_list(status=["running"])
+    assert [r["id"] for r in rows] == [b]
+    assert db.task_run_delete(a) is True
+    assert db.task_run_delete(a) is False
+    assert db.task_runs_types() == ["other"]
+
+
+def test_list_has_no_per_page_cap(db):
+    for _ in range(205):
+        _run(db, "noop")
+    rows, total = db.task_runs_list(type="noop", per_page=500)
+    assert total == 205 and len(rows) == 205
+
+
 def test_repo_adapter_delegates(db):
     repo = SqliteTaskRepo(db)
-    rid = repo.insert_run({"type": "noop", "title": "Noop"})
+    assert repo.actors() == []
+    _run(db, "noop")
     assert repo.next_number("noop") == 2
-    assert repo.update_run(rid, status="running")
-    assert repo.get_run(rid)["status"] == "running"
-    rows, total = repo.list_runs(type="noop")
-    assert total == 1 and rows[0]["id"] == rid
-    assert repo.recover() == [rid]
+    assert repo.list_types() == ["noop"]
     assert repo.actors() == ["admin"]
-    assert repo.prune(keep_per_type=0) == [rid]

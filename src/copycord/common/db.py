@@ -3155,7 +3155,7 @@ class DBManager:
     def task_runs_list(
         self,
         type: Optional[str] = None,
-        status: Optional[str] = None,
+        status=None,
         actor: Optional[str] = None,
         context_label: Optional[str] = None,
         q: Optional[str] = None,
@@ -3165,6 +3165,12 @@ class DBManager:
         """Newest first; returns (rows of the page, total matching). q matches the
         title, the context label, and "#<number>" or "<number>" exactly."""
         where, args = [], []
+        if isinstance(status, (list, tuple, set)):
+            statuses = [str(s) for s in status if s]
+            if statuses:
+                where.append(f"status IN ({', '.join('?' * len(statuses))})")
+                args += statuses
+            status = None
         for col, val in (("type", type), ("status", status), ("actor", actor)):
             if val:
                 where.append(f"{col} = ?")
@@ -3187,7 +3193,8 @@ class DBManager:
             where.append("(" + " OR ".join(ors) + ")")
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         page = max(1, int(page))
-        per_page = max(1, min(200, int(per_page)))
+        # no upper cap here: TaskService.prune pages by its keep count (500); the route caps
+        per_page = max(1, int(per_page))
         with self._tx():
             total = self.conn.execute(
                 f"SELECT COUNT(*) FROM task_runs {clause}", args
@@ -3242,6 +3249,20 @@ class DBManager:
                 chunk,
             )
         return ids
+
+    @_in_tx
+    def task_run_delete(self, run_id: int) -> bool:
+        """Delete one run row; True when it existed (the caller removes its log file)."""
+        cur = self.conn.execute("DELETE FROM task_runs WHERE id = ?", (int(run_id),))
+        return cur.rowcount > 0
+
+    def task_runs_types(self) -> list[str]:
+        """Distinct task types that have rows."""
+        with self._tx():
+            rows = self.conn.execute(
+                "SELECT DISTINCT type FROM task_runs ORDER BY type"
+            ).fetchall()
+        return [r[0] for r in rows]
 
     def task_runs_actors(self) -> list[str]:
         """Distinct actors, for the list filter."""

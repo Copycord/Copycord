@@ -15,8 +15,8 @@ def test_default_dir_is_under_the_data_dir(tmp_path, monkeypatch):
 def test_append_and_read(tmp_path):
     store = LogStore(tmp_path / "task-logs")
     ts = datetime(2026, 10, 14, 12, 0, 0, tzinfo=timezone.utc)
-    assert store.append(7, 1, ts, "info", None, "Started")
-    assert store.append(7, 2, "2026-10-14T12:00:01Z", "warn", "c1", "tab\there\nnewline")
+    assert store.append_fields(7, 1, ts, "info", None, "Started")
+    assert store.append_fields(7, 2, "2026-10-14T12:00:01Z", "warn", "c1", "tab\there\nnewline")
     text = (tmp_path / "task-logs" / "7.log").read_text()
     assert text == (
         "1\t2026-10-14T12:00:00Z\tinfo\t\tStarted\n"
@@ -34,7 +34,7 @@ def test_append_and_read(tmp_path):
 def test_after_step_and_limit(tmp_path):
     store = LogStore(tmp_path)
     for seq in range(1, 11):
-        store.append(1, seq, None, "info", "a" if seq % 2 else "b", f"line {seq}")
+        store.append_fields(1, seq, None, "info", "a" if seq % 2 else "b", f"line {seq}")
 
     lines, nxt, complete = store.read(1, after=6)
     assert [l["seq"] for l in lines] == [7, 8, 9, 10] and nxt == 10 and complete
@@ -57,11 +57,11 @@ def test_cap_writes_one_truncation_line(tmp_path):
     seq = 0
     while True:
         seq += 1
-        if not store.append(3, seq, "t", "info", "s", "x" * 30):
+        if not store.append_fields(3, seq, "t", "info", "s", "x" * 30):
             break
         written += 1
     for extra in range(5):
-        assert store.append(3, seq + 1 + extra, "t", "info", "s", "more") is False
+        assert store.append_fields(3, seq + 1 + extra, "t", "info", "s", "more") is False
     path = tmp_path / "3.log"
     lines = path.read_text().splitlines()
     assert len(lines) == written + 1
@@ -72,7 +72,7 @@ def test_cap_writes_one_truncation_line(tmp_path):
     got, _, _ = store.read(3, step="s")
     assert got[-1]["msg"] == TRUNCATED_MSG
     again = LogStore(tmp_path, cap_bytes=200)
-    assert again.append(3, 999, "t", "info", "s", "x" * 30) is False
+    assert again.append_fields(3, 999, "t", "info", "s", "x" * 30) is False
     assert path.read_text().splitlines() == lines
 
 
@@ -82,11 +82,11 @@ def test_default_cap_is_5_mb():
 
 def test_delete(tmp_path):
     store = LogStore(tmp_path, cap_bytes=60)
-    store.append(9, 1, "t", "info", None, "x" * 40)
-    store.append(9, 2, "t", "info", None, "x" * 40)
+    store.append_fields(9, 1, "t", "info", None, "x" * 40)
+    store.append_fields(9, 2, "t", "info", None, "x" * 40)
     assert (tmp_path / "9.log").exists()
     store.delete(9)
     assert not (tmp_path / "9.log").exists()
     store.delete(9)  # missing file is fine
     # the cap state goes with the file
-    assert store.append(9, 3, "t", "info", None, "fresh")
+    assert store.append_fields(9, 3, "t", "info", None, "fresh")
