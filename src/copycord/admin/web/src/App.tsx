@@ -1,19 +1,57 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { SkeletonSection } from "./components/ui/Skeleton";
+import { prefetch } from "./lib/api";
 import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 
-// Each page is its own chunk, so the first paint needs only the shell and the page it lands on.
-const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })));
-const Channels = lazy(() => import("./pages/Channels").then((m) => ({ default: m.Channels })));
-const Guilds = lazy(() => import("./pages/Guilds").then((m) => ({ default: m.Guilds })));
-const Forwarding = lazy(() => import("./pages/Forwarding").then((m) => ({ default: m.Forwarding })));
-const Scraper = lazy(() => import("./pages/Scraper").then((m) => ({ default: m.Scraper })));
-const System = lazy(() => import("./pages/System").then((m) => ({ default: m.System })));
-const Logs = lazy(() => import("./pages/Logs").then((m) => ({ default: m.Logs })));
-const Kit = lazy(() => import("./pages/Kit").then((m) => ({ default: m.Kit })));
+// Each page is its own chunk, so the first paint needs only the shell and the page it lands on. The
+// skeleton shows until the chunk is in. React.lazy with a Suspense fallback would hold the page back
+// about 300 ms after its chunk arrived (React 19 throttles fallback reveals), so a plain effect loads it.
+function lazyPage(load: () => Promise<ComponentType>): ComponentType {
+  let loaded: ComponentType | null = null;
+  let pending: Promise<ComponentType> | null = null;
+  const get = () => (pending ??= load().then((c) => (loaded = c)));
+  return function LazyPage() {
+    // Start the chunk download during the first render rather than after the commit.
+    const [Page, setPage] = useState<ComponentType | null>(() => loaded ?? (void get(), null));
+    useEffect(() => {
+      if (Page) return;
+      let live = true;
+      void get().then((c) => live && setPage(() => c));
+      return () => {
+        live = false;
+      };
+    }, [Page]);
+    return Page ? <Page /> : <PageSkeleton />;
+  };
+}
+
+// The Configuration page asks for these on mount; start them while its chunk is still downloading.
+const DASHBOARD_GETS = [
+  "/api/status",
+  "/api/config",
+  "/api/validate-tokens",
+  "/api/guild-mappings",
+  "/api/notifications/settings",
+  "/api/sync/settings",
+  "/api/server/proxies",
+  "/api/server/proxies/test/status",
+  "/version",
+] as const;
+
+const Dashboard = lazyPage(() => {
+  prefetch(DASHBOARD_GETS);
+  return import("./pages/Dashboard").then((m) => m.Dashboard);
+});
+const Channels = lazyPage(() => import("./pages/Channels").then((m) => m.Channels));
+const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds));
+const Forwarding = lazyPage(() => import("./pages/Forwarding").then((m) => m.Forwarding));
+const Scraper = lazyPage(() => import("./pages/Scraper").then((m) => m.Scraper));
+const System = lazyPage(() => import("./pages/System").then((m) => m.System));
+const Logs = lazyPage(() => import("./pages/Logs").then((m) => m.Logs));
+const Kit = lazyPage(() => import("./pages/Kit").then((m) => m.Kit));
 
 // The server serves index.html at each of these paths (admin/app.py SPA_PAGES).
 export const PAGES = [
@@ -39,16 +77,14 @@ function PageSkeleton() {
   );
 }
 
-const page = (el: ReactNode) => <Suspense fallback={<PageSkeleton />}>{el}</Suspense>;
-
 const PAGE_ELEMENTS: Record<(typeof PAGES)[number]["path"], ReactNode> = {
-  "/": page(<Dashboard />),
-  "/channels": page(<Channels />),
-  "/guilds": page(<Guilds />),
-  "/forwarding": page(<Forwarding />),
-  "/scraper": page(<Scraper />),
-  "/system": page(<System />),
-  "/logs": page(<Logs />),
+  "/": <Dashboard />,
+  "/channels": <Channels />,
+  "/guilds": <Guilds />,
+  "/forwarding": <Forwarding />,
+  "/scraper": <Scraper />,
+  "/system": <System />,
+  "/logs": <Logs />,
 };
 
 export function App() {
@@ -63,7 +99,7 @@ export function App() {
             <Route key={p.path} path={p.path} element={PAGE_ELEMENTS[p.path]} />
           ),
         )}
-        <Route path="/_kit" element={page(<Kit />)} />
+        <Route path="/_kit" element={<Kit />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

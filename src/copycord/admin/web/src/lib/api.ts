@@ -116,8 +116,29 @@ export async function request<T>(
   return data as T;
 }
 
+// GETs started before the code that reads them has loaded (a page chunk still downloading). The first
+// api.get of the same url within PREFETCH_TTL_MS takes the response instead of asking again.
+const PREFETCH_TTL_MS = 10_000;
+const prefetched = new Map<string, { at: number; res: Promise<unknown> }>();
+
+export function prefetch(urls: readonly string[]): void {
+  for (const url of urls) {
+    if (prefetched.has(url)) continue;
+    const res = request<unknown>("GET", url);
+    res.catch(() => undefined); // the reader sees the error, nobody else
+    prefetched.set(url, { at: Date.now(), res });
+  }
+}
+
+function takePrefetched<T>(url: string): Promise<T> | undefined {
+  const hit = prefetched.get(url);
+  if (!hit) return undefined;
+  prefetched.delete(url);
+  return Date.now() - hit.at < PREFETCH_TTL_MS ? (hit.res as Promise<T>) : undefined;
+}
+
 export const api = {
-  get: <T>(url: string, opts?: RequestOptions) => request<T>("GET", url, undefined, opts),
+  get: <T>(url: string, opts?: RequestOptions) => takePrefetched<T>(url) ?? request<T>("GET", url, undefined, opts),
   post: <T>(url: string, body?: unknown, opts?: RequestOptions) =>
     request<T>("POST", url, body, opts),
   put: <T>(url: string, body?: unknown, opts?: RequestOptions) =>
