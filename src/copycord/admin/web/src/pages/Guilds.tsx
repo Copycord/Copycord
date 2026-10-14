@@ -55,7 +55,10 @@ export function Guilds() {
         <Card className="mt-[18px]">
           {/* .card-titlebar: the h2, then the search and the sort direction button (.titlebar-actions). */}
           <header className="mb-1.5 block gap-3">
-            <h2 className="my-[0.83em] text-[24px] font-bold">Guilds</h2>
+            {/* The old visible h2, still the page's top heading. */}
+            <h2 aria-level={1} className="my-[0.83em] text-[24px] font-bold">
+              Guilds
+            </h2>
             <span className="flex flex-wrap items-center gap-2.5">
               <input
                 id="g-search"
@@ -65,7 +68,12 @@ export function Guilds() {
                 value={query}
                 hidden={!booted}
                 onChange={(e) => setQuery(e.target.value)}
-                className="w-[220px] max-w-[260px] rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[14px] text-[#e6e1ff] outline-none focus:border-primary"
+                className={
+                  "w-auto max-w-[260px] min-w-[220px] flex-none rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[14px] text-[#e6e1ff] " +
+                  "caret-[#7c5cff] outline-none transition-[border-color,box-shadow,background-color] duration-150 " +
+                  "placeholder:text-[color-mix(in_srgb,#e6e1ff_55%,transparent)] placeholder:opacity-75 " +
+                  "hover:border-[#7c5cff] hover:[box-shadow:0_0_0_1px_#7c5cff] focus:border-[#7c5cff] focus:[box-shadow:0_0_0_1px_#7c5cff]"
+                }
               />
               {/* .btn.btn-select */}
               <button
