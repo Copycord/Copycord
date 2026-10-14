@@ -96,8 +96,8 @@ export function ObjectPicker({ mappingId, listKey, initial, onApply, onClose }: 
   const isChannel = kind === "channel";
 
   return (
-    <Shell id="filterObjectsModal" closeId="filterObjectsCloseBtn" titleId="filterObjectsTitle" title={pickerTitle(listKey)} onClose={onClose} wide layer={35}>
-      <div className="modal-body flex flex-col gap-3 p-5">
+    <Shell id="filterObjectsModal" closeId="filterObjectsCloseBtn" titleId="filterObjectsTitle" title={pickerTitle(listKey)} onClose={onClose} cardClass="w-[min(920px,calc(100vw-32px))] max-w-[calc(100vw-32px)] min-w-[640px]" layer={35}>
+      <div className="modal-body flex min-h-0 flex-col gap-3 overflow-y-auto px-[22px] pt-[18px] pb-[22px]">
         <p id="filterObjectsHelp" className="text-xs text-muted">
           {pickerHelp(listKey)}
         </p>
@@ -225,8 +225,8 @@ export function RolePicker({ mappingId, initial, onApply, onClose, onStatus }: R
   const ids = shown.map((r) => String(r.id));
 
   return (
-    <Shell id="roleBlocksModal" closeId="roleBlocksCloseBtn" titleId="roleBlocksTitle" title="Role Blocks" onClose={onClose} wide layer={35}>
-      <div className="modal-body flex flex-col gap-3 p-5">
+    <Shell id="roleBlocksModal" closeId="roleBlocksCloseBtn" titleId="roleBlocksTitle" title="Role Blocks" onClose={onClose} cardClass="mt-[6vh] max-h-[80vh] w-[min(640px,94vw)] rounded-[18px]" layer={35}>
+      <div className="modal-body flex min-h-0 flex-col gap-3 overflow-y-auto px-[18px] pt-4 pb-[18px]">
         <p className="text-xs text-muted">Select which roles you want to block for this mapping.</p>
         <div className="role-blocks-search">
           <input

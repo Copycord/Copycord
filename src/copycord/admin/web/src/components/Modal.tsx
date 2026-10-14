@@ -151,6 +151,10 @@ const BUBBLE_ALIGN = {
   center:
     "left-1/2 max-w-[min(240px,calc(100vw-32px))] translate-x-[calc(-50%+60px)] -translate-y-1 overflow-x-hidden break-words whitespace-normal " +
     "after:left-[calc(50%-60px)] after:-translate-x-1/2 data-[open=true]:translate-y-0",
+  /** #filters-modal .tip-bubble: under the label, 200 to 260px wide, wraps. */
+  wrap:
+    "left-0 max-w-[260px] min-w-[200px] overflow-x-auto break-words whitespace-normal after:left-3.5 " +
+    "-translate-y-1 data-[open=true]:translate-y-0",
 } as const;
 
 export interface TipLabelProps {
