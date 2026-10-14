@@ -105,8 +105,11 @@ class BackfillManager(BackfillWebhookPool):
 
 
         clone_gid = st.get("cloned_guild_id")
+        job_id = (meta or {}).get("job_id")
 
         if not is_resume:
+            # Spare the row the admin just inserted for this job (run_id = job_id).
+            keep = str(job_id) if job_id else None
             try:
                 if clone_gid is not None:
 
@@ -114,11 +117,12 @@ class BackfillManager(BackfillWebhookPool):
                         cid,
                         int(clone_gid),
                         reason="user-declined-resume",
+                        except_run_id=keep,
                     )
                 else:
 
                     self.r.db.backfill_abort_running_for_channel(
-                        cid, reason="user-declined-resume"
+                        cid, reason="user-declined-resume", except_run_id=keep
                     )
             except Exception:
                 logger.exception(
@@ -169,7 +173,6 @@ class BackfillManager(BackfillWebhookPool):
                 st["clone_channel_id"] = int(clone)
 
         # The admin's job id names the run; it already inserted the backfill_runs row.
-        job_id = (meta or {}).get("job_id")
         desired_id = st.get("run_id") if (is_resume and reused) else None
         st["task_id"] = str(desired_id or job_id or uuid.uuid4())
         if not reused:

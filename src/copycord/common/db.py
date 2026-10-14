@@ -3087,13 +3087,17 @@ class DBManager:
 
     @_in_tx
     def backfill_abort_running_for_channel(
-        self, original_channel_id: int, reason: str | None = None
+        self,
+        original_channel_id: int,
+        reason: str | None = None,
+        except_run_id: str | None = None,
     ) -> int:
+        """Abort 'running' rows for this source channel, sparing except_run_id."""
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         cur = self.conn.execute(
             "UPDATE backfill_runs SET status='cancelled', error=COALESCE(?, error), updated_at=? "
-            "WHERE original_channel_id=? AND status='running'",
-            (reason, now, int(original_channel_id)),
+            "WHERE original_channel_id=? AND status='running' AND run_id IS NOT ?",
+            (reason, now, int(original_channel_id), except_run_id),
         )
         return cur.rowcount
 
@@ -3924,8 +3928,10 @@ class DBManager:
         original_channel_id: int,
         cloned_guild_id: int,
         reason: str | None = None,
+        except_run_id: str | None = None,
     ) -> int:
-        """Abort 'running' backfill_runs rows for this source channel and target clone guild only."""
+        """Abort 'running' backfill_runs rows for this source channel and target clone guild only,
+        sparing except_run_id."""
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         cur = self.conn.execute(
             """
@@ -3936,8 +3942,9 @@ class DBManager:
             WHERE original_channel_id = ?
             AND cloned_guild_id = ?
             AND status='running'
+            AND run_id IS NOT ?
             """,
-            (reason, now, int(original_channel_id), int(cloned_guild_id)),
+            (reason, now, int(original_channel_id), int(cloned_guild_id), except_run_id),
         )
         return cur.rowcount
 
