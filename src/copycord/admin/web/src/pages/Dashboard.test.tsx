@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
-import { CSRF_HEADER } from "../lib/api";
+import { CSRF_HEADER, resetLoginRedirect } from "../lib/api";
 import type { StatusResponse, VersionInfo } from "../types/dashboard";
 import { holdFetch } from "../test/holdFetch";
 import { Dashboard, DashboardSkeleton } from "./Dashboard";
@@ -140,6 +140,42 @@ describe("Dashboard bots panel", () => {
     const [post] = callsTo(fetchMock, "/stop");
     expect(post?.method).toBe("POST");
     expect(csrf(post!)).toBe("1");
+  });
+
+  it("toggles in place without navigating, and Start then Stop refetch the status", async () => {
+    const go = vi.fn();
+    resetLoginRedirect(go);
+    try {
+      let status = STOPPED;
+      const fetchMock = server({
+        "/api/status": () => json(status),
+        "/version": () => json(NO_UPDATE),
+        "/start": () => {
+          status = RUNNING;
+          return json({ ok: true });
+        },
+        "/stop": () => {
+          status = STOPPED;
+          return json({ ok: true });
+        },
+      });
+      const user = userEvent.setup();
+      renderPage();
+      const btn = document.getElementById("toggle-btn")!;
+      await waitFor(() => expect(btn).toHaveTextContent("Start"));
+      await user.click(btn);
+      await waitFor(() => expect(btn).toHaveTextContent("Stop"));
+      expect(document.getElementById("server-state")).toHaveTextContent("running");
+      expect(document.getElementById("client-uptime")).toHaveTextContent("1h 1m 40s");
+      await user.click(btn);
+      await waitFor(() => expect(btn).toHaveTextContent("Start"));
+      expect(document.getElementById("server-state")).toHaveTextContent("stopped");
+      expect(document.getElementById("client-uptime")).toHaveTextContent("");
+      expect(callsTo(fetchMock, "/api/status")).toHaveLength(3);
+      expect(go).not.toHaveBeenCalled();
+    } finally {
+      resetLoginRedirect();
+    }
   });
 
   it("toasts the server reason when Start is refused", async () => {

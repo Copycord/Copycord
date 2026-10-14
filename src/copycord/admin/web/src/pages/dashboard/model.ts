@@ -13,8 +13,8 @@ export const EMPTY_STATUSES: BotStatuses = {
   client: { running: false },
 };
 
-// The old /start and /stop are form posts that answer with a 303 to "/"; any
-// 2xx after the redirect is success. The CSRF header comes from lib/api.ts.
+// /start and /stop answer {"ok": true} to a JSON request (a 303 to "/" only
+// for a plain form post). The CSRF header comes from lib/api.ts.
 export const startBots = () => api.post<unknown>("/start");
 export const stopBots = () => api.post<unknown>("/stop");
 export const clearLogs = (which: LogStream) => api.post<unknown>(`/logs/clear/${encodeURIComponent(which)}`);

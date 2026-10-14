@@ -80,6 +80,24 @@ class TestApiConfig:
         assert resp.json() == saved
 
     @pytest.mark.asyncio
+    async def test_save_answers_json_when_asked(self, client):
+        saved = {"SERVER_TOKEN": "srv-tok", "CLIENT_TOKEN": "cli-tok", "LOG_LEVEL": "INFO"}
+        save = await client.post(
+            "/save", data=saved, headers={"Accept": "application/json"}
+        )
+        assert save.status_code == 200
+        assert save.json() == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_stop_answers_json_when_asked_and_redirects_otherwise(self, client):
+        resp = await client.post("/stop", headers={"Accept": "application/json"})
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        resp = await client.post("/stop")
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/"
+
+    @pytest.mark.asyncio
     async def test_only_the_form_keys_are_returned(self, client):
         db.set_config("SOMETHING_ELSE", "secret")
         try:

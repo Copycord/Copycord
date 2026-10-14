@@ -384,6 +384,13 @@ def _root_redirect(request: Request, path: str) -> RedirectResponse:
     return RedirectResponse(target, status_code=307)
 
 
+def _done_response(request: Request):
+    # The SPA asks for JSON and gets {"ok": true}; a plain form post still lands back on "/".
+    if "application/json" in (request.headers.get("accept") or ""):
+        return JSONResponse({"ok": True})
+    return RedirectResponse("/", status_code=303)
+
+
 @app.get("/event-logs", include_in_schema=False)
 async def event_logs_redirect(request: Request):
     return _root_redirect(request, "logs")
@@ -1759,7 +1766,7 @@ async def save(request: Request):
     except Exception as e:
         LOGGER.exception("Failed to apply LOG_LEVEL: %s", e)
 
-    return RedirectResponse("/", status_code=303)
+    return _done_response(request)
 
 
 async def _check_controller(
@@ -1778,7 +1785,7 @@ async def _check_controller(
 
 
 @app.post("/start")
-async def start_all():
+async def start_all(request: Request):
 
     errs = _validate(_read_env(), for_start=True)
     if errs:
@@ -1856,18 +1863,18 @@ async def start_all():
         srv.get("status") or srv.get("running"),
         cli.get("status") or cli.get("running"),
     )
-    return RedirectResponse("/", status_code=303)
+    return _done_response(request)
 
 
 @app.post("/stop")
-async def stop_all():
+async def stop_all(request: Request):
     LOGGER.info("POST /stop requested")
     await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
     await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
 
     await locks.clear_all()
 
-    return RedirectResponse("/", status_code=303)
+    return _done_response(request)
 
 
 @_on_shutdown

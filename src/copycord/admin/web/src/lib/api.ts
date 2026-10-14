@@ -50,17 +50,21 @@ async function readBody(res: Response): Promise<unknown> {
   return text;
 }
 
-// An expired session shows up as a 401, as a redirect that fetch followed to
-// the login page, or as HTML where JSON was asked for.
+// An expired session shows up as a 401 or as a redirect that fetch followed to
+// the login page. HTML anywhere else is an unexpected reply, not an expiry.
 function sessionExpired(res: Response): boolean {
   if (res.status === 401) return true;
   if (res.redirected && res.url) {
     try {
-      if (new URL(res.url).pathname.startsWith("/login")) return true;
+      return new URL(res.url).pathname.startsWith("/login");
     } catch {
-      // Not a parseable URL; fall through to the content type check.
+      return false;
     }
   }
+  return false;
+}
+
+function isHtml(res: Response): boolean {
   return (res.headers.get("content-type") ?? "").includes("text/html");
 }
 
@@ -109,6 +113,10 @@ export async function request<T>(
   if (sessionExpired(res)) {
     goToLogin();
     throw new ApiError(401, url, data, "session expired");
+  }
+  if (isHtml(res)) {
+    // A page where JSON was asked for: fail the call, never navigate.
+    throw new ApiError(res.status, url, data, "unexpected HTML response");
   }
   if (!res.ok) {
     throw new ApiError(res.status, url, data, errorMessage(data));

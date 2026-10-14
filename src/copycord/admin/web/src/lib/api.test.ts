@@ -94,10 +94,48 @@ describe("api session expiry", () => {
     expect(go).toHaveBeenCalledWith("/login");
   });
 
-  it("treats HTML where JSON was asked for as expired", async () => {
-    mockFetch(200, "<!doctype html><div id=\"root\"></div>", "text/html; charset=utf-8");
-    await expectExpired(() => api.get<unknown[]>("/api/guilds"));
+  it("navigates once when several requests follow a redirect to the login page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const res = new Response("<!doctype html>", { status: 200, headers: { "content-type": "text/html" } });
+        Object.defineProperty(res, "redirected", { value: true });
+        Object.defineProperty(res, "url", { value: "http://localhost/login?next=/" });
+        return res;
+      }),
+    );
+    await expectExpired(() => api.get("/api/status"));
+    await expectExpired(() => api.post("/start"));
+    expect(go).toHaveBeenCalledTimes(1);
     expect(go).toHaveBeenCalledWith("/login");
+  });
+
+  it("fails HTML at / with a plain ApiError and does not navigate", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const res = new Response("<!doctype html><div id=\"root\"></div>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+        Object.defineProperty(res, "redirected", { value: true });
+        Object.defineProperty(res, "url", { value: "http://localhost/" });
+        return res;
+      }),
+    );
+    const err = await api.post("/start").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(200);
+    expect((err as ApiError).message).toBe("unexpected HTML response");
+    expect(go).not.toHaveBeenCalled();
+  });
+
+  it("fails unredirected HTML where JSON was asked for without navigating", async () => {
+    mockFetch(200, "<!doctype html><div id=\"root\"></div>", "text/html; charset=utf-8");
+    const err = await api.get<unknown[]>("/api/guilds").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).message).toBe("unexpected HTML response");
+    expect(go).not.toHaveBeenCalled();
   });
 
   it("leaves a normal JSON reply alone", async () => {
