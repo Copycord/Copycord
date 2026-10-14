@@ -129,7 +129,7 @@ def test_prune_deletes_rows_and_log_files(db, store, noop_type):
         ids.append(rid)
     svc = TaskService(repo, store)
     assert svc.prune(keep=2) == 3
-    assert [r.id for r in svc.list({"type": KEY})[0]] == ids[:1:-1]
+    assert [r.id for r in svc.list({"type": KEY})[0]] == ids[:2:-1]
     for rid in ids[:3]:
         assert repo.get_run(rid) is None
         assert not store.path(rid).exists()
