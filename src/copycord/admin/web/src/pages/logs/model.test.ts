@@ -4,7 +4,6 @@ import {
   DEFAULT_SORT,
   PAGE_SIZE,
   buildLogsQuery,
-  bulkDeletePayload,
   countText,
   fmtTimestamp,
   guildText,
@@ -151,13 +150,5 @@ describe("sorting", () => {
     expect(sortLogs(rows, DEFAULT_SORT).map((r) => r.log_id)).toEqual(["2", "1", "3"]);
     expect(sortLogs(rows, { column: "details", dir: "asc" }).map((r) => r.log_id)).toEqual(["2", "1", "3"]);
     expect(sortLogs(rows, { column: "details", dir: "desc" }).map((r) => r.log_id)).toEqual(["3", "1", "2"]);
-  });
-});
-
-describe("bulkDeletePayload", () => {
-  it("sends only selected ids that are still on the page, in page order", () => {
-    const rows = [log({ log_id: "x" }), log({ log_id: "y" }), log({ log_id: "z" })];
-    expect(bulkDeletePayload(new Set(["z", "gone", "x"]), rows)).toEqual({ ids: ["x", "z"] });
-    expect(bulkDeletePayload(new Set(), rows)).toEqual({ ids: [] });
   });
 });

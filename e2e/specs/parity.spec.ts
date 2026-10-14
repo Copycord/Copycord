@@ -894,28 +894,6 @@ test.describe("event logs", () => {
     expect(empty.status()).toBe(400);
   });
 
-  test("51 bulk delete selected rows after confirming", async ({ page }) => {
-    for (const n of [1, 2, 3]) await addLog(page, "sticker_synced", `Synced sticker e2e-bulk-ui ${n}`);
-    await openLogs(page);
-    await page.locator("#logs-search").fill("e2e-bulk-ui");
-    const body = page.locator("#logs-tbody");
-    await expect(page.locator("#logs-count")).toHaveText("Showing 1-3 of 3");
-    for (const n of [1, 3]) {
-      await body.locator("tr", { hasText: `e2e-bulk-ui ${n}` }).getByRole("checkbox", { name: "Select log" }).check();
-    }
-    const bulk = page.locator("#logs-delete-selected");
-    await expect(bulk).toHaveText(/Delete selected \(2\)/);
-    const posted = page.waitForRequest((r) => r.url().endsWith("/api/event-logs/delete-bulk") && r.method() === "POST");
-    await bulk.click();
-    await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
-    expect(((await posted).postDataJSON() as { ids: string[] }).ids).toHaveLength(2);
-    await expect(page.locator("#logs-count")).toHaveText("Showing 1-1 of 1");
-    await expect(body).toContainText("e2e-bulk-ui 2");
-    await body.locator("tr", { hasText: "e2e-bulk-ui 2" }).locator('button[aria-label="Delete log"]').click();
-    await confirmIfAsked(page, "Delete");
-    await expect(body.locator("tr[data-log-id]")).toHaveCount(0);
-  });
-
   // Runs last in the file: clears the table, then puts the seeded events back.
   test("51 clear all asks first and Cancel keeps the logs", async ({ page }) => {
     await openLogs(page);

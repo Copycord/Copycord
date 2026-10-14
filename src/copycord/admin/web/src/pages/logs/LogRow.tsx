@@ -43,19 +43,17 @@ export function TypeBadge({ type }: { type: string }) {
 
 // Cells pick their own horizontal padding so no two utilities fight over one property.
 export const TD = "border-b py-2.5 align-middle text-[13px] text-text";
-export const COLS = 6;
+export const COLS = 5;
 
 export interface LogRowProps {
   log: EventLog;
-  selected: boolean;
   expanded: boolean;
   deleting: boolean;
-  onSelect: (id: string, on: boolean) => void;
   onToggle: (id: string) => void;
   onDelete: (log: EventLog) => void;
 }
 
-export function LogRow({ log, selected, expanded, deleting, onSelect, onToggle, onDelete }: LogRowProps) {
+export function LogRow({ log, expanded, deleting, onToggle, onDelete }: LogRowProps) {
   const expandable = hasMetadata(log);
   const toggle = expandable ? () => onToggle(log.log_id) : undefined;
   const onKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
@@ -75,22 +73,12 @@ export function LogRow({ log, selected, expanded, deleting, onSelect, onToggle, 
         className={cx(
           "group transition-colors hover:bg-[rgba(139,92,246,0.06)]",
           expandable && "cursor-pointer outline-none focus-visible:bg-[rgba(139,92,246,0.06)]",
-          selected && "bg-[rgba(139,92,246,0.08)]",
         )}
         onClick={toggle}
         onKeyDown={toggle ? onKey : undefined}
         tabIndex={expandable ? 0 : undefined}
         aria-expanded={expandable ? expanded : undefined}
       >
-        <td className={cx(edge, "px-0 text-center")} onClick={(e) => e.stopPropagation()}>
-          <input
-            type="checkbox"
-            className="size-3.5 cursor-pointer accent-primary"
-            aria-label="Select log"
-            checked={selected}
-            onChange={(e) => onSelect(log.log_id, e.target.checked)}
-          />
-        </td>
         <td className={td}>
           <span className="whitespace-nowrap font-mono text-xs text-muted">{fmtTimestamp(log.created_at)}</span>
         </td>

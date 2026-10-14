@@ -1,6 +1,6 @@
 // Event logs page, the SPA version of templates/logs.html and logs.js:
 // search, type filter, clear filters, refresh, per row expand and delete,
-// bulk delete of selected rows, clear all, and 50 per page pagination.
+// clear all, and 50 per page pagination.
 // The element ids match the old page so the e2e parity spec runs unchanged.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +22,6 @@ import { LogsIcon } from "./logs/icons";
 import { COLS, LogRow } from "./logs/LogRow";
 import {
   DEFAULT_SORT,
-  bulkDeletePayload,
   countText,
   logsUrl,
   nextSort,
@@ -83,10 +82,8 @@ export function Logs() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
-  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [deleting, setDeleting] = useState<ReadonlySet<string>>(() => new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
   const [clearBusy, setClearBusy] = useState(false);
 
   const url = logsUrl({ page, type, search });
@@ -111,9 +108,8 @@ export function Logs() {
     return () => clearTimeout(t);
   }, [searchInput, search]);
 
-  // A new query drops the selection and open rows.
+  // A new query closes the open rows.
   useEffect(() => {
-    setSelected(new Set());
     setExpanded(new Set());
   }, [url]);
 
@@ -143,8 +139,6 @@ export function Logs() {
   }, [type, list.data, list.loading]);
 
   const filtersActive = Boolean(type || search);
-  const visibleSelected = useMemo(() => logs.filter((l) => selected.has(l.log_id)).length, [logs, selected]);
-  const allOnPage = logs.length > 0 && visibleSelected === logs.length;
 
   const goPage = (p: number) => {
     if (p < 1 || p > pages || p === page) return;
@@ -158,15 +152,6 @@ export function Logs() {
     setType("");
     setPage(1);
   };
-
-  const onSelect = useCallback((id: string, on: boolean) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }, []);
 
   const onToggle = useCallback((id: string) => {
     setExpanded((prev) => {
@@ -190,11 +175,6 @@ export function Logs() {
       setDeleting((prev) => new Set(prev).add(id));
       try {
         await api.del<EventLogDeleteResponse>(`/api/event-logs/${encodeURIComponent(id)}`);
-        setSelected((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
         reloadAll();
       } catch (e) {
         notify(`Could not delete the log: ${e instanceof Error ? e.message : String(e)}`, "error");
@@ -209,31 +189,6 @@ export function Logs() {
     [confirm, notify, reloadAll],
   );
 
-  const deleteSelected = async () => {
-    const body = bulkDeletePayload(selected, logs);
-    if (body.ids.length === 0) return;
-    const n = body.ids.length;
-    const ok = await confirm({
-      title: "Delete Selected Logs",
-      body: `Delete ${n} selected event log${n === 1 ? "" : "s"}? This cannot be undone.`,
-      confirmLabel: "Delete",
-      danger: true,
-    });
-    if (!ok) return;
-    setBulkBusy(true);
-    try {
-      const res = await api.post<EventLogBulkDeleteResponse>("/api/event-logs/delete-bulk", body);
-      const deleted = res?.deleted ?? n;
-      setSelected(new Set());
-      reloadAll();
-      notify(`Deleted ${deleted} log${deleted === 1 ? "" : "s"}`, "success");
-    } catch (e) {
-      notify(`Could not delete the selected logs: ${e instanceof Error ? e.message : String(e)}`, "error");
-    } finally {
-      setBulkBusy(false);
-    }
-  };
-
   const clearAll = async () => {
     const ok = await confirm({
       title: "Delete All Logs",
@@ -245,7 +200,6 @@ export function Logs() {
     setClearBusy(true);
     try {
       await api.del<EventLogBulkDeleteResponse>("/api/event-logs");
-      setSelected(new Set());
       setPage(1);
       reloadAll();
       notify("All logs cleared", "success");
@@ -254,10 +208,6 @@ export function Logs() {
     } finally {
       setClearBusy(false);
     }
-  };
-
-  const toggleAll = (on: boolean) => {
-    setSelected(on ? new Set(logs.map((l) => l.log_id)) : new Set());
   };
 
   const firstLoad = list.loading && !list.data;
@@ -270,7 +220,7 @@ export function Logs() {
       id="logs-root"
       ref={rootRef}
       aria-label="Event logs"
-      className="mx-auto w-full max-w-[1200px] scroll-mt-4 max-md:px-3"
+      className="w-full scroll-mt-4 max-md:px-3"
     >
       <h1 className="sr-only">Logs</h1>
       <div className="mt-3 mb-3 flex items-center gap-3 max-md:mt-1">
@@ -338,22 +288,6 @@ export function Logs() {
               Clear Filters
             </button>
           ) : null}
-          {visibleSelected > 0 ? (
-            <button
-              type="button"
-              id="logs-delete-selected"
-              className={cx(
-                PILL_BTN,
-                "border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.1)] text-[#f87171]",
-                "enabled:hover:border-[rgba(239,68,68,0.5)] enabled:hover:bg-[rgba(239,68,68,0.2)]",
-              )}
-              disabled={bulkBusy}
-              onClick={() => void deleteSelected()}
-            >
-              <LogsIcon name="trash" size={14} />
-              Delete selected ({visibleSelected})
-            </button>
-          ) : null}
           <button
             type="button"
             id="logs-refresh"
@@ -393,19 +327,6 @@ export function Logs() {
         <table id="logs-table" className="w-full table-fixed border-collapse max-md:min-w-[560px]" aria-busy={list.loading || undefined}>
           <thead className="sticky top-0 z-[2]">
             <tr className="bg-[rgba(20,10,40,0.95)] backdrop-blur-sm">
-              <th scope="col" className={cx(TH, "w-9 px-0 text-center")}>
-                <input
-                  type="checkbox"
-                  className="size-3.5 cursor-pointer accent-primary align-middle"
-                  aria-label="Select all logs on this page"
-                  checked={allOnPage}
-                  ref={(el) => {
-                    if (el) el.indeterminate = visibleSelected > 0 && !allOnPage;
-                  }}
-                  disabled={logs.length === 0}
-                  onChange={(e) => toggleAll(e.target.checked)}
-                />
-              </th>
               {HEADERS.map((h) => {
                 const active = sort.column === h.key;
                 const touched = sort !== DEFAULT_SORT;
@@ -452,10 +373,8 @@ export function Logs() {
                 <LogRow
                   key={log.log_id}
                   log={log}
-                  selected={selected.has(log.log_id)}
                   expanded={expanded.has(log.log_id)}
                   deleting={deleting.has(log.log_id)}
-                  onSelect={onSelect}
                   onToggle={onToggle}
                   onDelete={(l) => void deleteOne(l)}
                 />

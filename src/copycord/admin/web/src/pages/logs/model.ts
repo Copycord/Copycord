@@ -1,6 +1,6 @@
 // Pure helpers for the Event logs page, ported from frontend/src/js/logs.js.
 
-import type { EventLog, EventLogBulkDeleteRequest } from "../../types/logs";
+import type { EventLog } from "../../types/logs";
 
 export const PAGE_SIZE = 50;
 
@@ -269,9 +269,4 @@ export function sortLogs(logs: readonly EventLog[], sort: SortState): EventLog[]
     const c = typeof ka === "number" && typeof kb === "number" ? ka - kb : String(ka).localeCompare(String(kb));
     return c * sign;
   });
-}
-
-/** Body for POST /api/event-logs/delete-bulk, limited to rows still on screen. */
-export function bulkDeletePayload(selected: ReadonlySet<string>, logs: readonly EventLog[]): EventLogBulkDeleteRequest {
-  return { ids: logs.filter((l) => selected.has(l.log_id)).map((l) => l.log_id) };
 }

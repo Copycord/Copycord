@@ -73,12 +73,6 @@ function server(initial: EventLog[]) {
       logs = logs.filter((l) => l.log_id !== id);
       return json({ ok: true });
     }
-    if (method === "POST" && path === "/api/event-logs/delete-bulk") {
-      const ids = (body as { ids: string[] }).ids;
-      const before = logs.length;
-      logs = logs.filter((l) => !ids.includes(l.log_id));
-      return json({ ok: true, deleted: before - logs.length });
-    }
     return json({ detail: "not found" }, 404);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -217,40 +211,6 @@ describe("Logs page", () => {
     await waitFor(() => expect(tbody()).not.toHaveTextContent("Deleted channel #old-news"));
     expect(mutations().map((c) => `${c.method} ${c.url.pathname}`)).toEqual(["DELETE /api/event-logs/b"]);
     expect(screen.getByText("Showing 1-2 of 2")).toBeInTheDocument();
-  });
-
-  it("bulk deletes the selected rows with one POST after confirming", async () => {
-    const { user, mutations } = setup();
-    await loaded();
-    expect(screen.queryByRole("button", { name: /Delete selected/ })).not.toBeInTheDocument();
-    const boxes = within(tbody()).getAllByRole("checkbox", { name: "Select log" });
-    await user.click(boxes[0]!);
-    await user.click(boxes[2]!);
-    const all = screen.getByRole("checkbox", { name: "Select all logs on this page" }) as HTMLInputElement;
-    expect(all.indeterminate).toBe(true);
-
-    await user.click(screen.getByRole("button", { name: "Delete selected (2)" }));
-    const dialog = await screen.findByRole("dialog", { name: "Delete Selected Logs" });
-    expect(dialog).toHaveTextContent("Delete 2 selected event logs?");
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(screen.getByText("Showing 1-1 of 1")).toBeInTheDocument());
-    expect(mutations()).toHaveLength(1);
-    expect(mutations()[0]!.method).toBe("POST");
-    expect(mutations()[0]!.url.pathname).toBe("/api/event-logs/delete-bulk");
-    expect(mutations()[0]!.body).toEqual({ ids: ["a", "c"] });
-    expect(screen.getByText("Deleted 2 logs")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Delete selected/ })).not.toBeInTheDocument();
-  });
-
-  it("select all picks every row on the page and cancel keeps them", async () => {
-    const { user, mutations } = setup();
-    await loaded();
-    await user.click(screen.getByRole("checkbox", { name: "Select all logs on this page" }));
-    for (const box of within(tbody()).getAllByRole("checkbox")) expect(box).toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Delete selected (3)" }));
-    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
-    expect(mutations()).toEqual([]);
-    expect(screen.getByRole("button", { name: "Delete selected (3)" })).toBeInTheDocument();
   });
 
   it("renders Discord text as text, never as markup", async () => {
