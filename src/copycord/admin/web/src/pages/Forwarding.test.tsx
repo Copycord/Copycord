@@ -239,7 +239,7 @@ describe("Forwarding client token gate", () => {
     const gate = await screen.findByTestId("status-gate");
     expect(gate).toHaveTextContent(CLIENT_TOKEN_MESSAGE);
     expect(gate).toHaveClass("fixed", "top-header", "bottom-0");
-    expect(within(gate).getByRole("status")).toHaveTextContent("Open the Configuration page, add your tokens");
+    expect(within(gate).getByText(CLIENT_TOKEN_MESSAGE)).toHaveAttribute("aria-live", "polite");
     expect(document.getElementById("fwd-root")!.querySelector("[inert]")).not.toBeNull();
   });
 
