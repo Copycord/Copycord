@@ -8,7 +8,7 @@ import type { ScraperQueueItem } from "../../types/scraper";
 import type { Confirm, Notify } from "../system/providers";
 import { ClockIcon, RefreshIcon, XIcon } from "./icons";
 import { cancelAll, plural, queueClear, queueRemove, reason } from "./scraperApi";
-import { ICON_BUTTON, TITLE } from "./TokensCard";
+import { ICON_BUTTON, SC_CARD, TITLE, TITLEBAR } from "./TokensCard";
 
 export interface QueueCardProps {
   queue: ScraperQueueItem[];
@@ -68,11 +68,11 @@ export function QueueCard({ queue, notify, confirm }: QueueCardProps) {
   }
 
   return (
-    <Card id="sc-queue-card" aria-label="Queue" hidden={queue.length === 0}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <Card id="sc-queue-card" aria-label="Queue" className={SC_CARD} hidden={queue.length === 0}>
+      <div className={TITLEBAR}>
         <h3 className={TITLE}>Queue</h3>
-        <div className="flex items-center gap-2">
-          <span id="sc-queue-count" className="text-[13px] text-text-1">
+        <div className="flex shrink-0 items-center gap-2">
+          <span id="sc-queue-count" className="rounded-lg bg-[rgba(139,92,246,0.12)] px-2 py-0.5 text-xs text-muted">
             {plural(queue.length, "item")}
           </span>
           <Button id="sc-queue-clear" size="sm" variant="ghost" title="Clear pending" disabled={busy !== null} onClick={onClear}>
@@ -83,7 +83,7 @@ export function QueueCard({ queue, notify, confirm }: QueueCardProps) {
             size="sm"
             variant="ghost"
             title="Cancel all"
-            className="text-danger enabled:hover:border-danger"
+            className="enabled:hover:border-danger enabled:hover:text-danger"
             disabled={busy !== null}
             onClick={onCancelAll}
           >
@@ -91,11 +91,11 @@ export function QueueCard({ queue, notify, confirm }: QueueCardProps) {
           </Button>
         </div>
       </div>
-      <div id="sc-queue-body">
-        <div id="sc-queue-empty" hidden={queue.length > 0} className="py-4 text-center text-sm text-text-2">
+      <div id="sc-queue-body" className="flex flex-col gap-1.5">
+        <div id="sc-queue-empty" hidden={queue.length > 0} className="p-5 text-center text-[13px] text-muted">
           <p className="m-0">Queue is empty</p>
         </div>
-        <div id="sc-queue-list" className="flex flex-col gap-2">
+        <div id="sc-queue-list" className="flex flex-col gap-1.5">
           {queue.map((item) => {
             const id = String(item.id);
             const isRunning = item.status === "running";
@@ -103,20 +103,20 @@ export function QueueCard({ queue, notify, confirm }: QueueCardProps) {
               <div
                 key={id}
                 data-id={id}
-                className="sc-queue-item flex items-center justify-between gap-3 rounded-control border border-border bg-white/3 px-3 py-2"
+                className="sc-queue-item flex items-center justify-between gap-3 rounded-btn border border-border bg-[rgba(20,11,38,0.4)] px-3 py-2.5 transition-colors duration-150 hover:border-[rgba(139,92,246,0.25)] hover:bg-[rgba(20,11,38,0.7)]"
               >
-                <div className="flex min-w-0 items-center gap-3">
+                <div className="flex min-w-0 items-center gap-2.5">
                   <span
                     className={cx(
-                      "sc-queue-badge inline-flex size-7 shrink-0 items-center justify-center rounded-full",
-                      isRunning ? "running bg-good/15 text-good" : "pending bg-white/6 text-text-1",
+                      "sc-queue-badge inline-flex size-7 shrink-0 items-center justify-center rounded-lg",
+                      isRunning ? "running bg-[rgba(59,130,246,0.15)] text-[#60a5fa]" : "pending bg-[rgba(139,92,246,0.12)] text-muted",
                     )}
                   >
                     {isRunning ? <RefreshIcon className="animate-spin" /> : <ClockIcon />}
                   </span>
-                  <div className="flex min-w-0 flex-col">
-                    <span className="sc-queue-guild truncate font-mono text-sm">{String(item.guild_id)}</span>
-                    <span className="sc-queue-status text-xs text-text-2">{isRunning ? "Scraping…" : "Pending"}</span>
+                  <div className="flex min-w-0 flex-col gap-px">
+                    <span className="sc-queue-guild truncate font-mono text-[13px] font-semibold text-text">{String(item.guild_id)}</span>
+                    <span className="sc-queue-status text-[11px] text-muted">{isRunning ? "Scraping…" : "Pending"}</span>
                   </div>
                 </div>
                 {isRunning ? null : (

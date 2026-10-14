@@ -17,7 +17,27 @@ import {
   startScrape,
   validateSetup,
 } from "./scraperApi";
-import { TITLE } from "./TokensCard";
+import { SC_CARD, TITLE, TITLEBAR } from "./TokensCard";
+
+// .sc-field label and .sc-opts legend.
+const SC_LABEL = "text-xs font-medium tracking-[0.04em] text-muted uppercase";
+// .sc-check: the label row; the checkbox itself draws the old .sc-check-box (18px, purple outline and
+// a 10px purple square when checked).
+export const SC_CHECK = "flex cursor-pointer items-center gap-2 text-[13px] text-text select-none";
+export const CHECK_BOX =
+  "m-0 flex size-[18px] shrink-0 cursor-pointer appearance-none items-center justify-center rounded-[5px] " +
+  "border-[1.5px] border-border bg-[rgba(20,11,38,0.5)] bg-center bg-no-repeat [background-size:10px_10px] [font-family:inherit] " +
+  "transition-[background,border-color] duration-150 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 " +
+  "focus-visible:outline-primary checked:border-primary checked:bg-[rgba(139,92,246,0.18)] " +
+  "checked:bg-[image:linear-gradient(var(--color-primary),var(--color-primary))]";
+// The same box as a span after a visually hidden peer checkbox, as the old markup drew it.
+export const CHECK_SPAN =
+  "inline-flex size-[18px] shrink-0 items-center justify-center rounded-[5px] border-[1.5px] border-border " +
+  "bg-[rgba(20,11,38,0.5)] transition-[background,border-color] duration-150 after:block after:size-2.5 " +
+  "after:rounded-[2px] after:content-[''] peer-checked:border-primary peer-checked:bg-[rgba(139,92,246,0.18)] " +
+  "peer-checked:after:bg-primary peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary";
+// The old .btn had no gap between the icon and the label.
+const OLD_BTN = "has-[svg]:gap-0!";
 
 export interface IncludeOpts {
   username: boolean;
@@ -169,14 +189,14 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
   }
 
   return (
-    <Card id="sc-config-card" aria-label="Configuration" className="flex min-w-0 flex-col">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <Card id="sc-config-card" aria-label="Configuration" className={cx(SC_CARD, "min-w-0")}>
+      <div className={TITLEBAR}>
         <h3 className={TITLE}>Configuration</h3>
       </div>
 
-      <div className="flex flex-col gap-3.5">
+      <div className="mt-3.5 flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="sc-guild-id" className="text-xs font-semibold tracking-wider text-text-1 uppercase">
+          <label htmlFor="sc-guild-id" className={SC_LABEL}>
             Server (Guild) ID
           </label>
           <Input
@@ -189,15 +209,15 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
           />
         </div>
 
-        <fieldset className="m-0 rounded-control border border-border px-4 pt-1 pb-3">
-          <legend className="px-1.5 text-xs font-semibold tracking-wider text-text-1 uppercase">Include fields</legend>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 py-2">
+        <fieldset className="m-0 rounded-control border border-border bg-[rgba(20,11,38,0.35)] px-4 py-3.5">
+          <legend className={cx(SC_LABEL, "px-1.5")}>Include fields</legend>
+          <div className="mt-2 grid grid-cols-2 gap-2.5">
             {OPTS.map((o) => (
-              <label key={o.key} className="inline-flex cursor-pointer items-center gap-2 text-sm">
+              <label key={o.key} className={SC_CHECK}>
                 <input
                   id={o.id}
                   type="checkbox"
-                  className="size-4 cursor-pointer accent-primary"
+                  className={CHECK_BOX}
                   checked={opts[o.key]}
                   onChange={(e) => setOpts((p) => ({ ...p, [o.key]: e.target.checked }))}
                 />
@@ -205,8 +225,8 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
               </label>
             ))}
           </div>
-          <p className="m-0 text-xs text-text-2">
-            Enabling <b className="text-text">Bio</b> requires extra API calls and will be slower.
+          <p className="m-0 mt-2.5 text-xs text-muted opacity-70">
+            Enabling <b>Bio</b> requires extra API calls and will be slower.
           </p>
         </fieldset>
 
@@ -215,24 +235,28 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
             id="sc-validation-result"
             role="status"
             className={cx(
-              "rounded-control border px-3 py-2 text-sm",
-              result.ok ? "border-good/40 bg-good/10 text-good" : "border-danger/40 bg-danger/10 text-danger",
+              "flex items-center gap-2 rounded-btn border px-3.5 py-2.5 text-[13px]",
+              result.ok
+                ? "border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.1)] text-[#34d399]"
+                : "border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.1)] text-[#f87171]",
             )}
           >
-            <span aria-hidden="true" className="mr-1.5 font-bold">
+            <span aria-hidden="true" className="text-base font-bold">
               {result.ok ? "✓" : "✗"}
             </span>
-            {result.text}
-            {result.warn ? (
-              <>
-                {" · "}
-                <span className="text-custom-ink">{result.warn}</span>
-              </>
-            ) : null}
+            <span>
+              {result.text}
+              {result.warn ? (
+                <>
+                  {" · "}
+                  <span className="text-[#fbbf24]">{result.warn}</span>
+                </>
+              ) : null}
+            </span>
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5 pt-1">
           <Button
             id="sc-validate-btn"
             variant="ghost"
@@ -241,11 +265,12 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
           >
             {busy === "validate" ? "Validating…" : "Validate"}
           </Button>
-          <div className="flex flex-wrap gap-2.5">
+          <div className="ml-auto flex gap-2.5">
             <Button
               id="sc-queue-btn"
               variant="outline"
               title="Add to queue"
+              className={OLD_BTN}
               disabled={busy === "queue"}
               onClick={() => void onQueue()}
             >
@@ -257,7 +282,13 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
                 Cancel
               </Button>
             ) : (
-              <Button id="sc-start-btn" variant="primary" disabled={busy === "start"} onClick={() => void onStart()}>
+              <Button
+                id="sc-start-btn"
+                variant="primary"
+                className={OLD_BTN}
+                disabled={busy === "start"}
+                onClick={() => void onStart()}
+              >
                 <PlayIcon />
                 Start Scrape
               </Button>

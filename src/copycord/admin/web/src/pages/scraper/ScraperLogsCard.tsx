@@ -7,7 +7,8 @@ import { Button, Card, cx, Input } from "../../components/ui";
 import { connectSse } from "../../lib/sse";
 import type { ScraperLogEvent } from "../../types/scraper";
 import { clearLogFile, LOG_STREAM_URL } from "./scraperApi";
-import { TITLE } from "./TokensCard";
+import { CHECK_SPAN } from "./ConfigCard";
+import { SC_CARD, TITLE } from "./TokensCard";
 import type { LogSignal } from "./useScraperLive";
 
 export const MAX_LINES = 10000;
@@ -123,42 +124,42 @@ export function ScraperLogsCard({ signal, EventSourceImpl }: ScraperLogsCardProp
   }
 
   return (
-    <Card id="sc-log-card" aria-label="Scraper Logs" className="sc-log-card">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className={cx(TITLE, "shrink-0")}>Scraper Logs</h3>
-        <div className="flex min-w-0 items-center gap-2">
+    <Card id="sc-log-card" aria-label="Scraper Logs" className={cx(SC_CARD, "sc-log-card")}>
+      <div className="mb-1.5 flex flex-nowrap items-center justify-between gap-2.5">
+        <h3 className={TITLE}>Scraper Logs</h3>
+        <div className="ml-auto flex min-w-0 shrink flex-nowrap items-center gap-2">
           <label
-            className="inline-flex shrink-0 cursor-pointer items-center gap-2 text-[13px] text-text-1"
+            className="flex cursor-pointer items-center gap-[5px] text-[11px] whitespace-nowrap text-muted select-none"
             title="Automatically clear logs after each scrape completes"
           >
             <input
               id="sc-log-autoclear"
               type="checkbox"
-              className="size-4 cursor-pointer accent-primary"
+              className="peer pointer-events-none absolute my-[3px] mr-[3px] ml-1 size-0 opacity-0"
               checked={autoclear}
               onChange={(e) => onAutoclear(e.target.checked)}
             />
+            <span aria-hidden="true" className={CHECK_SPAN} />
             <span>Auto-clear</span>
           </label>
-          <div className="w-40 min-w-0 shrink">
-            <Input
-              id="sc-log-search"
-              type="text"
-              aria-label="Search logs"
-              placeholder={"Search logs…"}
-              value={search}
-              onChange={(e) => {
-                stick.current = true;
-                setSearch(e.target.value);
-              }}
-              onKeyDown={(e) => {
-                if (e.key !== "Escape") return;
-                e.preventDefault();
-                setSearch("");
-                setQuery("");
-              }}
-            />
-          </div>
+          <Input
+            id="sc-log-search"
+            type="text"
+            aria-label="Search logs"
+            placeholder={"Search logs…"}
+            className="block min-w-[60px] shrink"
+            value={search}
+            onChange={(e) => {
+              stick.current = true;
+              setSearch(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Escape") return;
+              e.preventDefault();
+              setSearch("");
+              setQuery("");
+            }}
+          />
           <Button id="sc-log-clear" size="sm" variant="ghost" className="shrink-0" onClick={onClear}>
             Clear
           </Button>

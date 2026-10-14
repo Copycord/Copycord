@@ -9,10 +9,15 @@ import { CheckIcon, KeyIcon, RefreshIcon, TrashIcon, XIcon } from "./icons";
 import { displayMask } from "./mask";
 import { addToken, deleteToken, plural, reason, validateToken } from "./scraperApi";
 
-export const TITLE = "m-0 text-lg font-bold text-accent";
+// .scraper-card .card-titlebar h3 and the .card-titlebar row; every scraper card sits 18px below the last.
+export const TITLE = "m-0 text-[15px] font-bold whitespace-nowrap text-accent";
+export const TITLEBAR = "mb-1.5 flex items-center justify-between gap-2.5";
+export const SC_CARD = "mt-[18px] max-w-full";
 
+// .btn.btn-ghost.btn-xs holding a 14px icon.
 export const ICON_BUTTON =
-  "inline-flex size-8 cursor-pointer items-center justify-center rounded-control border border-border bg-white/4 " +
+  "inline-flex min-h-7 cursor-pointer items-center justify-center rounded-btn border border-border bg-[rgba(255,255,255,0.04)] " +
+  "px-2.5 py-1.5 leading-none " +
   "text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60 " +
   "enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-55";
 
@@ -86,12 +91,12 @@ export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps)
   }
 
   return (
-    <Card id="sc-tokens-card" aria-label="Tokens" className="flex min-w-0 flex-col">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <Card id="sc-tokens-card" aria-label="Tokens" className={cx(SC_CARD, "min-w-0")}>
+      <div className={TITLEBAR}>
         <h3 className={TITLE}>Tokens</h3>
         <span
           id="sc-token-count"
-          className="rounded-full border border-accent/40 bg-accent/15 px-2.5 py-0.5 text-[11px] font-bold text-accent"
+          className="rounded-xl border border-[rgba(139,92,246,0.25)] bg-[rgba(139,92,246,0.12)] px-2.5 py-[3px] text-[11px] font-semibold whitespace-nowrap text-primary"
         >
           {plural(tokens.length, "token")}
         </span>
@@ -99,13 +104,13 @@ export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps)
 
       <form
         id="sc-add-form"
-        className="rounded-control border border-border bg-white/2 p-3.5"
+        className="mt-3.5 mb-2 rounded-control border border-border bg-[rgba(20,11,38,0.6)] p-3.5"
         onSubmit={(e) => {
           e.preventDefault();
           void onAdd();
         }}
       >
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-2 max-[600px]:flex-col">
           <Input
             id="sc-token-value"
             type="text"
@@ -113,7 +118,7 @@ export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps)
             placeholder="Paste Discord token…"
             autoComplete="off"
             spellCheck={false}
-            className="min-w-0 sm:flex-[2]"
+            className="min-w-0 flex-[2]"
             value={value}
             onChange={(e) => setValue(e.target.value)}
           />
@@ -121,7 +126,7 @@ export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps)
             id="sc-token-label"
             aria-label="Token label"
             placeholder="Label (optional)"
-            className="min-w-0 sm:flex-1"
+            className="min-w-0 flex-1"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
           />
@@ -131,12 +136,12 @@ export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps)
         </div>
       </form>
 
-      <div id="sc-token-list" className="mt-3 flex flex-col gap-2">
+      <div id="sc-token-list" className="mt-3 max-h-[340px] overflow-y-auto [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]">
         {tokens.length === 0 ? (
-          <div id="sc-token-empty" className="flex flex-col items-center gap-1 py-6 text-center text-text-2">
-            <KeyIcon className="mb-1 opacity-60" />
-            <p className="m-0 text-text">No tokens configured</p>
-            <small className="text-xs">Add Discord tokens to start scraping members</small>
+          <div id="sc-token-empty" className="flex flex-col items-center gap-1 px-4 py-8 text-center text-muted">
+            <KeyIcon className="mb-1.5 text-muted opacity-35" />
+            <p className="m-0 text-sm">No tokens configured</p>
+            <small className="text-xs opacity-65">Add Discord tokens to start scraping members</small>
           </div>
         ) : (
           tokens.map((t) => {
@@ -145,24 +150,26 @@ export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps)
               <div
                 key={t.token_id}
                 data-id={t.token_id}
-                className="sc-token-item flex items-center justify-between gap-3 rounded-control border border-border bg-white/3 px-3 py-2.5"
+                className="sc-token-item mb-1.5 flex items-center justify-between gap-2.5 rounded-btn border border-border bg-[rgba(20,11,38,0.4)] px-3 py-2.5 transition-colors duration-200 last:mb-0 hover:border-[rgba(139,92,246,0.25)] hover:bg-[rgba(20,11,38,0.7)]"
               >
                 <div className="flex min-w-0 items-center gap-2.5">
                   <span
                     title={t.is_valid ? "Valid" : "Invalid"}
                     className={cx(
-                      "inline-flex size-6 shrink-0 items-center justify-center rounded-full",
-                      t.is_valid ? "bg-good/15 text-good" : "bg-danger/15 text-danger",
+                      "inline-flex size-7 shrink-0 items-center justify-center rounded-lg border",
+                      t.is_valid
+                        ? "border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.15)] text-[#34d399]"
+                        : "border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.15)] text-[#f87171]",
                     )}
                   >
                     {t.is_valid ? <CheckIcon /> : <XIcon />}
                   </span>
-                  <div className="flex min-w-0 flex-col">
-                    <span className="sc-token-name truncate font-semibold">{t.username || t.label || "Unlabeled"}</span>
-                    <span className="sc-token-masked truncate font-mono text-xs text-text-2">{displayMask(t.masked)}</span>
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="sc-token-name truncate text-[13px] font-semibold text-text">{t.username || t.label || "Unlabeled"}</span>
+                    <span className="sc-token-masked truncate font-mono text-[11px] text-muted">{displayMask(t.masked)}</span>
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-1.5">
+                <div className="flex shrink-0 gap-1">
                   <button
                     type="button"
                     className={cx("sc-token-revalidate", ICON_BUTTON)}
