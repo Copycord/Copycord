@@ -48,7 +48,9 @@ describe("App shell", () => {
 
   it("renders the Tasks page at a run url, not NotFound, with Tasks lit in the menu", async () => {
     renderAt("/tasks/runs/12");
-    expect(await screen.findByRole("heading", { level: 1, name: "Tasks" })).toBeInTheDocument();
+    // The type rail is only in the page, not its skeleton, so the chunk has replaced the skeleton.
+    await screen.findByRole("navigation", { name: "Task types" });
+    expect(screen.getByRole("heading", { level: 1, name: "Tasks" })).toBeInTheDocument();
     expect(screen.queryByText(/Page not found/)).not.toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "Site menu" });
     const item = within(nav).getByText("Tasks").closest("a");
