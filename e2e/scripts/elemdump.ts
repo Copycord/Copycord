@@ -109,6 +109,29 @@ const pfx = (prefix: string, probes: Probe[]): Probe[] => probes.map((p) => ({ .
 const pageProbes = (name: PageName) => [...pfx("shell", SHELL), ...pfx("page", GENERIC), ...pfx(name, PAGE_PROBES[name])];
 const modalProbes = (extra: Probe[]) => [...pfx("modal", DIALOG), ...pfx("modal", extra)];
 
+// An open collapsible dashboard card (details#<id>): its parts paired by text or id, so class names don't matter.
+function sectionProbes(id: string): Probe[] {
+  const c = `#${id}`;
+  const body = `${c} > summary ~ *`;
+  return [
+    { key: "card", sel: c },
+    { key: "summary", sel: `${c} > summary` },
+    { key: "body", sel: `${c} > summary + *` },
+    { key: "row", sel: `${c} > summary + * > *`, max: 20, pair: "index" },
+    { key: "text", sel: `${body} :is(p, span:not(:has(*)), code)`, max: 40, pair: "text" },
+    { key: "label", sel: `${body} label`, max: 20, pair: "text" },
+    { key: "input", sel: `${c} :is(input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea)`, max: 20, pair: "id" },
+    { key: "select", sel: `${c} select`, max: 10, pair: "id" },
+    { key: "button", sel: `${body} :is(button:not([role=switch]), a.btn)`, max: 20, pair: "text" },
+    { key: "switch", sel: `${c} :is(.toggle-track, [role=switch])`, max: 20, pair: "index" },
+  ];
+}
+
+async function openSection(page: Page, id: string): Promise<void> {
+  await page.locator(`#${id} > summary h3`).click();
+  await until(`${id} open`, async () => (await page.locator(`#${id}[open]`).count()) > 0);
+}
+
 const SCREENS: Screen[] = [
   ...(Object.keys(PAGES) as PageName[]).map((name): Screen => ({
     name,
@@ -194,6 +217,14 @@ const SCREENS: Screen[] = [
       await m.open(p);
       await until("dialog", async () => (await p.locator("[role=dialog]").filter({ visible: true }).count()) > 0);
     },
+  })),
+  ...[
+    { name: "dashboard-notifications-open", id: "notifications-card" },
+    { name: "dashboard-sync-open", id: "sync-settings-card" },
+    { name: "dashboard-proxy-open", id: "srv-proxy-card" },
+  ].map((d): Screen => ({
+    name: d.name, path: PAGES.dashboard, fullPage: true, probes: pfx(d.name, sectionProbes(d.id)),
+    open: (p) => openSection(p, d.id),
   })),
 ];
 
