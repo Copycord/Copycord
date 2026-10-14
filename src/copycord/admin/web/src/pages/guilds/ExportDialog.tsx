@@ -14,16 +14,18 @@ import { DEFAULT_EXPORT_FORM, MEDIA_LABELS, attachmentSummary, buildExportPayloa
 import type { ExportForm } from "./model";
 
 const BOX =
-  "size-[18px] shrink-0 cursor-pointer appearance-none rounded-md border border-border bg-white/4 outline-none transition " +
+  "relative m-[3px_3px_3px_4px] size-[18px] shrink-0 cursor-pointer appearance-none rounded-md border border-border bg-white/4 outline-none transition " +
   "hover:border-accent focus-visible:shadow-[0_0_0_4px_rgba(167,139,250,0.18)] checked:border-primary-600 checked:bg-primary " +
   "disabled:cursor-not-allowed disabled:opacity-60";
 
 const INPUT =
-  "h-9 w-full rounded-lg border border-white/8 bg-white/4 px-2.5 text-sm text-text outline-none [color-scheme:dark] " +
+  "h-9 w-full rounded-lg border border-white/8 bg-white/4 px-2.5 text-sm leading-9 text-inherit outline-none [color-scheme:dark] " +
   "placeholder:text-text-2/70 focus:border-accent disabled:cursor-not-allowed disabled:opacity-55";
 
-const LABEL = "mb-1.5 block text-sm font-semibold text-text";
-const HINT = "mt-1.5 block text-xs text-text-2";
+// label.form-field around span.label and the .input; SMALL is the 28px .input of the word and metric rows.
+const LABEL = "label mb-1.5 block font-semibold";
+const SMALL = "h-7! px-2! text-[13px]! leading-7!";
+const HINT = "hint mt-1.5 block text-xs opacity-75";
 const TWO_COL = "grid gap-3 min-[720px]:grid-cols-2";
 
 function Check({
@@ -48,17 +50,17 @@ function Check({
 function TextInput({
   label,
   hint,
+  small,
   ref,
+  className,
   ...rest
-}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: ReactNode; ref?: Ref<HTMLInputElement> }) {
+}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: ReactNode; small?: boolean; ref?: Ref<HTMLInputElement> }) {
   return (
-    <div>
-      <label htmlFor={rest.id} className={LABEL}>
-        {label}
-      </label>
-      <input ref={ref} className={INPUT} {...rest} />
+    <label className="form-field block">
+      <span className={cx(LABEL, small && "small text-xs opacity-85")}>{label}</span>
+      <input ref={ref} className={cx(INPUT, small && SMALL, className)} {...rest} />
       {hint ? <span className={HINT}>{hint}</span> : null}
-    </div>
+    </label>
   );
 }
 
@@ -82,11 +84,11 @@ function Section({
         if (e.currentTarget.open) onOpen?.();
       }}
       className={cx(
-        "group rounded-[10px] border px-2.5",
+        "export-advanced group rounded-[10px] border px-2.5 [&+details]:mt-2.5",
         tinted ? "border-accent/18 bg-linear-to-b from-accent/6 to-accent/3" : "border-white/8 bg-white/2",
       )}
     >
-      <summary className="flex cursor-pointer list-none items-center px-1 py-2.5 font-semibold text-text select-none [&::-webkit-details-marker]:hidden">
+      <summary className="label flex cursor-pointer list-none items-center px-1 py-2.5 text-base font-semibold select-none [&::-webkit-details-marker]:hidden">
         <span aria-hidden="true" className="mr-2 inline-block opacity-90 transition-transform group-open:rotate-90">
           ▸
         </span>
@@ -194,7 +196,7 @@ export function ExportDialog({ guild, onClose }: { guild: GuildSummary; onClose:
         </>
       }
     >
-      <div className="grid gap-3.5">
+      <div className="export-body-wrap grid gap-3.5">
         <div className={TWO_COL}>
           <TextInput
             id="ex-channel"
@@ -215,7 +217,7 @@ export function ExportDialog({ guild, onClose }: { guild: GuildSummary; onClose:
         </div>
 
         <Section id="ex-filters" title="Filters" tinted>
-          <div className="mt-2 grid gap-2">
+          <div className="mt-2 grid grid-cols-2 gap-2">
             {check("ex-f-hascontent", "hasContent", "Include text content")}
             {check("ex-f-embeds", "embeds", "Include embeds")}
             <div className="flex min-h-8 flex-wrap items-center gap-x-2">
@@ -250,7 +252,7 @@ export function ExportDialog({ guild, onClose }: { guild: GuildSummary; onClose:
                 aria-label="Word to include"
                 placeholder="must have this word..."
                 disabled={!form.wordOn}
-                className={INPUT}
+                className={cx(INPUT, SMALL, "disabled:border-white/6 disabled:bg-white/3 disabled:text-white/65 disabled:opacity-50!")}
                 {...text("word")}
               />
             </div>
@@ -261,10 +263,12 @@ export function ExportDialog({ guild, onClose }: { guild: GuildSummary; onClose:
             {check("ex-f-stickers", "stickers", "Include stickers")}
             {check("ex-f-mentions", "mentions", "Include mentions")}
             {check("ex-f-threads", "threads", "Include threads")}
-            <div className={TWO_COL}>
-              <TextInput id="ex-f-minlen" label="Min message length" type="number" min={0} step={1} {...text("minLength")} />
+            <div className={cx(TWO_COL, "ex-metrics")}>
+              <TextInput id="ex-f-minlen" small className="max-w-[120px]" label="Min message length" type="number" min={0} step={1} {...text("minLength")} />
               <TextInput
                 id="ex-f-minreacts"
+                small
+                className="max-w-[120px]"
                 label="Min total reactions"
                 type="number"
                 min={0}
@@ -295,14 +299,14 @@ export function ExportDialog({ guild, onClose }: { guild: GuildSummary; onClose:
 
         <Section id="ex-range" title="Date Range (optional)">
           <div className={cx(TWO_COL, "mt-2")}>
-            <TextInput id="ex-after" label="After" type="datetime-local" step={1} {...text("after")} />
-            <TextInput id="ex-before" label="Before" type="datetime-local" step={1} {...text("before")} />
+            <TextInput id="ex-after" className="pr-9! text-[13px]!" label="After" type="datetime-local" step={1} {...text("after")} />
+            <TextInput id="ex-before" className="pr-9! text-[13px]!" label="Before" type="datetime-local" step={1} {...text("before")} />
           </div>
           <p className={HINT}>Times use your local timezone; they’re converted to UTC.</p>
         </Section>
 
         <Section id="ex-dlwrap" title="Download media (optional)">
-          <div className="mt-2 grid gap-2">
+          <div className="mt-2 grid grid-cols-2 gap-2">
             {MEDIA_LABELS.map(([key, label]) => (
               <Check
                 key={key}

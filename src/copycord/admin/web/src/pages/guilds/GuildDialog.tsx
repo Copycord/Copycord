@@ -7,6 +7,7 @@
 import { useEffect, useId, useRef } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { MODAL_CLOSE } from "../../components/Modal";
 import { cx } from "../../components/ui";
 
 export interface GuildDialogProps {
@@ -45,6 +46,7 @@ export function GuildDialog({
   initialFocus,
   testId,
 }: GuildDialogProps) {
+  const top = placement === "top";
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const onCloseRef = useRef(onClose);
@@ -115,40 +117,57 @@ export function GuildDialog({
         aria-labelledby={titleId}
         tabIndex={-1}
         className={cx(
-          "absolute left-1/2 flex -translate-x-1/2 flex-col overflow-hidden rounded-[14px] border border-border",
-          "text-text shadow-[0_20px_56px_rgba(0,0,0,0.5),inset_0_0_0_1px_rgba(167,139,250,0.06)] outline-none",
-          placement === "top"
-            ? "top-[calc(var(--spacing-header)+8vh)] max-h-[80vh]"
-            : "top-1/2 max-h-[min(84vh,860px)] -translate-y-1/2",
+          "absolute left-1/2 flex -translate-x-1/2 flex-col overflow-hidden border border-border outline-none",
+          // The details dialog is the old .scraper-card (16px radius, 18px lower, no shadow); the
+          // export dialogs are the old .export-modal card.
+          top
+            ? "top-[calc(var(--spacing-header)+8vh)] mt-[18px] max-h-[80vh] rounded-panel text-text"
+            : "top-1/2 max-h-[min(84vh,860px)] -translate-y-1/2 rounded-[14px] text-[#e7eaf0] shadow-[0_20px_56px_rgba(0,0,0,0.5),inset_0_0_0_1px_rgba(167,139,250,0.06)]",
           width === "md" ? "w-[min(720px,92vw)] bg-[#0f0820]" : "w-[min(480px,92vw)] bg-[#160c30]",
         )}
       >
-        <header className="flex items-center justify-between gap-3 border-b border-border bg-linear-to-b from-accent/6 to-transparent px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2.5">
+        <header
+          className={cx(
+            "flex shrink-0 items-center justify-between",
+            top
+              ? "px-4 py-3"
+              : "border-b border-white/8 bg-linear-to-b from-accent/6 to-accent/0 px-[18px] py-3.5",
+          )}
+        >
+          <div className={cx("scraper-title-wrap min-w-0", top ? "flex items-center gap-2.5" : "grid gap-1")}>
             {icon ? (
-              <img src={icon} alt="" className="size-6 shrink-0 rounded-md object-cover" onError={onIconError} />
+              <img src={icon} alt="" className="scraper-icon size-6 shrink-0 rounded-md object-cover" onError={onIconError} />
             ) : null}
-            <div className="grid min-w-0 gap-1">
-              <h2 id={titleId} className="truncate text-base font-semibold text-accent">
-                {title}
-              </h2>
-              {subtitle ? <p className="text-xs text-muted">{subtitle}</p> : null}
-            </div>
+            <h2
+              id={titleId}
+              className={cx(
+                "scraper-title m-0 min-w-0 truncate text-accent",
+                top ? "text-[22px] font-bold" : "font-[system-ui,-apple-system,'Segoe_UI',Roboto,sans-serif] text-lg leading-[1.25] font-semibold",
+              )}
+            >
+              {title}
+            </h2>
+            {subtitle ? <p className="m-0 text-xs text-muted opacity-80">{subtitle}</p> : null}
           </div>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg text-text-1 outline-none hover:bg-white/6 focus-visible:ring-2 focus-visible:ring-accent/60"
-          >
+          <button type="button" aria-label="Close" onClick={onClose} className={`verify-close ${MODAL_CLOSE}`}>
             <span aria-hidden="true">✕</span>
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto px-4 py-3.5 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]">
+        <div
+          className={cx(
+            "scraper-body min-h-0 flex-1 overflow-auto [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]",
+            top ? "px-4 py-3.5" : "px-[18px] py-3.5 [scrollbar-gutter:stable]",
+          )}
+        >
           {children}
         </div>
         {footer ? (
-          <footer className="flex justify-end gap-2 border-t border-border bg-linear-to-t from-accent/6 to-transparent px-4 py-3">
+          <footer
+            className={cx(
+              "scraper-actions flex shrink-0 justify-end gap-2",
+              top ? "px-4 py-3" : "border-t border-white/8 bg-linear-to-t from-white/2 to-white/0 px-4 pt-3 pb-4",
+            )}
+          >
             {footer}
           </footer>
         ) : null}
