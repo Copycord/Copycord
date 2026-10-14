@@ -5,6 +5,7 @@ import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../lib/api";
 import type { StatusResponse, VersionInfo } from "../types/dashboard";
+import { holdFetch } from "../test/holdFetch";
 import { Dashboard } from "./Dashboard";
 import { appendCapped, formatUptime, parseLogData, statusFromWs } from "./dashboard/model";
 
@@ -320,5 +321,17 @@ describe("dashboard model", () => {
   it("ignores non status messages", () => {
     expect(statusFromWs({ type: "log", source: "server" })).toBeNull();
     expect(statusFromWs({ type: "status", source: "other" })).toBeNull();
+  });
+});
+
+describe("Dashboard loading", () => {
+  it("shows mapping card skeletons until the mapping list arrives", async () => {
+    server({ "/api/guild-mappings": () => json({ mappings: [] }) });
+    const release = holdFetch("/api/guild-mappings");
+    renderPage();
+    expect(await screen.findAllByTestId("mapping-skeleton")).toHaveLength(2);
+    expect(document.getElementById("new-mapping-card")).not.toBeNull();
+    release();
+    await waitFor(() => expect(screen.queryByTestId("mapping-skeleton")).toBeNull());
   });
 });

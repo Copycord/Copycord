@@ -5,6 +5,7 @@ import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../lib/api";
 import type { BackupArchive, BackupInfo } from "../types/system";
+import { holdFetch } from "../test/holdFetch";
 import { System } from "./System";
 import { fmtBackupWhen, fmtBytes, SHRUG } from "./system/format";
 
@@ -317,5 +318,17 @@ describe("system format helpers", () => {
     expect(fmtBackupWhen(new Date(2026, 9, 13, 12, 0).getTime() / 1000, now)).toBe("12:00pm");
     expect(fmtBackupWhen("not a date", now)).toBe("—");
     expect(fmtBackupWhen(undefined, now)).toBe("—");
+  });
+});
+
+describe("System loading", () => {
+  it("shows skeleton archive rows until the backup info arrives", async () => {
+    server({ "/api/backup/info": () => jsonResponse(info()) });
+    const release = holdFetch("/api/backup/info");
+    renderPage();
+    expect(screen.getAllByTestId("adv-archive-skeleton")).toHaveLength(3);
+    release();
+    await waitFor(() => expect(document.getElementById("adv-last-backup")).toHaveTextContent("Oct 9 2026"));
+    expect(screen.queryByTestId("adv-archive-skeleton")).toBeNull();
   });
 });

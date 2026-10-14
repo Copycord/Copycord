@@ -2,7 +2,7 @@
 // Only masked values are ever rendered; the value input clears after a save.
 
 import { useState } from "react";
-import { Button, Card, cx, Input } from "../../components/ui";
+import { Button, Card, cx, Input, SkeletonSection } from "../../components/ui";
 import type { ScraperToken } from "../../types/scraper";
 import type { Confirm, Notify } from "../system/providers";
 import { CheckIcon, KeyIcon, RefreshIcon, TrashIcon, XIcon } from "./icons";
@@ -26,9 +26,11 @@ export interface TokensCardProps {
   reload: () => void;
   notify: Notify;
   confirm: Confirm;
+  /** First load still running: skeleton rows instead of the empty state. */
+  loading?: boolean;
 }
 
-export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps) {
+export function TokensCard({ tokens, reload, notify, confirm, loading = false }: TokensCardProps) {
   const [value, setValue] = useState("");
   const [label, setLabel] = useState("");
   const [adding, setAdding] = useState(false);
@@ -137,7 +139,9 @@ export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps)
       </form>
 
       <div id="sc-token-list" className="mt-3 max-h-[340px] overflow-y-auto [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]">
-        {tokens.length === 0 ? (
+        {loading && tokens.length === 0 ? (
+          <SkeletonSection rows={3} rowHeight={44} label="Loading tokens" className="px-1 py-2" />
+        ) : tokens.length === 0 ? (
           <div id="sc-token-empty" className="flex flex-col items-center gap-1 px-4 py-8 text-center text-muted">
             <KeyIcon className="mb-1.5 text-muted opacity-35" />
             <p className="m-0 text-sm">No tokens configured</p>

@@ -71,7 +71,7 @@ export function Scraper() {
       </div>
 
       <div className="grid grid-cols-[1fr] items-start gap-[18px] min-[961px]:grid-cols-[1fr_1fr]">
-        <TokensCard tokens={list} reload={tokens.reload} notify={notify} confirm={confirm} />
+        <TokensCard tokens={list} loading={tokens.loading && !tokens.data} reload={tokens.reload} notify={notify} confirm={confirm} />
         <ConfigCard
           tokenCount={list.length}
           queueLength={live.queue.length}
@@ -86,7 +86,7 @@ export function Scraper() {
       <QueueCard queue={live.queue} notify={notify} confirm={confirm} />
       <ProgressCard progress={live.progress} />
       <ScraperLogsCard signal={live.logSignal} />
-      <PastScrapesCard data={scrapes.data} reload={scrapes.reload} notify={notify} confirm={confirm} />
+      <PastScrapesCard data={scrapes.data} loading={scrapes.loading && !scrapes.data} reload={scrapes.reload} notify={notify} confirm={confirm} />
     </div>
   );
 }

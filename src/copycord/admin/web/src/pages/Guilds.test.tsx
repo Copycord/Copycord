@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast";
 import { CSRF_HEADER } from "../lib/api";
 import type { ExportMessagesRequest, GuildDetails, GuildSummary } from "../types/guilds";
+import { holdFetch } from "../test/holdFetch";
 import { Guilds } from "./Guilds";
 
 const GUILDS: GuildSummary[] = [
@@ -324,5 +325,17 @@ describe("export dialog", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls(f, "/api/export/messages")).toHaveLength(0);
+  });
+});
+
+describe("Guilds loading", () => {
+  it("shows guild card skeletons until the list arrives", async () => {
+    serve();
+    const release = holdFetch("/api/guilds");
+    renderPage();
+    expect(await screen.findByRole("status", { name: "Loading guilds" })).toBeInTheDocument();
+    release();
+    await waitFor(() => expect(cardNames().length).toBeGreaterThan(0));
+    expect(screen.queryByRole("status", { name: "Loading guilds" })).toBeNull();
   });
 });

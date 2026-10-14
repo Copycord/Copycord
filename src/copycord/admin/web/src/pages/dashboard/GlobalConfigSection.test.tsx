@@ -6,6 +6,7 @@ import { ConfirmProvider } from "../../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../../lib/api";
 import type { GlobalConfig } from "../../types/dashboard-config";
 import { Dashboard } from "../Dashboard";
+import { holdFetch } from "../../test/holdFetch";
 import { GlobalConfigSection } from "./GlobalConfigSection";
 import {
   buildAddForm,
@@ -310,5 +311,18 @@ describe("Dashboard link cards", () => {
     for (const a of links) expect(a).toHaveAttribute("target", "_blank");
     expect(cards.compareDocumentPosition(screen.getByRole("heading", { name: "Bots" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await screen.findByLabelText("Server Token");
+  });
+});
+
+describe("Global Configuration loading", () => {
+  it("shows a skeleton until the saved config arrives, then the form", async () => {
+    server(baseRoutes());
+    const release = holdFetch("/api/config");
+    renderSection();
+    expect(await screen.findByRole("status", { name: "Loading configuration" })).toBeInTheDocument();
+    expect(document.getElementById("cfg-form")).toBeNull();
+    release();
+    await waitFor(() => expect(document.getElementById("cfg-form")).not.toBeNull());
+    expect(screen.queryByRole("status", { name: "Loading configuration" })).toBeNull();
   });
 });

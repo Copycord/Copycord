@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelRow, GuildMapping } from "../types/channels";
 import { ConfirmProvider } from "../components/ui";
 import { ToastProvider } from "../components/Toast";
+import { holdFetch } from "../test/holdFetch";
 import { Channels } from "./Channels";
 
 const renderPage = () =>
@@ -175,5 +176,17 @@ describe("Channels page", () => {
     expect(sel).toBeDisabled();
     expect(sel.options[0]).toHaveTextContent("(no mappings configured)");
     expect(channelUrls(f)).toEqual(["/api/channels"]);
+  });
+});
+
+describe("Channels loading", () => {
+  it("shows a skeleton list until the channels arrive", async () => {
+    serve();
+    const release = holdFetch("/api/channels");
+    renderPage();
+    expect(await screen.findByRole("status", { name: "Loading channels" })).toBeInTheDocument();
+    release();
+    await waitFor(() => expect(document.querySelectorAll("#channels-root article")).toHaveLength(3));
+    expect(screen.queryByRole("status", { name: "Loading channels" })).toBeNull();
   });
 });

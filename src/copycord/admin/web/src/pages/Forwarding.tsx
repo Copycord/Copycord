@@ -6,7 +6,7 @@
 // Element ids match the old page for the e2e specs.
 
 import { useState } from "react";
-import { Button, Card, cx } from "../components/ui";
+import { Button, Card, Skeleton, cx } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useApi } from "../hooks/useApi";
 import type { StatusGateState } from "../hooks/useStatusGate";
@@ -68,12 +68,7 @@ function Skeletons() {
   return (
     <>
       {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          data-testid="fwd-skeleton"
-          aria-hidden="true"
-          className="h-[118px] animate-pulse rounded-[14px] border border-border bg-white/4"
-        />
+        <Skeleton.Card key={i} height={118} testId="fwd-skeleton" />
       ))}
     </>
   );

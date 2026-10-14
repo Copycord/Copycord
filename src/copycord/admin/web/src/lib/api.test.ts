@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, CSRF_HEADER, api, resetLoginRedirect } from "./api";
+import { ApiError, CSRF_HEADER, api, prefetch, resetLoginRedirect } from "./api";
 
 function mockFetch(status: number, body: unknown, type = "application/json") {
   const text = typeof body === "string" ? body : JSON.stringify(body);
@@ -111,5 +111,18 @@ describe("api session expiry", () => {
     const err = await api.post("/api/x", {}).catch((e: unknown) => e);
     expect((err as ApiError).status).toBe(403);
     expect(go).not.toHaveBeenCalled();
+  });
+});
+
+describe("prefetch", () => {
+  it("hands a prefetched GET to the first reader only", async () => {
+    const fn = vi.fn(async () => new Response(JSON.stringify({ n: 1 }), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fn);
+    prefetch(["/api/prefetch-test"]);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(await api.get("/api/prefetch-test")).toEqual({ n: 1 });
+    expect(fn).toHaveBeenCalledTimes(1);
+    await api.get("/api/prefetch-test");
+    expect(fn).toHaveBeenCalledTimes(2);
   });
 });

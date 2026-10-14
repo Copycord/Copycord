@@ -21,9 +21,9 @@ function renderAt(path: string) {
 }
 
 describe("App shell", () => {
-  it.each(PAGES)("renders the $title page at $path", ({ path, title }) => {
+  it.each(PAGES)("renders the $title page at $path", async ({ path, title }) => {
     renderAt(path);
-    expect(screen.getByRole("heading", { level: 1, name: title })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: title })).toBeInTheDocument();
   });
 
   it("lists the menu in the same order as the old sidebar and marks the active page", () => {

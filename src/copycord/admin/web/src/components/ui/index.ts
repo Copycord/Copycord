@@ -10,6 +10,8 @@ export type { ConfirmOptions } from "./ConfirmDialog";
 export { EmptyState } from "./EmptyState";
 export { Field, Input, Select, Textarea } from "./Field";
 export type { SelectOption } from "./Field";
+export { Skeleton, SkeletonSection } from "./Skeleton";
+export type { SkeletonProps } from "./Skeleton";
 export { Spinner } from "./Spinner";
 export { Table } from "./Table";
 export type { Column } from "./Table";

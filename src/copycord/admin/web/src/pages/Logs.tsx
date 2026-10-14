@@ -8,7 +8,7 @@ import { useToast } from "../components/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import type { ConfirmOptions } from "../components/ui/ConfirmDialog";
 import { cx } from "../components/ui/cx";
-import { Spinner } from "../components/ui/Spinner";
+import { SkeletonSection } from "../components/ui/Skeleton";
 import { useApi } from "../hooks/useApi";
 import { api } from "../lib/api";
 import type {
@@ -358,8 +358,8 @@ export function Logs() {
           <tbody id="logs-tbody">
             {firstLoad ? (
               <tr>
-                <td colSpan={COLS} className="py-12 text-center">
-                  <Spinner label="Loading event logs" />
+                <td colSpan={COLS} className="px-3.5 py-2">
+                  <SkeletonSection rows={8} rowHeight={41} label="Loading event logs" />
                 </td>
               </tr>
             ) : (

@@ -5,7 +5,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";
-import { Card, cx } from "../components/ui";
+import { Card, cx, SkeletonSection } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import type { BackupInfo } from "../types/system";
 import {
@@ -258,6 +258,15 @@ export function System() {
                 </tr>
               </thead>
               <tbody hidden={!open}>
+                {data === undefined && !error
+                  ? [0, 1, 2].map((i) => (
+                      <tr key={i} data-testid="adv-archive-skeleton">
+                        <td colSpan={4} className={CELL}>
+                          <SkeletonSection rows={1} rowHeight={20} label="Loading backups" />
+                        </td>
+                      </tr>
+                    ))
+                  : null}
                 {archives?.map((a) => {
                   const busy = rowBusy?.name === a.name ? rowBusy.action : null;
                   return (
