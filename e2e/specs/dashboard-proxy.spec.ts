@@ -1,6 +1,6 @@
 // Parity for the Configuration page proxy card (inventory items 25, 26, 27).
 // Every proxy endpoint is stubbed: no real proxy is ever contacted. The bus websocket is stubbed too,
-// so the test pushes the proxy_test messages itself. Runs against the old UI by default, E2E_BASE_PATH=/app for the SPA.
+// so the test pushes the proxy_test messages itself.
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";
 import { settle } from "../lib/ui.ts";

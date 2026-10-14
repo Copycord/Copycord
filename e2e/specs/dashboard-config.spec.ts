@@ -1,8 +1,8 @@
 // Parity for the Global Configuration card, token validation, backup tokens and the link cards
-// (inventory items 15, 16, 17). Runs against the old UI by default; E2E_BASE_PATH=/app runs it on the SPA.
+// (inventory items 15, 16, 17).
 // The save and backup token endpoints are stubbed so the seeded install is never changed.
 import { expect, test, type Page } from "@playwright/test";
-import { BASE_PATH, pageUrl } from "../lib/env.ts";
+import { pageUrl } from "../lib/env.ts";
 import { settle } from "../lib/ui.ts";
 
 async function open(page: Page): Promise<void> {
@@ -93,7 +93,7 @@ test.describe("dashboard config", () => {
     );
     await open(page);
     await toast(page, /CLIENT_TOKEN is invalid or expired/);
-    await expect(page.locator("#CLIENT_TOKEN")).toHaveAttribute(BASE_PATH ? "aria-invalid" : "class", BASE_PATH ? "true" : /is-invalid/);
+    await expect(page.locator("#CLIENT_TOKEN")).toHaveAttribute("aria-invalid", "true");
     await expect(page.locator("#SERVER_TOKEN")).not.toHaveClass(/is-invalid/);
     await expect(page.locator("#bot-invite-btn")).toHaveAttribute("href", /client_id=777&permissions=8/);
   });

@@ -1,5 +1,4 @@
 // Parity for inventory items 23 (Notifications) and 24 (Sync Settings) on the Configuration page.
-// Runs against the old UI by default; E2E_BASE_PATH=/app runs the same checks against the SPA.
 // The test endpoint is always stubbed, so no webhook is ever called.
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";

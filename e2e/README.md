@@ -1,26 +1,27 @@
 # Copycord e2e
 
-Playwright harness for the dashboard. `global-setup.ts` builds the frontend, installs the repo into `../.venv`,
-starts `copycord run` against a throwaway home on port 18080 (`E2E_ADMIN_PORT`), seeds a mapping, a forwarding
-rule and some event logs, and logs in. No Discord tokens are needed; `/api/client-guilds` is stubbed in the
-forwarding tests.
+Playwright harness for the dashboard (the React SPA in `src/copycord/admin/web`, served at the root).
+`global-setup.ts` builds the SPA, installs the repo into `../.venv`, starts `copycord run` against a throwaway
+home on port 18080 (`E2E_ADMIN_PORT`), seeds a mapping, a forwarding rule and some event logs, and logs in
+through the SPA login page. No Discord tokens are needed; `/api/client-guilds` is stubbed in the forwarding
+tests.
 
 ```sh
 cd e2e && npm ci && npx playwright install chromium
 npx tsc --noEmit -p .                      # typecheck
-npx playwright test specs/baseline.spec.ts # screenshots into baseline/old
 npx playwright test specs/parity.spec.ts   # parity smoke
+npx playwright test                        # every spec
 ```
 
-Set `E2E_SKIP_BUILD=1` once `src/copycord/admin/static/assets` is built. On Titan use `run-on-titan.sh`.
+Set `E2E_SKIP_BUILD=1` once `src/copycord/admin/web/dist` is built. On Titan use `run-on-titan.sh`.
 
-## Against the new UI (/app)
+## Screenshots
 
-`E2E_BASE_PATH=/app` points every page URL at the SPA; the specs stay the same.
+`baseline/old/` holds the screenshots of the old Jinja UI, kept as reference images only. To compare the SPA
+with them:
 
 ```sh
-E2E_BASE_PATH=/app npx playwright test specs/parity.spec.ts
-E2E_BASE_PATH=/app E2E_SHOTS_DIR=baseline/new npx playwright test specs/baseline.spec.ts
+npx playwright test specs/baseline.spec.ts   # into baseline/new
 node --experimental-strip-types scripts/compare.ts baseline/old baseline/new compare-out
 ```
 

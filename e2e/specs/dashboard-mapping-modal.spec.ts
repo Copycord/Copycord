@@ -1,6 +1,6 @@
 // Inventory items 19 and 20: mapping modal #mapping-modal / #mapping-form and the message features
-// sub-modal #msg-features-modal. Runs against the old UI by default; E2E_BASE_PATH=/app runs the same
-// checks against the SPA. The mapping list and every write are stubbed so the seeded mapping stays
+// sub-modal #msg-features-modal.
+// The mapping list and every write are stubbed so the seeded mapping stays
 // intact and no Discord check runs.
 import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";

@@ -48,13 +48,10 @@ export default async function globalSetup(): Promise<void> {
   fs.mkdirSync(RUN_DIR, { recursive: true });
 
   if (process.env.E2E_SKIP_BUILD !== "1") {
-    const fe = path.join(REPO_DIR, "src", "copycord", "admin", "frontend");
-    sh("npm", ["ci", "--no-audit", "--no-fund"], fe);
-    sh("npm", ["run", "build"], fe);
-    // Editable installs serve admin/static from the checkout (hatch_build.py), so the build goes there (gitignored).
-    fs.cpSync(path.join(fe, "dist", "assets"), path.join(REPO_DIR, "src", "copycord", "admin", "static", "assets"), {
-      recursive: true,
-    });
+    // The SPA; editable installs serve admin/web/dist straight from the checkout.
+    const web = path.join(REPO_DIR, "src", "copycord", "admin", "web");
+    sh("npm", ["ci", "--no-audit", "--no-fund"], web);
+    sh("npm", ["run", "build"], web);
   }
   const py = path.join(VENV, "bin", "python");
   if (!fs.existsSync(path.join(VENV, "bin", "copycord"))) {

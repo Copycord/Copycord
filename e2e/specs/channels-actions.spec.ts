@@ -1,5 +1,4 @@
 // Inventory items 31 and 32: channel and category row actions and Delete all orphans.
-// Runs against the old UI by default; E2E_BASE_PATH=/app runs the same checks against the SPA.
 // The save routes are stubbed so the seeded database stays untouched.
 import { expect, test, type Page } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";

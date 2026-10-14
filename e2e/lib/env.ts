@@ -12,9 +12,7 @@ export const HOME = process.env.E2E_COPYCORD_HOME ?? "/tmp/cc-e2e-home";
 export const PORT = Number(process.env.E2E_ADMIN_PORT ?? "18080");
 export const BASE_URL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${PORT}`;
 
-// Old UI pages live at the root; the SPA lives under /app. E2E_BASE_PATH=/app reruns the same specs there.
-export const BASE_PATH = (process.env.E2E_BASE_PATH ?? "").replace(/\/+$/, "");
-
+// Dashboard pages, all served by the SPA at the root. The key event-logs is the old name of the logs page.
 export const PAGES = {
   dashboard: "/",
   channels: "/channels",
@@ -22,22 +20,16 @@ export const PAGES = {
   forwarding: "/forwarding",
   scraper: "/scraper",
   system: "/system",
-  "event-logs": "/event-logs",
+  "event-logs": "/logs",
 } as const;
 
 export type PageName = keyof typeof PAGES;
 
 export function pageUrl(name: PageName): string {
-  const p = PAGES[name];
-  if (!BASE_PATH) return p;
-  // The SPA serves the logs page at /logs; the old UI calls it /event-logs.
-  if (name === "event-logs") return `${BASE_PATH}/logs`;
-  // The router renders the home link without a trailing slash.
-  return p === "/" ? BASE_PATH : `${BASE_PATH}${p}`;
+  return PAGES[name];
 }
 
-// The login and 404 pages stay server routes until the SPA login lane replaces them.
-export const LOGIN_PATH = process.env.E2E_LOGIN_PATH ?? "/login";
-export const NOT_FOUND_PATH = `${BASE_PATH}/this-page-does-not-exist`;
+export const LOGIN_PATH = "/login";
+export const NOT_FOUND_PATH = "/this-page-does-not-exist";
 
 export const CSRF_HEADERS = { "X-Copycord-CSRF": "1", Origin: BASE_URL };

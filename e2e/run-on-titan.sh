@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the e2e suite on Titan WSL from a fresh clone of a branch.
 # Usage: B=<branch> [D=/tmp/cc-e2e-src] [SPECS="specs/baseline.spec.ts specs/parity.spec.ts"] bash e2e/run-on-titan.sh
-# Env passed through: E2E_BASE_PATH (e.g. /app), E2E_SHOTS_DIR (e.g. baseline/new), E2E_ADMIN_PORT.
+# Env passed through: E2E_SHOTS_DIR (e.g. baseline/new), E2E_ADMIN_PORT.
 set -u
 B=${B:?branch}
 D=${D:-/root/cc-e2e-src}

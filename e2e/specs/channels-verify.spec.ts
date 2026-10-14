@@ -1,8 +1,7 @@
 // Inventory items 33 to 36: the clone action, the verify modal, the backfill modal and live backfill progress.
-// The verify button and the clone progress UI exist on the SPA only, so this runs with E2E_BASE_PATH=/app.
 // Endpoints and the /ws/out and /ws/in sockets are stubbed, nothing reaches the real client.
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
-import { BASE_PATH, pageUrl } from "../lib/env.ts";
+import { pageUrl } from "../lib/env.ts";
 import { settle } from "../lib/ui.ts";
 import { CHANNELS, channelCards, stubChannels } from "./channels-fixtures.ts";
 
@@ -81,8 +80,6 @@ async function openCloneDialog(page: Page, cid: string): Promise<void> {
 }
 
 test.describe("channels verify and backfill", () => {
-  test.skip(!BASE_PATH, "SPA only: run with E2E_BASE_PATH=/app");
-
   test("33 the clone action is offered for cloned channels only", async ({ page }) => {
     await stubBackfill(page);
     await openChannels(page);

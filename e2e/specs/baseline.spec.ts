@@ -1,15 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { BASE_PATH, E2E_DIR, LOGIN_PATH, NOT_FOUND_PATH, PAGES, pageUrl, type PageName } from "../lib/env.ts";
+import { E2E_DIR, LOGIN_PATH, NOT_FOUND_PATH, PAGES, pageUrl, type PageName } from "../lib/env.ts";
 import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, expectOpen, modal, settle } from "../lib/ui.ts";
 import { stubClientGuilds } from "../lib/seed.ts";
 import { DETAILS, FIRST, dialog as guildDialog, guildAction, guildCard, stubGuilds } from "./guilds-fixtures.ts";
 import { LOG_LINES, stubLogStream, stubRunning, stubVersion } from "./dashboard-fixtures.ts";
 import { CHANNELS, channelCards, stubChannels } from "./channels-fixtures.ts";
 
-// E2E_SHOTS_DIR=baseline/new captures the SPA into a separate folder for scripts/compare.ts.
-const OUT = path.resolve(E2E_DIR, process.env.E2E_SHOTS_DIR ?? "baseline/old");
+// Captures into baseline/new (or E2E_SHOTS_DIR); baseline/old holds the old UI as reference images only.
+const OUT = path.resolve(E2E_DIR, process.env.E2E_SHOTS_DIR ?? "baseline/new");
 const VIEWPORTS = [
   { name: "1440x900", width: 1440, height: 900 },
   { name: "390x844", width: 390, height: 844 },
@@ -85,8 +85,7 @@ for (const vp of VIEWPORTS) {
 
     for (const name of Object.keys(PAGES) as PageName[]) {
       test(`${name}`, async ({ page }) => {
-        // The SPA serves the old /event-logs page at /app/logs (App.tsx PAGES).
-        await page.goto(name === "event-logs" && BASE_PATH ? `${BASE_PATH}/logs` : pageUrl(name));
+        await page.goto(pageUrl(name));
         await settle(page);
         await page.screenshot({ path: path.join(OUT, `${name}-${vp.name}.png`), fullPage: true });
       });

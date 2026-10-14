@@ -1,7 +1,7 @@
 // Inventory item 21: the Token Message Cloning block of the mapping modal (#user-tokens-section):
 // the USE_USER_TOKENS options saved with the mapping, and the per mapping token manager (add, bulk
-// add, search, enable, remove, verify, delete all). Runs against the old UI by default;
-// E2E_BASE_PATH=/app runs the same checks against the SPA. The mapping list and every token
+// add, search, enable, remove, verify, delete all).
+// The mapping list and every token
 // endpoint are stubbed with fake tokens, so no Discord check runs and no real data is touched.
 import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";

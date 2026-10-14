@@ -1,7 +1,6 @@
 // Parity smoke for inventory items reachable without Discord (numbers refer to copycord-frontend-inventory.md).
-// Runs against the old UI by default; E2E_BASE_PATH=/app runs the same checks against the SPA.
 import { expect, test, type Page } from "@playwright/test";
-import { BASE_PATH, CSRF_HEADERS, LOGIN_PATH, NOT_FOUND_PATH, PAGES, PASSWORD, pageUrl, type PageName } from "../lib/env.ts";
+import { CSRF_HEADERS, LOGIN_PATH, NOT_FOUND_PATH, PAGES, PASSWORD, pageUrl, type PageName } from "../lib/env.ts";
 import { SEED, stubClientGuilds } from "../lib/seed.ts";
 import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, closeX, expectClosed, expectOpen, modal, settle } from "../lib/ui.ts";
 import { DETAILS, FIRST, GUILDS, LAST, dialog as guildDialog, guildAction, guildCard, stubGuilds } from "./guilds-fixtures.ts";
@@ -161,7 +160,6 @@ test.describe("dashboard", () => {
   });
 
   test("15 config form loads with save and cancel", async ({ page }) => {
-    test.skip(!!BASE_PATH, "lane 14 ports the global configuration card");
     await open(page, "dashboard");
     await expect(page.locator("#cfg-form")).toBeAttached();
     await expect(page.locator("#cfg-save-btn")).toBeAttached();
@@ -169,7 +167,6 @@ test.describe("dashboard", () => {
   });
 
   test("17 backup tokens modal opens and closes", async ({ page }) => {
-    test.skip(!!BASE_PATH, "lane 14 ports backup tokens");
     await open(page, "dashboard");
     const m = modal(page, "backup-token-modal");
     await page.locator("#backupTokensBtn").click();
@@ -179,7 +176,6 @@ test.describe("dashboard", () => {
   });
 
   test("18 seeded mapping card is listed and search filters it", async ({ page }) => {
-    test.skip(!!BASE_PATH, "lane 15 ports the mapping cards");
     await open(page, "dashboard");
     const list = page.locator("#guild-mapping-list");
     await expect(list).toContainText(SEED.mappingName);
@@ -190,7 +186,6 @@ test.describe("dashboard", () => {
   });
 
   test("19 mapping settings modal opens with the seeded guild IDs and closes", async ({ page }) => {
-    test.skip(!!BASE_PATH, "lane 16 ports the mapping modal");
     await open(page, "dashboard");
     await page.locator(MAPPING_EDIT_BTN).first().click();
     const m = modal(page, "mapping-modal");
@@ -202,7 +197,6 @@ test.describe("dashboard", () => {
   });
 
   test("22 filters modal opens and closes", async ({ page }) => {
-    test.skip(!!BASE_PATH, "lane 18 ports the filters modal");
     await open(page, "dashboard");
     await page.locator(MAPPING_FILTERS_BTN).first().click();
     const m = modal(page, "filters-modal");
@@ -221,7 +215,6 @@ test.describe("dashboard", () => {
   });
 
   test("27 proxy settings and favorites help modals open and close", async ({ page }) => {
-    test.skip(!!BASE_PATH, "lane 21 ports the proxy panel");
     await open(page, "dashboard");
     for (const [btn, id] of [["#srv-proxy-settings-btn", "proxy-settings-modal"], ["#srv-proxy-fav-help-btn", "proxy-fav-help-modal"]] as const) {
       const m = modal(page, id);
@@ -528,10 +521,8 @@ test.describe("scraper", () => {
     await row.locator(".sc-token-revalidate").click();
     await expect.poll(() => validated).toBe(1);
 
-    // The old page asks with window.confirm, the SPA with its dialog.
-    if (!BASE_PATH) page.once("dialog", (d) => void d.accept());
     await row.locator(".sc-token-delete").click();
-    if (BASE_PATH) await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
     await expect.poll(() => deleted).toBe(1);
     await expect(page.locator("#sc-token-empty")).toBeVisible();
   });
@@ -576,20 +567,17 @@ test.describe("scraper", () => {
       expect((await put(["127.0.0.1:9"])).ok()).toBeTruthy();
       const got = (await (await page.request.get("/api/scraper/proxies")).json()) as { proxies: string[] };
       expect(got.proxies).toEqual(["127.0.0.1:9"]);
-      if (BASE_PATH) {
-        // The SPA edits the list in place; the old page links to Configuration.
-        await page.reload();
-        await settle(page);
-        await page.locator("#sc-proxy-toggle").click();
-        await expect(page.locator("#sc-proxy-panel")).toContainText("127.0.0.1:9");
-        await page.locator("#sc-proxy-input").fill("127.0.0.1:10");
-        await page.locator("#sc-proxy-input").press("Enter");
-        const saved = page.waitForResponse((res) => res.url().endsWith("/api/scraper/proxies") && res.request().method() === "PUT");
-        await page.locator("#sc-proxy-save").click();
-        expect((await saved).ok()).toBeTruthy();
-        const after = (await (await page.request.get("/api/scraper/proxies")).json()) as { proxies: string[] };
-        expect(after.proxies).toEqual(["127.0.0.1:9", "127.0.0.1:10"]);
-      }
+      await page.reload();
+      await settle(page);
+      await page.locator("#sc-proxy-toggle").click();
+      await expect(page.locator("#sc-proxy-panel")).toContainText("127.0.0.1:9");
+      await page.locator("#sc-proxy-input").fill("127.0.0.1:10");
+      await page.locator("#sc-proxy-input").press("Enter");
+      const saved = page.waitForResponse((res) => res.url().endsWith("/api/scraper/proxies") && res.request().method() === "PUT");
+      await page.locator("#sc-proxy-save").click();
+      expect((await saved).ok()).toBeTruthy();
+      const after = (await (await page.request.get("/api/scraper/proxies")).json()) as { proxies: string[] };
+      expect(after.proxies).toEqual(["127.0.0.1:9", "127.0.0.1:10"]);
     } finally {
       await put([]);
     }
@@ -625,9 +613,8 @@ test.describe("scraper", () => {
     await expect.poll(() => hits).toContain("DELETE queue/8");
     await page.locator("#sc-queue-clear").click();
     await expect.poll(() => hits).toContain("POST queue/clear");
-    if (!BASE_PATH) page.once("dialog", (d) => void d.accept());
     await page.locator("#sc-cancel-all-btn").click();
-    if (BASE_PATH) await page.getByRole("dialog").getByRole("button", { name: "Cancel All", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel All", exact: true }).click();
     await expect.poll(() => hits).toContain("POST cancel-all");
   });
 
@@ -677,9 +664,8 @@ test.describe("scraper", () => {
     await page.locator("#sc-scrapes-refresh").click();
     await expect(item).toHaveCount(1);
 
-    if (!BASE_PATH) page.once("dialog", (d) => void d.accept());
     await item.locator(".sc-scrape-delete").click();
-    if (BASE_PATH) await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
     await expect.poll(() => deleted).toEqual(["/api/scraper/scrapes/123456789%2Fscrape_e2e.json"]);
     await expect(page.locator("#sc-scrapes-empty")).toBeVisible();
     await expect(item).toHaveCount(0);
@@ -804,8 +790,7 @@ test.describe("system", () => {
 });
 
 test.describe("event logs", () => {
-  // The SPA serves the old /event-logs page at /app/logs (App.tsx PAGES).
-  const LOGS_URL = BASE_PATH ? `${BASE_PATH}/logs` : PAGES["event-logs"];
+  const LOGS_URL = PAGES["event-logs"];
   const SEEDED: Array<[string, string]> = [
     ["channel_created", "Created channel #general"],
     ["channel_deleted", "Deleted channel #old-news"],
@@ -910,7 +895,6 @@ test.describe("event logs", () => {
   });
 
   test("51 bulk delete selected rows after confirming", async ({ page }) => {
-    test.skip(!BASE_PATH, "the old page has no row selection");
     for (const n of [1, 2, 3]) await addLog(page, "sticker_synced", `Synced sticker e2e-bulk-ui ${n}`);
     await openLogs(page);
     await page.locator("#logs-search").fill("e2e-bulk-ui");

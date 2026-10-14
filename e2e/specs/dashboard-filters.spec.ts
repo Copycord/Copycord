@@ -1,6 +1,6 @@
 // Inventory item 22: mapping Filters modal (#filters-modal / #form-filters) with its category/channel
-// picker (#filterObjectsModal) and role picker (#roleBlocksModal). Runs against the old UI by default;
-// E2E_BASE_PATH=/app runs the same checks against the SPA. Filters, channels and roles are stubbed so the
+// picker (#filterObjectsModal) and role picker (#roleBlocksModal).
+// Filters, channels and roles are stubbed so the
 // seeded mapping keeps its real (empty) filters for the other specs. Chip lists are read from the hidden
 // inputs both UIs keep in sync.
 import { expect, test, type Page, type Route } from "@playwright/test";
