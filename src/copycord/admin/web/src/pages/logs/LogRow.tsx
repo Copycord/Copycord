@@ -63,15 +63,15 @@ export function LogRow({ log, expanded, deleting, onToggle, onDelete }: LogRowPr
       toggle();
     }
   };
-  const edge = cx(TD, expanded ? "border-b-transparent" : "border-white/4");
-  const td = cx(edge, "px-3.5");
+  const edge = cx(TD, expanded ? "border-b-transparent" : "border-b-white/4");
+  const td = cx(edge, "px-3.5 text-left");
 
   return (
     <>
       <tr
         data-log-id={log.log_id}
         className={cx(
-          "group transition-colors hover:bg-[rgba(139,92,246,0.06)]",
+          "group border-[gray] transition-colors hover:bg-[rgba(139,92,246,0.06)]",
           expandable && "cursor-pointer outline-none focus-visible:bg-[rgba(139,92,246,0.06)]",
         )}
         onClick={toggle}
@@ -89,9 +89,9 @@ export function LogRow({ log, expanded, deleting, onToggle, onDelete }: LogRowPr
           <span className="text-xs font-medium text-muted">{guildText(log)}</span>
         </td>
         <td className={td}>
-          <span className="break-words text-[13px] text-white/80">{log.details ?? ""}</span>
+          <span className="text-[13px] text-white/80">{log.details ?? ""}</span>
         </td>
-        <td className={cx(edge, "px-1 text-center")}>
+        <td className={cx(edge, "px-3.5 text-center")}>
           <button
             type="button"
             title="Delete"

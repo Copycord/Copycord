@@ -9,11 +9,14 @@ const BTN =
 const IDLE = "border-border bg-transparent text-text enabled:hover:border-accent enabled:hover:bg-[rgba(139,92,246,0.15)]";
 const ACTIVE = "border-accent bg-accent text-white";
 
+// With one page the old .logs-pagination stayed in the flow, empty, keeping its 16px padding.
+const NAV = "flex flex-wrap items-center justify-center gap-1 py-4";
+
 export function Pagination({ page, pages, onPage }: { page: number; pages: number; onPage: (p: number) => void }) {
   const range = pageRange(page, pages);
-  if (range.length === 0) return <nav id="logs-pagination" aria-label="Pagination" />;
+  if (range.length === 0) return <nav id="logs-pagination" aria-label="Pagination" className={NAV} />;
   return (
-    <nav id="logs-pagination" aria-label="Pagination" className="flex flex-wrap items-center justify-center gap-1 py-4">
+    <nav id="logs-pagination" aria-label="Pagination" className={NAV}>
       <button
         type="button"
         className={cx(BTN, IDLE)}
