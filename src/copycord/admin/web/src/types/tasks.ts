@@ -33,6 +33,15 @@ export interface TaskStep {
   note?: string | null;
 }
 
+/** One friendly log line in the run detail's log_lines; seq numbers the line, step names a step key. */
+export interface TaskLogLine {
+  seq: number;
+  ts: string;
+  level: "info" | "warn" | "error" | string;
+  step?: string | null;
+  msg: string;
+}
+
 export interface TaskRun {
   id: string;
   type: string;
