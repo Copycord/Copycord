@@ -209,6 +209,18 @@ describe("Dashboard log modal", () => {
     return { user, modal, src: FakeSource.instances.at(-1)! };
   }
 
+  it("locks the page scroll only while the log modal is open", async () => {
+    server({ "/api/status": () => json(STOPPED), "/version": () => json(NO_UPDATE) });
+    renderPage();
+    expect(document.getElementById("log-modal")).toBeNull();
+    expect(document.body.style.overflow).not.toBe("hidden");
+    const { user, modal } = await openLogs("server");
+    expect(document.body.style.overflow).toBe("hidden");
+    await user.click(within(modal).getByRole("button", { name: /close/i }));
+    await waitFor(() => expect(document.getElementById("log-modal")).toBeNull());
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
+
   it("tails /logs/stream/{which} and renders lines as text", async () => {
     server({ "/api/status": () => json(STOPPED), "/version": () => json(NO_UPDATE) });
     renderPage();

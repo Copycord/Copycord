@@ -26,7 +26,8 @@ export interface LogModalProps {
 }
 
 export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
-  useScrollLock(true);
+  // Dashboard keeps this mounted while closed (which is null), so lock only while open.
+  useScrollLock(which !== null);
   const notify = useNotify();
   const confirm = useSafeConfirm();
   const [lines, setLines] = useState<string[]>([]);
