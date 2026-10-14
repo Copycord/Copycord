@@ -10,6 +10,7 @@ import { GuildsSkeleton } from "./pages/guilds/GuildsSkeleton";
 import { LogsSkeleton } from "./pages/logs/LogsSkeleton";
 import { ScraperSkeleton } from "./pages/scraper/ScraperSkeleton";
 import { SystemSkeleton } from "./pages/system/SystemSkeleton";
+import { TasksSkeleton } from "./pages/tasks/TasksSkeleton";
 import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 
@@ -53,6 +54,7 @@ const Dashboard = lazyPage(() => {
   return import("./pages/Dashboard").then((m) => m.Dashboard);
 }, DashboardSkeleton);
 const Channels = lazyPage(() => import("./pages/Channels").then((m) => m.Channels), ChannelsSkeleton);
+const Tasks = lazyPage(() => import("./pages/Tasks").then((m) => m.Tasks), TasksSkeleton);
 const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds), GuildsSkeleton);
 const Forwarding = lazyPage(() => import("./pages/Forwarding").then((m) => m.Forwarding), ForwardingSkeleton);
 const Scraper = lazyPage(() => import("./pages/Scraper").then((m) => m.Scraper), ScraperSkeleton);
@@ -64,6 +66,7 @@ const Kit = lazyPage(() => import("./pages/Kit").then((m) => m.Kit));
 export const PAGES = [
   { path: "/", title: "Configuration" },
   { path: "/channels", title: "Channels" },
+  { path: "/tasks", title: "Tasks" },
   { path: "/guilds", title: "Guilds" },
   { path: "/forwarding", title: "Forwarding" },
   { path: "/scraper", title: "Scraper" },
@@ -87,6 +90,7 @@ function PageSkeleton() {
 const PAGE_ELEMENTS: Record<(typeof PAGES)[number]["path"], ReactNode> = {
   "/": <Dashboard />,
   "/channels": <Channels />,
+  "/tasks": <Tasks />,
   "/guilds": <Guilds />,
   "/forwarding": <Forwarding />,
   "/scraper": <Scraper />,
@@ -106,6 +110,8 @@ export function App() {
             <Route key={p.path} path={p.path} element={PAGE_ELEMENTS[p.path]} />
           ),
         )}
+        {/* A run page is the Tasks page with a run open, so /tasks/runs/12 never falls to NotFound. */}
+        <Route path="/tasks/runs/:id" element={PAGE_ELEMENTS["/tasks"]} />
         <Route path="/_kit" element={<Kit />} />
         <Route path="*" element={<NotFound />} />
       </Route>

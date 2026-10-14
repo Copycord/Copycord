@@ -1,0 +1,43 @@
+// Left column of the Tasks page: "All tasks", then one entry per registered type with its active count.
+
+import { Link } from "react-router";
+import { cx } from "../../components/ui/cx";
+import type { TaskType } from "../../types/tasks";
+import { RAIL, RAIL_HEADING, RAIL_ITEM } from "./TasksSkeleton";
+
+export interface TypeRailProps {
+  types: TaskType[];
+  /** The selected type key, or "" for All tasks. */
+  selected: string;
+}
+
+const item = (active: boolean) => cx(RAIL_ITEM, active ? "bg-rail-active font-semibold" : "hover:bg-rail-hover");
+
+export function TypeRail({ types, selected }: TypeRailProps) {
+  return (
+    <nav aria-label="Task types" className={RAIL}>
+      <Link to="/tasks" className={item(selected === "")} aria-current={selected === "" ? "page" : undefined}>
+        All tasks
+      </Link>
+      <div className={RAIL_HEADING}>Task types</div>
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {types.map((t) => (
+          <li key={t.key}>
+            <Link
+              to={`/tasks?type=${encodeURIComponent(t.key)}`}
+              className={item(selected === t.key)}
+              aria-current={selected === t.key ? "page" : undefined}
+            >
+              <span className="min-w-0 truncate">{t.title}</span>
+              {t.active > 0 ? (
+                <span className="rounded-full bg-brand-ghost px-1.5 text-xs text-accent tabular-nums" aria-label={`${t.active} active`}>
+                  {t.active}
+                </span>
+              ) : null}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}

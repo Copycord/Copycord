@@ -31,6 +31,7 @@ const FRAMES: Record<string, Frame> = {
   "/channels": { main: `${WIDE} max-sm:px-3` },
   "/guilds": { main: WIDE },
   "/forwarding": { main: WIDE, footerInside: true },
+  "/tasks": { main: WIDE },
   // .scraper-wide
   "/scraper": { main: `${COLUMN} max-w-[1200px] px-5 pb-20`, sidebarFooter: "social" },
   // .adv-wide
@@ -55,7 +56,7 @@ export function Layout() {
   // undefined while /version loads, null when it has no version or fails.
   const [version, setVersion] = useState<string | null | undefined>(undefined);
   const location = useLocation();
-  const frame = FRAMES[location.pathname] ?? NOT_FOUND;
+  const frame = FRAMES[location.pathname] ?? (location.pathname.startsWith("/tasks/") ? FRAMES["/tasks"] : NOT_FOUND);
 
   useEffect(() => setDrawerOpen(false), [location.pathname]);
 

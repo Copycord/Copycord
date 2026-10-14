@@ -7,9 +7,13 @@ import { PROMO_LINKS } from "../pages/dashboard/config/model";
 import type { SidebarItem } from "../types/api";
 import { DISCORD_PATH, MenuIcon } from "./icons";
 
-export const SIDEBAR_ITEMS: SidebarItem[] = [
+/** A menu entry; Tasks is a v4 page the old sidebar never had, so its key sits outside SidebarItem. */
+export type MenuItem = Omit<SidebarItem, "key"> & { key: SidebarItem["key"] | "tasks" };
+
+export const SIDEBAR_ITEMS: MenuItem[] = [
   { key: "config", label: "Configuration", to: "/" },
   { key: "channels", label: "Channels", to: "/channels" },
+  { key: "tasks", label: "Tasks", to: "/tasks" },
   { key: "guilds", label: "Guilds", to: "/guilds" },
   { key: "forwarding", label: "Forwarding", to: "/forwarding" },
   { key: "scraper", label: "Scraper", to: "/scraper" },
@@ -40,7 +44,7 @@ export async function logout(go: (url: string) => void = (url) => window.locatio
 export interface SidebarProps {
   onNavigate?: () => void;
   /** Items to leave out, like the old sidebar_hide. */
-  hide?: SidebarItem["key"][];
+  hide?: MenuItem["key"][];
   /** "social" shows GitHub and Discord links in the footer instead of GitHub and the version. */
   footer?: "version" | "social";
   version?: string | null;
@@ -56,7 +60,8 @@ export function Sidebar({ onNavigate, hide = [], footer = "version", version }: 
             <li key={item.key}>
               <NavLink
                 to={item.to}
-                end
+                // Tasks stays lit on its run pages (/tasks/runs/:id).
+                end={item.key !== "tasks"}
                 onClick={onNavigate}
                 className={({ isActive }) => `${ITEM} ${isActive ? "bg-rail-active" : "hover:bg-rail-hover"}`}
               >

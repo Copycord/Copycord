@@ -1,0 +1,90 @@
+// Wire shapes of /api/tasks/* and the task.run.updated frame on /ws/out. Every id is a string.
+
+export type RunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
+export type StepState = "queued" | "running" | "success" | "failed" | "skipped" | "cancelled";
+export type RunTrigger = "manual" | "rerun" | "api";
+
+export interface TaskType {
+  key: string;
+  title: string;
+  description: string;
+  inputs_schema: Record<string, unknown>;
+  /** Queued plus running runs of this type. */
+  active: number;
+  total: number;
+}
+
+export interface TaskContext {
+  label: string;
+  mapping_id?: string | null;
+  guild_id?: string | null;
+}
+
+export interface TaskStep {
+  key: string;
+  title: string;
+  state: StepState;
+  label?: string | null;
+  done?: number | null;
+  total?: number | null;
+  queue_position?: number | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  note?: string | null;
+}
+
+export interface TaskRun {
+  id: string;
+  type: string;
+  number: number;
+  title: string;
+  context: TaskContext | null;
+  status: RunStatus;
+  trigger: RunTrigger | string;
+  actor: string;
+  inputs?: Record<string, unknown>;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  summary: Record<string, number> | null;
+  /** The detail response carries the friendly log lines; list rows may carry a count or nothing. */
+  log_lines?: unknown;
+  steps?: TaskStep[];
+  report?: unknown;
+  /** Monotonic per run; a frame with a lower seq than the one held is stale. */
+  seq: number;
+}
+
+export interface TaskTypesResponse {
+  types: TaskType[];
+}
+
+export interface TaskRunsResponse {
+  runs: TaskRun[];
+  total: number;
+  page: number;
+  actors: string[];
+  contexts: TaskContext[];
+}
+
+export interface TaskRunResponse {
+  run: TaskRun;
+}
+
+/** The payload of a task.run.updated frame: the run without inputs and only the steps that changed. */
+export interface TaskRunUpdated {
+  run: TaskRun;
+  steps?: TaskStep[];
+}
+
+export interface RunFilters {
+  type?: string;
+  status?: RunStatus;
+  actor?: string;
+  context?: string;
+  q?: string;
+  page?: number;
+}
+
+export const ACTIVE_STATUSES: readonly RunStatus[] = ["queued", "running"];

@@ -3,7 +3,7 @@
 
 import type { SidebarItem } from "../types/api";
 
-type IconKey = SidebarItem["key"] | "logout";
+export type IconKey = SidebarItem["key"] | "tasks" | "logout";
 
 const PATHS: Record<IconKey, string[]> = {
   config: [
@@ -20,6 +20,11 @@ const PATHS: Record<IconKey, string[]> = {
     "m6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z",
   ],
   logs: ["M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"],
+  // play-circle
+  tasks: [
+    "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+    "M15.91 11.672a.375.375 0 0 1 0 .656l-5.603 3.113a.375.375 0 0 1-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112Z",
+  ],
   logout: [
     "M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9",
   ],
