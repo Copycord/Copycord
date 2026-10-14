@@ -6,6 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "../../components/ui";
+import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_OVERLAY, MODAL_TITLE } from "../../components/Modal";
 import { logStream } from "../../lib/sse";
 import type { SseOptions } from "../../lib/sse";
 import type { LogStream } from "../../types/api";
@@ -111,16 +112,16 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
   };
 
   return createPortal(
-    <div id="log-modal" className="show fixed inset-0 z-40 flex items-center justify-center p-4" aria-hidden="false">
-      <div className="modal-backdrop absolute inset-0 bg-black/60" data-testid="log-backdrop" onClick={onClose} />
+    <div id="log-modal" className={`show ${MODAL_OVERLAY}`} aria-hidden="false">
+      <div className={`modal-backdrop ${MODAL_BACKDROP}`} data-testid="log-backdrop" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="log-title"
-        className="relative flex h-[min(80vh,720px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card-solid text-text shadow-card"
+        className={`${MODAL_CARD} h-[80vh] w-[min(900px,92vw)]`}
       >
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <h4 id="log-title" className="shrink-0 text-base font-semibold">
+        <div className="flex shrink-0 items-center justify-center gap-2 px-4 py-3">
+          <h4 id="log-title" className={MODAL_TITLE}>
             {label} logs
           </h4>
           <input
@@ -138,15 +139,9 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
                 setQuery("");
               }
             }}
-            className="min-w-0 flex-1 rounded-control border border-border bg-bg-2 px-3 py-1.5 text-sm text-text outline-none focus:border-accent"
+            className="ml-0 min-w-[220px] rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[#e6e1ff] caret-[#7c5cff] outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[color-mix(in_srgb,#e6e1ff_55%,transparent)] placeholder:opacity-75 hover:border-[#7c5cff] hover:shadow-[0_0_0_0.25px_#7c5cff] focus:border-[#7c5cff] focus:shadow-[0_0_0_0.25px_#7c5cff]"
           />
-          <button
-            type="button"
-            id="log-close"
-            aria-label="Close"
-            onClick={onClose}
-            className="verify-close rounded-control px-2 py-1 text-muted hover:text-text"
-          >
+          <button type="button" id="log-close" aria-label="Close" onClick={onClose} className={`verify-close ${MODAL_CLOSE}`}>
             ✕
           </button>
         </div>
@@ -158,17 +153,17 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
             follow.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
           }}
           className={cx(
-            "m-0 flex-1 overflow-auto overscroll-contain bg-[#0e0720] px-4 py-3 font-mono text-xs leading-normal",
-            "whitespace-pre-wrap text-[#e6e1ff]",
+            "m-0 flex-1 overflow-auto overscroll-contain rounded-b-panel bg-[#0e0720] px-4 py-3 font-mono text-xs leading-normal",
+            "whitespace-pre-wrap text-[#e6e1ff] [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]",
           )}
         >
           {view.length ? view.join("\n") + "\n" : ""}
         </pre>
-        <div className="flex justify-end px-4 py-2">
-          <GhostButton id="log-clear-btn" onClick={() => void clear()}>
+        <footer className="mt-3 flex flex-wrap justify-end gap-2.5 px-4 py-2">
+          <GhostButton id="log-clear-btn" className="gap-[normal]!" onClick={() => void clear()}>
             Clear logs
           </GhostButton>
-        </div>
+        </footer>
       </div>
     </div>,
     document.body,
