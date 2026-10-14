@@ -67,8 +67,8 @@ export function ProviderPicker({ value, onChange }: { value: string; onChange: (
           }
         }}
         className={cx(
-          "provider-select-btn flex w-full cursor-pointer items-center gap-2 rounded-control border border-border px-3 py-2.5 text-left text-sm text-text",
-          "bg-linear-to-b from-[#1a1030] to-[#140b26] outline-none focus:border-accent focus:ring-2 focus:ring-accent/30",
+          "provider-select-btn input flex w-full max-w-[240px] min-w-[160px] cursor-pointer items-center gap-2.5 rounded-btn border border-border bg-control px-2.5 py-2 text-left font-sans text-[13px] text-text",
+          "outline-none focus:border-accent",
         )}
       >
         <span className={cx("provider-opt-icon", !selected && "invisible")} aria-hidden="true">
@@ -115,12 +115,15 @@ export function ProviderPicker({ value, onChange }: { value: string; onChange: (
   );
 }
 
-const ROW = "grid grid-cols-1 gap-3 sm:grid-cols-2";
+// .form-row of two .form-group cells, and a .form-group on its own.
+const ROW = "form-row flex flex-wrap gap-2.5";
+const CELL = "form-group flex-[1_1_200px] gap-1!";
+const GROUP = "form-group mb-3 gap-1!";
 
 export function PushoverFields({ form, patch }: { form: RuleForm; patch: Patch }) {
   return (
     <div id="provider_pushover" className={cx("provider-fields", ROW)}>
-      <Field label="App token" id="pushover_app_token">
+      <Field label="App token" id="pushover_app_token" className={CELL}>
         <Input
           type="text"
           autoComplete="off"
@@ -130,7 +133,7 @@ export function PushoverFields({ form, patch }: { form: RuleForm; patch: Patch }
           onChange={(e) => patch({ pushover_app_token: e.target.value })}
         />
       </Field>
-      <Field label="User / group key" id="pushover_user_key">
+      <Field label="User / group key" id="pushover_user_key" className={CELL}>
         <Input
           type="text"
           autoComplete="off"
@@ -147,7 +150,7 @@ export function PushoverFields({ form, patch }: { form: RuleForm; patch: Patch }
 export function TelegramFields({ form, patch }: { form: RuleForm; patch: Patch }) {
   return (
     <div id="provider_telegram" className={cx("provider-fields", ROW)}>
-      <Field label="Bot token" id="telegram_bot_token">
+      <Field label="Bot token" id="telegram_bot_token" className={CELL}>
         <Input
           type="text"
           autoComplete="off"
@@ -157,7 +160,7 @@ export function TelegramFields({ form, patch }: { form: RuleForm; patch: Patch }
           onChange={(e) => patch({ telegram_bot_token: e.target.value })}
         />
       </Field>
-      <Field label="Chat ID" id="telegram_chat_id">
+      <Field label="Chat ID" id="telegram_chat_id" className={CELL}>
         <Input
           type="text"
           autoComplete="off"
@@ -197,7 +200,7 @@ function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: strin
       }}
       className={cx(
         "chip-input-wrap flex min-h-[46px] cursor-text flex-wrap items-center gap-1.5 rounded-control border border-border px-3 py-2",
-        "bg-linear-to-b from-[#1a1030] to-[#140b26] focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30",
+        "bg-linear-to-b from-[#1a1030] to-[#140b26] transition-[border-color,box-shadow] duration-200 hover:border-accent/30 focus-within:border-accent",
       )}
     >
       <ul className="contents" aria-label="Webhook URLs">
@@ -211,7 +214,7 @@ function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: strin
                 onChange(value.filter((v) => v !== url));
                 entryRef.current?.focus();
               }}
-              className="chip max-w-full cursor-pointer truncate rounded-[6px] border border-white/10 bg-white/5 px-2.5 py-1 text-[13px] leading-snug text-text outline-none hover:border-danger/50 hover:bg-danger/10 focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="chip max-w-full cursor-pointer truncate rounded-[6px] border border-[rgba(139,92,246,0.3)] bg-[rgba(139,92,246,0.15)] py-1 pr-2 pl-2.5 text-[13px] leading-snug text-text outline-none hover:border-danger/50 hover:bg-danger/10 focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {url}
             </button>
@@ -238,7 +241,7 @@ function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: strin
             onChange(value.slice(0, -1));
           }
         }}
-        className="chip-text-input min-w-32 flex-1 bg-transparent text-sm text-text outline-none placeholder:text-text-2/70"
+        className="chip-text-input min-w-[120px] flex-1 bg-transparent py-1 text-sm text-text outline-none placeholder:text-[rgba(200,184,232,0.4)]"
       />
     </div>
   );
@@ -246,17 +249,17 @@ function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: strin
 
 export function DiscordFields({ form, patch }: { form: RuleForm; patch: Patch }) {
   return (
-    <div id="provider_discord" className="provider-fields flex flex-col gap-3">
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="discord_webhook_urls" className="text-sm font-semibold text-text-1">
+    <div id="provider_discord" className="provider-fields">
+      <div className={cx("flex flex-col", GROUP)}>
+        <label htmlFor="discord_webhook_urls" className="form-label ml-0.5 text-xs text-muted">
           Discord webhook URLs
         </label>
         <UrlChips value={form.discord_urls} onChange={(discord_urls) => patch({ discord_urls })} />
-        <p id="discord_webhook_urls-help" className="text-xs text-text-2">
+        <p id="discord_webhook_urls-help" className="help-text text-xs text-muted opacity-85">
           Copycord forwards the matched message to every webhook URL listed here.
         </p>
       </div>
-      <Field label="Bot Username (optional)" id="discord_webhook_username">
+      <Field label="Bot Username (optional)" id="discord_webhook_username" className={GROUP}>
         <Input
           type="text"
           autoComplete="off"
@@ -265,7 +268,7 @@ export function DiscordFields({ form, patch }: { form: RuleForm; patch: Patch })
           onChange={(e) => patch({ discord_username: e.target.value })}
         />
       </Field>
-      <Field label="Bot Avatar URL (optional)" id="discord_webhook_avatar_url">
+      <Field label="Bot Avatar URL (optional)" id="discord_webhook_avatar_url" className={GROUP}>
         <Input
           type="text"
           autoComplete="off"

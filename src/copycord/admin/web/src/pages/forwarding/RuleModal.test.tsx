@@ -276,8 +276,8 @@ describe("rule modal", () => {
     expect(within(dialog).getByRole("button", { name: "Remove urgent" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Remove 11" })).toBeInTheDocument();
     expect(document.getElementById("fwdFiltersMore")).toHaveAttribute("open");
-    expect(input("fwd_bot_messages")).toHaveAttribute("aria-checked", "true");
-    expect(input("fwd_enabled")).toHaveAttribute("aria-checked", "true");
+    expect(input("fwd_bot_messages")).toBeChecked();
+    expect(input("fwd_enabled")).toBeChecked();
 
     await user.clear(input("fwd_label"));
     await user.type(input("fwd_label"), "Renamed");
