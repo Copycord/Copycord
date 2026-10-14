@@ -3,16 +3,89 @@
 // shell can show it without pulling the page chunk in. The sections share the loading bodies below so the
 // page's own loading state and this one are the same boxes.
 
-import { Skeleton, SkeletonSection, cx } from "../../components/ui";
+import { Skeleton, cx } from "../../components/ui";
+import { FIELD_TIPS } from "./config/model";
 import { PromoCards } from "./config/PromoCards";
-import { BOT_ROLES, BOTS_CELL, BOTS_HEAD, BOTS_STATE, CARD, Chevron, GHOST, SUMMARY, SUMMARY_TITLE } from "./parts";
+import { FIELD_INPUT } from "./config/TokenInput";
+import {
+  BOT_ROLES,
+  BOTS_CELL,
+  BOTS_HEAD,
+  BOTS_STATE,
+  CARD,
+  Chevron,
+  GC_FIELD,
+  GC_HINT,
+  GC_LABEL,
+  GHOST,
+  PS_UNIT,
+  SETTING_LABEL,
+  SETTING_ROW,
+  SETTING_SUB,
+  SettingRow,
+  SUMMARY,
+  SUMMARY_TITLE,
+} from "./parts";
 
-/** Mapping tiles shown while the list loads; three is the common count. */
-export const MAPPING_SKELETONS = 3;
+/** One placeholder tile while the list loads; the count is unknown until it lands. */
+export const MAPPING_SKELETONS = 1;
 
-/** Global Configuration body while the config loads, as tall as the loaded form (measured at 1440 px). */
+/** A shimmer bar standing in for a control while the config loads. */
+function Bar({ className }: { className: string }) {
+  return <span aria-hidden="true" data-skeleton="" className={cx("cc-skeleton block shrink-0", className)} />;
+}
+
+/** Global Configuration body while the config loads: the loaded form's grid, field boxes, labels and hints,
+ * with empty boxes and bars where the values go, so each box sits where the form puts it. */
 export function GlobalConfigLoading() {
-  return <SkeletonSection rows={8} rowHeight={37} label="Loading configuration" className="h-[359px]" />;
+  return (
+    <div role="status" aria-busy="true" aria-label="Loading configuration" className="grid grid-cols-2 gap-x-[22px] gap-y-3 max-[900px]:grid-cols-1">
+      <div className={GC_FIELD}>
+        <span className={GC_LABEL}>Server Token</span>
+        <span className={GC_HINT}>{FIELD_TIPS.SERVER_TOKEN}</span>
+        <div className="relative w-full">
+          <input type="password" disabled tabIndex={-1} aria-hidden="true" className={cx(FIELD_INPUT, "border-border")} />
+        </div>
+      </div>
+      <div className={GC_FIELD}>
+        <span className={cx(GC_LABEL, "mt-1 mb-2.5 w-fit")}>Client Token</span>
+        <span className={GC_HINT}>{FIELD_TIPS.CLIENT_TOKEN}</span>
+        <div className="relative w-full">
+          <input type="password" disabled tabIndex={-1} aria-hidden="true" className={cx(FIELD_INPUT, "border-border")} />
+        </div>
+      </div>
+      <div className="col-span-full -mt-1 grid grid-cols-2 gap-x-[22px] gap-y-2 max-[900px]:grid-cols-1">
+        <div className={cx(SETTING_ROW, "flex-col items-stretch")}>
+          <div>
+            <div className={SETTING_LABEL}>
+              <span className="text-[13px] font-medium">Command Users</span>
+              <span className={SETTING_SUB}>{FIELD_TIPS.COMMAND_USERS}</span>
+            </div>
+            <div className="mt-1.5">
+              <div className="flex min-h-[42px] items-center rounded-control border border-border bg-[#140b26] px-3 py-2" />
+            </div>
+          </div>
+        </div>
+        <SettingRow label="Auto Start" hint={FIELD_TIPS.COPYCORD_AUTOSTART}>
+          <Bar className="ml-auto h-[22px] w-[38px] rounded-[999px]" />
+        </SettingRow>
+        <SettingRow label="Log Level" hint={FIELD_TIPS.LOG_LEVEL}>
+          <Bar className="ml-auto h-[34px] w-[100px] rounded-lg" />
+        </SettingRow>
+        <SettingRow label="Max Log Size" hint={FIELD_TIPS.LOG_MAX_SIZE_MB}>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <Bar className="h-8 w-16 rounded-lg" />
+            <span className={PS_UNIT}>MB</span>
+          </div>
+        </SettingRow>
+      </div>
+      <div className="col-span-full mt-3 flex flex-wrap gap-2.5 max-sm:flex-col">
+        <span className={cx(GHOST, "invisible flex")}>Save</span>
+        <span className="flex-1 max-sm:hidden" />
+        <span className="inline-flex items-center gap-[5px] text-xs font-medium text-accent opacity-30 max-sm:self-start">Add Bot to Server</span>
+      </div>
+    </div>
+  );
 }
 
 /** One mapping tile while the list loads. */

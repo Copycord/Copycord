@@ -25,7 +25,7 @@ const EYE_OFF = (
   <path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
 );
 
-const FIELD_INPUT =
+export const FIELD_INPUT =
   "inline-block w-full rounded-control border bg-[#140b26] py-3 pr-9 pl-3 text-[13.3333px] text-text outline-none " +
   "transition-[border-color] duration-200 focus:border-accent";
 const FIELD_REVEAL =

@@ -27,18 +27,11 @@ import {
   validateTokens,
 } from "./config/model";
 import { STATUS_URL, statusesFrom, anyRunning } from "./model";
-import { CARD, Chevron, DocLink, GHOST, GHOST_DISABLED, PS_INPUT, PS_UNIT, SettingRow, SETTING_LABEL, SETTING_ROW, SETTING_SUB, SUMMARY, SUMMARY_TITLE, Switch } from "./parts";
+import { CARD, Chevron, DocLink, GC_FIELD as FIELD, GC_HINT as HINT, GC_LABEL as LABEL, GHOST, GHOST_DISABLED, PS_INPUT, PS_UNIT, SettingRow, SETTING_LABEL, SETTING_ROW, SETTING_SUB, SUMMARY, SUMMARY_TITLE, Switch } from "./parts";
 
 const LOCK_TITLE = "Stop the bot to edit global configuration";
 const START_NEEDS_TOKENS = "Provide SERVER_TOKEN and CLIENT_TOKEN to start.";
 const START_BAD_TOKENS = "Saved tokens are no longer valid. Please update SERVER_TOKEN and CLIENT_TOKEN to start.";
-
-/** .field.field-token */
-const FIELD = "relative block rounded-lg border border-border bg-[rgba(255,255,255,0.02)] px-2.5 py-2 transition-colors duration-100 hover:bg-[rgba(255,255,255,0.04)]";
-/** .field label */
-const LABEL = "mb-1.5 ml-0.5 block text-xs text-muted";
-/** .gc-field-hint */
-const HINT = "mb-1 block text-[11px] leading-[1.4] text-muted opacity-70";
 
 const SELECT_ARROW =
   "bg-[url(\"data:image/svg+xml,%3Csvg_xmlns='http://www.w3.org/2000/svg'_width='10'_height='6'_fill='none'%3E%3Cpath_d='M1_1l4_4_4-4'_stroke='%239e95b7'_stroke-width='1.5'_stroke-linecap='round'_stroke-linejoin='round'/%3E%3C/svg%3E\")]";

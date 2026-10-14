@@ -47,6 +47,12 @@ export const SUMMARY =
 /** .srv-proxy-summary h3 */
 export const SUMMARY_TITLE = "m-0 cursor-text text-[15px] font-bold select-text";
 
+/** .field.field-token, its label and .gc-field-hint, shared with the Global Configuration loading body. */
+export const GC_FIELD =
+  "relative block rounded-lg border border-border bg-[rgba(255,255,255,0.02)] px-2.5 py-2 transition-colors duration-100 hover:bg-[rgba(255,255,255,0.04)]";
+export const GC_LABEL = "mb-1.5 ml-0.5 block text-xs text-muted";
+export const GC_HINT = "mb-1 block text-[11px] leading-[1.4] text-muted opacity-70";
+
 /** .proxy-settings-label and its sublabel */
 export const SETTING_LABEL = "flex min-w-0 flex-col gap-px";
 export const SETTING_SUB = "text-[11px] text-muted opacity-70";
