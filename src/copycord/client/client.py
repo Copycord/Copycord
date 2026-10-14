@@ -160,67 +160,6 @@ class GatewayConnectTimeout(OSError):
     """The gateway did not come up in time."""
 
 
-def clone_messages_to_backfill_run(data: dict) -> dict:
-    """Translate the legacy clone_messages command into a backfill_run frame."""
-    data = data if isinstance(data, dict) else {}
-    chan_id = int(data.get("channel_id"))
-    rng = data.get("range") or {}
-    mode = (data.get("mode") or rng.get("mode") or "").lower()
-
-    after_iso = (
-        data.get("after_iso")
-        or data.get("since")
-        or (rng.get("value") if mode == "since" else None)
-    )
-    before_iso = (
-        data.get("before_iso")
-        or (rng.get("before") if mode in ("between", "range") else None)
-        or data.get("until")
-    )
-    _n = data.get("last_n") or (rng.get("value") if mode in ("last", "last_n") else None)
-    try:
-        last_n = int(_n) if _n is not None else None
-    except Exception:
-        last_n = None
-
-    after_id = data.get("after_id")
-    checkpoint = None
-    if data.get("resume"):
-        checkpoint = {"last_orig_message_id": str(after_id)} if after_id else {}
-
-    exclude_ids = [str(x) for x in (data.get("exclude_ids") or [])]
-    job_id = (
-        data.get("job_id")
-        or data.get("task_id")
-        or data.get("run_id")
-        or f"legacy-{chan_id}"
-    )
-    return {
-        "job_id": str(job_id),
-        "original_channel_id": str(chan_id),
-        "range": {
-            "mode": (
-                "last_n"
-                if last_n
-                else (
-                    "between"
-                    if (after_iso and before_iso)
-                    else ("since" if after_iso else "all")
-                )
-            ),
-            "since": after_iso,
-            "until": before_iso,
-            "last_n": last_n,
-        },
-        "exclude_ids": exclude_ids,
-        "checkpoint": checkpoint,
-        "ignore_cloned": bool(exclude_ids),
-        "mapping_id": data.get("mapping_id"),
-        "cloned_guild_id": data.get("cloned_guild_id"),
-        "original_guild_id": data.get("original_guild_id"),
-    }
-
-
 class ClientListener:
     def __init__(self):
         self.config = Config(logger=logger)
@@ -502,11 +441,6 @@ class ClientListener:
                 logger.exception("[notify] Failed to reload forwarding rules")
 
             return {"ok": True}
-
-        elif typ == "clone_messages":
-            return await self._start_backfill_run(
-                clone_messages_to_backfill_run(data)
-            )
 
         elif typ == "backfill_run":
             return await self._start_backfill_run(data or {})
