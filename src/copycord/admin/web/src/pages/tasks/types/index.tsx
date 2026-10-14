@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { ComponentType, FormEvent, ReactNode } from "react";
 import { Modal } from "../../../components/Modal";
 import { Button } from "../../../components/ui/Button";
+import { Checkbox } from "../../../components/ui/Checkbox";
 import { Field, Input, Select } from "../../../components/ui/Field";
 import { BackfillForm } from "./backfill/BackfillForm";
 import { useStartRun, type TaskFormProps } from "./start";
@@ -187,7 +188,7 @@ export function SchemaForm({ type, open, onClose, prefill }: TaskFormProps) {
         {fields.map((f) =>
           f.kind === "boolean" ? (
             <label key={f.key} className="flex items-center gap-2 text-sm text-text">
-              <input type="checkbox" checked={Boolean(values[f.key])} onChange={(e) => set(f.key, e.target.checked)} />
+              <Checkbox checked={Boolean(values[f.key])} onChange={(e) => set(f.key, e.target.checked)} />
               {f.label}
               {errors[f.key] ? <span className="text-xs text-danger">{errors[f.key]}</span> : null}
             </label>

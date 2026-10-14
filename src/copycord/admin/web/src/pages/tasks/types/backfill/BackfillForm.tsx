@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Modal, TipLabel } from "../../../../components/Modal";
 import { Button } from "../../../../components/ui/Button";
+import { Checkbox, Radio } from "../../../../components/ui/Checkbox";
 import { Field, Input, Select } from "../../../../components/ui/Field";
 import { useApi } from "../../../../hooks/useApi";
 import type { GuildMappingListResponse } from "../../../../types/channels";
@@ -37,8 +38,13 @@ const RANGE_OPTIONS: { value: RangeMode; label: string }[] = [
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 
+// The thin accent scrollbar of the other dialogs on the modal body.
+const BODY_CLASS = "px-4 pb-4 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]";
+const FIELDSET = "m-0 flex min-w-0 flex-col gap-1 border-0 p-0";
+const CHOICE = "flex cursor-pointer items-center gap-2 text-sm text-text";
+
 function Indent({ children }: { children: ReactNode }) {
-  return <div className="mt-1 mb-2 ml-6 flex flex-wrap gap-2">{children}</div>;
+  return <div className="mt-1 mb-2 ml-[26px] flex min-w-0 flex-wrap gap-2">{children}</div>;
 }
 
 export function BackfillForm({ type, open, onClose, prefill }: TaskFormProps) {
@@ -128,14 +134,8 @@ export function BackfillForm({ type, open, onClose, prefill }: TaskFormProps) {
   );
 
   const radio = (value: RangeMode, label: string) => (
-    <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
-      <input
-        type="radio"
-        name="bf-range"
-        value={value}
-        checked={range.mode === value}
-        onChange={() => setR({ mode: value })}
-      />
+    <label className={CHOICE}>
+      <Radio name="bf-range" value={value} checked={range.mode === value} onChange={() => setR({ mode: value })} />
       {label}
     </label>
   );
@@ -148,7 +148,7 @@ export function BackfillForm({ type, open, onClose, prefill }: TaskFormProps) {
     ) : null;
 
   return (
-    <Modal open={open} onClose={onClose} title={prefill ? `Re-run ${type.title}` : `Run ${type.title}`} className="w-[min(640px,92vw)]" footer={footer}>
+    <Modal open={open} onClose={onClose} title={prefill ? `Re-run ${type.title}` : `Run ${type.title}`} className="w-[min(640px,92vw)]" bodyClassName={BODY_CLASS} footer={footer}>
       <form id="backfill-form" noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <Field label="Mapping" error={errors.mapping} id="bf-mapping">
           <Select
@@ -175,7 +175,7 @@ export function BackfillForm({ type, open, onClose, prefill }: TaskFormProps) {
           )}
         </div>
 
-        <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
+        <fieldset className={FIELDSET}>
           <legend className="mb-1.5 ml-0.5 text-xs text-muted">How far back?</legend>
           {radio("all", RANGE_OPTIONS[0]!.label)}
           {radio("since", RANGE_OPTIONS[1]!.label)}
@@ -207,21 +207,22 @@ export function BackfillForm({ type, open, onClose, prefill }: TaskFormProps) {
           {fieldError(errors.range)}
         </fieldset>
 
-        <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
+        <fieldset className={FIELDSET}>
           <legend className="mb-1.5 ml-0.5 text-xs text-muted">Settings</legend>
-          <div className="flex items-center gap-2">
-            <input id="bf-ignore-cloned" type="checkbox" checked={ignoreCloned} onChange={(e) => setIgnoreCloned(e.target.checked)} />
-            <TipLabel htmlFor="bf-ignore-cloned" text="Ignore cloned messages" tip={IGNORE_CLONED_TIP} tipLabel="What is Ignore cloned messages?" className="m-0! text-sm! text-text!" />
+          {/* The closed tip bubble is display none, so the hidden box does not widen or lengthen the scrolling body. */}
+          <div className="flex items-center gap-2 [&_.tip-bubble[aria-hidden=true]]:hidden">
+            <Checkbox id="bf-ignore-cloned" checked={ignoreCloned} onChange={(e) => setIgnoreCloned(e.target.checked)} />
+            <TipLabel htmlFor="bf-ignore-cloned" text="Ignore cloned messages" tip={IGNORE_CLONED_TIP} tipLabel="What is Ignore cloned messages?" align="wrap" className="m-0! text-sm! text-text!" />
           </div>
           {resumable ? (
             <div role="radiogroup" aria-label="Mode" className="mt-2 flex flex-col gap-1">
               <span className="ml-0.5 text-xs text-muted">Some picked channels have an unfinished backfill</span>
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
-                <input type="radio" name="bf-mode" checked={mode === "resume"} onChange={() => setMode("resume")} />
+              <label className={CHOICE}>
+                <Radio name="bf-mode" checked={mode === "resume"} onChange={() => setMode("resume")} />
                 Resume previous
               </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
-                <input type="radio" name="bf-mode" checked={mode === "new"} onChange={() => setMode("new")} />
+              <label className={CHOICE}>
+                <Radio name="bf-mode" checked={mode === "new"} onChange={() => setMode("new")} />
                 Start new
               </label>
             </div>

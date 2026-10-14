@@ -156,7 +156,7 @@ export function Modal({
             ✕
           </button>
         </header>
-        <div className={`min-h-0 flex-1 overflow-y-auto ${bodyClassName}`}>{children}</div>
+        <div className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${bodyClassName}`}>{children}</div>
         {footer ? <footer className="flex justify-end gap-2.5 px-4 pb-4">{footer}</footer> : null}
       </div>
     </div>,

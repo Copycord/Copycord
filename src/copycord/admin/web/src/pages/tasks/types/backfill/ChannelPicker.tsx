@@ -2,9 +2,11 @@
 // a search box, Select listed and Clear. Ctrl/Cmd+A selects the listed channels and Escape clears
 // the selection before it reaches the modal. Rendered flat; not virtualised.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { Button } from "../../../../components/ui/Button";
+import { Checkbox } from "../../../../components/ui/Checkbox";
+import { Input } from "../../../../components/ui/Field";
 import type { BackfillOptionCategory, BackfillOptionChannel } from "../../../../types/tasks";
 import { shortDate } from "./logic";
 
@@ -36,36 +38,11 @@ export function listCategories(categories: BackfillOptionCategory[], query: stri
 
 const selectable = (c: BackfillOptionChannel) => !c.busy;
 
-function CategoryBox({
-  label,
-  checked,
-  mixed,
-  disabled,
-  onToggle,
-}: {
-  label: string;
-  checked: boolean;
-  mixed: boolean;
-  disabled: boolean;
-  onToggle: () => void;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = mixed;
-  }, [mixed]);
-  return (
-    <input
-      ref={ref}
-      type="checkbox"
-      aria-label={label}
-      aria-checked={mixed ? "mixed" : checked}
-      checked={checked}
-      disabled={disabled}
-      onChange={onToggle}
-      className="size-4 accent-[var(--color-accent)]"
-    />
-  );
-}
+// The list is the form's only scroller: its height leaves room in the 80vh modal for the other
+// fields, so the modal body does not scroll as well; the thin accent scrollbar of the other dialogs.
+const LIST_SCROLL =
+  "max-h-[clamp(9rem,calc(80vh_-_34rem),40vh)] overflow-x-hidden overflow-y-auto overscroll-contain " +
+  "[scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]";
 
 export function ChannelPicker({ categories, selected, onChange, error }: ChannelPickerProps) {
   const [query, setQuery] = useState("");
@@ -101,14 +78,14 @@ export function ChannelPicker({ categories, selected, onChange, error }: Channel
 
   return (
     <div onKeyDown={onKeyDown} data-testid="channel-picker" className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <input
+      <div className="flex min-w-0 items-center gap-2">
+        <Input
           type="search"
           aria-label="Search channels"
           placeholder="Search channels"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="min-w-0 flex-1 rounded-control border border-border bg-control px-3 py-2 text-sm text-text outline-none focus:border-accent"
+          className="min-w-0 flex-1"
         />
         <Button variant="ghost" size="sm" onClick={selectListed} disabled={listedIds.length === 0}>
           Select listed
@@ -122,7 +99,7 @@ export function ChannelPicker({ categories, selected, onChange, error }: Channel
         role="group"
         aria-label="Channels"
         aria-invalid={error ? true : undefined}
-        className={`max-h-[40vh] overflow-y-auto rounded-control border ${error ? "border-danger" : "border-border"} bg-card`}
+        className={`${LIST_SCROLL} rounded-control border ${error ? "border-danger" : "border-border"} bg-card`}
       >
         {listed.length === 0 ? (
           <p className="m-0 px-3 py-3 text-sm text-muted">{query ? "No channels match" : "No channels in this mapping"}</p>
@@ -134,27 +111,25 @@ export function ChannelPicker({ categories, selected, onChange, error }: Channel
             return (
               <div key={key}>
                 <label className="flex cursor-pointer items-center gap-2 border-b border-border bg-rail-hover/40 px-3 py-1.5 text-xs font-semibold tracking-wide text-muted uppercase">
-                  <CategoryBox
-                    label={`Category ${cat.name}`}
+                  <Checkbox
+                    aria-label={`Category ${cat.name}`}
                     checked={all}
-                    mixed={on > 0 && !all}
+                    indeterminate={on > 0 && !all}
                     disabled={ids.length === 0}
-                    onToggle={() => toggle(ids, !all)}
+                    onChange={() => toggle(ids, !all)}
                   />
-                  <span>{cat.name}</span>
+                  <span className="min-w-0 truncate">{cat.name}</span>
                 </label>
                 {channels.map((c) => (
                   <label
                     key={c.id}
                     className={`flex items-center gap-2 px-3 py-1.5 pl-8 text-sm ${c.busy ? "cursor-not-allowed text-muted" : "cursor-pointer text-text hover:bg-rail-hover"}`}
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       aria-label={`#${c.name}`}
                       checked={selected.has(c.id)}
                       disabled={Boolean(c.busy)}
                       onChange={(e) => toggle([c.id], e.target.checked)}
-                      className="size-4 accent-[var(--color-accent)]"
                     />
                     <span className="min-w-0 truncate">#{c.name}</span>
                     {c.busy ? <span className="ml-auto text-xs text-muted">Running in #{c.busy.number}</span> : null}
