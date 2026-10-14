@@ -51,17 +51,18 @@ const REPLAY_MS = 1500;
 
 /** .srv-proxy-hint.srv-proxy-rotation-hint, and the code samples in the paste hint. */
 const ROTATION_HINT = "m-0 mt-1.5 text-xs leading-normal text-muted";
-const CODE = "[&_code]:rounded-[4px] [&_code]:bg-white/6 [&_code]:px-[5px] [&_code]:py-px [&_code]:text-[11px]";
-/** .input.srv-proxy-interval-input: the .input look at 34px, sized by the browser like the old one. */
+const CODE = "[&_code]:rounded-[4px] [&_code]:bg-white/6 [&_code]:px-[5px] [&_code]:py-px [&_code]:font-[monospace] [&_code]:text-[11px]";
+/** .input.srv-proxy-interval-input: the full width .input look at 34px, so it shrinks on phones like the old one. */
 const NUM =
-  "h-[34px] rounded-control border border-border bg-(image:--control-gradient) px-3.5 text-center text-sm text-text outline-0 transition-[border-color] " +
-  "[appearance:textfield] focus:border-accent disabled:opacity-50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+  "h-[34px] w-full rounded-control border border-border bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] " +
+  "hover:border-accent/30 hover:bg-[linear-gradient(180deg,#1f1237_0%,#160b2a_100%)] focus:border-accent focus:bg-[linear-gradient(180deg,#1f1237_0%,#160b2a_100%)] disabled:opacity-50 " +
+  "[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 /** The .dd toggle the old page turned select.srv-proxy-interval-select into; the caret sits on top. */
 const UNIT =
   "dd-toggle relative min-h-[34px] cursor-pointer appearance-none rounded-btn border border-border bg-control py-2 pr-9 pl-2.5 text-left font-sans text-[13px] " +
   "text-text outline-0 transition-[border,box-shadow,background] duration-200 focus-visible:border-accent disabled:opacity-50";
 /** .srv-proxy-rotation-section */
-const ROTATION_SECTION = "mt-4 border-t border-border pt-3.5";
+const ROTATION_SECTION = "mt-4 border-t border-t-border pt-3.5";
 
 function UnitSelect({ id, value, disabled, onChange }: { id: string; value: string; disabled: boolean; onChange: (v: IntervalUnit) => void }) {
   return (
@@ -70,7 +71,7 @@ function UnitSelect({ id, value, disabled, onChange }: { id: string; value: stri
         <option value="60">minutes</option>
         <option value="3600">hours</option>
       </select>
-      <span aria-hidden="true" className="dd-caret pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-sm leading-none text-accent">
+      <span aria-hidden="true" className="dd-caret pointer-events-none absolute top-1/2 right-[11px] -translate-y-1/2 text-sm leading-none text-accent">
         ▾
       </span>
     </div>
@@ -537,7 +538,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
 
           <div
             id="srv-proxy-rotation-section"
-            className={cx(ROTATION_SECTION, locked && "is-locked opacity-50")}
+            className={cx(ROTATION_SECTION, locked && "is-locked opacity-40")}
             {...lockedProps}
           >
             <div className="srv-proxy-rotation-row flex items-center gap-2.5">
@@ -596,7 +597,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
 
           <div
             id="srv-proxy-fav-section"
-            className={cx(ROTATION_SECTION, locked && "is-locked opacity-50")}
+            className={cx(ROTATION_SECTION, locked && "is-locked opacity-40")}
             {...lockedProps}
           >
             <div className="srv-proxy-rotation-row flex items-center gap-2.5">
