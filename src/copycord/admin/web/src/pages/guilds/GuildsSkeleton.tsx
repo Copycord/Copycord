@@ -2,6 +2,8 @@
 // shows while the list loads. Kept out of Guilds.tsx so the app shell can show it without the page chunk.
 
 import { Card, Skeleton } from "../../components/ui";
+import { StatusGate } from "../../components/ui/StatusGate";
+import { useStatusGate } from "../../hooks/useStatusGate";
 
 /** Guild tiles while the list loads, shared with the page. */
 export function GuildTileSkeletons() {
@@ -19,18 +21,18 @@ export function GuildTileSkeletons() {
 }
 
 export function GuildsSkeleton() {
+  // The page gates on both sides the same way, so the skeleton shows the same cover while the bot is down.
+  const gate = useStatusGate({ require: "both" });
   return (
-    <div className="relative">
-      <div>
-        <Card className="mt-[18px]" data-testid="card-skeleton">
-          <header className="mb-1.5 block gap-3">
-            <h2 aria-level={1} className="my-[0.83em] text-[24px] font-bold">
-              Guilds
-            </h2>
-            <span className="flex flex-wrap items-center gap-2.5" />
-          </header>
-        </Card>
-      </div>
-    </div>
+    <StatusGate gate={gate}>
+      <Card className="mt-[18px]" data-testid="card-skeleton">
+        <header className="mb-1.5 block gap-3">
+          <h2 aria-level={1} className="my-[0.83em] text-[24px] font-bold">
+            Guilds
+          </h2>
+          <span className="flex flex-wrap items-center gap-2.5" />
+        </header>
+      </Card>
+    </StatusGate>
   );
 }

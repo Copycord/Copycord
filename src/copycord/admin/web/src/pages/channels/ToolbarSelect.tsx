@@ -22,9 +22,11 @@ export interface ToolbarSelectProps {
   disabled?: boolean;
   /** Takes the native select out of the layout, as the old page did until the status gate opened. */
   nativeHidden?: boolean;
+  /** The options are still loading: a bar stands where the chosen label goes. */
+  pending?: boolean;
 }
 
-export function ToolbarSelect({ id, label, value, options, onChange, disabled, nativeHidden }: ToolbarSelectProps) {
+export function ToolbarSelect({ id, label, value, options, onChange, disabled, nativeHidden, pending }: ToolbarSelectProps) {
   const [open, setOpen] = useState(false);
   const [focus, setFocus] = useState(0);
   const wrap = useRef<HTMLSpanElement>(null);
@@ -124,7 +126,13 @@ export function ToolbarSelect({ id, label, value, options, onChange, disabled, n
           "focus-visible:border-accent focus-visible:shadow-[0_20px_56px_rgba(0,0,0,0.5)] disabled:cursor-not-allowed disabled:opacity-60",
         )}
       >
-        <span>{options[selected]?.label ?? ""}</span>
+        {pending ? (
+          <span data-skeleton="" className="cc-skeleton inline-block rounded-md align-middle text-transparent">
+            Guild mapping
+          </span>
+        ) : (
+          <span>{options[selected]?.label ?? ""}</span>
+        )}
         <span
           aria-hidden
           className={cx(

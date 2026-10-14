@@ -64,7 +64,7 @@ describe("Forwarding page", () => {
     server(listRoutes());
     renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "Forwarding" })).toBeInTheDocument();
-    expect(screen.getAllByTestId("fwd-skeleton")).toHaveLength(3);
+    expect(screen.getAllByTestId("fwd-skeleton")).toHaveLength(1);
 
     await waitFor(() => expect(document.querySelectorAll(".fwd-card")).toHaveLength(2));
     expect(screen.queryByTestId("fwd-skeleton")).toBeNull();

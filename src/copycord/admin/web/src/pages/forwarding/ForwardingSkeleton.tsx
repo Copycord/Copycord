@@ -37,9 +37,8 @@ export function RuleSkeletons() {
           </Button>
         </div>
       </div>
-      {[0, 1, 2].map((i) => (
-        <Skeleton.Card key={i} height={116} testId="fwd-skeleton" />
-      ))}
+      {/* One tile: the rule count is unknown until the list answers, and one rule is the common case. */}
+      <Skeleton.Card height={116} testId="fwd-skeleton" />
     </>
   );
 }

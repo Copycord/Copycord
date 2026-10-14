@@ -111,6 +111,7 @@ export function Channels() {
               label="Guild mapping"
               value={mappingId}
               disabled={!list.length}
+              pending={!mappingsSettled}
               onChange={onMapping}
               options={
                 list.length
