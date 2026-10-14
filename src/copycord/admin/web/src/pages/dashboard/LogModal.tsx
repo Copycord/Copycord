@@ -7,6 +7,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "../../components/ui";
 import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_OVERLAY, MODAL_TITLE, useScrollLock } from "../../components/Modal";
+import { errorText } from "../../lib/api";
 import { logStream } from "../../lib/sse";
 import type { SseOptions } from "../../lib/sse";
 import type { LogStream } from "../../types/api";
@@ -108,8 +109,8 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
       await clearLogs(which);
       setLines([]);
       notify(`${label} logs cleared`, "success");
-    } catch {
-      notify("Failed to clear logs", "error");
+    } catch (e) {
+      notify(errorText(e, "Failed to clear logs"), "error");
     }
   };
 

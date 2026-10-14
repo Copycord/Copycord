@@ -7,6 +7,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";
 import { Card, cx, SkeletonSection } from "../components/ui";
 import { useApi } from "../hooks/useApi";
+import { errorText } from "../lib/api";
 import type { BackupInfo } from "../types/system";
 import {
   BACKUP_INFO_URL,
@@ -101,8 +102,8 @@ export function System() {
       await backupNow();
       reload();
       notify("Backup created", "success");
-    } catch {
-      notify("Backup failed", "error");
+    } catch (e) {
+      notify(errorText(e, "Backup failed"), "error");
     } finally {
       setBackingUp(false);
     }
@@ -124,8 +125,8 @@ export function System() {
       await restoreUpload(file);
       reload();
       notify("Database restored from upload.", "success");
-    } catch {
-      notify("Restore failed", "error");
+    } catch (err) {
+      notify(errorText(err, "Restore failed"), "error");
     } finally {
       input.value = "";
       setUploading(false);
@@ -145,8 +146,8 @@ export function System() {
       await restoreExisting(name);
       reload();
       notify("Database restored.", "success");
-    } catch {
-      notify("Restore failed", "error");
+    } catch (e) {
+      notify(errorText(e, "Restore failed"), "error");
     } finally {
       setRowBusy(null);
     }
@@ -165,8 +166,8 @@ export function System() {
       await deleteBackup(name);
       reload();
       notify("Backup deleted", "success");
-    } catch {
-      notify("Delete failed", "error");
+    } catch (e) {
+      notify(errorText(e, "Delete failed"), "error");
     } finally {
       setRowBusy(null);
     }

@@ -3,7 +3,7 @@
 // start, queue and proxies are JSON. A non 2xx reply throws an ApiError
 // whose message is the server's error or detail, which the cards toast.
 
-import { api } from "../../lib/api";
+import { api, errorText } from "../../lib/api";
 import type {
   ScraperOk,
   ScraperPayload,
@@ -85,9 +85,9 @@ export function saveProxies(proxies: string[]): Promise<ScraperProxiesResponse> 
   return api.put<ScraperProxiesResponse>(PROXIES_URL, { proxies });
 }
 
-/** The server's reason when it sent one, otherwise the fallback. */
+/** The server's reason when it sent one, otherwise the fallback with the status. */
 export function reason(e: unknown, fallback: string): string {
-  return e instanceof Error && e.message && !e.message.startsWith("request to ") ? e.message : fallback;
+  return errorText(e, fallback);
 }
 
 /** "1 token", "2 tokens". */

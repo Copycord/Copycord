@@ -3,7 +3,7 @@
 // client side half of validateProviderConfig. Secrets are prefilled as they
 // come from GET /api/forwarding, exactly like the old page's plain text inputs.
 
-import { api, ApiError } from "../../lib/api";
+import { api, ApiError, errorText } from "../../lib/api";
 import type {
   ForwardingRule,
   ForwardingRulePayload,
@@ -205,18 +205,11 @@ export function validateFailure(e: unknown): string {
       if (Array.isArray(body.errors) && body.errors.length) return body.errors.map(String).join("\n");
       if (typeof body.detail === "string" && body.detail) return body.detail;
     }
-    if (typeof body === "string" && body) return body;
-    return "Provider details are invalid.";
+    return errorText(e, "Provider details are invalid");
   }
-  return "Validation failed: network error";
+  return errorText(e, "Validation failed");
 }
 
 export function saveFailure(e: unknown): string {
-  if (e instanceof ApiError) {
-    const body = e.body as { detail?: unknown } | string | undefined;
-    if (body && typeof body === "object" && typeof body.detail === "string" && body.detail) return body.detail;
-    if (typeof body === "string" && body) return body;
-    return `Failed to save forwarding rule (${e.status})`;
-  }
-  return "Failed to save forwarding rule (network error)";
+  return errorText(e, "Failed to save forwarding rule");
 }

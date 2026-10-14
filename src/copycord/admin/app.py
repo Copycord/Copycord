@@ -6580,7 +6580,9 @@ async def api_save_forwarding(payload: dict = Body(...)):
     if provider not in ("pushover", "telegram", "discord"):
         raise HTTPException(status_code=400, detail="invalid-provider")
 
-    if provider in ("telegram", "pushover"):
+    # A disabled rule is stored as given, so a rule with a dead token can still
+    # be switched off. Turning it back on validates again.
+    if enabled and provider in ("telegram", "pushover"):
         ok, errors, _details = await _validate_forwarding_provider_config(
             provider, config
         )
@@ -6588,7 +6590,7 @@ async def api_save_forwarding(payload: dict = Body(...)):
 
             return PlainTextResponse("\n".join(errors), status_code=400)
 
-    if provider == "discord":
+    if enabled and provider == "discord":
         raw_urls = discord_urls_from_config(config)
         if not raw_urls:
             return PlainTextResponse(

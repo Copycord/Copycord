@@ -14,6 +14,7 @@ import type {
   MappingSettingValue,
   MsgFeatureKey,
 } from "../../../../types/dashboard-mappings";
+import { errorText } from "../../../../lib/api";
 import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
 import { MsgFeaturesModal } from "./MsgFeaturesModal";
@@ -160,7 +161,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
       notify(isEdit ? "Mapping updated." : "Mapping created.", "success");
       onClose();
     } catch (err) {
-      const msg = err instanceof Error && err.message ? err.message : "Network error while saving mapping.";
+      const msg = errorText(err, "Failed to save mapping");
       notify(msg, "error");
       setSaving(false);
     }

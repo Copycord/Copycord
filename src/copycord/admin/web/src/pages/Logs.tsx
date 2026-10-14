@@ -10,7 +10,7 @@ import type { ConfirmOptions } from "../components/ui/ConfirmDialog";
 import { cx } from "../components/ui/cx";
 import { SkeletonSection } from "../components/ui/Skeleton";
 import { useApi } from "../hooks/useApi";
-import { api } from "../lib/api";
+import { api, errorText } from "../lib/api";
 import type {
   EventLog,
   EventLogBulkDeleteResponse,
@@ -178,7 +178,7 @@ export function Logs() {
         await api.del<EventLogDeleteResponse>(`/api/event-logs/${encodeURIComponent(id)}`);
         reloadAll();
       } catch (e) {
-        notify(`Could not delete the log: ${e instanceof Error ? e.message : String(e)}`, "error");
+        notify(errorText(e, "Could not delete the log"), "error");
       } finally {
         setDeleting((prev) => {
           const next = new Set(prev);
@@ -205,7 +205,7 @@ export function Logs() {
       reloadAll();
       notify("All logs cleared", "success");
     } catch (e) {
-      notify(`Could not clear the logs: ${e instanceof Error ? e.message : String(e)}`, "error");
+      notify(errorText(e, "Could not clear the logs"), "error");
     } finally {
       setClearBusy(false);
     }

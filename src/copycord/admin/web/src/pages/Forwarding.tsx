@@ -10,7 +10,7 @@ import { Button, Card, Skeleton, cx } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useApi } from "../hooks/useApi";
 import type { StatusGateState } from "../hooks/useStatusGate";
-import { ApiError } from "../lib/api";
+import { ApiError, errorText } from "../lib/api";
 import type {
   ClientGuildsResponse,
   ForwardingCountByRuleResponse,
@@ -60,8 +60,7 @@ interface RowBusy {
 }
 
 function failure(what: string, e: unknown): string {
-  if (e instanceof ApiError) return `${what} (${e.status})`;
-  return `${what} (network error)`;
+  return errorText(e, what);
 }
 
 function Skeletons() {

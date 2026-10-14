@@ -161,8 +161,22 @@ describe("Forwarding page", () => {
     await waitFor(() => expect(document.querySelectorAll(".fwd-card")).toHaveLength(2));
     await user.click(within(card("r1")).getByRole("button", { name: "Delete" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("Failed to delete forwarding rule (404)")).toBeInTheDocument();
+    expect(await screen.findByText("fwd-not-found")).toBeInTheDocument();
     expect(document.querySelectorAll(".fwd-card")).toHaveLength(2);
+  });
+
+  it("toasts the server's reason when a toggle save fails with a 400", async () => {
+    server({
+      ...listRoutes(),
+      "POST /api/forwarding": () =>
+        new Response("Telegram: invalid bot token. (Unauthorized)", { status: 400, headers: { "content-type": "text/plain" } }),
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(document.querySelectorAll(".fwd-card")).toHaveLength(2));
+    await user.click(within(card("r1")).getByRole("button", { name: "Disable" }));
+    expect(await screen.findByText("Telegram: invalid bot token. (Unauthorized)")).toBeInTheDocument();
+    expect(screen.queryByText("Failed to save forwarding rule (400)")).not.toBeInTheDocument();
   });
 
   it("toggles a rule by posting it back with enabled flipped, then reloads the list", async () => {

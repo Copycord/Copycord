@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Spinner, cx } from "../../components/ui";
 import { useWsMessages } from "../../hooks/useWsMessages";
 import type { UseWsOptions } from "../../hooks/useWsMessages";
-import { api } from "../../lib/api";
+import { api, errorText } from "../../lib/api";
 import type { LogStream } from "../../types/api";
 import type { BotRole, BotStatuses, StatusResponse } from "../../types/dashboard";
 import { useNotify } from "../system/providers";
@@ -101,7 +101,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
       notify(running ? "Stopped." : "Started.", "success");
       await refresh();
     } catch (e) {
-      notify(e instanceof Error ? e.message : String(e), "error");
+      notify(errorText(e, running ? "Failed to stop" : "Failed to start"), "error");
     } finally {
       setBusy(false);
     }
