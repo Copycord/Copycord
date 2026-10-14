@@ -80,13 +80,12 @@ def test_root_chowns_then_drops_to_uid_1000(run):
         assert str(data / "data.db") in log
 
 
-def test_root_stays_root_with_one_warning_when_chown_does_not_take(run):
+def test_root_stays_root_silently_when_chown_does_not_take(run):
+    # Windows Docker Desktop bind mounts ignore chown; the user cannot fix that, so no message.
     p, log, data = run(0, app_writable=False)
     assert p.returncode == 0, p.stderr
     assert p.stdout == "copycord run\n"
-    assert p.stderr.count("\n") == 1
-    assert "could not give %s to uid 1000" % data in p.stderr
-    assert "runs as root" in p.stderr
+    assert p.stderr == ""
     assert not any(line.endswith("copycord run") for line in log.splitlines())
 
 

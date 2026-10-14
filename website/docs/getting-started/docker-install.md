@@ -73,7 +73,7 @@ Put your own password after `PASSWORD=`. The container listens on every network 
 :::
 
 :::note Non-root user and volume ownership
-Copycord runs as a non-root user (`copycord`, uid and gid 1000). The container starts as root only to give `./data` to uid 1000, which also fixes a folder left root-owned by an older image that ran as root, then switches to that user. On a volume where this cannot change ownership, Copycord logs one warning and keeps running as root.
+Copycord runs as a non-root user (`copycord`, uid and gid 1000). The container starts as root only to give `./data` to uid 1000, which also fixes a folder left root-owned by an older image that ran as root, then switches to that user. On a volume where ownership cannot be changed (Windows Docker Desktop bind mounts), Copycord keeps running as root, as v3 did.
 
 If you start the container as a non-root user yourself (`user:` in compose) and Copycord exits with "is not writable", fix it once on the host:
 

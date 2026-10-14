@@ -3,8 +3,8 @@ set -eu
 
 # The image starts as root only to hand files the v3 image left root-owned (it ran
 # as root) to the copycord user (uid 1000), then drops to that user. Where chown
-# does not take (some Windows or network bind mounts) it stays root with a warning
-# instead of refusing to start.
+# does not take (Windows Docker Desktop and some network bind mounts) it stays root,
+# as v3 did, instead of refusing to start.
 DATA="${DATA_DIR:-/data}"
 DB="${DB_PATH:-$DATA/data.db}"
 # Same rule as backups_dir() in src/copycord/common/db.py.
@@ -46,9 +46,10 @@ done
 
 AS_APP="setpriv --reuid=$APP_UID --regid=$APP_GID --clear-groups"
 # shellcheck disable=SC2086
-bad="$(first_unwritable $AS_APP)"
-if [ -n "$bad" ]; then
-    echo "copycord: could not give $bad to uid $APP_UID (chown did not take on this volume), so Copycord runs as root" >&2
+# Windows Docker Desktop bind mounts keep their own owner and mode, so chown does not
+# take there and uid 1000 cannot write. Nothing the user can do about it, so no
+# message: run as root, as the v3 image did.
+if [ -n "$(first_unwritable $AS_APP)" ]; then
     exec "$COPYCORD" run
 fi
 
