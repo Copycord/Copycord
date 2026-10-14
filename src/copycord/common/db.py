@@ -156,16 +156,47 @@ def needs_pre_v4_backup(db_path: str) -> bool:
         conn.close()
 
 
+class BackupNotWritableError(RuntimeError):
+    """The pre-v4 backup of a v3 DB cannot be written, so v4 must not open the DB."""
+
+    def __init__(self, directory: Path, reason: str):
+        self.directory = Path(directory)
+        self.reason = reason
+        super().__init__(
+            f"cannot write the pre-v4 backup to {self.directory} ({reason}). Make that "
+            "folder writable by the user running Copycord; in Docker run once on the "
+            "host: sudo chown -R 1000:1000 <your data folder>"
+        )
+
+
+def pre_v4_backup_dir(db_path: str) -> Path:
+    """The backups folder next to the DB, where the pre-v4 copy goes."""
+    return Path(db_path).resolve().parent / "backups"
+
+
+def check_pre_v4_backup(db_path: str, backup_dir: Optional[Path] = None) -> None:
+    """Raise BackupNotWritableError when db_path needs a pre-v4 backup that cannot be written."""
+    if not needs_pre_v4_backup(db_path):
+        return
+    backup_dir = pre_v4_backup_dir(db_path) if backup_dir is None else Path(backup_dir)
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        probe = backup_dir / f".write-test-{uuid.uuid4().hex}"
+        probe.touch(exist_ok=False)
+        probe.unlink()
+    except OSError as e:
+        raise BackupNotWritableError(backup_dir, e.strerror or str(e)) from e
+
+
 def backup_pre_v4(db_path: str, backup_dir: Optional[Path] = None) -> Optional[Path]:
-    """Copy a pre-v4 DB to <data dir>/backups/pre-v4-<timestamp>.db before v4 first opens it; None when no backup was needed."""
+    """Copy a pre-v4 DB to backups/pre-v4-<timestamp>.db next to it before v4 first opens it; None when no backup was needed."""
     if not needs_pre_v4_backup(db_path):
         return None
-    if backup_dir is None:
-        from copycord.common.paths import data_dir
-
-        backup_dir = data_dir() / "backups"
-    backup_dir = Path(backup_dir)
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_dir = pre_v4_backup_dir(db_path) if backup_dir is None else Path(backup_dir)
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise BackupNotWritableError(backup_dir, e.strerror or str(e)) from e
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     dest = backup_dir / f"pre-v4-{stamp}.db"
     n = 1
@@ -175,11 +206,17 @@ def backup_pre_v4(db_path: str, backup_dir: Optional[Path] = None) -> Optional[P
     # sqlite backup API rather than a file copy so a leftover WAL is included
     src = sqlite3.connect(f"{Path(db_path).resolve().as_uri()}?mode=ro", uri=True)
     try:
-        out = sqlite3.connect(str(dest))
+        try:
+            out = sqlite3.connect(str(dest))
+        except sqlite3.OperationalError as e:
+            raise BackupNotWritableError(backup_dir, str(e)) from e
         try:
             src.backup(out)
-        finally:
+        except BaseException:
             out.close()
+            dest.unlink(missing_ok=True)
+            raise
+        out.close()
     finally:
         src.close()
     logger.info("Backed up %s to %s before the first v4 open", db_path, dest)

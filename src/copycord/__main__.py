@@ -2725,6 +2725,23 @@ def schema_guard() -> bool:
     return True
 
 
+def backup_guard() -> bool:
+    """False when a v3 DB needs its pre-v4 backup and the backups folder is not writable."""
+    from copycord import logging_setup, ui
+    from copycord.common.db import BackupNotWritableError, check_pre_v4_backup
+    from copycord.common.paths import db_path
+
+    try:
+        check_pre_v4_backup(str(db_path()))
+    except BackupNotWritableError as e:
+        text = "Copycord did not start: the v3 database cannot be backed up before v4 opens it"
+        if logging_setup.WINDOWLESS:
+            logging.getLogger("copycord.supervisor").error("%s: %s", text, e)
+        ui.fail(text, str(e), stream=sys.stderr)
+        return False
+    return True
+
+
 def port_busy_message(port: int) -> None:
     """What `copycord run` prints when a port it needs stays in use."""
     from copycord import logging_setup, ui
@@ -2843,6 +2860,8 @@ def run_command(argv: Optional[List[str]] = None) -> int:
             return 1
         migrate_on_start()
         if not schema_guard():
+            return 1
+        if not backup_guard():
             return 1
 
         from copycord import supervisor, update_check
