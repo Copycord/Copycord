@@ -510,7 +510,8 @@ class VerifyController:
     async def _delete_ids(
         self, guild: discord.Guild, targets: list[tuple[int, str]], *, req_id: str
     ):
-        """Returns a list of dicts: {id, kind, name, deleted, reason}.
+        """Returns a list of dicts: {id, kind, name, deleted, reason}; id is a string
+        so snowflakes above 2**53 survive JSON.parse in the browser.
 
         reason is one of protected, not_found, not_category, not_channel, error.
         """
@@ -529,7 +530,7 @@ class VerifyController:
                 if not ch:
                     results.append(
                         {
-                            "id": int(_id),
+                            "id": str(int(_id)),
                             "kind": kind or "channel",
                             "name": f"#{_id}",
                             "deleted": False,
@@ -543,7 +544,7 @@ class VerifyController:
                     if not isinstance(ch, discord.CategoryChannel):
                         results.append(
                             {
-                                "id": int(_id),
+                                "id": str(int(_id)),
                                 "kind": "category",
                                 "name": getattr(ch, "name", f"#{_id}"),
                                 "deleted": False,
@@ -564,7 +565,7 @@ class VerifyController:
                     )
                     results.append(
                         {
-                            "id": int(_id),
+                            "id": str(int(_id)),
                             "kind": "category",
                             "name": ch.name,
                             "deleted": True,
@@ -576,7 +577,7 @@ class VerifyController:
                     if isinstance(ch, discord.CategoryChannel):
                         results.append(
                             {
-                                "id": int(_id),
+                                "id": str(int(_id)),
                                 "kind": "channel",
                                 "name": getattr(ch, "name", f"#{_id}"),
                                 "deleted": False,
@@ -599,7 +600,7 @@ class VerifyController:
                         )
                         results.append(
                             {
-                                "id": int(_id),
+                                "id": str(int(_id)),
                                 "kind": "channel",
                                 "name": getattr(ch, "name", f"#{_id}"),
                                 "deleted": False,
@@ -618,7 +619,7 @@ class VerifyController:
                     )
                     results.append(
                         {
-                            "id": int(_id),
+                            "id": str(int(_id)),
                             "kind": "channel",
                             "name": getattr(ch, "name", f"#{_id}"),
                             "deleted": True,
@@ -637,7 +638,7 @@ class VerifyController:
                 )
                 results.append(
                     {
-                        "id": int(_id),
+                        "id": str(int(_id)),
                         "kind": kind or "channel",
                         "name": f"#{_id}",
                         "deleted": False,
