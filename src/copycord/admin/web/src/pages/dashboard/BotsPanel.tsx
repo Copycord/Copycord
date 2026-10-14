@@ -1,6 +1,7 @@
 // The Bots card from index.html: server and client state, uptime and status
 // note, Start/Stop, and the per bot log buttons. State comes from /api/status
-// on load and after Start/Stop, then from the status pushes on /ws/ui.
+// on load, on the useStatusPoll schedule and after Start/Stop, and from the
+// status pushes on /ws/ui in between.
 
 import { useCallback, useEffect, useState } from "react";
 import { Spinner, cx } from "../../components/ui";
@@ -20,8 +21,11 @@ import {
   STATUS_URL,
   statusesFrom,
   statusFromWs,
+  statusHealthy,
   stopBots,
 } from "./model";
+import type { PollResult } from "./useStatusPoll";
+import { useStatusPoll } from "./useStatusPoll";
 
 const ROLES: Array<{ role: BotRole; label: string }> = BOT_ROLES;
 
@@ -44,19 +48,24 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
   const [stamps, setStamps] = useState<Record<BotRole, number>>({ server: 0, client: 0 });
   const [now, setNow] = useState(() => Date.now());
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<PollResult> => {
     try {
-      setStatuses(statusesFrom(await api.get<StatusResponse>(STATUS_URL)));
+      const res = await api.get<StatusResponse>(STATUS_URL);
+      setStatuses(statusesFrom(res));
       setStamps({ server: Date.now(), client: Date.now() });
       setNow(Date.now());
+      return statusHealthy(res) ? "ok" : "degraded";
     } catch {
       // The table keeps its last state; the websocket fills it in.
+      return "failed";
     }
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const burstPoll = useStatusPoll(refresh);
 
   useWsMessages(
     "/ws/ui",
@@ -88,6 +97,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
       await (running ? stopBots() : startBots());
       notify(running ? "Stopped." : "Started.", "success");
       await refresh();
+      burstPoll();
     } catch (e) {
       notify(errorText(e, running ? "Failed to stop" : "Failed to start"), "error");
     } finally {

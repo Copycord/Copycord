@@ -50,6 +50,12 @@ export function statusFromWs(msg: BusMessage): { role: BotRole; status: BotStatu
   };
 }
 
+/** Whether both roles in /api/status report no error, as app.js checked before slowing its poll. */
+export function statusHealthy(res: StatusResponse | undefined): boolean {
+  const ok = (r: StatusResponse["server"]) => !!r && r.ok !== false && !r.error;
+  return ok(res?.server) && ok(res?.client);
+}
+
 export function anyRunning(s: BotStatuses): boolean {
   return s.server.running || s.client.running;
 }
