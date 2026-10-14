@@ -17,25 +17,9 @@ import {
   startScrape,
   validateSetup,
 } from "./scraperApi";
-import { SC_CARD, TITLE, TITLEBAR } from "./TokensCard";
+import { CHECK_BOX, CHECK_SPAN, SC_CARD, SC_CHECK, SC_LABEL, TITLE, TITLEBAR } from "./ScraperSkeleton";
 
-// .sc-field label and .sc-opts legend.
-const SC_LABEL = "text-xs font-medium tracking-[0.04em] text-muted uppercase";
-// .sc-check: the label row; the checkbox itself draws the old .sc-check-box (18px, purple outline and
-// a 10px purple square when checked).
-export const SC_CHECK = "flex cursor-pointer items-center gap-2 text-[13px] text-text select-none";
-export const CHECK_BOX =
-  "m-0 flex size-[18px] shrink-0 cursor-pointer appearance-none items-center justify-center rounded-[5px] " +
-  "border-[1.5px] border-border bg-[rgba(20,11,38,0.5)] bg-center bg-no-repeat [background-size:10px_10px] [font-family:inherit] " +
-  "transition-[background,border-color] duration-150 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 " +
-  "focus-visible:outline-primary checked:border-primary checked:bg-[rgba(139,92,246,0.18)] " +
-  "checked:bg-[image:linear-gradient(var(--color-primary),var(--color-primary))]";
-// The same box as a span after a visually hidden peer checkbox, as the old markup drew it.
-export const CHECK_SPAN =
-  "inline-flex size-[18px] shrink-0 items-center justify-center rounded-[5px] border-[1.5px] border-border " +
-  "bg-[rgba(20,11,38,0.5)] transition-[background,border-color] duration-150 after:block after:size-2.5 " +
-  "after:rounded-[2px] after:content-[''] peer-checked:border-primary peer-checked:bg-[rgba(139,92,246,0.18)] " +
-  "peer-checked:after:bg-primary peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary";
+export { CHECK_BOX, CHECK_SPAN, SC_CHECK };
 // The old .btn had no gap between the icon and the label.
 const OLD_BTN = "has-[svg]:gap-0!";
 

@@ -6,19 +6,18 @@ import { cx } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import type { ScraperScrapesResponse, ScraperStatus, ScraperTokensResponse } from "../types/scraper";
 import { ConfigCard } from "./scraper/ConfigCard";
-import { SearchIcon } from "./scraper/icons";
 import { PastScrapesCard } from "./scraper/PastScrapesCard";
 import { ProgressCard } from "./scraper/ProgressCard";
 import { ProxyCard } from "./scraper/ProxyCard";
 import { QueueCard } from "./scraper/QueueCard";
 import { ScraperLogsCard } from "./scraper/ScraperLogsCard";
 import { SCRAPES_URL, STATUS_URL, TOKENS_URL } from "./scraper/scraperApi";
+import { IDLE_PILL, PILL_BOX, ScraperTitle } from "./scraper/ScraperSkeleton";
 import { TokensCard } from "./scraper/TokensCard";
 import { useScraperLive } from "./scraper/useScraperLive";
 import { useNotify, useSafeConfirm } from "./system/providers";
 
 // .scraper-status-pill and its .pill-dot per data-status.
-const IDLE_PILL = { box: "border-border bg-[rgba(255,255,255,0.04)] text-muted", dot: "bg-muted" };
 const PILL: Record<string, { box: string; dot: string }> = {
   idle: IDLE_PILL,
   running: {
@@ -49,21 +48,11 @@ export function Scraper() {
     <div id="scraper-root" className="min-w-fit">
       <h1 className="sr-only">Scraper</h1>
       <div className="mt-7 mb-1 flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="m-0 flex items-center gap-2.5 text-[22px] font-bold whitespace-nowrap text-accent">
-            <SearchIcon className="shrink-0 text-primary" />
-            Member Scraper
-          </h2>
-          <p className="m-0 mt-1 text-[13px] text-muted">Scrape Discord server members</p>
-        </div>
+        <ScraperTitle />
         <span
           id="sc-status-pill"
           data-status={live.pill}
-          className={cx(
-            "mt-1 inline-flex shrink-0 items-center gap-[7px] rounded-[20px] border px-3.5 py-1.5 text-xs font-semibold",
-            "tracking-[0.03em] whitespace-nowrap transition-all duration-[250ms]",
-            pill.box,
-          )}
+          className={cx(PILL_BOX, pill.box)}
         >
           <span aria-hidden="true" className={cx("size-2 rounded-full transition-all duration-[250ms]", pill.dot, busy && "animate-pulse")} />
           <span id="sc-status-label">{live.pillLabel}</span>

@@ -3,11 +3,12 @@
 // scraper.js. The page owns the list request so a finished run can reload it.
 
 import { useState } from "react";
-import { Button, Card, cx, SkeletonSection } from "../../components/ui";
+import { Button, Card, cx } from "../../components/ui";
 import type { ScraperScrape, ScraperScrapesResponse } from "../../types/scraper";
 import type { Confirm, Notify } from "../system/providers";
 import { DownloadIcon, RefreshIcon, TrashIcon, UsersIcon } from "./icons";
 import { deleteScrape, reason, scrapeUrl } from "./scraperApi";
+import { ScrapesPlaceholder } from "./ScraperSkeleton";
 import { ICON_BUTTON, SC_CARD, TITLE, TITLEBAR } from "./TokensCard";
 
 /** "Oct 13, 2026 09:41" in the browser's locale, as fmtDate. */
@@ -72,7 +73,7 @@ export function PastScrapesCard({ data, reload, notify, confirm, loading = false
         </Button>
       </div>
       <div id="sc-scrapes-body" className="mt-3">
-        {loading ? <SkeletonSection rows={2} rowHeight={44} label="Loading saved scrapes" /> : null}
+        {loading ? <ScrapesPlaceholder /> : null}
         <div id="sc-scrapes-empty" hidden={loading || all.length > 0} className="px-4 py-6 text-center text-muted">
           <p className="m-0 mb-1 text-sm font-semibold">No saved scrapes yet</p>
           <small className="text-xs">Completed scrapes are automatically saved here</small>

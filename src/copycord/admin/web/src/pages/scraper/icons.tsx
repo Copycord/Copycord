@@ -23,14 +23,6 @@ function Icon({ size = 14, strokeWidth = 2, children, ...rest }: IconProps) {
 
 const ROUND = { strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
-export function SearchIcon(p: IconProps) {
-  return (
-    <Icon size={26} strokeWidth={1.5} {...p}>
-      <path {...ROUND} d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-    </Icon>
-  );
-}
-
 export function KeyIcon(p: IconProps) {
   return (
     <Icon size={32} strokeWidth={1.5} {...p}>

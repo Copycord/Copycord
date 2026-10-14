@@ -2,17 +2,15 @@
 // Only masked values are ever rendered; the value input clears after a save.
 
 import { useState } from "react";
-import { Button, Card, cx, Input, SkeletonSection } from "../../components/ui";
+import { Button, Card, cx, Input } from "../../components/ui";
 import type { ScraperToken } from "../../types/scraper";
 import type { Confirm, Notify } from "../system/providers";
 import { CheckIcon, KeyIcon, RefreshIcon, TrashIcon, XIcon } from "./icons";
 import { displayMask } from "./mask";
 import { addToken, deleteToken, plural, reason, validateToken } from "./scraperApi";
+import { SC_CARD, TITLE, TITLEBAR, TokenListPlaceholder } from "./ScraperSkeleton";
 
-// .scraper-card .card-titlebar h3 and the .card-titlebar row; every scraper card sits 18px below the last.
-export const TITLE = "m-0 text-[15px] font-bold whitespace-nowrap text-accent";
-export const TITLEBAR = "mb-1.5 flex items-center justify-between gap-2.5";
-export const SC_CARD = "mt-[18px] max-w-full";
+export { SC_CARD, TITLE, TITLEBAR };
 
 // .btn.btn-ghost.btn-xs holding a 14px icon.
 export const ICON_BUTTON =
@@ -140,7 +138,7 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
 
       <div id="sc-token-list" className="mt-3 max-h-[340px] overflow-y-auto [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]">
         {loading && tokens.length === 0 ? (
-          <SkeletonSection rows={3} rowHeight={44} label="Loading tokens" className="px-1 py-2" />
+          <TokenListPlaceholder />
         ) : tokens.length === 0 ? (
           <div id="sc-token-empty" className="flex flex-col items-center gap-1 px-4 py-8 text-center text-muted">
             <KeyIcon className="mb-1.5 text-muted opacity-35" />
