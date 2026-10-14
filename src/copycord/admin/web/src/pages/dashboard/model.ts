@@ -32,8 +32,17 @@ export function statusesFrom(res: StatusResponse | undefined): BotStatuses {
   return { server: toBotStatus(res?.server), client: toBotStatus(res?.client) };
 }
 
-/** A status push on /ws/ui, as app.js read it, or null for any other message. */
-export function statusFromWs(msg: BusMessage): { role: BotRole; status: BotStatus } | null {
+/** A status push on /ws/ui, or null for any other message. */
+export function statusFromWs(frame: BusMessage): { role: BotRole; status: BotStatus } | null {
+  const p = (frame.payload && typeof frame.payload === "object" ? frame.payload : {}) as Record<string, unknown>;
+  // AdminBus.status() and the hub's replay on connect: {kind: "status", role, payload: {running, status}}.
+  if (frame.kind === "status" && !p.type) {
+    if (frame.role !== "server" && frame.role !== "client") return null;
+    return { role: frame.role, status: toBotStatus(p as Partial<BotStatus>) };
+  }
+  // hub.broadcast() keeps kind and role and moves the rest into payload, so
+  // {type: "status", source, data} and agent frames arrive with payload.type.
+  const msg: BusMessage = frame.type ? frame : { ...p, kind: frame.kind, role: frame.role };
   if (msg.type !== "status") return null;
   const data = (msg.data ?? {}) as Record<string, unknown>;
   if (msg.kind === "agent") {

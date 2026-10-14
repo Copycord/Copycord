@@ -1400,7 +1400,7 @@ class ServerReceiver:
                 if orig in self._active_backfills:
                     await self.bus.publish(
                         "client",
-                        {"type": "backfill_busy", "data": {"channel_id": orig}},
+                        {"type": "backfill_busy", "data": {"channel_id": str(orig)}},
                     )
                     return
 

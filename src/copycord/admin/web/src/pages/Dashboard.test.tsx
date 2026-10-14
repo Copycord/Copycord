@@ -358,6 +358,22 @@ describe("dashboard model", () => {
   it("ignores non status messages", () => {
     expect(statusFromWs({ type: "log", source: "server" })).toBeNull();
     expect(statusFromWs({ type: "status", source: "other" })).toBeNull();
+    expect(statusFromWs({ kind: "proxy_test", role: "admin", payload: { type: "started", total: 2 } })).toBeNull();
+  });
+
+  it("reads the status frames the hub sends on /ws/ui", () => {
+    // AdminBus.status() from the bots and the hub's replay on connect.
+    expect(
+      statusFromWs({ kind: "status", role: "client", payload: { running: true, status: "Logged in as cc", discord: { ready: true } } }),
+    ).toEqual({ role: "client", status: { running: true, uptime_sec: null, status: "Logged in as cc" } });
+    // hub.broadcast({type: "status", source, data}) after _normalize.
+    expect(
+      statusFromWs({ kind: "status", role: "unknown", payload: { type: "status", source: "server", data: { running: true } } }),
+    ).toEqual({ role: "server", status: { running: true, uptime_sec: null, status: "" } });
+    // An agent frame from /bus after _normalize.
+    expect(
+      statusFromWs({ kind: "agent", role: "server", payload: { type: "status", ts: 1, data: { running: false, status: "Stopped" } } }),
+    ).toEqual({ role: "server", status: { running: false, uptime_sec: null, status: "Stopped" } });
   });
 });
 

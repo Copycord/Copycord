@@ -89,6 +89,10 @@ describe("events", () => {
     expect(eventChannelId({ data: { original_channel_id: 9 } }, tm)).toBe("9");
     expect(eventChannelId({}, tm)).toBeNull();
   });
+  it("keeps every digit of a snowflake from the backfill_busy frame the server sends", () => {
+    const frame = JSON.parse('{"kind":"client","role":"server","payload":{"type":"backfill_busy","data":{"channel_id":"1521898853337403511"}}}');
+    expect(eventChannelId(frame.payload, new Map())).toBe("1521898853337403511");
+  });
   it("progress never goes backwards and keeps the known total", () => {
     expect(progressOf({ data: { delivered: 5 } }, { delivered: 8, total: 100 })).toEqual({ delivered: 8, total: 100 });
     expect(progressOf({ data: { applied: 20, expected_total: 50 } }, { delivered: 8, total: null })).toEqual({ delivered: 20, total: 50 });
