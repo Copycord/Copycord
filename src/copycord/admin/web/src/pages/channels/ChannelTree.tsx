@@ -8,35 +8,56 @@ import { cx } from "../../components/ui";
 import type { ChannelTree as Tree, TreeChannel } from "./model";
 import type { ChannelTreeSlots } from "./slots";
 
-const CHIP = "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold";
-const CHIP_GOOD = "border-[#2e7d5b] bg-[#0f2a1f] text-[#7ee2b8]";
-const CHIP_CUSTOM = "border-[rgba(250,204,21,0.45)] bg-[rgba(250,204,21,0.12)] text-[#facc15]";
-const CHIP_ORPHAN = "border-[rgba(239,68,68,0.35)] bg-[#3a1c20] text-[#ffc5cf]";
-const CHIP_MUTED = "border-border bg-white/4 text-muted";
+// .ch-section-title .cat-chip: 12px system-ui pill with the old good / custom / orphan inks.
+const CAT_CHIP =
+  "inline-flex min-h-6 items-center justify-center rounded-full border px-2.5 py-1 text-center " +
+  "font-[system-ui,sans-serif] text-[12px] font-normal leading-[1.2]";
+const CAT_GOOD = "border-[rgba(16,185,129,0.35)] bg-[rgba(16,185,129,0.12)] text-good";
+// .badge.badge-custom
+const CUSTOM =
+  "border-[color-mix(in_srgb,#facc15_45%,rgba(255,255,255,0.12))] " +
+  "bg-[color-mix(in_srgb,#facc15_12%,rgba(255,255,255,0.045))] text-custom-ink";
+const CAT_ORPHAN = "border-[rgba(239,68,68,0.35)] bg-[#3a1c20] text-[#ffc5cf]";
+
+// .badge inside a card: 600 12px/1.8 system-ui, 2px 8px.
+const BADGE =
+  "inline-block rounded-full border px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] font-semibold leading-[1.8]";
+const BADGE_MUTED = "border-border bg-bg2 text-[#e6e1ff]";
+const BADGE_GOOD = "border-[rgba(16,185,129,0.35)] bg-[rgba(16,185,129,0.12)] text-good";
+const BADGE_ORPHAN = "border-border bg-[#3a1c20] text-[#ffc5cf]";
 
 export interface ChannelTreeProps extends ChannelTreeSlots {
   tree: Tree;
+  /** Hidden until the status gate first opens, as the old page did. */
+  hidden?: boolean;
 }
 
-export function ChannelTree({ tree, channelActions, categoryActions, channelStatus }: ChannelTreeProps) {
+export function ChannelTree({ tree, hidden, channelActions, categoryActions, channelStatus }: ChannelTreeProps) {
   return (
-    <div id="channels-root" aria-live="polite" className="mt-3 flex flex-col gap-6 xl:gap-7">
+    <div id="channels-root" aria-live="polite" hidden={hidden} className="grid gap-6 xl:gap-7">
       {tree.sections.map((s) => (
-        <section key={s.key} className="ch-section flex flex-col gap-2.5">
+        <section key={s.key} className="ch-section grid gap-3">
           <div className="flex items-center">
-            <h3 className="m-0 text-sm">
+            <h3 className="m-0 gap-[0.5ch] font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold text-muted">
               <span
                 data-cat-name={s.originalName}
                 title={s.tooltip || undefined}
                 data-orphan-cat-id={s.orphanCategoryId ?? undefined}
-                className={cx(CHIP, s.orphanCategory ? CHIP_ORPHAN : s.customized ? CHIP_CUSTOM : CHIP_GOOD)}
+                className={cx(CAT_CHIP, s.orphanCategory ? CAT_ORPHAN : s.customized ? CUSTOM : CAT_GOOD)}
               >
                 {s.displayName}
                 {!s.uncategorized ? categoryActions?.(s) : null}
               </span>
             </h3>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3 max-sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] xl:gap-4">
+          <div
+            className={
+              "grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3 xl:gap-4 " +
+              "max-sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] " +
+              "max-[520px]:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] max-[520px]:gap-2.5 " +
+              "max-[360px]:grid-cols-1"
+            }
+          >
             {s.channels.map((c) => (
               <ChannelCard
                 key={c.id}
@@ -64,50 +85,48 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions, status }: C
       data-cid={c.id}
       data-orphan={c.orphan ? "1" : undefined}
       className={cx(
-        "ch-card flex min-w-0 flex-col gap-2 rounded-panel border bg-linear-to-b from-[#1f1237] to-[#160b2a] p-3",
-        c.orphan ? "border-[#a33a4a]" : "border-border",
+        "ch-card block min-w-0 rounded-panel border bg-[linear-gradient(#1f1237,#160b2a)] p-3 max-[520px]:p-2.5",
+        c.orphan ? "border-white/12" : "border-border",
       )}
     >
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <span
-            title={c.title}
-            className={cx("block truncate font-semibold", c.customized ? "text-[#facc15]" : "text-text")}
-          >
+      {/* .ch-head: the name (.ch-name) and the menu button (.ch-top-right) */}
+      <div className="flex items-center justify-between">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 font-semibold text-text max-[520px]:text-[13px]">
+          <bdi title={c.title} className={cx("min-w-0 truncate", c.customized && "text-custom-ink")}>
             # {c.displayName}
-          </span>
-        </div>
-        {actions ? <div className="shrink-0">{actions}</div> : null}
+          </bdi>
+        </span>
+        {actions ? <div className="relative ml-2 flex shrink-0 items-center gap-1.5">{actions}</div> : null}
       </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span title="Channel type" className={cx(CHIP, CHIP_MUTED)}>
+      <div className="mt-2 flex gap-1.5">
+        <span title="Channel type" className={cx(BADGE, BADGE_MUTED)}>
           {c.typeLabel}
         </span>
         {c.orphan ? (
-          <span className={cx(CHIP, CHIP_ORPHAN)}>Orphan</span>
+          <span className={cx(BADGE, BADGE_ORPHAN)}>Orphan</span>
         ) : c.clonedId ? (
           <>
-            <span title="Part of the host servers structure" className={cx(CHIP, CHIP_GOOD)}>
+            <span title="Part of the host servers structure" className={cx(BADGE, BADGE_GOOD)}>
               Clone
             </span>
             {c.customized ? (
-              <span title="Customized channel" className={cx(CHIP, CHIP_CUSTOM)}>
+              <span title="Customized channel" className={cx(BADGE, CUSTOM)}>
                 Custom
               </span>
             ) : null}
           </>
         ) : null}
       </div>
-      <div className="flex gap-1.5 text-xs text-muted max-sm:flex-wrap">
+      <div
+        className={
+          "mt-1.5 flex gap-1.5 text-[12px] text-muted max-sm:flex-wrap max-[520px]:gap-1 " +
+          "max-sm:*:min-w-0 max-sm:*:[overflow-wrap:anywhere] max-[520px]:*:max-w-full max-[520px]:*:flex-[1_1_100%] max-[520px]:*:truncate"
+        }
+      >
         <span title="Original channel ID">{c.id}</span>
-        {c.clonedId ? (
-          <span title="Cloned channel ID" className="opacity-80">
-            → {c.clonedId}
-          </span>
-        ) : null}
+        {c.clonedId ? <span title="Cloned channel ID">→ {c.clonedId}</span> : null}
       </div>
       {status}
     </article>
   );
 });
-

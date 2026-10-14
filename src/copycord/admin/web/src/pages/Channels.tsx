@@ -5,7 +5,7 @@
 // Like the old page it waits until both Server and Client are connected.
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Button, Card, Input, Select, Spinner } from "../components/ui";
+import { Card, Spinner } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useApi } from "../hooks/useApi";
 import { useStatusGate } from "../hooks/useStatusGate";
@@ -13,6 +13,7 @@ import type { ChannelListResponse, ChannelRow, GuildMappingListResponse } from "
 import { useRowActions } from "./channels/actions/useRowActions";
 import { useBackfill } from "./channels/backfill/useBackfill";
 import { ChannelTree } from "./channels/ChannelTree";
+import { ToolbarSelect } from "./channels/ToolbarSelect";
 import { orphanStore, useOrphans } from "./channels/verify/orphanStore";
 import { useVerify } from "./channels/verify/useVerify";
 import {
@@ -83,6 +84,7 @@ export function Channels() {
   });
 
   const onMapping = (id: string) => {
+    if (id === mappingId) return;
     setOrphans(NO_ORPHANS);
     setPicked(id);
   };
@@ -91,69 +93,70 @@ export function Channels() {
 
   return (
     <StatusGate gate={gate}>
-      <Card className="shadow-card">
-        <header className="mb-1.5 flex flex-col items-start gap-3">
-          <h1 className="text-xl font-bold tracking-wide">Channels</h1>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Select
+      {/* The old .container.wide sat 20px in from the body padding at every width; the shell gives 12px below sm. */}
+      <Card className="mt-[18px] max-sm:mx-2">
+        {/* .card-titlebar: the h2, then one wrapping row of controls (.titlebar-actions). */}
+        <header className="mb-1.5 block gap-3">
+          <h2 className="my-[0.83em] text-[24px] font-bold">Channels</h2>
+          <span className="flex flex-wrap items-center gap-2.5">
+            <ToolbarSelect
               id="mapping-select"
-              aria-label="Guild mapping"
+              label="Guild mapping"
               value={mappingId}
               disabled={!list.length}
-              onChange={(e) => onMapping(e.target.value)}
-              className="w-auto! max-w-64"
-            >
-              {list.length ? (
-                list.map((m) => (
-                  <option key={m.mapping_id} value={m.mapping_id} className="bg-card-solid">
-                    {mappingLabel(m)}
-                  </option>
-                ))
-              ) : (
-                <option value="" disabled className="bg-card-solid">
-                  (no mappings configured)
-                </option>
-              )}
-            </Select>
-            <Input
+              onChange={onMapping}
+              options={
+                list.length
+                  ? list.map((m) => ({ value: m.mapping_id, label: mappingLabel(m) }))
+                  : [{ value: "", label: "(no mappings configured)", disabled: true }]
+              }
+            />
+            <input
               id="ch-search"
               type="text"
               placeholder="Search channels…"
               aria-label="Search channels"
               value={query}
+              hidden={!booted}
               onChange={(e) => setQuery(e.target.value)}
-              className="max-w-60"
+              className="w-[220px] max-w-[260px] rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[14px] text-[#e6e1ff] outline-none focus:border-primary"
             />
-            <Select
+            <ToolbarSelect
               id="ch-filter"
-              aria-label="Filter"
+              label="Filter"
               value={filter}
-              onChange={(e) => setFilter(e.target.value as FilterMode)}
-              options={[...FILTER_OPTIONS]}
-              className="w-auto!"
+              onChange={(v) => setFilter(v as FilterMode)}
+              options={FILTER_OPTIONS}
             />
-            <Select
+            <ToolbarSelect
               id="ch-sort"
-              aria-label="Sort"
+              label="Sort"
               value={sort.sort}
-              onChange={(e) => setSort((cur) => nextSort(cur, e.target.value))}
-              options={[...SORT_OPTIONS]}
-              className="w-auto!"
+              onChange={(v) => setSort((cur) => nextSort(cur, v))}
+              options={SORT_OPTIONS}
             />
-            <Button
+            {/* .btn.btn-ghost-red */}
+            <button
               id="orph-delall"
               type="button"
-              variant="danger"
               disabled={actions.deleteAll.disabled}
               onClick={actions.deleteAll.onClick}
+              className={
+                "flex h-[34px] cursor-pointer items-center justify-center rounded-input border border-border bg-white/4 px-2.5 " +
+                "text-[13px] leading-8 font-semibold text-accent transition-colors duration-150 " +
+                "hover:border-[color-mix(in_oklab,#2c1d4a_20%,#ef4444_80%)] hover:bg-white/8 hover:text-danger active:bg-white/10 " +
+                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28 " +
+                "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-white/4 disabled:hover:text-accent"
+              }
             >
               Delete all orphans
-            </Button>
-          </div>
+            </button>
+          </span>
         </header>
 
         <ChannelTree
           tree={tree}
+          hidden={!booted}
           channelActions={actions.channelActions}
           categoryActions={actions.categoryActions}
           channelStatus={backfill.channelStatus}
@@ -180,11 +183,9 @@ export function Channels() {
           </div>
         ) : null}
 
-        {loaded && tree.empty ? (
-          <div id="channels-empty" className="rounded-lg px-2.5 py-2 text-[0.9em] text-muted opacity-80">
-            No channels found.
-          </div>
-        ) : null}
+        <div id="channels-empty" hidden={!(loaded && tree.empty)} className="text-[0.9em] text-muted opacity-80">
+          No channels found.
+        </div>
       </Card>
     </StatusGate>
   );
