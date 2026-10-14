@@ -8,7 +8,6 @@ import { useToast } from "../components/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import type { ConfirmOptions } from "../components/ui/ConfirmDialog";
 import { cx } from "../components/ui/cx";
-import { SkeletonSection } from "../components/ui/Skeleton";
 import { useApi } from "../hooks/useApi";
 import { api, errorText } from "../lib/api";
 import type {
@@ -20,7 +19,26 @@ import type {
 } from "../types/logs";
 import { LogsIcon } from "./logs/icons";
 import { ToolbarSelect } from "./channels/ToolbarSelect";
-import { COLS, LogRow } from "./logs/LogRow";
+import { LogRow } from "./logs/LogRow";
+import {
+  ACTIONS_TH,
+  CLEAR_ALL_BTN,
+  COUNT,
+  HEAD_ROW,
+  HEADERS,
+  LogsHeader,
+  LogsLoadingRow,
+  REFRESH_BTN,
+  SEARCH_INPUT,
+  SORT_BTN,
+  TABLE,
+  TABLE_WRAP,
+  TH,
+  TOOLBAR,
+  TOOLBAR_LEFT,
+  TOOLBAR_RIGHT,
+  TYPE_BOX,
+} from "./logs/LogsSkeleton";
 import {
   DEFAULT_SORT,
   countText,
@@ -30,7 +48,7 @@ import {
   totalPages,
   typeOptions,
 } from "./logs/model";
-import type { SortColumn, SortState } from "./logs/model";
+import type { SortState } from "./logs/model";
 import { Pagination } from "./logs/Pagination";
 
 export const SEARCH_DEBOUNCE_MS = 300;
@@ -44,26 +62,9 @@ function useOptional<T>(hook: () => T): T | null {
   }
 }
 
-const CONTROL =
-  "rounded-lg border border-border bg-[rgba(20,10,40,0.6)] text-[13px] text-text outline-none transition-colors focus:border-accent";
-const ICON_BTN =
-  "inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-border bg-transparent px-1.5 py-px text-muted " +
-  "transition-colors disabled:cursor-wait disabled:opacity-55 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none";
-const ICON_BTN_DANGER =
-  "enabled:hover:border-[rgba(239,68,68,0.3)] enabled:hover:bg-[rgba(239,68,68,0.1)] enabled:hover:text-[#f87171]";
 const PILL_BTN =
   "inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 py-[5px] text-xs transition-colors " +
   "disabled:cursor-wait disabled:opacity-55 outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
-
-const HEADERS: Array<{ key: SortColumn; label: string; className: string }> = [
-  { key: "created_at", label: "Timestamp", className: "w-[200px] min-w-[200px] max-md:w-[130px]" },
-  { key: "event_type", label: "Type", className: "w-[160px]" },
-  { key: "guild_name", label: "Guild", className: "w-[140px] max-md:hidden" },
-  { key: "details", label: "Details", className: "" },
-];
-
-// Padding and alignment are per header so no two utilities fight over one property.
-const TH = "relative border-b border-b-border py-2.5 text-[11px] leading-[normal] font-semibold tracking-[0.5px] whitespace-nowrap text-muted uppercase";
 
 export function Logs() {
   const toast = useOptional(useToast);
@@ -214,8 +215,6 @@ export function Logs() {
   const firstLoad = list.loading && !list.data;
   const empty = !firstLoad && !list.error && logs.length === 0;
 
-  // The table height leaves room for the header and toolbar so the page fits the screen. On phones the
-  // table keeps the old fixed layout without Guild, so Details runs past the edge and the wrap scrolls.
   return (
     <section
       id="logs-root"
@@ -223,24 +222,16 @@ export function Logs() {
       aria-label="Event logs"
       className="w-full scroll-mt-4"
     >
-      <h1 className="sr-only">Logs</h1>
-      <div className="my-3 flex items-center gap-3">
-        <h2 className="m-0 text-[22px] font-bold text-text">Event Logs</h2>
-      </div>
+      <LogsHeader />
 
-      <div
-        className={cx(
-          "mb-3 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border px-3.5 py-2.5",
-          "bg-linear-135 from-[rgba(27,16,48,0.6)] to-[rgba(20,10,40,0.4)] max-md:flex-col max-md:items-stretch",
-        )}
-      >
-        <div className="flex flex-wrap items-center gap-2.5 max-md:flex-col">
+      <div className={TOOLBAR}>
+        <div className={TOOLBAR_LEFT}>
           <div className="relative flex items-center">
             <LogsIcon name="search" size={15} className="pointer-events-none absolute left-2.5 text-muted" />
             <input
               type="text"
               id="logs-search"
-              className={cx(CONTROL, "w-[200px] py-[7px] pr-3 pl-[30px] placeholder:text-muted/60 max-md:w-full")}
+              className={SEARCH_INPUT}
               placeholder="Search logs"
               aria-label="Search logs"
               autoComplete="off"
@@ -248,7 +239,7 @@ export function Logs() {
               onChange={(e) => setSearchInput(e.target.value)}
             />
           </div>
-          <div className="w-[300px] min-w-[300px] [&_select]:w-[300px] [&_select]:max-w-[300px] [&>span]:block">
+          <div className={TYPE_BOX}>
             <ToolbarSelect
               id="logs-filter-type"
               label="Filter by type"
@@ -262,8 +253,8 @@ export function Logs() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span id="logs-count" className="text-xs whitespace-nowrap text-muted" aria-live="polite">
+        <div className={TOOLBAR_RIGHT}>
+          <span id="logs-count" className={COUNT} aria-live="polite">
             {list.data ? countText(page, logs.length, total) : ""}
           </span>
           {filtersActive ? (
@@ -287,7 +278,7 @@ export function Logs() {
             id="logs-refresh"
             title="Refresh logs"
             aria-label="Refresh logs"
-            className={cx(ICON_BTN, "enabled:hover:border-accent/40 enabled:hover:bg-[rgba(139,92,246,0.1)] enabled:hover:text-accent")}
+            className={REFRESH_BTN}
             onClick={reloadAll}
           >
             <LogsIcon name="refresh" size={16} className={list.loading ? "animate-spin" : undefined} />
@@ -297,7 +288,7 @@ export function Logs() {
             id="logs-clear-all"
             title="Clear all logs"
             aria-label="Clear all logs"
-            className={cx(ICON_BTN, ICON_BTN_DANGER)}
+            className={CLEAR_ALL_BTN}
             disabled={clearBusy}
             onClick={() => void clearAll()}
           >
@@ -312,15 +303,10 @@ export function Logs() {
         </p>
       ) : null}
 
-      <div
-        className={cx(
-          "h-[calc(100vh-280px)] min-h-[400px] overflow-auto rounded-xl border border-border",
-          "bg-linear-to-b from-[rgba(27,16,48,0.5)] to-[rgba(15,8,30,0.6)] max-md:h-[calc(100vh-320px)] max-md:min-h-[300px]",
-        )}
-      >
-        <table id="logs-table" className="mt-2 w-full table-fixed border-collapse border-[gray]" aria-busy={list.loading || undefined}>
+      <div className={TABLE_WRAP}>
+        <table id="logs-table" className={TABLE} aria-busy={list.loading || undefined}>
           <thead className="sticky top-0 z-[2]">
-            <tr className="border-[gray] bg-[rgba(20,10,40,0.95)] backdrop-blur-sm">
+            <tr className={HEAD_ROW}>
               {HEADERS.map((h) => {
                 const active = sort.column === h.key;
                 const touched = sort !== DEFAULT_SORT;
@@ -334,7 +320,7 @@ export function Logs() {
                     <button
                       type="button"
                       data-sort={h.key}
-                      className="cursor-pointer uppercase outline-none select-none hover:text-text focus-visible:text-text"
+                      className={SORT_BTN}
                       onClick={() => {
                         setSort((s) => nextSort(s, h.key));
                       }}
@@ -350,18 +336,14 @@ export function Logs() {
                   </th>
                 );
               })}
-              <th scope="col" className={cx(TH, "w-11 px-3.5 text-center")}>
+              <th scope="col" className={ACTIONS_TH}>
                 <span className="sr-only">Actions</span>
               </th>
             </tr>
           </thead>
           <tbody id="logs-tbody">
             {firstLoad ? (
-              <tr>
-                <td colSpan={COLS} className="px-3.5 py-2">
-                  <SkeletonSection rows={8} rowHeight={41} label="Loading event logs" />
-                </td>
-              </tr>
+              <LogsLoadingRow />
             ) : (
               rows.map((log) => (
                 <LogRow

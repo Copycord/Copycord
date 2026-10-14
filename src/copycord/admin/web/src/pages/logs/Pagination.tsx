@@ -1,6 +1,7 @@
 // Page buttons under the table, same shape as the old .logs-pagination.
 
 import { cx } from "../../components/ui/cx";
+import { PAGINATION as NAV } from "./LogsSkeleton";
 import { pageRange } from "./model";
 
 const BTN =
@@ -8,9 +9,6 @@ const BTN =
   "disabled:cursor-default disabled:opacity-30";
 const IDLE = "border-border bg-transparent text-text enabled:hover:border-accent enabled:hover:bg-[rgba(139,92,246,0.15)]";
 const ACTIVE = "border-accent bg-accent text-white";
-
-// With one page the old .logs-pagination stayed in the flow, empty, keeping its 16px padding.
-const NAV = "flex flex-wrap items-center justify-center gap-1 py-4";
 
 export function Pagination({ page, pages, onPage }: { page: number; pages: number; onPage: (p: number) => void }) {
   const range = pageRange(page, pages);

@@ -7,6 +7,7 @@ import { ChannelsSkeleton } from "./pages/channels/ChannelsSkeleton";
 import { DashboardSkeleton } from "./pages/dashboard/DashboardSkeleton";
 import { ForwardingSkeleton } from "./pages/forwarding/ForwardingSkeleton";
 import { GuildsSkeleton } from "./pages/guilds/GuildsSkeleton";
+import { LogsSkeleton } from "./pages/logs/LogsSkeleton";
 import { ScraperSkeleton } from "./pages/scraper/ScraperSkeleton";
 import { SystemSkeleton } from "./pages/system/SystemSkeleton";
 import { Login } from "./pages/Login";
@@ -56,7 +57,7 @@ const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds), Gu
 const Forwarding = lazyPage(() => import("./pages/Forwarding").then((m) => m.Forwarding), ForwardingSkeleton);
 const Scraper = lazyPage(() => import("./pages/Scraper").then((m) => m.Scraper), ScraperSkeleton);
 const System = lazyPage(() => import("./pages/System").then((m) => m.System), SystemSkeleton);
-const Logs = lazyPage(() => import("./pages/Logs").then((m) => m.Logs));
+const Logs = lazyPage(() => import("./pages/Logs").then((m) => m.Logs), LogsSkeleton);
 const Kit = lazyPage(() => import("./pages/Kit").then((m) => m.Kit));
 
 // The server serves index.html at each of these paths (admin/app.py SPA_PAGES).

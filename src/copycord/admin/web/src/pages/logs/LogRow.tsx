@@ -5,6 +5,7 @@ import type { KeyboardEvent } from "react";
 import { cx } from "../../components/ui/cx";
 import type { EventLog } from "../../types/logs";
 import { LogsIcon } from "./icons";
+import { COLS } from "./LogsSkeleton";
 import { fmtTimestamp, guildText, hasMetadata, metadataRows, typeMeta } from "./model";
 import type { TypeTone } from "./model";
 
@@ -43,7 +44,6 @@ export function TypeBadge({ type }: { type: string }) {
 
 // Cells pick their own horizontal padding so no two utilities fight over one property.
 export const TD = "border-b py-2.5 align-middle text-[13px] text-text";
-export const COLS = 5;
 
 export interface LogRowProps {
   log: EventLog;
