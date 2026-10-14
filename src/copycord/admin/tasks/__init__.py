@@ -9,7 +9,7 @@
 
 """Tasks framework: long jobs register a TaskType and run through TaskService.
 
-Task types register here at import once they exist (backfill_channels next)."""
+Task types register here at import."""
 
 from .context import RunContext, Step, TaskCancelled
 from .registry import TaskType, register
@@ -20,6 +20,7 @@ from .service import (
     TaskRun,
     TaskService,
 )
+from . import backfill  # noqa: F401,E402  registers backfill_channels
 
 __all__ = (
     "MemoryRunRepo", "RunContext", "RunFinished", "RunRepo",

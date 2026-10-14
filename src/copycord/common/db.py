@@ -2952,6 +2952,7 @@ class DBManager:
         run_id: str | None = None,
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
+        task_run_id: int | None = None,
     ) -> str:
         run_id = run_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
@@ -2966,9 +2967,10 @@ class DBManager:
                     original_channel_id,
                     range_json,
                     started_at,
-                    updated_at
+                    updated_at,
+                    task_run_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -2978,6 +2980,7 @@ class DBManager:
                     json.dumps(range_json or {}),
                     now,
                     now,
+                    int(task_run_id) if task_run_id is not None else None,
                 ),
             )
         return run_id
