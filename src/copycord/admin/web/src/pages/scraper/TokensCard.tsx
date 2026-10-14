@@ -108,7 +108,7 @@ export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps)
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Input
             id="sc-token-value"
-            type="password"
+            type="text"
             aria-label="Discord token"
             placeholder="Paste Discord token…"
             autoComplete="off"

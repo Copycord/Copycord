@@ -122,7 +122,7 @@ describe("Scraper tokens card", () => {
     });
     renderPage();
     const value = document.getElementById("sc-token-value") as HTMLInputElement;
-    expect(value.type).toBe("password");
+    expect(value.type).toBe("text");
     await user.type(value, RAW);
     await user.type(document.getElementById("sc-token-label")!, "  Alt ");
     await user.click(screen.getByRole("button", { name: "Add" }));
