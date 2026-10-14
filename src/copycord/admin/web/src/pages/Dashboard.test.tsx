@@ -6,7 +6,8 @@ import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../lib/api";
 import type { StatusResponse, VersionInfo } from "../types/dashboard";
 import { holdFetch } from "../test/holdFetch";
-import { Dashboard } from "./Dashboard";
+import { Dashboard, DashboardSkeleton } from "./Dashboard";
+import { MAPPING_SKELETONS } from "./dashboard/DashboardSkeleton";
 import { appendCapped, formatUptime, parseLogData, statusFromWs } from "./dashboard/model";
 
 class FakeSocket {
@@ -329,9 +330,25 @@ describe("Dashboard loading", () => {
     server({ "/api/guild-mappings": () => json({ mappings: [] }) });
     const release = holdFetch("/api/guild-mappings");
     renderPage();
-    expect(await screen.findAllByTestId("mapping-skeleton")).toHaveLength(2);
+    expect(await screen.findAllByTestId("mapping-skeleton")).toHaveLength(MAPPING_SKELETONS);
     expect(document.getElementById("new-mapping-card")).not.toBeNull();
     release();
     await waitFor(() => expect(screen.queryByTestId("mapping-skeleton")).toBeNull());
+  });
+
+  it("the chunk skeleton has the loaded page's cards, titles and order", async () => {
+    const shape = (root: Element) =>
+      Array.from(root.children).map((el) => `${el.tagName} ${el.querySelector("h2, h3")?.textContent ?? ""}`);
+    const skel = render(<DashboardSkeleton />);
+    expect(screen.getByRole("heading", { level: 1, name: "Configuration" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Bots" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("card-skeleton")).toHaveLength(6);
+    expect(screen.getAllByTestId("mapping-skeleton")).toHaveLength(MAPPING_SKELETONS);
+    const skelShape = shape(screen.getByRole("heading", { level: 1, name: "Configuration" }).parentElement!);
+    skel.unmount();
+    server({});
+    renderPage();
+    await screen.findByRole("heading", { name: "Bots" });
+    expect(shape(screen.getByRole("heading", { level: 1, name: "Configuration" }).parentElement!)).toEqual(skelShape);
   });
 });

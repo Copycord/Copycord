@@ -4,7 +4,8 @@
 // mappings/openers.ts, which the modal lanes fill in.
 
 import { useCallback, useEffect, useState } from "react";
-import { Skeleton, cx } from "../../components/ui";
+import { cx } from "../../components/ui";
+import { MAPPING_SKELETONS, MappingTileSkeleton } from "./DashboardSkeleton";
 import { errorText } from "../../lib/api";
 import type { DashboardMapping } from "../../types/dashboard-mappings";
 import { useNotify, useSafeConfirm } from "../system/providers";
@@ -143,7 +144,7 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
             </span>
           </button>
           {!loaded
-            ? [0, 1].map((i) => <Skeleton.Card key={i} height="auto" testId="mapping-skeleton" className="min-h-[150px]" />)
+            ? Array.from({ length: MAPPING_SKELETONS }, (_, i) => <MappingTileSkeleton key={i} />)
             : null}
           {shown.map((m) => (
             <MappingCard

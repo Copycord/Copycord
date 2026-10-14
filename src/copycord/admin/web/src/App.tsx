@@ -3,13 +3,14 @@ import { Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { SkeletonSection } from "./components/ui/Skeleton";
 import { prefetch } from "./lib/api";
+import { DashboardSkeleton } from "./pages/dashboard/DashboardSkeleton";
 import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 
 // Each page is its own chunk, so the first paint needs only the shell and the page it lands on. The
 // skeleton shows until the chunk is in. React.lazy with a Suspense fallback would hold the page back
 // about 300 ms after its chunk arrived (React 19 throttles fallback reveals), so a plain effect loads it.
-function lazyPage(load: () => Promise<ComponentType>): ComponentType {
+function lazyPage(load: () => Promise<ComponentType>, Skeleton: ComponentType = PageSkeleton): ComponentType {
   let loaded: ComponentType | null = null;
   let pending: Promise<ComponentType> | null = null;
   const get = () => (pending ??= load().then((c) => (loaded = c)));
@@ -24,7 +25,7 @@ function lazyPage(load: () => Promise<ComponentType>): ComponentType {
         live = false;
       };
     }, [Page]);
-    return Page ? <Page /> : <PageSkeleton />;
+    return Page ? <Page /> : <Skeleton />;
   };
 }
 
@@ -44,7 +45,7 @@ const DASHBOARD_GETS = [
 const Dashboard = lazyPage(() => {
   prefetch(DASHBOARD_GETS);
   return import("./pages/Dashboard").then((m) => m.Dashboard);
-});
+}, DashboardSkeleton);
 const Channels = lazyPage(() => import("./pages/Channels").then((m) => m.Channels));
 const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds));
 const Forwarding = lazyPage(() => import("./pages/Forwarding").then((m) => m.Forwarding));

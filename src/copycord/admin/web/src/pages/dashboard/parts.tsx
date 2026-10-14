@@ -22,6 +22,21 @@ export const GHOST =
 /** The old .btn[disabled]; left off where a hidden button must keep opacity 1 like the old one. */
 export const GHOST_DISABLED = "disabled:opacity-60";
 
+/** The Bots table rows, shared with the dashboard skeleton. */
+export const BOT_ROLES: Array<{ role: "server" | "client"; label: string }> = [
+  { role: "server", label: "Server" },
+  { role: "client", label: "Client" },
+];
+
+// The old .runtime-table: fixed layout, 110px State and 120px Uptime columns,
+// muted 0.9rem headers, a rule under every row, centered cells after the first.
+export const BOTS_HEAD = "border-b border-b-border px-3 py-2 align-middle text-[0.9rem] font-medium whitespace-nowrap text-muted";
+export const BOTS_CELL = "border-b border-b-border px-3 py-2 align-middle text-[0.95rem] whitespace-nowrap";
+
+// The old .runtime-table .badge with .badge-ok / .badge-stop.
+export const BOTS_STATE =
+  "inline-block rounded-[12px] border border-border px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
+
 /** details.card.srv-proxy-card; the summary chevron turns with group-open. */
 export const CARD = "group mt-[18px] rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text";
 

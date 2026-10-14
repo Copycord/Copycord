@@ -10,7 +10,7 @@ import { api, errorText } from "../../lib/api";
 import type { LogStream } from "../../types/api";
 import type { BotRole, BotStatuses, StatusResponse } from "../../types/dashboard";
 import { useNotify } from "../system/providers";
-import { GHOST, GHOST_DISABLED } from "./parts";
+import { BOT_ROLES, BOTS_CELL as CELL, BOTS_HEAD as HEAD, BOTS_STATE as STATE, GHOST, GHOST_DISABLED } from "./parts";
 import {
   anyRunning,
   displayStatus,
@@ -23,19 +23,7 @@ import {
   stopBots,
 } from "./model";
 
-const ROLES: Array<{ role: BotRole; label: string }> = [
-  { role: "server", label: "Server" },
-  { role: "client", label: "Client" },
-];
-
-// The old .runtime-table: fixed layout, 110px State and 120px Uptime columns,
-// muted 0.9rem headers, a rule under every row, centered cells after the first.
-const HEAD = "border-b border-b-border px-3 py-2 align-middle text-[0.9rem] font-medium whitespace-nowrap text-muted";
-const CELL = "border-b border-b-border px-3 py-2 align-middle text-[0.95rem] whitespace-nowrap";
-
-// The old .runtime-table .badge with .badge-ok / .badge-stop.
-const STATE =
-  "inline-block rounded-[12px] border border-border px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
+const ROLES: Array<{ role: BotRole; label: string }> = BOT_ROLES;
 
 export interface BotsPanelProps {
   onViewLogs: (which: LogStream) => void;

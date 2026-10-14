@@ -5,7 +5,8 @@
 // two-column grid of bordered field boxes (.grid, .field-token, .gc-setting-row).
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChipInput, SkeletonSection, Spinner, cx } from "../../components/ui";
+import { ChipInput, Spinner, cx } from "../../components/ui";
+import { GlobalConfigLoading } from "./DashboardSkeleton";
 import { api, errorText } from "../../lib/api";
 import type { StatusResponse } from "../../types/dashboard";
 import type { GlobalConfig, TokenKey } from "../../types/dashboard-config";
@@ -157,7 +158,7 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
       </summary>
 
       {baseline === null ? (
-        <div className="mt-3.5">{loadError ? <p role="alert" className="text-sm text-danger">Could not load the configuration.</p> : <SkeletonSection rows={6} rowHeight={34} label="Loading configuration" />}</div>
+        <div className="mt-3.5">{loadError ? <p role="alert" className="text-sm text-danger">Could not load the configuration.</p> : <GlobalConfigLoading />}</div>
       ) : (
         <form
           id="cfg-form"

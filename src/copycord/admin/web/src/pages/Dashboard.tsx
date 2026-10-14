@@ -17,6 +17,8 @@ import { ProxySection } from "./dashboard/ProxySection";
 import { SyncSettingsSection } from "./dashboard/SyncSettingsSection";
 import { UpdateNotice } from "./dashboard/UpdateNotice";
 
+export { DashboardSkeleton } from "./dashboard/DashboardSkeleton";
+
 export interface DashboardProps {
   /** For tests. */
   WebSocketImpl?: UseWsOptions["WebSocketImpl"];
