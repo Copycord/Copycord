@@ -23,7 +23,7 @@ Copycord v4 runs the dashboard (admin), the server bot and the client together a
 The first time v4 opens a database that v3 created, it copies it to:
 
 ```
-<data dir>/backups/pre-v4-<timestamp>.db
+<folder of data.db>/backups/pre-v4-<timestamp>.db
 ```
 
 For Docker that is `./data/backups/pre-v4-<timestamp>.db`. The copy is made before v4 changes anything, and only once: v4 then records a `schema_version` in the database so the backup is not repeated.
