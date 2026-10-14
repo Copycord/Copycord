@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../components/Toast";
 import { ConfirmProvider } from "../../../components/ui";
 import { Channels } from "../../Channels";
+import { FakeWs } from "../../scraper/testFakes";
 
 const ROWS = [
   {
@@ -167,5 +168,46 @@ describe("row actions", () => {
     page();
     await waitFor(() => expect(document.querySelector("article")).not.toBeNull());
     expect(document.getElementById("orph-delall")).toBeDisabled();
+  });
+
+  it("toasts each result of Delete all orphans from the server's verify frame", async () => {
+    serve();
+    FakeWs.all = [];
+    vi.stubGlobal("WebSocket", FakeWs);
+    page();
+    await waitFor(() => expect(document.querySelector("article")).not.toBeNull());
+    // Frames as VerifyController._publish sends them through AdminBus.publish("verify", ...).
+    FakeWs.emit("/ws/out", {
+      kind: "verify",
+      role: "server",
+      payload: {
+        type: "orphans",
+        req_id: "a1",
+        categories: [],
+        channels: [
+          { id: "1521898853337403511", name: "old-news" },
+          { id: "1521898853337403512", name: "12367686" },
+        ],
+      },
+    });
+    await waitFor(() => expect(document.getElementById("orph-delall")).toBeEnabled());
+    await userEvent.click(document.getElementById("orph-delall")!);
+    await userEvent.click(await screen.findByRole("button", { name: "Delete all" }));
+    FakeWs.emit("/ws/out", {
+      kind: "verify",
+      role: "server",
+      payload: {
+        type: "deleted",
+        req_id: "841c7bf2",
+        ok: true,
+        results: [
+          { id: "1521898853337403511", kind: "channel", name: "old-news", deleted: true },
+          { id: "1521898853337403512", kind: "channel", name: "12367686", deleted: false, reason: "protected" },
+        ],
+      },
+    });
+    expect(await screen.findByText('Deleted "old-news"')).toBeInTheDocument();
+    expect(screen.getByText('"12367686" can\'t be deleted. Manual action required.')).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 });
