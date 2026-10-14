@@ -127,3 +127,16 @@ export const api = {
   del: <T>(url: string, body?: unknown, opts?: RequestOptions) =>
     request<T>("DELETE", url, body, opts),
 };
+
+// The text an error toast should show: the server's own message when it sent
+// one, else the caller's fallback with the status or "network error".
+export function errorText(e: unknown, fallback: string): string {
+  if (e instanceof ApiError) {
+    const generic = `request to ${e.url} failed with status ${e.status}`;
+    const message = e.message.trim();
+    if (message && message !== generic) return message;
+    return `${fallback} (${e.status})`;
+  }
+  if (e instanceof Error && e.message.trim()) return e.message.trim();
+  return `${fallback} (network error)`;
+}

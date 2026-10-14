@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, CSRF_HEADER, api, resetLoginRedirect } from "./api";
+import { ApiError, CSRF_HEADER, api, errorText, resetLoginRedirect } from "./api";
 
 function mockFetch(status: number, body: unknown, type = "application/json") {
   const text = typeof body === "string" ? body : JSON.stringify(body);
@@ -111,5 +111,48 @@ describe("api session expiry", () => {
     const err = await api.post("/api/x", {}).catch((e: unknown) => e);
     expect((err as ApiError).status).toBe(403);
     expect(go).not.toHaveBeenCalled();
+  });
+});
+
+describe("errorText", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function caught(call: () => Promise<unknown>): Promise<unknown> {
+    try {
+      await call();
+    } catch (e) {
+      return e;
+    }
+    throw new Error("expected the request to fail");
+  }
+
+  it("shows a plain text 400 body, every line of it", async () => {
+    mockFetch(400, "Telegram: invalid bot token. (Unauthorized)\nPushover: bad user", "text/plain");
+    const e = await caught(() => api.post("/api/forwarding", {}));
+    expect(errorText(e, "Failed to save forwarding rule")).toBe(
+      "Telegram: invalid bot token. (Unauthorized)\nPushover: bad user",
+    );
+  });
+
+  it("shows a JSON detail body", async () => {
+    mockFetch(400, { detail: "missing-guild-id" });
+    const e = await caught(() => api.post("/api/forwarding", {}));
+    expect(errorText(e, "Failed to save forwarding rule")).toBe("missing-guild-id");
+  });
+
+  it("falls back to the caller's text and the status when the server sent no message", async () => {
+    mockFetch(500, "", "text/plain");
+    const e = await caught(() => api.get("/api/x"));
+    expect(errorText(e, "Failed to load")).toBe("Failed to load (500)");
+    expect(errorText(new ApiError(422, "/api/x", { detail: [] }), "Failed")).toBe("Failed (422)");
+  });
+
+  it("shows the message of any other Error", () => {
+    expect(errorText(new TypeError("Failed to fetch"), "Failed to load")).toBe("Failed to fetch");
+  });
+
+  it("calls anything else a network error", () => {
+    expect(errorText(undefined, "Failed to load")).toBe("Failed to load (network error)");
+    expect(errorText(new Error(""), "Failed to load")).toBe("Failed to load (network error)");
   });
 });
