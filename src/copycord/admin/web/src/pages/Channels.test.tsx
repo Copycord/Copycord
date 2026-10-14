@@ -77,7 +77,7 @@ describe("Channels page", () => {
   it("preselects the first mapping and loads its tree", async () => {
     const f = serve();
     renderPage();
-    expect(screen.getByRole("heading", { level: 2, name: "Channels" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Channels" })).toBeInTheDocument();
     await waitFor(() => expect(document.querySelectorAll("#channels-root article")).toHaveLength(3));
 
     const sel = el<HTMLSelectElement>("mapping-select");

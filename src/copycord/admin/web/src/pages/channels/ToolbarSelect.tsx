@@ -20,9 +20,11 @@ export interface ToolbarSelectProps {
   options: readonly ToolbarOption[];
   onChange: (value: string) => void;
   disabled?: boolean;
+  /** Takes the native select out of the layout, as the old page did until the status gate opened. */
+  nativeHidden?: boolean;
 }
 
-export function ToolbarSelect({ id, label, value, options, onChange, disabled }: ToolbarSelectProps) {
+export function ToolbarSelect({ id, label, value, options, onChange, disabled, nativeHidden }: ToolbarSelectProps) {
   const [open, setOpen] = useState(false);
   const [focus, setFocus] = useState(0);
   const wrap = useRef<HTMLSpanElement>(null);
@@ -98,6 +100,7 @@ export function ToolbarSelect({ id, label, value, options, onChange, disabled }:
         tabIndex={-1}
         value={value}
         disabled={disabled}
+        hidden={nativeHidden}
         onChange={(e) => onChange(e.target.value)}
         className="absolute top-0 left-0 size-0 border-0 bg-[#efefef] p-0 text-[13px] text-black opacity-0"
       >

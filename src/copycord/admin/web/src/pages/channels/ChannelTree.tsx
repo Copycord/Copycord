@@ -124,7 +124,12 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions, status }: C
         }
       >
         <span title="Original channel ID">{c.id}</span>
-        {c.clonedId ? <span title="Cloned channel ID">→ {c.clonedId}</span> : null}
+        {/* .muted: 0.9em at 80% opacity, as the old clone id. */}
+        {c.clonedId ? (
+          <span title="Cloned channel ID" className="text-[0.9em] opacity-80">
+            → {c.clonedId}
+          </span>
+        ) : null}
       </div>
       {status}
     </article>

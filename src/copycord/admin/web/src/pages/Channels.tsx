@@ -97,10 +97,14 @@ export function Channels() {
       <Card className="mt-[18px] max-sm:mx-2">
         {/* .card-titlebar: the h2, then one wrapping row of controls (.titlebar-actions). */}
         <header className="mb-1.5 block gap-3">
-          <h2 className="my-[0.83em] text-[24px] font-bold">Channels</h2>
+          {/* The old visible h2, still the page's top heading. */}
+          <h2 aria-level={1} className="my-[0.83em] text-[24px] font-bold">
+            Channels
+          </h2>
           <span className="flex flex-wrap items-center gap-2.5">
             <ToolbarSelect
               id="mapping-select"
+              nativeHidden={!booted}
               label="Guild mapping"
               value={mappingId}
               disabled={!list.length}
@@ -119,10 +123,16 @@ export function Channels() {
               value={query}
               hidden={!booted}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-[220px] max-w-[260px] rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[14px] text-[#e6e1ff] outline-none focus:border-primary"
+              className={
+                "w-auto max-w-[260px] min-w-[220px] flex-none rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[14px] text-[#e6e1ff] " +
+                "caret-[#7c5cff] outline-none transition-[border-color,box-shadow,background-color] duration-150 " +
+                "placeholder:text-[color-mix(in_srgb,#e6e1ff_55%,transparent)] placeholder:opacity-75 " +
+                "hover:border-[#7c5cff] hover:[box-shadow:0_0_0_1px_#7c5cff] focus:border-[#7c5cff] focus:[box-shadow:0_0_0_1px_#7c5cff]"
+              }
             />
             <ToolbarSelect
               id="ch-filter"
+              nativeHidden={!booted}
               label="Filter"
               value={filter}
               onChange={(v) => setFilter(v as FilterMode)}
@@ -130,6 +140,7 @@ export function Channels() {
             />
             <ToolbarSelect
               id="ch-sort"
+              nativeHidden={!booted}
               label="Sort"
               value={sort.sort}
               onChange={(v) => setSort((cur) => nextSort(cur, v))}
@@ -142,11 +153,11 @@ export function Channels() {
               disabled={actions.deleteAll.disabled}
               onClick={actions.deleteAll.onClick}
               className={
-                "flex h-[34px] cursor-pointer items-center justify-center rounded-input border border-border bg-white/4 px-2.5 " +
+                "flex h-[34px] cursor-pointer items-center justify-center rounded-input border border-border bg-[rgba(255,255,255,0.04)] px-2.5 " +
                 "text-[13px] leading-8 font-semibold text-accent transition-colors duration-150 " +
-                "hover:border-[color-mix(in_oklab,#2c1d4a_20%,#ef4444_80%)] hover:bg-white/8 hover:text-danger active:bg-white/10 " +
+                "hover:border-[color-mix(in_oklab,#2c1d4a_20%,#ef4444_80%)] hover:bg-[rgba(255,255,255,0.08)] hover:text-danger active:bg-[rgba(255,255,255,0.1)] " +
                 "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28 " +
-                "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-white/4 disabled:hover:text-accent"
+                "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-[rgba(255,255,255,0.04)] disabled:hover:text-accent"
               }
             >
               Delete all orphans
