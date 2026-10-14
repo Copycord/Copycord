@@ -578,3 +578,51 @@ class TestRoleLogLocations:
         assert resp.status_code == 200
         assert (old / "server.out").read_text() == ""
         assert (new / "server.out").read_text() == ""
+
+
+# ---------------------------------------------------------------------------
+# Forwarding rules: provider validation only runs for enabled rules
+# ---------------------------------------------------------------------------
+
+class TestForwardingSaveValidation:
+
+    @pytest.fixture()
+    def validator(self, monkeypatch):
+        import copycord.admin.app as app_mod
+        mock = AsyncMock(
+            return_value=(False, ["Telegram: invalid bot token. (Unauthorized)"], {})
+        )
+        monkeypatch.setattr(app_mod, "_validate_forwarding_provider_config", mock)
+        yield mock
+        db.delete_message_forward_rule("fwd-dead-token")
+
+    def _payload(self, enabled):
+        return {
+            "rule_id": "fwd-dead-token",
+            "guild_id": "123",
+            "label": "tg",
+            "provider": "telegram",
+            "enabled": enabled,
+            "config": {"bot_token": "dead", "chat_id": "1"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_disabling_skips_provider_validation(self, client, validator):
+        resp = await client.post("/api/forwarding", json=self._payload(False))
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        validator.assert_not_awaited()
+        rule = db.get_message_forwarding_rule("fwd-dead-token")
+        assert rule is not None
+        assert rule["enabled"] is False
+        assert rule["config"]["bot_token"] == "dead"
+
+    @pytest.mark.asyncio
+    async def test_enabling_validates_and_returns_the_error_text(self, client, validator):
+        resp = await client.post("/api/forwarding", json=self._payload(False))
+        assert resp.status_code == 200
+        resp = await client.post("/api/forwarding", json=self._payload(True))
+        assert resp.status_code == 400
+        assert resp.text == "Telegram: invalid bot token. (Unauthorized)"
+        validator.assert_awaited_once()
+        assert db.get_message_forwarding_rule("fwd-dead-token")["enabled"] is False
