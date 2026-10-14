@@ -22,7 +22,8 @@ const CAT_ORPHAN = "border-[rgba(239,68,68,0.35)] bg-[#3a1c20] text-[#ffc5cf]";
 // .badge inside a card: 600 12px/1.8 system-ui, 2px 8px.
 const BADGE =
   "inline-block rounded-full border px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] font-semibold leading-[1.8]";
-const BADGE_MUTED = "border-border bg-bg2 text-[#e6e1ff]";
+// .badge.muted: the .muted ink at 80% opacity (its 0.9em loses to the later 12px).
+const BADGE_MUTED = "border-border bg-bg2 text-muted opacity-80";
 const BADGE_GOOD = "border-[rgba(16,185,129,0.35)] bg-[rgba(16,185,129,0.12)] text-good";
 const BADGE_ORPHAN = "border-border bg-[#3a1c20] text-[#ffc5cf]";
 
