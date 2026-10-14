@@ -29,7 +29,6 @@ export function GuildsSkeleton() {
             </h2>
             <span className="flex flex-wrap items-center gap-2.5" />
           </header>
-
         </Card>
       </div>
     </div>

@@ -29,7 +29,6 @@ export function ChannelsSkeleton() {
               </button>
             </span>
           </header>
-
         </Card>
       </div>
     </div>
