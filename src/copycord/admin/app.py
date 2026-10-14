@@ -25,7 +25,7 @@ import tarfile, tempfile, shutil
 import re
 import time
 import logging
-from typing import Dict, List, Set, Literal, Optional, Any, Union
+from typing import Dict, List, Set, Optional, Any, Union
 from copycord.admin import spa
 from copycord.admin.auth import init_admin_auth
 from copycord.admin.security import authorize_websocket, safe_child
@@ -787,63 +787,8 @@ def _next_queue_id():
     return _queue_id_counter
 
 
-class BackfillLocks:
-    def __init__(self, ttl_launching_sec: float = 20.0):
-        self._launching_ttl = ttl_launching_sec
-        self._launching: Dict[int, float] = {}
-        self._running: set[int] = set()
-        self._lock = asyncio.Lock()
-
-    async def clear_all(self):
-        async with self._lock:
-            self._launching.clear()
-            self._running.clear()
-
-    async def try_acquire_launching(
-        self, channel_id: int, cloned_guild_id: int | None
-    ) -> bool:
-
-        key = int(channel_id)
-        now = time.time()
-        async with self._lock:
-
-            self._launching = {
-                k: exp for k, exp in self._launching.items() if exp > now
-            }
-            if key in self._running or key in self._launching:
-                return False
-            self._launching[key] = now + self._launching_ttl
-            return True
-
-    async def promote_to_running(self, channel_id: int, cloned_guild_id: int | None):
-        key = int(channel_id)
-        async with self._lock:
-            self._launching.pop(key, None)
-            self._running.add(key)
-
-    async def release(self, channel_id: int, cloned_guild_id: int | None):
-        key = int(channel_id)
-        async with self._lock:
-            self._launching.pop(key, None)
-            self._running.discard(key)
-
-    async def status(
-        self, channel_id: int, cloned_guild_id: int | None
-    ) -> Literal["idle", "launching", "running"]:
-        key = int(channel_id)
-        now = time.time()
-        async with self._lock:
-            if key in self._running:
-                return "running"
-            if self._launching.get(key, 0) > now:
-                return "launching"
-            return "idle"
-
-
-locks = BackfillLocks()
-
-
-async def _lock_listener():
+async def _backfill_job_listener():
+    """Hand client backfill_job* frames from the bus to the Backfill channels task."""
     q = hub.subscribe()
     while True:
         raw = await q.get()
@@ -854,30 +799,8 @@ async def _lock_listener():
         if ev.get("kind") != "client":
             continue
         p = ev.get("payload") or {}
-        t = p.get("type")
-        if t in task_backfill.JOB_FRAMES:
+        if p.get("type") in task_backfill.JOB_FRAMES:
             await task_backfill.dispatch(p)
-            continue
-        d = p.get("data") or {}
-        cid = d.get("channel_id") or p.get("channel_id")
-
-        try:
-            cid = int(cid)
-        except Exception:
-            continue
-
-        gid = d.get("cloned_guild_id") or p.get("cloned_guild_id")
-        try:
-            gid = int(gid) if gid is not None else 0
-        except Exception:
-            gid = 0
-
-        if t in ("backfill_ack",):
-            await locks.promote_to_running(cid, gid)
-        elif t in ("backfill_done",):
-            await locks.release(cid, gid)
-        elif t in ("backfill_busy",):
-            await locks.promote_to_running(cid, gid)
 
 
 async def _close_ws_quietly(
@@ -1883,8 +1806,6 @@ async def stop_all(request: Request):
     await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
     await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
 
-    await locks.clear_all()
-
     return _done_response(request)
 
 
@@ -2062,7 +1983,7 @@ async def _apply_db_log_level_and_banner():
 
 @_on_startup
 async def _start_bg_tasks():
-    asyncio.create_task(_lock_listener())
+    asyncio.create_task(_backfill_job_listener())
 
 
 @_on_startup
@@ -3536,284 +3457,6 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
             )
 
     return {"items": items}
-
-
-@app.get("/api/backfills/queue")
-async def api_backfills_queue(mapping_id: Optional[str] = Query(default=None)):
-    """Backfill channels jobs of active task runs: running ones "active", the rest "queued"."""
-    items = []
-    for cid, job in task_backfill.busy_channels(mapping_id).items():
-        step = job.step.data
-        running = step["state"] == "running"
-        items.append({
-            "channel_id": cid,
-            "mapping_id": job.mapping_id,
-            "state": "active" if running else "queued",
-            "position": None if running else step.get("queue_position"),
-            "task_run_id": str(job.run.id),
-        })
-    return JSONResponse({"ok": True, "items": items})
-
-
-@app.get("/api/backfills/inflight")
-async def api_backfills_inflight(mapping_id: Optional[str] = Query(default=None)):
-    """Running Backfill channels steps keyed by original channel id."""
-    items = {}
-    for cid, job in task_backfill.busy_channels(mapping_id).items():
-        step = job.step.data
-        if step["state"] != "running":
-            continue
-        items[cid] = {
-            "mapping_id": job.mapping_id,
-            "delivered": step.get("done"),
-            "expected_total": step.get("total"),
-            "label": step.get("label"),
-            "run_id": job.job_id,
-            "task_run_id": str(job.run.id),
-        }
-    return JSONResponse({"ok": True, "items": items})
-
-
-def _legacy_backfill_inputs(payload: dict, mapping_id: str, channel_ids: list) -> dict:
-    """Map the Channels page's start payload onto Backfill channels inputs."""
-    rng = payload.get("range") or {}
-    mode = payload.get("mode") or rng.get("mode") or "all"
-    if mode in ("last", "lastn"):
-        mode = "last_n"
-    since = payload.get("since") or payload.get("after_iso")
-    until = (
-        payload.get("before_iso")
-        or rng.get("before")
-        or payload.get("until")
-        or payload.get("to_iso")
-    )
-    return {
-        "mapping_id": mapping_id,
-        "channel_ids": [str(c) for c in channel_ids],
-        "range": {
-            "mode": mode,
-            "since": str(since) if since else None,
-            "until": str(until) if until else None,
-            "last_n": payload.get("last_n"),
-        },
-        "ignore_cloned": bool(payload.get("ignore_cloned")),
-        "mode": "resume" if payload.get("resume") else "new",
-    }
-
-
-def _legacy_task_error(exc: ValueError) -> JSONResponse:
-    errors = exc.args[0] if exc.args and isinstance(exc.args[0], dict) else {"inputs": str(exc)}
-    field = next(iter(errors), "inputs")
-    return JSONResponse(
-        {"ok": False, "error": f"invalid-{field.split('.')[0]}", "errors": errors},
-        status_code=400,
-    )
-
-
-@app.get("/api/backfills/resume-info", response_class=JSONResponse)
-async def api_backfills_resume_info(channel_id: int, mapping_id: str | None = None):
-    try:
-        cid = int(channel_id)
-    except Exception:
-        return JSONResponse(
-            {"ok": False, "error": "invalid-channel_id"}, status_code=400
-        )
-
-    row = None
-    if mapping_id:
-        m = db.get_mapping_by_id(mapping_id)
-        if not m:
-            return JSONResponse(
-                {"ok": False, "error": "unknown-mapping"}, status_code=404
-            )
-
-        try:
-            cloned_gid = int(m["cloned_guild_id"])
-        except Exception:
-            cloned_gid = None
-
-        if cloned_gid is not None:
-            row = db.backfill_get_incomplete_for_channel_in_clone(cid, cloned_gid)
-        else:
-            row = None
-    else:
-        row = db.backfill_get_incomplete_for_channel(cid)
-
-    def _parse_range(r):
-        try:
-            return json.loads(r or "{}")
-        except Exception:
-            return {}
-
-    payload = {
-        "channel_id": str(cid),
-        "original_guild_id": "",
-        "cloned_guild_id": "",
-        "active": bool(row is not None),
-        "resumable": False,
-        "run_id": None,
-        "delivered": None,
-        "expected_total": None,
-        "checkpoint": {
-            "last_orig_message_id": None,
-            "last_orig_timestamp": None,
-        },
-        "clone_channel_id": None,
-        "range": None,
-        "started_at": None,
-        "updated_at": None,
-    }
-
-    if row:
-        payload.update(
-            {
-                "resumable": True,
-                "run_id": row.get("run_id"),
-                "delivered": row.get("delivered"),
-                "expected_total": row.get("expected_total"),
-                "checkpoint": {
-                    "last_orig_message_id": row.get("last_orig_message_id"),
-                    "last_orig_timestamp": row.get("last_orig_timestamp"),
-                },
-                "clone_channel_id": row.get("clone_channel_id"),
-                "range": _parse_range(row.get("range_json")),
-                "started_at": row.get("started_at"),
-                "updated_at": row.get("updated_at"),
-                "original_guild_id": str(row.get("original_guild_id") or ""),
-                "cloned_guild_id": str(row.get("cloned_guild_id") or ""),
-            }
-        )
-
-    return JSONResponse({"ok": True, "data": payload})
-
-
-@app.post("/api/backfill/start", response_class=JSONResponse)
-async def api_backfill_start(payload: dict = Body(...)):
-    try:
-        channel_id = int(payload.get("channel_id") or payload.get("clone_channel_id"))
-    except Exception:
-        return JSONResponse(
-            {"ok": False, "error": "invalid-channel_id"}, status_code=400
-        )
-
-    mapping_id = (payload.get("mapping_id") or "").strip()
-    m = db.get_mapping_by_id(mapping_id) if mapping_id else None
-    if not m:
-        return JSONResponse({"ok": False, "error": "unknown-mapping"}, status_code=404)
-    cloned_guild_id = int(m["cloned_guild_id"])
-
-    busy = task_backfill.busy_channels().get(str(channel_id))
-    if busy is not None:
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": "backfill-already-running",
-                "channel_id": channel_id,
-                "cloned_guild_id": cloned_guild_id,
-                "state": "running" if busy.step.data["state"] == "running" else "launching",
-            },
-            status_code=409,
-        )
-
-    service = task_routes.get_service()
-    if service is None:
-        return JSONResponse({"ok": False, "error": "tasks-unavailable"}, status_code=503)
-    try:
-        run = await service.start(
-            task_backfill.TYPE_KEY,
-            _legacy_backfill_inputs(payload, mapping_id, [channel_id]),
-            actor="admin",
-            trigger="api",
-        )
-    except ValueError as exc:
-        return _legacy_task_error(exc)
-
-    return JSONResponse({"ok": True, "task_run_id": str(run.id), "number": run.number})
-
-
-@app.post("/api/backfill/start-batch", response_class=JSONResponse)
-async def api_backfill_start_batch(payload: dict = Body(...)):
-    mapping_id = (payload.get("mapping_id") or "").strip()
-    m = db.get_mapping_by_id(mapping_id) if mapping_id else None
-    if not m:
-        return JSONResponse({"ok": False, "error": "unknown-mapping"}, status_code=404)
-    cloned_guild_id = int(m["cloned_guild_id"])
-
-    raw_ids = (
-        payload.get("channel_ids") or payload.get("channels") or payload.get("ids")
-    )
-    if not isinstance(raw_ids, (list, tuple)) or not raw_ids:
-        return JSONResponse(
-            {"ok": False, "error": "invalid-channel_ids"}, status_code=400
-        )
-
-    ids, bad, seen = [], [], set()
-    for x in raw_ids:
-        try:
-            cid = int(x)
-            if cid not in seen:
-                ids.append(cid)
-                seen.add(cid)
-        except Exception:
-            bad.append(x)
-    if not ids:
-        return JSONResponse(
-            {"ok": False, "error": "no-valid-channel_ids", "bad": bad}, status_code=400
-        )
-
-    results, started, locked, failed = [], 0, 0, 0
-    busy = task_backfill.busy_channels()
-    free = []
-    for cid in ids:
-        job = busy.get(str(cid))
-        if job is not None:
-            results.append(
-                {
-                    "channel_id": cid,
-                    "ok": False,
-                    "error": "backfill-already-running",
-                    "state": "running" if job.step.data["state"] == "running" else "launching",
-                    "status": 409,
-                }
-            )
-            locked += 1
-        else:
-            free.append(cid)
-
-    task_run_id = None
-    if free:
-        service = task_routes.get_service()
-        if service is None:
-            return JSONResponse({"ok": False, "error": "tasks-unavailable"}, status_code=503)
-        try:
-            run = await service.start(
-                task_backfill.TYPE_KEY,
-                _legacy_backfill_inputs(payload, mapping_id, free),
-                actor="admin",
-                trigger="api",
-            )
-        except ValueError as exc:
-            return _legacy_task_error(exc)
-        task_run_id = str(run.id)
-        for cid in free:
-            results.append({"channel_id": cid, "ok": True, "state": "started"})
-            started += 1
-
-    return JSONResponse(
-        {
-            "ok": True,
-            "task_run_id": task_run_id,
-            "counts": {
-                "total": len(ids),
-                "started": started,
-                "locked": locked,
-                "failed": failed,
-                "invalid": len(bad),
-            },
-            "results": results,
-            "invalid": bad,
-        }
-    )
 
 
 @app.get("/api/guilds", response_class=JSONResponse)

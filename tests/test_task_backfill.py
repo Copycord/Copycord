@@ -1,10 +1,8 @@
 """Backfill channels task type (Tasks framework, lane L6): a fake client sender
 and job frames handed straight to the dispatcher, as the admin bus watcher does."""
 import asyncio
-import time
 
 import pytest
-from starlette.testclient import TestClient
 
 from copycord.admin.tasks import backfill
 from copycord.admin.tasks.service import MemoryRunRepo, TaskService
@@ -236,52 +234,3 @@ async def test_options_flag_orphan_busy_and_resumable(svc, sent, mapping, db):
     assert chans[str(CH[1])]["busy"] is None and chans[str(CH[1])]["resumable"] is None
     await svc.cancel(run.id)
     await _settled(svc, run.id)
-
-
-def test_legacy_start_route_starts_a_task_run(db, sent, mapping, monkeypatch):
-    from copycord.admin import app as app_module
-    from copycord.admin import auth
-    from copycord.admin.app import app
-    from copycord.admin.security import CSRF_HEADER
-    from copycord.admin.tasks import routes as task_routes
-    from copycord.admin.tasks.repo import SqliteTaskRepo
-
-    service = TaskService(SqliteTaskRepo(db), cancel_grace=2.0)
-    task_routes.set_service(service)
-    monkeypatch.setattr(app_module, "db", db)
-    monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
-    monkeypatch.setattr(app_module, "_startup_hooks", [])
-    monkeypatch.setattr(app_module, "_shutdown_hooks", [])
-    try:
-        with TestClient(app) as tc:
-            tc.headers.update({"origin": "http://testserver", CSRF_HEADER: "1",
-                               "cookie": f"{auth.ADMIN_COOKIE_NAME}={auth.make_session_token()}"})
-            res = tc.post("/api/backfill/start", json={
-                "channel_id": str(CH[0]), "mapping_id": mapping, "mode": "last_n", "last_n": 7,
-            })
-            assert res.status_code == 200, res.text
-            body = res.json()
-            assert body["ok"] is True
-            run_id = body["task_run_id"]
-            end = time.monotonic() + 3
-            while not _of(sent, "backfill_run"):
-                assert time.monotonic() < end
-                time.sleep(0.02)
-            frame = _of(sent, "backfill_run")[0]
-            assert frame["job_id"] == f"{run_id}:{CH[0]}"
-            assert frame["range"] == {"mode": "last_n", "since": None, "until": None, "last_n": 7}
-            run = tc.get(f"/api/tasks/runs/{run_id}").json()["run"]
-            assert run["type"] == "backfill_channels" and run["trigger"] == "api"
-
-            again = tc.post("/api/backfill/start", json={"channel_id": str(CH[0]), "mapping_id": mapping})
-            assert again.status_code == 409 and again.json()["error"] == "backfill-already-running"
-            inflight = tc.get("/api/backfills/queue").json()
-            assert inflight["items"][0]["channel_id"] == str(CH[0])
-
-            assert tc.post(f"/api/tasks/runs/{run_id}/cancel").status_code == 200
-            end = time.monotonic() + 3
-            while tc.get(f"/api/tasks/runs/{run_id}").json()["run"]["status"] != "cancelled":
-                assert time.monotonic() < end
-                time.sleep(0.02)
-    finally:
-        task_routes.set_service(None)
