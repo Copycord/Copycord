@@ -248,7 +248,7 @@ describe("System page", () => {
     });
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Restore" }));
-    expect(await screen.findByText("Restore failed")).toBeInTheDocument();
+    expect(await screen.findByText("archive missing data.db")).toBeInTheDocument();
   });
 
   it("delete asks first and posts the archive name as a form field", async () => {
@@ -295,7 +295,7 @@ describe("System page", () => {
     const row = (await screen.findByText("copycord-2026-10-09")).closest("tr")!;
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("Delete failed")).toBeInTheDocument();
+    expect(await screen.findByText("not found")).toBeInTheDocument();
   });
 });
 

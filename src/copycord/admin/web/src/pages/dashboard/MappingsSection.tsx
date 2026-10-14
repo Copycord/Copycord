@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { cx } from "../../components/ui";
+import { errorText } from "../../lib/api";
 import type { DashboardMapping } from "../../types/dashboard-mappings";
 import { useNotify, useSafeConfirm } from "../system/providers";
 import { MappingCard } from "./mappings/MappingCard";
@@ -28,7 +29,7 @@ export interface MappingsSectionProps {
 
 const DOCS_URL = "https://copycord.github.io/Copycord/docs/configuration/cloning-options";
 
-const errText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
+const errText = errorText;
 
 export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
   const notify = useNotify();

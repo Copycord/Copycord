@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChipInput, Spinner, cx } from "../../components/ui";
-import { api } from "../../lib/api";
+import { api, errorText } from "../../lib/api";
 import type { StatusResponse } from "../../types/dashboard";
 import type { GlobalConfig, TokenKey } from "../../types/dashboard-config";
 import { useNotify } from "../system/providers";
@@ -131,7 +131,7 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
       setInvalid(new Set());
       void checkTokens(false);
     } catch (e) {
-      notify(e instanceof Error ? e.message : "Network error", "error");
+      notify(errorText(e, "Failed to save configuration"), "error");
       void checkTokens(false);
     } finally {
       setSaving(false);

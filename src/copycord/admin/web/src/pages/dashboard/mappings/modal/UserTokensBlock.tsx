@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { api } from "../../../../lib/api";
+import { api, errorText } from "../../../../lib/api";
 import { Button, cx } from "../../../../components/ui";
 import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, useScrollLock } from "../../../../components/Modal";
 import type {
@@ -281,8 +281,8 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     if (!mappingId) return;
     try {
       await api.patch(tokensPath(mappingId, `/${encodeURIComponent(t.id)}`), { enabled });
-    } catch {
-      notify("Failed to update token.", "error");
+    } catch (e) {
+      notify(errorText(e, "Failed to update token"), "error");
     }
     await load();
   };
@@ -310,9 +310,9 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
         return null;
       }
       return j.deleted ?? 0;
-    } catch {
+    } catch (e) {
       await load();
-      notify("Network error while deleting tokens.", "error");
+      notify(errorText(e, "Failed to delete tokens"), "error");
       return null;
     }
   };
@@ -326,7 +326,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
       j = await api.post<VerifyResponse>(tokensPath(mappingId, "/verify"));
     } catch (err) {
       setVerifying(false);
-      notify(err instanceof Error && err.message ? err.message : "Network error while verifying tokens.", "error");
+      notify(errorText(err, "Failed to verify tokens"), "error");
       return;
     }
     setVerifying(false);

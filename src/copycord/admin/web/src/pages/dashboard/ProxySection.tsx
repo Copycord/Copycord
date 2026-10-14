@@ -13,6 +13,7 @@ import type {
   ProxyTestEvent,
   ProxyTestResult,
 } from "../../types/dashboard-proxy";
+import { errorText } from "../../lib/api";
 import { useNotify, useSafeConfirm } from "../system/providers";
 import { CARD, Chevron, DocLink, GHOST_XS_GREEN, GHOST_XS_RED, SUMMARY, SUMMARY_TITLE } from "./parts";
 import { ProxyChips } from "./proxy/ProxyChips";
@@ -150,7 +151,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
   slowRef.current = slowMs;
   const readyAt = useRef(Date.now() + replayMs);
 
-  const fail = useCallback((e: unknown, fallback: string) => notify(e instanceof Error && e.message ? e.message : fallback, "error"), [notify]);
+  const fail = useCallback((e: unknown, fallback: string) => notify(errorText(e, fallback), "error"), [notify]);
 
   const applyConfig = useCallback((j: Awaited<ReturnType<typeof loadProxies>>) => {
     setFavorites(new Set(j.favorites ?? []));

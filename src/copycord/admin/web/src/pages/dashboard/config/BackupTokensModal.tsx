@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "../../../components/ui";
 import { Modal } from "../../../components/Modal";
-import { ApiError } from "../../../lib/api";
+import { errorText } from "../../../lib/api";
 import type { BackupToken } from "../../../types/dashboard-config";
 import { GhostButton } from "../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../system/providers";
@@ -15,7 +15,7 @@ export interface BackupTokensModalProps {
   onClose: () => void;
 }
 
-const errText = (e: unknown, fallback: string) => (e instanceof ApiError && e.message.trim() && !/^request to /.test(e.message) ? e.message.trim() : fallback);
+const errText = (e: unknown, fallback: string) => errorText(e, fallback.replace(/\.$/, ""));
 
 // The old .field label.has-tip and .field-token .token-input / .field > input, which keep the browser font size.
 const LABEL = "relative mb-1.5 ml-0.5 inline-flex items-center gap-1.5 text-xs text-muted";
@@ -96,11 +96,11 @@ export function BackupTokensModal({ open, onClose }: BackupTokensModalProps) {
     if (!ok) return;
     try {
       const res = await deleteBackupToken(id);
-      if (!res?.ok) throw new Error("delete failed");
+      if (!res?.ok) throw new Error("Failed to remove backup token.");
       notify("Backup token removed.", "success");
       await refresh();
-    } catch {
-      notify("Failed to remove backup token.", "error");
+    } catch (e) {
+      notify(errText(e, "Failed to remove backup token."), "error");
     }
   };
 
