@@ -8,12 +8,23 @@ import { PROMO_LINKS } from "./model";
 const CARD =
   "group relative flex cursor-pointer items-center gap-3.5 overflow-hidden rounded-[14px] border border-[rgba(255,255,255,0.08)] " +
   "bg-[linear-gradient(rgba(255,255,255,0.04),rgba(255,255,255,0.02))] px-[18px] py-4 text-inherit no-underline " +
-  "[box-shadow:0_8px_24px_rgba(0,0,0,0.25)] transition duration-200 outline-none " +
+  "[box-shadow:0_8px_24px_rgba(0,0,0,0.25)] transition-[translate,box-shadow,border-color] duration-180 ease-[ease] outline-none " +
   "hover:-translate-y-0.5 hover:border-[rgba(214,188,250,0.35)] hover:[box-shadow:0_12px_28px_rgba(0,0,0,0.32)] " +
-  "focus-visible:-translate-y-0.5 focus-visible:border-[rgba(214,188,250,0.35)] focus-visible:[box-shadow:0_12px_28px_rgba(0,0,0,0.32)]";
+  "focus-visible:-translate-y-0.5 focus-visible:border-[rgba(214,188,250,0.35)] focus-visible:[box-shadow:0_12px_28px_rgba(0,0,0,0.32)] " +
+  // .promo-card::after: the soft light that sweeps across on hover
+  "after:pointer-events-none after:absolute after:-inset-x-[30%] after:-inset-y-[20%] " +
+  "after:bg-[radial-gradient(160px_280px_at_50%_50%,rgba(255,255,255,0.08)_0%,rgba(255,255,255,0.02)_36%,rgba(255,255,255,0)_72%)] " +
+  "after:mix-blend-screen after:blur-[1px] after:[transform:translateX(-60%)] after:[transition:transform_0.45s_linear_0s] after:will-change-transform " +
+  "hover:after:[transform:translateX(70%)] focus-visible:after:[transform:translateX(70%)]";
 
 const ICON =
-  "relative grid size-[46px] flex-none place-items-center rounded-[9999px] text-white [box-shadow:inset_0_0_1px_rgba(255,255,255,0.35)]";
+  "relative grid size-[46px] flex-none place-items-center rounded-[9999px] text-white [box-shadow:inset_0_0_1px_rgba(255,255,255,0.35)] " +
+  "[transition:box-shadow_0.18s_ease,transform_0.18s_ease] " +
+  // .promo-card:hover .promo-icon: lifts 1 px and glows in the card's --icon-glow-rgb
+  "group-hover:[box-shadow:inset_0_0_1px_rgba(255,255,255,0.35),0_0_0_2px_rgba(var(--icon-glow-rgb),0.18),0_0_10px_rgba(var(--icon-glow-rgb),0.5),0_0_22px_rgba(var(--icon-glow-rgb),0.32),0_0_36px_rgba(var(--icon-glow-rgb),0.2)] " +
+  "group-hover:[transform:translateY(-1px)] " +
+  "group-focus-visible:[box-shadow:inset_0_0_1px_rgba(255,255,255,0.35),0_0_0_2px_rgba(var(--icon-glow-rgb),0.18),0_0_10px_rgba(var(--icon-glow-rgb),0.5),0_0_22px_rgba(var(--icon-glow-rgb),0.32),0_0_36px_rgba(var(--icon-glow-rgb),0.2)] " +
+  "group-focus-visible:[transform:translateY(-1px)]";
 
 interface PromoProps {
   className: string;
@@ -47,8 +58,8 @@ const HEART =
   "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 6.5 3.99 5 6.5 5c1.54 0 3.04.81 3.85 2.09C11.16 5.81 12.66 5 14.2 5 16.71 5 18.7 6.5 18.7 8.5c0 3.78-3.4 6.86-8.25 11.53L12 21.35z";
 const STAR = "M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z";
 
-const svg = (size: number, d: string) => (
-  <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
+const svg = (size: number, d: string, className?: string) => (
+  <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true" className={className}>
     <path d={d} />
   </svg>
 );
@@ -57,7 +68,7 @@ export function PromoCards() {
   return (
     <section className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4" aria-label="Quick actions">
       <Promo
-        className="promo-star"
+        className="promo-star [--icon-glow-rgb:255,213,79]"
         href={PROMO_LINKS.github}
         title="Star on GitHub"
         sub="Support development & features"
@@ -71,7 +82,7 @@ export function PromoCards() {
                 width="16"
                 height="16"
                 aria-hidden="true"
-                className="block overflow-visible text-[#ffd54f] drop-shadow-[0_0_6px_rgba(255,213,79,0.55)]"
+                className="block origin-center animate-[cc-star-wobble_2.6s_ease-in-out_infinite] overflow-visible text-[#ffd54f] drop-shadow-[0_0_6px_rgba(255,213,79,0.55)] group-hover:animate-[cc-spin-360_650ms_linear_1_forwards]"
               >
                 <path d={STAR} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
               </svg>
@@ -80,21 +91,21 @@ export function PromoCards() {
         }
       />
       <Promo
-        className="promo-discord"
+        className="promo-discord [--icon-glow-rgb:88,101,242]"
         href={PROMO_LINKS.discord}
         title="Join the Discord"
         sub="Chat with the community"
         ariaLabel="Join the Discord"
-        iconClass="bg-[radial-gradient(130%_130%_at_25%_20%,#8ea1f2_0%,#5865f2_55%,#404eed_100%)]"
+        iconClass="bg-[radial-gradient(130%_130%_at_25%_20%,#8ea1f2_0%,#5865f2_55%,#404eed_100%)] group-hover:bg-[radial-gradient(140%_140%_at_30%_15%,#a9b7ff_0%,#6d7ef7_50%,#5865f2_100%)] group-focus-visible:bg-[radial-gradient(140%_140%_at_30%_15%,#a9b7ff_0%,#6d7ef7_50%,#5865f2_100%)]"
         icon={svg(22, DISCORD)}
       />
       <Promo
-        className="promo-donate"
+        className="promo-donate [--icon-glow-rgb:236,72,153]"
         href={PROMO_LINKS.kofi}
         title="Donate"
         sub="Thank you for your support!"
         iconClass="bg-[radial-gradient(105%_105%_at_20%_20%,#fca5a5,#ec4899)]"
-        icon={svg(24, HEART)}
+        icon={svg(24, HEART, "origin-center group-hover:animate-[cc-heartbeat_1.2s_ease-in-out_infinite] group-hover:will-change-transform")}
       />
     </section>
   );

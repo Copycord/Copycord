@@ -113,3 +113,42 @@
     color: var(--color-accent);
   }
 }
+
+/* Dashboard link cards (PromoCards.tsx): the old star wobble, its spin on
+   hover and the donate heart beat, copied from main.css. */
+@keyframes cc-star-wobble {
+  0% {
+    transform: rotate(-12deg);
+  }
+  50% {
+    transform: rotate(12deg);
+  }
+  100% {
+    transform: rotate(-12deg);
+  }
+}
+@keyframes cc-spin-360 {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes cc-heartbeat {
+  0% {
+    transform: scale(1);
+  }
+  14% {
+    transform: scale(1.15);
+  }
+  28% {
+    transform: scale(1);
+  }
+  42% {
+    transform: scale(1.15);
+  }
+  70% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
