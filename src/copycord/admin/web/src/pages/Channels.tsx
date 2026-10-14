@@ -5,7 +5,7 @@
 // Like the old page it waits until both Server and Client are connected.
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Card, Spinner } from "../components/ui";
+import { Card, SkeletonSection } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useApi } from "../hooks/useApi";
 import { useStatusGate } from "../hooks/useStatusGate";
@@ -175,11 +175,7 @@ export function Channels() {
         {actions.dialogs}
         {backfill.dialogs}
 
-        {channels.loading && !loaded ? (
-          <div className="flex justify-center py-6">
-            <Spinner label="Loading channels" />
-          </div>
-        ) : null}
+        {channels.loading && !loaded ? <SkeletonSection rows={6} label="Loading channels" className="px-2.5 py-2" /> : null}
 
         {channels.error && !loaded ? (
           <div role="alert" className="flex flex-wrap items-center gap-3 px-2.5 py-2 text-sm text-muted">

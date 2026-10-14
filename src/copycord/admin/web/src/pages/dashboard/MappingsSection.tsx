@@ -4,7 +4,7 @@
 // mappings/openers.ts, which the modal lanes fill in.
 
 import { useCallback, useEffect, useState } from "react";
-import { cx } from "../../components/ui";
+import { Skeleton, cx } from "../../components/ui";
 import type { DashboardMapping } from "../../types/dashboard-mappings";
 import { useNotify, useSafeConfirm } from "../system/providers";
 import { MappingCard } from "./mappings/MappingCard";
@@ -36,12 +36,15 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
   const [mappings, setMappings] = useState<DashboardMapping[]>([]);
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       setMappings(await fetchMappings());
     } catch {
       // The list keeps its last state.
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -138,6 +141,9 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
               </span>
             </span>
           </button>
+          {!loaded
+            ? [0, 1].map((i) => <Skeleton.Card key={i} height="auto" testId="mapping-skeleton" className="min-h-[150px]" />)
+            : null}
           {shown.map((m) => (
             <MappingCard
               key={m.mapping_id}

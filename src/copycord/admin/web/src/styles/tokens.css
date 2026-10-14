@@ -114,6 +114,37 @@
   }
 }
 
+/* Skeleton placeholders (components/ui/Skeleton.tsx): a soft light sweep over
+   a faint surface block; reduced motion keeps the block and drops the sweep. */
+@keyframes cc-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+.cc-skeleton {
+  background-color: var(--color-line-1);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-brand-ghost) 40%,
+    var(--color-line-2) 50%,
+    var(--color-brand-ghost) 60%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: cc-shimmer 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-skeleton {
+    animation: none;
+    background-image: none;
+  }
+}
+
 /* Dashboard link cards (PromoCards.tsx): the old star wobble, its spin on
    hover and the donate heart beat, copied from main.css. */
 @keyframes cc-star-wobble {
