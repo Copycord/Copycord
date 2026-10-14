@@ -234,6 +234,23 @@ def _in_tx(method):
     return wrapper
 
 
+TASK_RUN_COLUMNS = (
+    "id", "type", "number", "status", "title", "context_json", "trigger", "actor",
+    "inputs_json", "progress_json", "created_at", "started_at", "finished_at",
+    "updated_at", "error",
+)
+# columns task_run_update may write; id, type and number are fixed at insert
+_TASK_RUN_MUTABLE = frozenset(TASK_RUN_COLUMNS) - {"id", "type", "number"}
+_TASK_RUN_JSON = frozenset({"context_json", "inputs_json", "progress_json"})
+
+
+def _task_run_value(col: str, value):
+    """Dicts and lists for a *_json column are stored as JSON text."""
+    if col in _TASK_RUN_JSON and isinstance(value, (dict, list)):
+        return json.dumps(value, separators=(",", ":"))
+    return value
+
+
 _OPEN: "weakref.WeakSet[DBManager]" = weakref.WeakSet()
 
 
@@ -981,11 +998,13 @@ class DBManager:
                     delivered             INTEGER NOT NULL DEFAULT 0,
                     expected_total        INTEGER,
                     last_orig_message_id  TEXT,                          
-                    last_orig_timestamp   TEXT,                           
-                    error                 TEXT
+                    last_orig_timestamp   TEXT,
+                    error                 TEXT,
+                    task_run_id           INTEGER
                 );
             """,
             required_columns={
+                "task_run_id",
                 "run_id",
                 "original_channel_id",
                 "clone_channel_id",
@@ -1014,8 +1033,11 @@ class DBManager:
                 "last_orig_message_id": "last_orig_message_id",
                 "last_orig_timestamp": "last_orig_timestamp",
                 "error": "error",
-                "original_guild_id": "NULL",
-                "cloned_guild_id": "NULL",
+                # identifiers, not "NULL": a rebuild for task_run_id keeps the guild ids;
+                # a column absent on an older table still becomes NULL
+                "original_guild_id": "original_guild_id",
+                "cloned_guild_id": "cloned_guild_id",
+                "task_run_id": "task_run_id",
             },
             post_sql=[
                 "CREATE INDEX IF NOT EXISTS idx_bf_runs_by_orig_status ON backfill_runs(original_channel_id, status);",
@@ -1459,6 +1481,37 @@ class DBManager:
             },
             post_sql=[
                 "CREATE INDEX IF NOT EXISTS idx_mapping_token_identities_mapping ON mapping_token_identities(mapping_id);",
+            ],
+        )
+
+        # Tasks framework: one row per run of any task type; the log lives in a file (admin/tasks/logstore.py)
+        self._ensure_table(
+            name="task_runs",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type           TEXT NOT NULL,
+                    number         INTEGER NOT NULL,
+                    status         TEXT NOT NULL DEFAULT 'queued',
+                    title          TEXT NOT NULL DEFAULT '',
+                    context_json   TEXT,
+                    trigger        TEXT NOT NULL DEFAULT 'manual',
+                    actor          TEXT NOT NULL DEFAULT 'admin',
+                    inputs_json    TEXT NOT NULL DEFAULT '{}',
+                    progress_json  TEXT,
+                    created_at     TEXT NOT NULL,
+                    started_at     TEXT,
+                    finished_at    TEXT,
+                    updated_at     TEXT NOT NULL,
+                    error          TEXT
+                );
+            """,
+            required_columns=set(TASK_RUN_COLUMNS),
+            copy_map={c: c for c in TASK_RUN_COLUMNS},
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_task_runs_type_id ON task_runs(type, id DESC);",
+                "CREATE INDEX IF NOT EXISTS idx_task_runs_status ON task_runs(status);",
+                "CREATE INDEX IF NOT EXISTS idx_task_runs_created ON task_runs(created_at);",
             ],
         )
 
@@ -3039,6 +3092,178 @@ class DBManager:
             (reason, now, int(original_channel_id)),
         )
         return cur.rowcount
+
+    # ---- task_runs (Tasks framework) ----
+
+    @staticmethod
+    def _task_now() -> str:
+        return datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+
+    @_in_tx
+    def task_run_insert(self, fields: dict) -> int:
+        """Insert a run and return its id. number is MAX+1 for the type, taken in
+        the same INSERT statement so two inserts never share a number."""
+        row = {
+            k: _task_run_value(k, v)
+            for k, v in fields.items()
+            if k in _TASK_RUN_MUTABLE
+        }
+        if not fields.get("type"):
+            raise ValueError("task run needs a type")
+        now = self._task_now()
+        row.setdefault("created_at", now)
+        row.setdefault("updated_at", row["created_at"])
+        cols = ["type", "number", *row.keys()]
+        cur = self.conn.execute(
+            f"INSERT INTO task_runs ({', '.join(cols)}) "
+            f"SELECT ?, COALESCE(MAX(number), 0) + 1, {', '.join('?' * len(row))} "
+            "FROM task_runs WHERE type = ?",
+            (str(fields["type"]), *row.values(), str(fields["type"])),
+        )
+        return int(cur.lastrowid)
+
+    @_in_tx
+    def task_run_update(self, run_id: int, **fields) -> bool:
+        """Set the given columns (updated_at defaults to now); True when the row exists."""
+        bad = set(fields) - _TASK_RUN_MUTABLE
+        if bad:
+            raise ValueError(f"task_runs columns not updatable: {sorted(bad)}")
+        fields.setdefault("updated_at", self._task_now())
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        cur = self.conn.execute(
+            f"UPDATE task_runs SET {sets} WHERE id = ?",
+            (*(_task_run_value(k, v) for k, v in fields.items()), int(run_id)),
+        )
+        return cur.rowcount > 0
+
+    def task_run_get(self, run_id: int) -> Optional[dict]:
+        with self._tx():
+            row = self.conn.execute(
+                "SELECT * FROM task_runs WHERE id = ?", (int(run_id),)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def task_run_next_number(self, task_type: str) -> int:
+        """The number the next insert of this type gets (task_run_insert assigns it atomically)."""
+        with self._tx():
+            row = self.conn.execute(
+                "SELECT COALESCE(MAX(number), 0) + 1 FROM task_runs WHERE type = ?",
+                (str(task_type),),
+            ).fetchone()
+        return int(row[0])
+
+    def task_runs_list(
+        self,
+        type: Optional[str] = None,
+        status: Optional[str] = None,
+        actor: Optional[str] = None,
+        context_label: Optional[str] = None,
+        q: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 25,
+    ) -> tuple[list[dict], int]:
+        """Newest first; returns (rows of the page, total matching). q matches the
+        title, the context label, and "#<number>" or "<number>" exactly."""
+        where, args = [], []
+        for col, val in (("type", type), ("status", status), ("actor", actor)):
+            if val:
+                where.append(f"{col} = ?")
+                args.append(str(val))
+        if context_label:
+            where.append("json_extract(context_json, '$.label') = ?")
+            args.append(str(context_label))
+        q = (q or "").strip()
+        if q:
+            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            ors = [
+                "title LIKE ? ESCAPE '\\'",
+                "COALESCE(json_extract(context_json, '$.label'), '') LIKE ? ESCAPE '\\'",
+            ]
+            args += [like, like]
+            num = q[1:] if q.startswith("#") else q
+            if num.isdigit():
+                ors.append("number = ?")
+                args.append(int(num))
+            where.append("(" + " OR ".join(ors) + ")")
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        page = max(1, int(page))
+        per_page = max(1, min(200, int(per_page)))
+        with self._tx():
+            total = self.conn.execute(
+                f"SELECT COUNT(*) FROM task_runs {clause}", args
+            ).fetchone()[0]
+            rows = self.conn.execute(
+                f"SELECT * FROM task_runs {clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+                (*args, per_page, (page - 1) * per_page),
+            ).fetchall()
+        return [dict(r) for r in rows], int(total)
+
+    @_in_tx
+    def task_runs_recover(self) -> list[int]:
+        """On boot: queued and running runs become failed; returns their ids."""
+        ids = [
+            int(r[0])
+            for r in self.conn.execute(
+                "SELECT id FROM task_runs WHERE status IN ('queued', 'running') ORDER BY id"
+            ).fetchall()
+        ]
+        if ids:
+            now = self._task_now()
+            self.conn.execute(
+                "UPDATE task_runs SET status = 'failed', error = 'Interrupted by restart', "
+                "finished_at = ?, updated_at = ? WHERE status IN ('queued', 'running')",
+                (now, now),
+            )
+        return ids
+
+    @_in_tx
+    def task_runs_prune(self, keep_per_type: int = 500) -> list[int]:
+        """Delete finished runs older than the newest keep_per_type of each type;
+        returns the deleted ids so the caller removes their log files."""
+        ids = [
+            int(r[0])
+            for r in self.conn.execute(
+                """
+                SELECT id FROM (
+                    SELECT id, status,
+                           ROW_NUMBER() OVER (PARTITION BY type ORDER BY id DESC) AS rn
+                    FROM task_runs
+                )
+                WHERE rn > ? AND status NOT IN ('queued', 'running')
+                ORDER BY id
+                """,
+                (max(0, int(keep_per_type)),),
+            ).fetchall()
+        ]
+        for i in range(0, len(ids), 500):
+            chunk = ids[i : i + 500]
+            self.conn.execute(
+                f"DELETE FROM task_runs WHERE id IN ({', '.join('?' * len(chunk))})",
+                chunk,
+            )
+        return ids
+
+    def task_runs_actors(self) -> list[str]:
+        """Distinct actors, for the list filter."""
+        with self._tx():
+            rows = self.conn.execute(
+                "SELECT DISTINCT actor FROM task_runs ORDER BY actor"
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def task_runs_contexts(self, type: Optional[str] = None) -> list[str]:
+        """Distinct context labels (optionally for one type), for the list filter."""
+        sql = (
+            "SELECT DISTINCT json_extract(context_json, '$.label') AS label FROM task_runs "
+            "WHERE json_extract(context_json, '$.label') IS NOT NULL"
+        )
+        args: list = []
+        if type:
+            sql += " AND type = ?"
+            args.append(str(type))
+        with self._tx():
+            rows = self.conn.execute(sql + " ORDER BY label", args).fetchall()
+        return [r[0] for r in rows]
 
     def get_clone_guild_ids(self, original_guild_id: int) -> List[int]:
         """All clone guild ids for a host guild."""
