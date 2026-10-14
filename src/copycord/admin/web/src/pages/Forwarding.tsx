@@ -6,7 +6,7 @@
 // Element ids match the old page for the e2e specs.
 
 import { useState } from "react";
-import { Button, Card, Skeleton, cx } from "../components/ui";
+import { Button, Card, cx } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useApi } from "../hooks/useApi";
 import type { StatusGateState } from "../hooks/useStatusGate";
@@ -29,7 +29,10 @@ import {
   toCount,
 } from "./forwarding/forwardingApi";
 import { RuleCard } from "./forwarding/RuleCard";
+import { RuleSkeletons } from "./forwarding/ForwardingSkeleton";
 import { RuleModal } from "./forwarding/RuleModal";
+
+export { ForwardingSkeleton } from "./forwarding/ForwardingSkeleton";
 import { CLIENT_GUILDS_URL } from "./forwarding/ruleForm";
 import { useNotify, useSafeConfirm } from "./system/providers";
 
@@ -61,16 +64,6 @@ interface RowBusy {
 
 function failure(what: string, e: unknown): string {
   return errorText(e, what);
-}
-
-function Skeletons() {
-  return (
-    <>
-      {[0, 1, 2].map((i) => (
-        <Skeleton.Card key={i} height={118} testId="fwd-skeleton" />
-      ))}
-    </>
-  );
 }
 
 export interface ForwardingProps {
@@ -190,7 +183,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
                 "min-[1501px]:grid-cols-[repeat(4,minmax(260px,1fr))]",
               )}
             >
-              {!loaded ? <Skeletons /> : null}
+              {!loaded ? <RuleSkeletons /> : null}
               {items.length > 0 ? (
                 <>
                   <div className="col-span-full mb-2 flex items-start justify-between gap-3">
