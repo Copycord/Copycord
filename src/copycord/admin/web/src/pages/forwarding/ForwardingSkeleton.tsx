@@ -13,7 +13,7 @@ export const FWD_LIST =
 export function RuleSkeletons() {
   return (
     <>
-      <div className="col-span-full mb-2 flex items-start justify-between gap-3">
+      <div aria-hidden="true" inert className="col-span-full mb-2 flex items-start justify-between gap-3">
         <div className="flex flex-col">
           <div className="flex min-w-0 flex-auto items-center gap-2.5">
             <input
