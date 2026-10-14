@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { ApiError, CSRF_HEADER, api } from "./api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError, CSRF_HEADER, api, resetLoginRedirect } from "./api";
 
 function mockFetch(status: number, body: unknown, type = "application/json") {
   const text = typeof body === "string" ? body : JSON.stringify(body);
@@ -56,5 +56,60 @@ describe("api", () => {
   it("returns undefined for an empty 204", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
     await expect(api.del("/api/x")).resolves.toBeUndefined();
+  });
+});
+
+describe("api session expiry", () => {
+  let go = vi.fn();
+
+  beforeEach(() => {
+    go = vi.fn();
+    resetLoginRedirect(go);
+  });
+
+  afterEach(() => {
+    resetLoginRedirect();
+  });
+
+  async function expectExpired(call: () => Promise<unknown>) {
+    const err = await call().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(401);
+  }
+
+  it("sends the browser to /login once on a 401, however many requests fail", async () => {
+    mockFetch(401, { detail: "Unauthorized" });
+    await expectExpired(() => api.get("/api/status"));
+    await expectExpired(() => api.post("/api/x", {}));
+    expect(go).toHaveBeenCalledTimes(1);
+    expect(go).toHaveBeenCalledWith("/login");
+  });
+
+  it("treats a followed redirect to the login page as expired", async () => {
+    const res = new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    Object.defineProperty(res, "redirected", { value: true });
+    Object.defineProperty(res, "url", { value: "http://localhost/login" });
+    vi.stubGlobal("fetch", vi.fn(async () => res));
+    await expectExpired(() => api.get("/api/status"));
+    expect(go).toHaveBeenCalledWith("/login");
+  });
+
+  it("treats HTML where JSON was asked for as expired", async () => {
+    mockFetch(200, "<!doctype html><div id=\"root\"></div>", "text/html; charset=utf-8");
+    await expectExpired(() => api.get<unknown[]>("/api/guilds"));
+    expect(go).toHaveBeenCalledWith("/login");
+  });
+
+  it("leaves a normal JSON reply alone", async () => {
+    mockFetch(200, [{ id: 1 }]);
+    await expect(api.get<{ id: number }[]>("/api/guilds")).resolves.toEqual([{ id: 1 }]);
+    expect(go).not.toHaveBeenCalled();
+  });
+
+  it("leaves other errors alone", async () => {
+    mockFetch(403, { detail: "Forbidden" });
+    const err = await api.post("/api/x", {}).catch((e: unknown) => e);
+    expect((err as ApiError).status).toBe(403);
+    expect(go).not.toHaveBeenCalled();
   });
 });

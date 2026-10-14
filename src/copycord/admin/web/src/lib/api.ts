@@ -50,6 +50,38 @@ async function readBody(res: Response): Promise<unknown> {
   return text;
 }
 
+// An expired session shows up as a 401, as a redirect that fetch followed to
+// the login page, or as HTML where JSON was asked for.
+function sessionExpired(res: Response): boolean {
+  if (res.status === 401) return true;
+  if (res.redirected && res.url) {
+    try {
+      if (new URL(res.url).pathname.startsWith("/login")) return true;
+    } catch {
+      // Not a parseable URL; fall through to the content type check.
+    }
+  }
+  return (res.headers.get("content-type") ?? "").includes("text/html");
+}
+
+// Several requests usually fail together when the session expires; send the
+// browser to the login page only once.
+let loginRedirectStarted = false;
+let navigate: (url: string) => void = (url) => window.location.assign(url);
+
+function goToLogin(): void {
+  if (loginRedirectStarted) return;
+  if (window.location.pathname.startsWith("/login")) return;
+  loginRedirectStarted = true;
+  navigate("/login");
+}
+
+// For tests: forget an earlier login redirect and optionally capture the next one.
+export function resetLoginRedirect(go?: (url: string) => void): void {
+  loginRedirectStarted = false;
+  navigate = go ?? ((url) => window.location.assign(url));
+}
+
 export async function request<T>(
   method: Method,
   url: string,
@@ -74,6 +106,10 @@ export async function request<T>(
     signal: opts.signal,
   });
   const data = await readBody(res);
+  if (sessionExpired(res)) {
+    goToLogin();
+    throw new ApiError(401, url, data, "session expired");
+  }
   if (!res.ok) {
     throw new ApiError(res.status, url, data, errorMessage(data));
   }
