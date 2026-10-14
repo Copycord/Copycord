@@ -179,7 +179,10 @@ export function ChannelPicker({ categories, selected, onChange, error }: Channel
   );
 }
 
-/** Split a channel selection into whole categories (by id) and the remaining channels. */
+/**
+ * Split a channel selection into whole categories (by id) and the remaining channels. A category
+ * with a busy channel goes as its picked channels, so the run does not add a skipped step for it.
+ */
 export function splitSelection(
   categories: BackfillOptionCategory[],
   selected: ReadonlySet<string>,
@@ -188,8 +191,9 @@ export function splitSelection(
   const covered = new Set<string>();
   for (const cat of categories) {
     if (cat.id === null) continue;
-    const ids = cat.channels.filter((c) => !c.orphan && selectable(c)).map((c) => c.id);
-    if (ids.length > 1 && ids.every((id) => selected.has(id))) {
+    const live = cat.channels.filter((c) => !c.orphan);
+    const ids = live.map((c) => c.id);
+    if (ids.length > 1 && live.every(selectable) && ids.every((id) => selected.has(id))) {
       category_ids.push(cat.id);
       ids.forEach((id) => covered.add(id));
     }

@@ -62,8 +62,10 @@ describe("ChannelPicker", () => {
     expect(screen.getByText("0 selected")).toBeInTheDocument();
   });
 
-  it("sends a fully picked category by id", () => {
-    expect(splitSelection(CATS, new Set(["1", "2"]))).toEqual({ category_ids: ["c1"], channel_ids: [] });
-    expect(splitSelection(CATS, new Set(["1"]))).toEqual({ category_ids: [], channel_ids: ["1"] });
+  it("sends a fully picked category by id, unless it holds a busy channel", () => {
+    const free = [{ ...CATS[0]!, channels: CATS[0]!.channels.filter((c) => !c.busy) }];
+    expect(splitSelection(free, new Set(["1", "2"]))).toEqual({ category_ids: ["c1"], channel_ids: [] });
+    expect(splitSelection(free, new Set(["1"]))).toEqual({ category_ids: [], channel_ids: ["1"] });
+    expect(splitSelection(CATS, new Set(["1", "2"]))).toEqual({ category_ids: [], channel_ids: ["1", "2"] });
   });
 });
