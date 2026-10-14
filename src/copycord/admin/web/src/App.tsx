@@ -7,6 +7,7 @@ import { ChannelsSkeleton } from "./pages/channels/ChannelsSkeleton";
 import { DashboardSkeleton } from "./pages/dashboard/DashboardSkeleton";
 import { ForwardingSkeleton } from "./pages/forwarding/ForwardingSkeleton";
 import { GuildsSkeleton } from "./pages/guilds/GuildsSkeleton";
+import { SystemSkeleton } from "./pages/system/SystemSkeleton";
 import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 
@@ -53,7 +54,7 @@ const Channels = lazyPage(() => import("./pages/Channels").then((m) => m.Channel
 const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds), GuildsSkeleton);
 const Forwarding = lazyPage(() => import("./pages/Forwarding").then((m) => m.Forwarding), ForwardingSkeleton);
 const Scraper = lazyPage(() => import("./pages/Scraper").then((m) => m.Scraper));
-const System = lazyPage(() => import("./pages/System").then((m) => m.System));
+const System = lazyPage(() => import("./pages/System").then((m) => m.System), SystemSkeleton);
 const Logs = lazyPage(() => import("./pages/Logs").then((m) => m.Logs));
 const Kit = lazyPage(() => import("./pages/Kit").then((m) => m.Kit));
 

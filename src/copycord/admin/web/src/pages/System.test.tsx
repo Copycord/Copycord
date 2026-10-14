@@ -8,6 +8,7 @@ import type { BackupArchive, BackupInfo } from "../types/system";
 import { holdFetch } from "../test/holdFetch";
 import { System } from "./System";
 import { fmtBackupWhen, fmtBytes, SHRUG } from "./system/format";
+import { SystemSkeleton } from "./system/SystemSkeleton";
 
 // Noon UTC keeps the calendar day the same in every test runner time zone.
 const OCT_9 = Date.UTC(2026, 9, 9, 12) / 1000;
@@ -330,5 +331,20 @@ describe("System loading", () => {
     release();
     await waitFor(() => expect(document.getElementById("adv-last-backup")).toHaveTextContent("Oct 9 2026"));
     expect(screen.queryByTestId("adv-archive-skeleton")).toBeNull();
+  });
+
+  it("keeps the real title and the one Database card while loading, as the chunk skeleton does", async () => {
+    server({ "/api/backup/info": () => jsonResponse(info()) });
+    const release = holdFetch("/api/backup/info");
+    const { container } = renderPage();
+    expect(screen.getByRole("heading", { level: 2, name: "Database" })).toBeInTheDocument();
+    expect(container.querySelectorAll("#adv-data-card")).toHaveLength(1);
+    release();
+    await waitFor(() => expect(document.getElementById("adv-last-backup")).toHaveTextContent("Oct 9 2026"));
+    expect(container.querySelectorAll("#adv-data-card")).toHaveLength(1);
+
+    const skel = render(<SystemSkeleton />);
+    expect(within(skel.container).getByRole("heading", { level: 2, name: "Database" })).toBeInTheDocument();
+    expect(within(skel.container).getAllByTestId("card-skeleton")).toHaveLength(1);
   });
 });
