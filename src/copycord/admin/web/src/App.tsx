@@ -7,6 +7,7 @@ import { Forwarding } from "./pages/Forwarding";
 import { Scraper } from "./pages/Scraper";
 import { Channels } from "./pages/Channels";
 import { Kit } from "./pages/Kit";
+import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { NotFound } from "./pages/NotFound";
 import { Placeholder } from "./pages/Placeholder";
@@ -37,6 +38,7 @@ const PAGE_ELEMENTS: Partial<Record<(typeof PAGES)[number]["path"], ReactNode>> 
 export function App() {
   return (
     <Routes>
+      <Route path="/login" element={<Login />} />
       <Route element={<Layout />}>
         {PAGES.map((p) => {
           const element = PAGE_ELEMENTS[p.path] ?? <Placeholder title={p.title} legacyHref={p.legacy} />;

@@ -1,18 +1,15 @@
 """
-The new SPA at /app: behind the login guard, index.html for client routes,
+The SPA: behind the login guard, index.html for client routes,
 hashed assets with a long cache, no path traversal.
 """
-import sys
 
 import pytest
 from starlette.testclient import TestClient
 
 from copycord.admin import auth
+from copycord.admin import spa as spa_module
 from copycord.admin.app import app
-
-app_module = sys.modules["copycord.admin.app"]
-
-INDEX = '<!doctype html><div id="root"></div>'
+from tests.conftest import SPA_INDEX as INDEX
 
 
 @pytest.fixture()
@@ -21,22 +18,17 @@ def tc():
 
 
 @pytest.fixture()
-def spa(tmp_path, monkeypatch):
-    dist = tmp_path / "dist"
-    (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text(INDEX, encoding="utf-8")
-    (dist / "assets" / "index-abc123.js").write_text("console.log(1)", encoding="utf-8")
-    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
-    monkeypatch.setattr(app_module, "SPA_DIRS", (tmp_path / "missing", dist))
+def spa(spa_build, monkeypatch):
+    (spa_build.parent / "secret.txt").write_text("secret", encoding="utf-8")
     monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
-    return dist
+    return spa_build
 
 
 def _cookie():
     return {"cookie": f"{auth.ADMIN_COOKIE_NAME}={auth.make_session_token()}"}
 
 
-@pytest.mark.parametrize("path", ["/app", "/app/", "/app/channels", "/app/assets/index-abc123.js"])
+@pytest.mark.parametrize("path", ["/app", "/app/", "/app/channels"])
 def test_requires_login(tc, spa, path):
     resp = tc.get(path, headers={"accept": "text/html"}, follow_redirects=False)
     assert resp.status_code in (302, 307)
@@ -56,7 +48,7 @@ def test_assets_served_with_long_cache(tc, spa):
     resp = tc.get("/app/assets/index-abc123.js", headers=_cookie())
     assert resp.status_code == 200
     assert resp.text == "console.log(1)"
-    assert resp.headers["cache-control"] == app_module.SPA_ASSET_CACHE
+    assert resp.headers["cache-control"] == spa_module.SPA_ASSET_CACHE
     assert "javascript" in resp.headers["content-type"]
 
 
@@ -81,13 +73,75 @@ def test_path_traversal_rejected(tc, spa, path):
 
 
 def test_not_built_is_404(tc, tmp_path, monkeypatch):
-    monkeypatch.setattr(app_module, "SPA_DIRS", (tmp_path / "none",))
+    monkeypatch.setattr(spa_module, "SPA_DIRS", (tmp_path / "none",))
     monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
     resp = tc.get("/app/", headers=_cookie())
     assert resp.status_code == 404
     assert "npm run build" in resp.text
 
 
-def test_old_pages_still_served(tc, spa):
+# ---------------------------------------------------------------------------
+# Login: the SPA renders the form; POST /login keeps its checks
+# ---------------------------------------------------------------------------
+
+ORIGIN = "http://testserver"
+
+
+@pytest.fixture()
+def limiter(monkeypatch):
+    monkeypatch.setattr(auth, "LOGIN_LIMITER", auth.LoginLimiter())
+
+
+def _login(tc, pw, **headers):
+    return tc.post("/login", data={"password": pw}, headers={"origin": ORIGIN, **headers}, follow_redirects=False)
+
+
+def test_login_page_is_the_spa(tc, spa):
     resp = tc.get("/login", follow_redirects=False)
     assert resp.status_code == 200
+    assert resp.text == INDEX
+    assert resp.headers["cache-control"] == "no-cache"
+
+
+def test_login_page_redirects_when_signed_in(tc, spa):
+    resp = tc.get("/login", headers=_cookie(), follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/"
+
+
+def test_spa_assets_load_logged_out(tc, spa):
+    resp = tc.get(f"{auth.SPA_ASSETS_PREFIX}index-abc123.js", follow_redirects=False)
+    assert resp.status_code == 200
+    assert resp.text == "console.log(1)"
+
+
+def test_wrong_password_shows_error_in_meta(tc, spa, limiter):
+    resp = _login(tc, "nope")
+    assert resp.status_code == 401
+    assert auth.ADMIN_COOKIE_NAME not in resp.cookies
+    meta = f'<meta name="{spa_module.LOGIN_ERROR_META}" content="Incorrect password. Please try again." />'
+    assert meta + "</head>" in resp.text
+    assert '<div id="root"></div>' in resp.text
+
+
+def test_lockout_message_and_retry_after(tc, spa, limiter):
+    for _ in range(4):
+        assert _login(tc, "nope").status_code == 401
+    resp = _login(tc, "nope")
+    assert resp.status_code == 429
+    assert resp.headers["retry-after"] == "30"
+    assert "Too many failed attempts. Try again in 30 seconds." in resp.text
+
+
+def test_login_error_is_escaped(spa):
+    resp = spa_module.index_response(401, login_error='"><script>alert(1)</script>')
+    body = resp.body.decode()
+    assert "<script>" not in body
+    assert "&quot;&gt;&lt;script&gt;" in body
+
+
+def test_login_success_and_cross_origin(tc, spa, limiter):
+    resp = _login(tc, "pw")
+    assert resp.status_code == 302 and resp.headers["location"] == "/"
+    assert auth.ADMIN_COOKIE_NAME in resp.cookies
+    assert _login(tc, "pw", origin="http://evil.example").status_code == 403

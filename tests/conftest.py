@@ -53,3 +53,19 @@ def _no_exit_ip_lookup(request, monkeypatch):
     exit_timezone.clear_cache()
     yield
     exit_timezone.clear_cache()
+
+
+SPA_INDEX = '<!doctype html><html><head><title>Copycord</title></head><body><div id="root"></div></body></html>'
+
+
+@pytest.fixture(autouse=True)
+def spa_build(tmp_path_factory, monkeypatch):
+    """A stand-in SPA build, so page and login routes work without npm."""
+    from copycord.admin import spa
+
+    dist = tmp_path_factory.mktemp("spa") / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text(SPA_INDEX, encoding="utf-8")
+    (dist / "assets" / "index-abc123.js").write_text("console.log(1)", encoding="utf-8")
+    monkeypatch.setattr(spa, "SPA_DIRS", (dist.parent / "missing", dist))
+    return dist

@@ -26,6 +26,7 @@ import re
 import time
 import logging
 from typing import Dict, List, Set, Literal, Optional, Any, Union
+from copycord.admin import spa
 from copycord.admin.auth import init_admin_auth
 from copycord.admin.security import authorize_websocket, safe_child
 from copycord.logging_setup import (
@@ -353,41 +354,22 @@ app = FastAPI(title=APP_TITLE, lifespan=_lifespan)
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
-# The new single-page dashboard: web_static in a wheel, web/dist in a checkout.
-SPA_DIRS = (BASE_DIR / "web_static", BASE_DIR / "web" / "dist")
-SPA_ASSET_CACHE = "public, max-age=31536000, immutable"
-
-
-def _spa_dir() -> Optional[Path]:
-    for d in SPA_DIRS:
-        if (d / "index.html").is_file():
-            return d
-    return None
 
 
 @app.get("/app", include_in_schema=False)
 @app.get("/app/{path:path}", include_in_schema=False)
-async def spa(path: str = ""):
+async def spa_page(path: str = ""):
     """Serve the SPA: hashed files under assets/, index.html for every client route."""
-    root = _spa_dir()
-    if root is None:
-        return PlainTextResponse(
-            "The new dashboard is not built (run `npm ci && npm run build` in src/copycord/admin/web).",
-            status_code=404,
-        )
     if path.startswith("assets/"):
-        asset = safe_child(root / "assets", path[len("assets/"):])
-        if asset is None or not asset.is_file():
-            raise HTTPException(status_code=404)
-        return FileResponse(asset, headers={"Cache-Control": SPA_ASSET_CACHE})
-    return FileResponse(root / "index.html", headers={"Cache-Control": "no-cache"})
+        return spa.asset_response(path[len("assets/"):])
+    return spa.index_response()
 
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals.setdefault("links", {})
 app.include_router(links_router)
 shutdown_event = asyncio.Event()
-init_admin_auth(app, templates, DATA_DIR)
+init_admin_auth(app, DATA_DIR)
 
 
 @app.exception_handler(StarletteHTTPException)

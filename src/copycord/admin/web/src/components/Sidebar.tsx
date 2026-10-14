@@ -50,6 +50,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <a
             href="/login"
             role="button"
+            data-logout
             className={ITEM}
             onClick={(e) => {
               e.preventDefault();

@@ -20,12 +20,10 @@ from typing import Optional, Dict
 
 from fastapi import FastAPI, Request, Form, status
 from fastapi.responses import RedirectResponse, PlainTextResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from copycord.logging_setup import get_logger
-from copycord.common.config import CURRENT_VERSION
 from copycord.common.private_file import write_private_file
 
 LOGGER = get_logger("copycord")
@@ -254,8 +252,12 @@ def decode_admin_session(token: str | None) -> Optional[Dict]:
     return sess
 
 
+# The SPA build's hashed js and css; the login page needs them before sign-in.
+SPA_ASSETS_PREFIX = "/app/assets/"
+
+
 class PasswordGuardMiddleware(BaseHTTPMiddleware):
-    """Single-password gate: everything except /login, /health and static assets needs a valid session cookie.
+    """Single-password gate: everything except /login, /health and static or SPA assets needs a valid session cookie.
     Unauthenticated GET/HEAD requests redirect to /login; others get a 401."""
 
     async def dispatch(self, request: Request, call_next):
@@ -267,6 +269,7 @@ class PasswordGuardMiddleware(BaseHTTPMiddleware):
             or path == "/logout"
             or path.startswith("/health")
             or path.startswith("/static")
+            or path.startswith(SPA_ASSETS_PREFIX)
         ):
             return await call_next(request)
 
@@ -283,7 +286,7 @@ class PasswordGuardMiddleware(BaseHTTPMiddleware):
         )
 
 
-def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) -> None:
+def init_admin_auth(app: FastAPI, data_dir: Path) -> None:
     """Set up admin login: read PASSWORD and SECRET_KEY, add PasswordGuardMiddleware, CSRFMiddleware and the /login routes."""
     global ADMIN_PASSWORD, TRUSTED_PROXIES, _session_signer, _session_secret
 
@@ -301,15 +304,13 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
 
     app.add_middleware(CSRFMiddleware)
 
+    # The SPA renders the login form; a failed post gets the same page with the error.
+    from copycord.admin import spa
+
     def _too_many(request: Request, wait: int):
-        return templates.TemplateResponse(
-            "login.html",
-            {
-                "request": request,
-                "version": CURRENT_VERSION,
-                "error": f"Too many failed attempts. Try again in {wait} seconds.",
-            },
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        return spa.index_response(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            login_error=f"Too many failed attempts. Try again in {wait} seconds.",
             headers={"Retry-After": str(wait)},
         )
 
@@ -324,14 +325,7 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
             )
             return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
 
-        return templates.TemplateResponse(
-            "login.html",
-            {
-                "request": request,
-                "version": CURRENT_VERSION,
-                "error": None,
-            },
-        )
+        return spa.index_response()
 
     @app.post("/login", response_class=HTMLResponse)
     async def login_submit(
@@ -378,14 +372,9 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
         if wait:
             return _too_many(request, wait)
 
-        return templates.TemplateResponse(
-            "login.html",
-            {
-                "request": request,
-                "version": CURRENT_VERSION,
-                "error": "Incorrect password. Please try again.",
-            },
-            status_code=status.HTTP_401_UNAUTHORIZED,
+        return spa.index_response(
+            status.HTTP_401_UNAUTHORIZED,
+            login_error="Incorrect password. Please try again.",
         )
 
     @app.post("/logout")
