@@ -88,7 +88,7 @@ async function states(browser: Browser, state: Awaited<ReturnType<typeof login>>
   const skel = await blocks(page);
   hold = false;
   for (const r of held.splice(0)) await r.continue().catch(() => {});
-  await page.waitForLoadState("networkidle").catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(1500);
   const loaded = await blocks(page);
   await ctx.close();
@@ -107,7 +107,8 @@ async function cls(browser: Browser, state: Awaited<ReturnType<typeof login>>, p
         if (!e.hadRecentInput) w.__cls += e.value;
     }).observe({ type: "layout-shift", buffered: true });
   });
-  await page.goto(path, { waitUntil: "networkidle" });
+  await page.goto(path, { waitUntil: "load" });
+  await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(2000);
   const v = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
   await ctx.close();
@@ -122,7 +123,9 @@ async function main(): Promise<void> {
   await cls(browser, state, "/");
   console.log(`SKELSHIFT ${BASE_URL} throttle=${process.env.THROTTLE ?? "none"}`);
   for (const path of PATHS) {
-    const { skel, loaded } = await states(browser, state, path);
+    const got = await states(browser, state, path).catch((e: Error) => (console.log(`PAGE ${path} error ${e.message.split("\n")[0]}`), null));
+    if (!got) continue;
+    const { skel, loaded } = got;
     let differ = 0;
     let max = 0;
     const lines: string[] = [];
@@ -140,7 +143,7 @@ async function main(): Promise<void> {
         if (d > 2 || process.env.VERBOSE) lines.push(`    ${kind}[${i}] d=${Number.isFinite(d) ? r0(d) : "missing"} skel ${fmt(s)} | loaded ${fmt(l)}`);
       }
     }
-    const c = await cls(browser, state, path);
+    const c = await cls(browser, state, path).catch(() => NaN);
     console.log(`PAGE ${path} differ=${differ} maxdelta=${r0(max)} cls=${c.toFixed(4)}`);
     for (const l of lines) console.log(l);
   }
