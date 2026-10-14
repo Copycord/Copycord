@@ -2,13 +2,18 @@
 // task type (?type=), the list shows its runs live, and /tasks/runs/:id opens one run.
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useToast } from "../components/Toast";
 import { Button } from "../components/ui/Button";
+import { useConfirm } from "../components/ui/ConfirmDialog";
+import { EmptyState } from "../components/ui/EmptyState";
 import { useApi } from "../hooks/useApi";
-import type { TaskType, TaskTypesResponse } from "../types/tasks";
+import { ApiError, api, errorText } from "../lib/api";
+import type { TaskRun, TaskRunResponse, TaskType, TaskTypesResponse } from "../types/tasks";
 import { RunDetail } from "./tasks/RunDetail";
-import { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS, RunList } from "./tasks/RunList";
-import { useTaskRuns } from "./tasks/runStore";
+import { RunFilterSelects, RunSearch, useRunFilters } from "./tasks/RunFilters";
+import { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS, RunList, RunMenu, type RunAction } from "./tasks/RunList";
+import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
 import { MAIN, PAGE, TasksHeading } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
 
@@ -68,7 +73,7 @@ export function Tasks() {
                 description={selected?.description ?? "Showing runs from all task types"}
                 runnable={[]}
               />
-              <RunsView typeKey={typeKey} typeTitle={typeTitle} />
+              <RunsView types={types} typeTitle={typeTitle} />
             </>
           )}
         </div>
@@ -77,16 +82,69 @@ export function Tasks() {
   );
 }
 
-function RunsView({ typeKey, typeTitle }: { typeKey: string; typeTitle: (key: string) => string }) {
-  const { runs, total, loading, reload } = useTaskRuns({ type: typeKey || undefined });
+/** Poll this often while the socket is down and auto-refresh is Off, so the list still moves. */
+const SOCKET_DOWN_POLL_S = 30;
+
+function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: string) => string }) {
+  const { filters, active, set, setPage, clear } = useRunFilters();
+  const { runs, total, loading, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
+  const navigate = useNavigate();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const page = filters.page ?? 1;
+  const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const onSearch = useCallback((q: string) => set("q", q), [set]);
 
   useEffect(() => {
-    const secs = Number(autoRefresh);
+    const secs = Number(autoRefresh) || (connected ? 0 : SOCKET_DOWN_POLL_S);
     if (!secs) return;
     const t = window.setInterval(reload, secs * 1000);
     return () => window.clearInterval(t);
-  }, [autoRefresh, reload]);
+  }, [autoRefresh, connected, reload]);
+
+  const onAction = async (act: RunAction, run: TaskRun) => {
+    const name = `${typeTitle(run.type)} #${run.number}`;
+    if (act === "view") {
+      navigate(`/tasks/runs/${encodeURIComponent(run.id)}`);
+    } else if (act === "rerun") {
+      // L10 opens the type's form prefilled from this run; until then the list keeps the hint in the URL.
+      navigate(`/tasks?type=${encodeURIComponent(run.type)}&rerun=${encodeURIComponent(run.id)}`);
+    } else if (act === "cancel") {
+      const ok = await confirm({
+        title: `Cancel ${name}?`,
+        body: "Work already done is kept; the run stops at its next checkpoint.",
+        confirmLabel: "Cancel run",
+        cancelLabel: "Keep running",
+        confirmVariant: "ghost-red",
+      });
+      if (!ok) return;
+      try {
+        const res = await api.post<TaskRunResponse>(`${runUrl(run.id)}/cancel`);
+        if (res?.run) patchRun(res.run);
+        toast.show(`Cancelling ${name}`, { kind: "info" });
+      } catch (e) {
+        const held = e instanceof ApiError ? (e.body as { run?: TaskRun } | null)?.run : undefined;
+        if (held) patchRun(held);
+        toast.show(errorText(e, `Could not cancel ${name}`), { kind: "error" });
+      }
+    } else {
+      const ok = await confirm({
+        title: `Delete ${name}?`,
+        body: "Its log and report are deleted with it. This cannot be undone.",
+        confirmLabel: "Delete",
+        confirmVariant: "ghost-red",
+      });
+      if (!ok) return;
+      try {
+        await api.del(runUrl(run.id));
+        removeRun(run.id);
+        toast.show(`Deleted ${name}`, { kind: "success" });
+      } catch (e) {
+        toast.show(errorText(e, `Could not delete ${name}`), { kind: "error" });
+      }
+    }
+  };
 
   const onAutoRefresh = (v: string) => {
     setAutoRefresh(v);
@@ -97,14 +155,68 @@ function RunsView({ typeKey, typeTitle }: { typeKey: string; typeTitle: (key: st
     }
   };
 
-  return (
-    <RunList
-      runs={runs}
-      total={total}
-      loading={loading}
-      typeTitle={typeTitle}
-      autoRefresh={autoRefresh}
-      onAutoRefresh={onAutoRefresh}
+  const empty = active ? (
+    <EmptyState
+      title="No runs match"
+      className="m-4"
+      action={
+        <Button variant="ghost" onClick={clear}>
+          Clear filters
+        </Button>
+      }
     />
+  ) : (
+    <EmptyState
+      title="No task runs yet"
+      className="m-4"
+      action={
+        <Button variant="primary" disabled title="No task type has a start form yet">
+          Run task
+        </Button>
+      }
+    />
+  );
+
+  const footer =
+    total > PER_PAGE || page > 1 ? (
+      <nav aria-label="Pages" className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted">
+        <Button variant="ghost" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+          Previous
+        </Button>
+        <span>
+          Page {page} of {pages}
+        </span>
+        <Button variant="ghost" size="sm" disabled={page >= pages} onClick={() => setPage(page + 1)}>
+          Next
+        </Button>
+      </nav>
+    ) : null;
+
+  return (
+    <>
+      <RunSearch value={filters.q ?? ""} onSearch={onSearch} />
+      <RunList
+        runs={runs}
+        total={total}
+        loading={loading}
+        typeTitle={typeTitle}
+        autoRefresh={autoRefresh}
+        onAutoRefresh={onAutoRefresh}
+        filters={
+          <RunFilterSelects
+            filters={filters}
+            types={types}
+            actors={actors}
+            contexts={contexts}
+            onChange={set}
+            active={active}
+            onClear={clear}
+          />
+        }
+        empty={empty}
+        footer={footer}
+        rowActions={(r) => <RunMenu run={r} onAction={(act, run) => void onAction(act, run)} />}
+      />
+    </>
   );
 }

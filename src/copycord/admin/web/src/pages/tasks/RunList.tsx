@@ -5,7 +5,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Badge } from "../../components/ui/Badge";
 import { EmptyState } from "../../components/ui/EmptyState";
-import type { TaskRun } from "../../types/tasks";
+import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
+import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { StatusIcon } from "./StatusIcon";
 import { FRAME, FRAME_HEAD, ROW, RunRowsLoading } from "./TasksSkeleton";
@@ -128,9 +129,29 @@ export interface RunListProps {
   empty?: ReactNode;
   /** Under the rows: paging. */
   footer?: ReactNode;
+  /** The right edge of each row: its kebab menu. */
+  rowActions?: (run: TaskRun) => ReactNode;
 }
 
-export function RunList({ runs, total, loading, typeTitle, autoRefresh, onAutoRefresh, filters, empty, footer }: RunListProps) {
+export type RunAction = "view" | "cancel" | "rerun" | "delete";
+
+/** The row kebab: View always; Cancel while queued or running; Re-run and Delete once finished. */
+export function RunMenu({ run, onAction }: { run: TaskRun; onAction: (act: RunAction, run: TaskRun) => void }) {
+  const live = ACTIVE_STATUSES.includes(run.status);
+  const items: MenuItem[] = [{ act: "view", label: "View", onSelect: () => onAction("view", run) }];
+  if (live) items.push({ act: "cancel", label: "Cancel", onSelect: () => onAction("cancel", run) });
+  else {
+    items.push({ act: "rerun", label: "Re-run", onSelect: () => onAction("rerun", run) });
+    items.push({ act: "delete", label: "Delete", danger: true, onSelect: () => onAction("delete", run) });
+  }
+  return (
+    <div className="shrink-0 self-start">
+      <RowMenu kind="channel" items={items} />
+    </div>
+  );
+}
+
+export function RunList({ runs, total, loading, typeTitle, autoRefresh, onAutoRefresh, filters, empty, footer, rowActions }: RunListProps) {
   const first = loading && runs.length === 0;
   return (
     <div className={FRAME}>
@@ -148,7 +169,7 @@ export function RunList({ runs, total, loading, typeTitle, autoRefresh, onAutoRe
       ) : (
         <ul aria-label="Task runs" className="m-0 list-none p-0">
           {runs.map((r) => (
-            <RunRow key={r.id} run={r} typeTitle={typeTitle(r.type)} />
+            <RunRow key={r.id} run={r} typeTitle={typeTitle(r.type)} actions={rowActions?.(r)} />
           ))}
         </ul>
       )}

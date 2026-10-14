@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useWsMessages } from "../../hooks/useWsMessages";
 import { api } from "../../lib/api";
 import type { BusMessage } from "../../types/api";
-import type { RunFilters, TaskRun, TaskRunResponse, TaskRunsResponse, TaskRunUpdated, TaskStep } from "../../types/tasks";
+import type { RunFilters, TaskContext, TaskRun, TaskRunResponse, TaskRunsResponse, TaskRunUpdated, TaskStep } from "../../types/tasks";
 
 export const PER_PAGE = 25;
 export const RUN_UPDATED = "task.run.updated";
@@ -95,6 +95,12 @@ export function mergeIntoList(state: ListState, frame: TaskRunUpdated, filters: 
   return { runs: [row, ...state.runs].slice(0, PER_PAGE), total: state.total + 1 };
 }
 
+/** A list page without the run `id` (after a delete); unchanged when the page does not hold it. */
+export function removeFromList(state: ListState, id: string): ListState {
+  if (!state.runs.some((r) => r.id === id)) return state;
+  return { runs: state.runs.filter((r) => r.id !== id), total: Math.max(0, state.total - 1) };
+}
+
 /** Calls `refetch` when the socket comes back after a drop, not on the first open. */
 function useReconnectRefetch(connected: boolean, refetch: () => void) {
   const was = useRef(connected);
@@ -112,12 +118,20 @@ export interface TaskRunsState extends ListState {
   /** The /ws/out socket is open, so rows update live. */
   connected: boolean;
   reload: () => void;
+  /** Actor and mapping choices for the filter dropdowns, from the last page fetched. */
+  actors: string[];
+  contexts: TaskContext[];
+  /** Apply a run the server returned (a cancel response) as if it came in a frame. */
+  patchRun: (run: TaskRun) => void;
+  /** Drop a deleted run from the page. */
+  removeRun: (id: string) => void;
 }
 
 /** The list page for `filters`, live. */
 export function useTaskRuns(filters: RunFilters): TaskRunsState {
   const url = runsUrl(filters);
   const [state, setState] = useState<ListState>({ runs: [], total: 0 });
+  const [choices, setChoices] = useState<{ actors: string[]; contexts: TaskContext[] }>({ actors: [], contexts: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | undefined>(undefined);
   const [tick, setTick] = useState(0);
@@ -133,6 +147,7 @@ export function useTaskRuns(filters: RunFilters): TaskRunsState {
       .then((d) => {
         if (ctl.signal.aborted) return;
         setState({ runs: (d.runs ?? []).map((r) => ({ ...r, id: String(r.id) })), total: d.total ?? 0 });
+        setChoices({ actors: d.actors ?? [], contexts: d.contexts ?? [] });
       })
       .catch((e: unknown) => {
         if (!ctl.signal.aborted) setError(e instanceof Error ? e : new Error(String(e)));
@@ -153,8 +168,13 @@ export function useTaskRuns(filters: RunFilters): TaskRunsState {
     { types: [RUN_UPDATED] },
   );
   useReconnectRefetch(connected, reload);
+  const patchRun = useCallback((run: TaskRun) => {
+    const frame = { run: { ...run, id: String(run.id) } };
+    setState((s) => mergeIntoList(s, frame, filtersRef.current));
+  }, []);
+  const removeRun = useCallback((id: string) => setState((s) => removeFromList(s, id)), []);
 
-  return { ...state, loading, error, connected, reload };
+  return { ...state, ...choices, loading, error, connected, reload, patchRun, removeRun };
 }
 
 export interface TaskRunState {
