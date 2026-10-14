@@ -38,8 +38,8 @@ import type { RuleForm } from "./ruleForm";
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
-/** .form-group: 4px between label, control and help, 12px below. */
-const GROUP = "form-group mb-3 gap-1!";
+/** .form-group: 4px between label, control and help, 12px below; p.help-text kept the browser's 1em margins. */
+const GROUP = "form-group mb-3 gap-1! [&>p]:my-3";
 /** .chip-input-wrap and .chip-text-input over the shared ChipInput. */
 const CHIP_WRAP =
   "[&>div]:transition-[border-color,box-shadow] [&>div]:duration-200 [&>div:hover]:border-accent/30 [&>div:focus-within]:border-accent [&>div:focus-within]:ring-0 " +

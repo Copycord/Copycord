@@ -11,6 +11,9 @@ import { ProviderIcon } from "./RuleCard";
 
 type Patch = (next: Partial<RuleForm>) => void;
 
+// .provider-opt-icon: an 18 px box, kept when nothing is chosen so the button is 36 px tall.
+const OPT_ICON = "provider-opt-icon inline-flex size-[18px] shrink-0 items-center justify-center [&>svg]:size-[18px]";
+
 export function ProviderPicker({ value, onChange }: { value: string; onChange: (provider: string) => void }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -71,7 +74,7 @@ export function ProviderPicker({ value, onChange }: { value: string; onChange: (
           "outline-none focus:border-accent",
         )}
       >
-        <span className={cx("provider-opt-icon", !selected && "invisible")} aria-hidden="true">
+        <span className={cx(OPT_ICON, !selected && "invisible")} aria-hidden="true">
           {selected ? <ProviderIcon provider={selected.value} /> : null}
         </span>
         <span className="provider-opt-label flex-1">{selected ? selected.label : "Choose provider…"}</span>
@@ -103,7 +106,7 @@ export function ProviderPicker({ value, onChange }: { value: string; onChange: (
                 p.value === value && "bg-primary/20",
               )}
             >
-              <span className="provider-opt-icon" aria-hidden="true">
+              <span className={OPT_ICON} aria-hidden="true">
                 <ProviderIcon provider={p.value} />
               </span>
               <span className="provider-opt-label">{p.label}</span>
@@ -118,7 +121,7 @@ export function ProviderPicker({ value, onChange }: { value: string; onChange: (
 // .form-row of two .form-group cells, and a .form-group on its own.
 const ROW = "form-row flex flex-wrap gap-2.5";
 const CELL = "form-group flex-[1_1_200px] gap-1!";
-const GROUP = "form-group mb-3 gap-1!";
+const GROUP = "form-group mb-3 gap-1! [&>p]:my-3";
 
 export function PushoverFields({ form, patch }: { form: RuleForm; patch: Patch }) {
   return (
