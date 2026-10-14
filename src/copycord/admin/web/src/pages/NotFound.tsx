@@ -1,25 +1,27 @@
-// Unknown route: the old 404 page message, inside the normal shell.
+// Unknown route: the old 404.html card (.card, 640px wide, 40px from the top) inside the normal shell.
 
 import { Link } from "react-router";
+import { Card } from "../components/ui";
 
 export function NotFound() {
   return (
-    <section className="mx-auto my-10 max-w-xl rounded-card border border-border bg-card p-6 text-center shadow-card">
-      <h2 className="mb-4 text-2xl font-bold tracking-wide">404 – Page not found</h2>
+    <Card className="mx-auto my-10 max-w-[640px] text-center">
+      <h2 className="my-5 text-2xl font-bold">404 – Page not found</h2>
       <img
         src="/static/logo.png"
         alt="Copycord logo"
         draggable={false}
-        className="mx-auto mt-4 w-24 opacity-90"
+        className="mt-4 inline h-auto w-24 max-w-none opacity-90"
       />
-      <div className="mt-6 flex justify-center">
+      {/* .btns with a .btn.btn-ghost */}
+      <div className="mt-6 flex flex-wrap justify-center gap-2.5">
         <Link
           to="/"
-          className="rounded-control border border-border px-4 py-2 text-sm text-muted no-underline hover:text-text"
+          className="inline-flex min-h-[42px] items-center justify-center rounded-control border border-border bg-[rgba(255,255,255,0.04)] px-4 py-2.5 text-sm leading-none font-semibold text-accent no-underline transition duration-200 hover:-translate-y-0.5 hover:border-[rgba(167,139,250,0.3)] hover:bg-[rgba(255,255,255,0.08)] hover:shadow-soft"
         >
           Back to dashboard
         </Link>
       </div>
-    </section>
+    </Card>
   );
 }
