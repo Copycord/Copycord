@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { Card } from "../../components/ui";
-import { TITLE } from "./TokensCard";
+import { SC_CARD, TITLE, TITLEBAR } from "./TokensCard";
 import type { ProgressState } from "./useScraperLive";
 
 /** "12s" or "3m 7s", as updateElapsed did. */
@@ -28,40 +28,48 @@ export function ProgressCard({ progress }: { progress: ProgressState }) {
   const elapsed = startedAt ? fmtElapsed((endedAt ?? now) - startedAt) : "0s";
 
   return (
-    <Card id="sc-progress-card" aria-label="Progress" hidden={!visible}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <Card id="sc-progress-card" aria-label="Progress" className={SC_CARD} hidden={!visible}>
+      <div className={TITLEBAR}>
         <h3 className={TITLE}>Progress</h3>
-        <div className="flex items-center gap-3 text-[13px] text-text-1">
-          <span id="sc-elapsed" className="font-mono">
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            id="sc-elapsed"
+            className="rounded-md border border-border bg-[rgba(20,11,38,0.5)] px-2 py-0.5 font-mono text-xs text-muted"
+          >
             {elapsed}
           </span>
-          <span id="sc-eta">{eta}</span>
-          <span id="sc-member-count" className="font-semibold text-text">
+          <span
+            id="sc-eta"
+            className="rounded-md border border-[rgba(52,211,153,0.25)] bg-[rgba(52,211,153,0.1)] px-2 py-0.5 font-mono text-xs text-[#34d399] empty:hidden"
+          >
+            {eta}
+          </span>
+          <span id="sc-member-count" className="text-xs font-semibold text-primary empty:hidden">
             {members}
           </span>
         </div>
       </div>
-      <div
-        className="h-2.5 overflow-hidden rounded-full bg-white/8"
-        role="progressbar"
-        aria-label="Scrape progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={pct ?? undefined}
-      >
+      <div className="mt-3">
         <div
-          id="sc-progress-fill"
-          className="h-full rounded-full bg-linear-to-r from-primary to-accent transition-[width] duration-300"
-          style={{ width: `${pct ?? 0}%` }}
-        />
-      </div>
-      <div className="mt-2 flex items-center justify-between gap-3 text-sm">
-        <span id="sc-progress-text" className="min-w-0 truncate text-text-1">
-          {text}
-        </span>
-        <span id="sc-progress-pct" className="font-mono font-semibold">
-          {pct == null ? "\u2014" : `${pct}%`}
-        </span>
+          className="h-2 w-full overflow-hidden rounded-lg border border-border bg-[rgba(20,11,38,0.8)]"
+          role="progressbar"
+          aria-label="Scrape progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct ?? undefined}
+        >
+          <div
+            id="sc-progress-fill"
+            className="h-full rounded-lg bg-linear-to-r from-primary to-[#34d399] transition-[width] duration-[400ms]"
+            style={{ width: `${pct ?? 0}%` }}
+          />
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-3 text-[13px] text-muted">
+          <span id="sc-progress-text" className="min-w-0 truncate">
+            {text}
+          </span>
+          <span id="sc-progress-pct">{pct == null ? "—" : `${pct}%`}</span>
+        </div>
       </div>
     </Card>
   );

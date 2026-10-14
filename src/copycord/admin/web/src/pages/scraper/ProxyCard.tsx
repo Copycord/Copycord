@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Button, Card, ChipInput, cx } from "../../components/ui";
 import type { Notify } from "../system/providers";
 import { getProxies, reason, saveProxies } from "./scraperApi";
-import { TITLE } from "./TokensCard";
+import { SC_CARD, TITLE } from "./TokensCard";
 
 export function ProxyCard({ notify }: { notify: Notify }) {
   const [open, setOpen] = useState(false);
@@ -44,8 +44,8 @@ export function ProxyCard({ notify }: { notify: Notify }) {
   }
 
   return (
-    <Card id="sc-proxy-card" aria-label="Proxies">
-      <div className="mb-2 flex items-center justify-between gap-3">
+    <Card id="sc-proxy-card" aria-label="Proxies" className={SC_CARD}>
+      <div className="mb-2 flex items-center justify-between gap-2.5">
         <h3 className={TITLE}>Proxies</h3>
         <button
           id="sc-proxy-toggle"
@@ -54,18 +54,18 @@ export function ProxyCard({ notify }: { notify: Notify }) {
           aria-expanded={open}
           aria-label={open ? "Collapse proxies" : "Expand proxies"}
           className={cx(
-            "inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-control border border-border",
-            "bg-white/4 text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60",
+            "flex size-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-btn border border-border text-sm leading-[14px] font-semibold",
+            "bg-[rgba(255,255,255,0.04)] text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60",
             "hover:-translate-y-0.5 hover:border-accent/30 hover:bg-white/8",
           )}
           onClick={() => setOpen((v) => !v)}
         >
-          <span aria-hidden="true" className="text-sm leading-none">
+          <span aria-hidden="true">
             {open ? "▴" : "▾"}
           </span>
         </button>
       </div>
-      <p className="m-0 text-[13px]">
+      <p className="m-0 text-xs leading-normal text-muted">
         The scraper uses the shared proxy list from the{" "}
         <a href="/" className="text-accent underline">
           Configuration
