@@ -64,6 +64,7 @@ RUN sed -i 's/\r$//' /entrypoint.sh \
     && chmod +x /entrypoint.sh
 
 VOLUME ["/data"]
-USER copycord
+# No USER: entrypoint.sh starts as root to chown a ./data folder the root v3
+# image left behind, then drops to copycord with setpriv.
 
 ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]

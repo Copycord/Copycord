@@ -66,9 +66,11 @@ def test_entrypoint_has_no_pipefail_under_sh():
     assert "/bin/sh" in _read("Dockerfile") or "bash" in shebang
 
 
-def test_dockerfile_runs_as_non_root():
-    users = re.findall(r"^USER\s+(\S+)", _read("Dockerfile"), re.M)
-    assert users and users[-1] not in ("root", "0")
+def test_dockerfile_drops_to_non_root():
+    # The image starts as root so entrypoint.sh can chown v3 files, then drops to uid 1000.
+    assert not re.findall(r"^USER\s+(\S+)", _read("Dockerfile"), re.M)
+    assert "--uid 1000" in _read("Dockerfile")
+    assert "setpriv --reuid=$APP_UID" in _read("entrypoint.sh")
 
 
 def test_installers_match_python_version_and_node_major():

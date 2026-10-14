@@ -73,13 +73,13 @@ Put your own password after `PASSWORD=`. The container listens on every network 
 :::
 
 :::note Non-root user and volume ownership
-The container runs as a non-root user (`copycord`, uid and gid 1000), so the `./data` folder must be writable by uid 1000. A new folder created by Docker is owned by root, and so is one left by an older image that ran as root. If Copycord exits with "is not writable", fix it once on the host:
+Copycord runs as a non-root user (`copycord`, uid and gid 1000). The container starts as root only to give `./data` to uid 1000, which also fixes a folder left root-owned by an older image that ran as root, then switches to that user. On a volume where this cannot change ownership, Copycord logs one warning and keeps running as root.
+
+If you start the container as a non-root user yourself (`user:` in compose) and Copycord exits with "is not writable", fix it once on the host:
 
 ```bash
 sudo chown -R 1000:1000 ./data
 ```
-
-Files created from now on are owned by uid 1000 on the host.
 :::
 
 :::note Upgrading from v3
