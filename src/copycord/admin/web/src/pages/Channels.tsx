@@ -1,7 +1,7 @@
 // Channels page, ported from templates/channels.html and frontend/src/js/channels.js:
 // the mapping select, the tree of categories and channels (GET /api/channels)
-// with search, filter and sort. Row actions (lane 23) and the verify and
-// backfill modals plug into the ChannelTree slots.
+// with search, filter and sort. Row actions (lane 23), the orphan scan and the
+// backfill modal plug into the ChannelTree slots.
 // Like the old page it waits until both Server and Client are connected.
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
@@ -15,7 +15,6 @@ import { useBackfill } from "./channels/backfill/useBackfill";
 import { ChannelTree } from "./channels/ChannelTree";
 import { orphanStore, useOrphans } from "./channels/verify/orphanStore";
 import { useVerify } from "./channels/verify/useVerify";
-import { VerifyModal } from "./channels/verify/VerifyModal";
 import {
   buildCategoryPins,
   buildTree,
@@ -49,8 +48,8 @@ export function Channels() {
   // Filled by the verify scan (verify/orphanStore); a mapping switch clears it.
   const orphans = useOrphans();
   const setOrphans = orphanStore.set;
-  const verify = useVerify(mappingId);
-  const [verifyOpen, setVerifyOpen] = useState(false);
+  // Asks the client for the orphan list on load, as the old page did.
+  useVerify(mappingId);
 
   // Typing stays responsive on large guilds: the tree rebuilds from the deferred query.
   const deferredQuery = useDeferredValue(query);
@@ -141,9 +140,6 @@ export function Channels() {
               options={[...SORT_OPTIONS]}
               className="w-auto!"
             />
-            <Button id="verify-btn" type="button" variant="ghost" onClick={() => setVerifyOpen(true)}>
-              Verify
-            </Button>
             <Button
               id="orph-delall"
               type="button"
@@ -164,16 +160,6 @@ export function Channels() {
         />
         {actions.dialogs}
         {backfill.dialogs}
-        <VerifyModal
-          open={verifyOpen}
-          onClose={() => setVerifyOpen(false)}
-          orphans={orphans}
-          scanning={verify.scanning}
-          scanned={verify.scanned}
-          onFetch={verify.fetch}
-          onDeleteAll={actions.deleteAll.onClick}
-          deleteBusy={actions.deleteAll.busy}
-        />
 
         {channels.loading && !loaded ? (
           <div className="flex justify-center py-6">

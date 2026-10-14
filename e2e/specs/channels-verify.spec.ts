@@ -1,4 +1,4 @@
-// Inventory items 33 to 36: the clone action, the verify modal, the backfill modal and live backfill progress.
+// Inventory items 33 to 36: the clone action, the orphan scan, the backfill modal and live backfill progress.
 // Endpoints and the /ws/out and /ws/in sockets are stubbed, nothing reaches the real client.
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";
@@ -231,27 +231,18 @@ test.describe("channels verify and backfill", () => {
     await expect(card(page, WELCOME).locator(".ch-status")).toHaveCount(0);
   });
 
-  test("34 verify lists the orphans from the websocket and fetch asks the client", async ({ page }) => {
+  test("34 the page asks for the orphan list on load and marks the orphans in the tree", async ({ page }) => {
     const stub = await stubBackfill(page);
     await openChannels(page);
-    // The page asks for the list once on load.
     await expect.poll(() => stub.ins.filter((p) => p.action === "list").length).toBeGreaterThan(0);
-    const before = stub.ins.length;
     const mid = await page.locator("#mapping-select").inputValue();
-
-    await page.locator("#verify-btn").click();
-    await expect(page.locator("#verify-status")).toHaveText("Press “Fetch orphans” to scan.");
-    await expect(page.locator("#verify-delall")).toBeDisabled();
-
-    await page.locator("#verify-fetch").click();
-    await expect(page.locator("#verify-status")).toHaveText("Scanning…");
-    await expect.poll(() => stub.ins.length).toBeGreaterThan(before);
-    expect(stub.ins.at(-1)).toMatchObject({ action: "list", mapping_id: mid });
+    expect(stub.ins.find((p) => p.action === "list")).toMatchObject({ action: "list", mapping_id: mid });
+    await expect(page.locator("#verify-btn")).toHaveCount(0);
 
     // An event for another mapping is ignored.
-    stub.out({ type: "orphans", mapping_id: "other", categories: [{ id: "1", name: "Nope" }], channels: [] }, "verify");
+    stub.out({ type: "orphans", mapping_id: "other", categories: [], channels: [{ id: "911", name: "stray" }] }, "verify");
     await page.waitForTimeout(200);
-    await expect(page.locator("#verify-status")).toHaveText("Scanning…");
+    await expect(page.locator("#orph-delall")).toBeDisabled();
 
     stub.out(
       {
@@ -262,29 +253,20 @@ test.describe("channels verify and backfill", () => {
       },
       "verify",
     );
-    await expect(page.locator("#verify-status")).toHaveText("Found 1 orphan category and 1 orphan channel.");
-    await expect(page.locator("#orph-cats")).toContainText("Old <b>cat</b>");
-    await expect(page.locator("#orph-chs")).toContainText("stray");
-    await expect(page.locator("#verify-delall")).toBeEnabled();
-    // The tree shows the same orphans (the shared store feeds the row actions).
     await expect(card(page, "911")).toHaveAttribute("data-orphan", "1");
+    await expect(page.locator("#orph-delall")).toBeEnabled();
 
     stub.out({ type: "orphans", mapping_id: mid, categories: [], channels: [] }, "verify");
-    await expect(page.locator("#verify-status")).toHaveText("All channels and categories match the last sitemap.");
-    await expect(page.locator("#verify-delall")).toBeDisabled();
-    await page.locator("#verify-cancel").click();
-    await expect(page.locator("#verify-status")).toHaveCount(0);
+    await expect(page.locator("#orph-delall")).toBeDisabled();
   });
 
-  test("34 delete all in the verify modal confirms and sends delete_all with every orphan id", async ({ page }) => {
+  test("34 delete all orphans confirms and sends delete_all with every orphan id", async ({ page }) => {
     const stub = await stubBackfill(page);
     await openChannels(page);
     const mid = await page.locator("#mapping-select").inputValue();
-    await page.locator("#verify-btn").click();
-    await page.locator("#verify-fetch").click();
     stub.out({ type: "orphans", mapping_id: mid, categories: [{ id: "910", name: "Old" }], channels: [{ id: "911", name: "stray" }] }, "verify");
-    await expect(page.locator("#verify-delall")).toBeEnabled();
-    await page.locator("#verify-delall").click();
+    await expect(page.locator("#orph-delall")).toBeEnabled();
+    await page.locator("#orph-delall").click();
     await page.getByRole("dialog", { name: "Delete all orphans?" }).getByRole("button", { name: "Delete all" }).click();
     await expect.poll(() => stub.ins.some((p) => p.action === "delete_all")).toBe(true);
     expect(stub.ins.find((p) => p.action === "delete_all")).toMatchObject({ mapping_id: mid, ids: ["910", "911"] });
