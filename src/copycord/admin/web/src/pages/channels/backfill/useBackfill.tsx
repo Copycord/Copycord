@@ -318,6 +318,8 @@ export function useBackfill({ mappingId, nameOf }: BackfillInput): Backfill {
           title: "Resume previous backfill?",
           confirmLabel: "Continue",
           cancelLabel: "Start Over",
+          confirmVariant: "ghost",
+          cancelVariant: "ghost-red",
           body: (
             <div>
               <p className="mb-2">A previous backfill for this channel was not finished.</p>

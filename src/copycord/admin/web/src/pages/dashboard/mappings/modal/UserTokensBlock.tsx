@@ -290,7 +290,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
   const removeToken = async (t: UserToken) => {
     if (!mappingId) return;
     const name = tokenName(t);
-    if (!(await confirm({ title: `Remove ${name}?`, confirmLabel: "Remove", danger: true }))) return;
+    if (!(await confirm({ title: `Remove ${name}?`, confirmLabel: "Remove", confirmVariant: "ghost-red" }))) return;
     try {
       await api.del(tokensPath(mappingId, `/${encodeURIComponent(t.id)}`));
     } catch {
@@ -354,14 +354,14 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
       </div>
     );
     if (!j.broken) {
-      await confirm({ title: "Token verification", body, confirmLabel: "Done" });
+      await confirm({ title: "Token verification", body, confirmLabel: "Done", confirmVariant: "primary" });
       return;
     }
     const ok = await confirm({
       title: "Token verification",
       body,
       confirmLabel: `Delete ${j.broken} non-working`,
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     const deleted = await deleteTokens({ ids: brokenIds(j.results ?? []) });
@@ -378,7 +378,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
         </>
       ),
       confirmLabel: "Delete all",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     const deleted = await deleteTokens({ scope: "all" });

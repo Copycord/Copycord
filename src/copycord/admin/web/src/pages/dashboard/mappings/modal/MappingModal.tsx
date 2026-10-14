@@ -123,7 +123,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
       title: "Discard unsaved mapping changes?",
       body: "You have unsaved changes to this mapping. If you close now, your changes will be lost.",
       confirmLabel: "Discard changes",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     asking.current = false;
     if (ok) onClose();

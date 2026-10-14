@@ -68,7 +68,7 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
       title: "Delete guild mapping?",
       body: deleteBody(m),
       confirmLabel: "Delete mapping",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     try {

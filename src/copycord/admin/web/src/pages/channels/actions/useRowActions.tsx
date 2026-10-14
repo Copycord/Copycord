@@ -146,7 +146,7 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
           </>
         ),
         confirmLabel: "Add to blacklist",
-        danger: true,
+        confirmVariant: "ghost-red",
       });
       if (!ok) return;
       if (!mappingId) {
@@ -175,7 +175,7 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
           </>
         ),
         confirmLabel: "Delete",
-        danger: true,
+        confirmVariant: "ghost-red",
       });
       if (!ok) return;
       pending.current.add(id);
@@ -315,7 +315,7 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
               </>
             ),
             confirmLabel: "Delete all",
-            danger: true,
+            confirmVariant: "ghost-red",
           });
           if (!ok) return;
           for (const id of orphanIds(orphans)) pending.current.add(id);

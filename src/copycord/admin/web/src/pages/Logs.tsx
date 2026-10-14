@@ -169,7 +169,7 @@ export function Logs() {
         title: "Delete Log",
         body: "Delete this event log entry? This cannot be undone.",
         confirmLabel: "Delete",
-        danger: true,
+        confirmVariant: "ghost-red",
       });
       if (!ok) return;
       const id = log.log_id;
@@ -195,7 +195,7 @@ export function Logs() {
       title: "Delete All Logs",
       body: "Are you sure you want to delete all event logs? This cannot be undone.",
       confirmLabel: "Delete All",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     setClearBusy(true);

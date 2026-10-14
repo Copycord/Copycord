@@ -52,7 +52,7 @@ export function QueueCard({ queue, notify, confirm }: QueueCardProps) {
       body: "Cancel the current scrape and clear the entire queue?",
       confirmLabel: "Cancel All",
       cancelLabel: "Keep",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     setBusy("cancel");

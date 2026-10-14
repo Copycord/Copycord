@@ -128,7 +128,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
       title: "Delete forwarding rule",
       body: "Are you sure you want to delete this forwarding rule?",
       confirmLabel: "Delete",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     setRowBusy({ id: rule.rule_id, action: "delete" });

@@ -138,7 +138,7 @@ export function Kit() {
                 title: "Delete mapping?",
                 body: "This removes the mapping and its settings.",
                 confirmLabel: "Delete",
-                danger: true,
+                confirmVariant: "ghost-red",
               });
               setAnswer(ok ? "confirmed" : "cancelled");
             }}

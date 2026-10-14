@@ -45,7 +45,7 @@ export function PastScrapesCard({ data, reload, notify, confirm }: PastScrapesCa
       title: "Delete scrape?",
       body: `Delete scrape file "${path}"?`,
       confirmLabel: "Delete",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     setDeleting(path);

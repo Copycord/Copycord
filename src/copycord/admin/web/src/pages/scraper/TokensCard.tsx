@@ -74,7 +74,7 @@ export function TokensCard({ tokens, reload, notify, confirm }: TokensCardProps)
       title: "Delete token?",
       body: "Delete this token?",
       confirmLabel: "Delete",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     setBusyId(t.token_id);

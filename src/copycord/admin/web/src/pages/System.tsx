@@ -117,7 +117,7 @@ export function System() {
         title: "Restore database?",
         body: `Restore database from uploaded file “${file.name}”? This will stop bots and replace the database.`,
         confirmLabel: "Restore",
-        danger: true,
+        confirmVariant: "ghost-red",
       });
       if (!ok) return;
       setUploading(true);
@@ -137,7 +137,7 @@ export function System() {
       title: "Restore database?",
       body: `Restore database from “${name}”? This will stop bots and replace the database.`,
       confirmLabel: "Restore",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     setRowBusy({ name, action: "restore" });
@@ -157,7 +157,7 @@ export function System() {
       title: "Delete backup?",
       body: `Permanently delete “${name}”? This cannot be undone.`,
       confirmLabel: "Delete",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     setRowBusy({ name, action: "delete" });

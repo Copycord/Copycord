@@ -88,7 +88,7 @@ export function BackupTokensModal({ open, onClose }: BackupTokensModalProps) {
         title: "Remove backup token?",
         body: "This will delete the backup token from the database.",
         confirmLabel: "Remove",
-        danger: true,
+        confirmVariant: "ghost-red",
       });
     } finally {
       confirming.current = false;

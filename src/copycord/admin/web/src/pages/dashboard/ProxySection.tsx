@@ -263,7 +263,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
       title: "Clear all proxies?",
       body: "This will remove all proxies from the list.",
       confirmLabel: "Clear",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     setProxies([]);

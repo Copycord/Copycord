@@ -101,7 +101,7 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
       title: "Clear logs?",
       body: `This will permanently delete all ${label.toLowerCase()} logs. This cannot be undone.`,
       confirmLabel: "Clear logs",
-      danger: true,
+      confirmVariant: "ghost-red",
     });
     if (!ok) return;
     try {
