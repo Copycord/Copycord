@@ -10,9 +10,9 @@ import { BOT_ROLES, BOTS_CELL, BOTS_HEAD, BOTS_STATE, CARD, Chevron, GHOST, SUMM
 /** Mapping tiles shown while the list loads; three is the common count. */
 export const MAPPING_SKELETONS = 3;
 
-/** Global Configuration body while the config loads. */
+/** Global Configuration body while the config loads, as tall as the loaded form (measured at 1440 px). */
 export function GlobalConfigLoading() {
-  return <SkeletonSection rows={6} rowHeight={34} label="Loading configuration" />;
+  return <SkeletonSection rows={8} rowHeight={37} label="Loading configuration" className="h-[359px]" />;
 }
 
 /** One mapping tile while the list loads. */
