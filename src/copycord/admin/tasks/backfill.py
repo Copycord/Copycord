@@ -463,6 +463,12 @@ async def run(ctx: Any, inputs: BackfillInputs) -> None:
     try:
         for job in mine:
             cid = job.channel_id
+            if ctx.cancelled.is_set():
+                # Cancelled while the jobs were being handed out: the rest never reach the client.
+                await job.step.finish("cancelled", "Cancelled")
+                job.result["finished_at"] = job.step.data["finished_at"]
+                job.done.set()
+                continue
             checkpoint = None
             if inputs.mode == "resume" and cloned_gid is not None:
                 try:

@@ -242,6 +242,30 @@ async def test_cancel_while_the_server_delivers_waits_for_its_count(svc, sent, m
 
 
 @pytest.mark.asyncio
+async def test_cancel_while_handing_out_jobs_sends_no_more(svc, sent, mapping, monkeypatch, db):
+    gate = asyncio.Event()
+
+    async def send(frame):
+        sent.append(frame)
+        if frame["type"] == "backfill_run" and len(_of(sent, "backfill_run")) == 1:
+            await gate.wait()
+        return {"ok": True}
+
+    monkeypatch.setattr(backfill, "_wiring", backfill._Wiring(db=db, send=send))
+    run = await svc.start("backfill_channels", {"mapping_id": mapping, "category_ids": [str(CAT)]})
+    await _until(lambda: len(_of(sent, "backfill_run")) == 1)
+    await svc.cancel(run.id)
+    gate.set()
+    await _until(lambda: _of(sent, "backfill_cancel"))
+    await _frame("backfill_job_end", job_id=f"{run.id}:{CH[0]}", ok=False, error="cancelled", delivered=0)
+    done = await _settled(svc, run.id)
+    assert done.status == "cancelled"
+    assert len(_of(sent, "backfill_run")) == 1
+    assert _of(sent, "backfill_cancel") == [{"job_id": f"{run.id}:{CH[0]}"}]
+    assert {s["state"] for s in done.steps} == {"cancelled"}
+
+
+@pytest.mark.asyncio
 async def test_one_failed_channel_fails_the_run(svc, sent, mapping):
     run = await svc.start("backfill_channels", {"mapping_id": mapping, "category_ids": [str(CAT)]})
     await _until(lambda: len(_of(sent, "backfill_run")) == 3)
