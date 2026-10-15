@@ -19,6 +19,7 @@ import {
 } from "./system/backupApi";
 import { CHEV, CHEV_BUTTON, GhostButton, LinkButton } from "./system/buttons";
 import { archiveLabel, fmtBackupWhen, fmtBytes, NO_VALUE, SHRUG } from "./system/format";
+import { ARCHIVES_TABLE, ARCHIVES_WRAP, DB_CARD, DB_HEADER, DB_TITLE, LastBackupPending } from "./system/SystemSkeleton";
 import { useNotify, useSafeConfirm } from "./system/providers";
 
 /** The archive list scrolls once it has more rows than this. */
@@ -180,16 +181,16 @@ export function System() {
         id="adv-data-card"
         aria-label="Database"
         data-collapsed={open ? "false" : "true"}
-        className="mt-[18px] max-w-full"
+        className={DB_CARD}
         onMouseDownCapture={onCardMouseDown}
         onClick={onCardClick}
         onDoubleClick={onCardDoubleClick}
       >
-        <div id="adv-collapse-header" className="mb-1.5 flex items-center justify-between gap-3 px-4 py-3">
+        <div id="adv-collapse-header" className={DB_HEADER}>
           <div className="flex flex-col gap-1 leading-[normal]">
-            <h2 className="my-[1em] text-[1.17em] font-bold">Database</h2>
+            <h2 className={DB_TITLE}>Database</h2>
             <div id="adv-last-wrap" className="opacity-85">
-              Last backup: <span id="adv-last-backup">{lastBackup}</span>
+              Last backup: <span id="adv-last-backup">{data === undefined && !error ? <LastBackupPending /> : lastBackup}</span>
             </div>
           </div>
           <button
@@ -239,14 +240,14 @@ export function System() {
           </div>
 
           <div
-            className="overflow-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className={ARCHIVES_WRAP}
             style={maxHeight ? { maxHeight } : undefined}
             data-testid="adv-archives-wrap"
           >
             <table
               ref={tableRef}
               id="adv-archives"
-              className="mt-2 w-full border-separate border-spacing-0 text-left md:table-fixed"
+              className={ARCHIVES_TABLE}
             >
               <thead hidden={!open}>
                 <tr>
