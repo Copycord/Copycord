@@ -95,7 +95,8 @@ describe("Forwarding skeleton", () => {
     serve([]);
     const view = page();
     await waitFor(() => expect(document.getElementById("forwarding-empty")).toBeVisible());
-    expect(localStorage.getItem(`skel:${RULES_COUNT_KEY}`)).toBe("0");
+    // The count is stored in an effect after the commit that shows the empty block.
+    await waitFor(() => expect(localStorage.getItem(`skel:${RULES_COUNT_KEY}`)).toBe("0"));
     view.unmount();
     const none = render(<ForwardingSkeleton />);
     expect(none.container.querySelectorAll("[data-skeleton-row]")).toHaveLength(0);

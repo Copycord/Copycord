@@ -48,8 +48,8 @@ const page = () =>
 
 const gateOpen = () => waitFor(() => expect(screen.queryByTestId("status-gate")).toBeNull());
 const searchBox = (root: Element) => root.querySelector<HTMLInputElement>('input[aria-label="Search channels"]');
-// The tree sections of either state, and the loading tree's role.
-const ROWS_SEL = "section";
+// The tree of either state: the loaded tree and the loading tree (the Card is a section too).
+const ROWS_SEL = "#channels-root, [aria-label='Loading channels']";
 
 beforeEach(() => {
   sessionStorage.clear();

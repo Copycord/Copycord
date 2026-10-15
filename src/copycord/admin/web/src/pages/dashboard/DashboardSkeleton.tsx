@@ -317,9 +317,9 @@ export function DashboardSkeleton() {
             </div>
           </div>
           <div className={MAPPING_GRID}>
-            <span inert className={NEW_MAPPING_TILE}>
+            <button type="button" inert aria-label="Add new mapping" title="Add new mapping" className={NEW_MAPPING_TILE}>
               <NewMappingPlus />
-            </span>
+            </button>
             {Array.from({ length: mappingSkeletons() }, (_, i) => (
               <MappingTileSkeleton key={i} />
             ))}

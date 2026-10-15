@@ -296,7 +296,7 @@ export function ScraperSkeleton() {
           <div className="mt-3.5 flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <span className={SC_LABEL}>Server (Guild) ID</span>
-              <Input aria-label="Server (Guild) ID" placeholder="e.g. 123456789012345678" />
+              <Input placeholder="e.g. 123456789012345678" autoComplete="off" inputMode="numeric" />
             </div>
             <fieldset className="m-0 rounded-control border border-border bg-[rgba(20,11,38,0.35)] px-4 py-3.5">
               <legend className={cx(SC_LABEL, "px-1.5")}>Include fields</legend>
@@ -332,7 +332,7 @@ export function ScraperSkeleton() {
       <Card inert aria-label="Proxies" className={SC_CARD}>
         <div className="mb-2 flex items-center justify-between gap-2.5">
           <h3 className={TITLE}>Proxies</h3>
-          <button type="button" className={PROXY_TOGGLE}>
+          <button type="button" aria-expanded={false} aria-label="Expand proxies" className={PROXY_TOGGLE}>
             <span aria-hidden="true">▾</span>
           </button>
         </div>

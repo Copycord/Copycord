@@ -16,6 +16,7 @@ import { errorText } from "../../lib/api";
 import { useNotify, useSafeConfirm } from "../system/providers";
 import { CARD, CARD_DOCS, CHECK, Chevron, DocLink, GHOST_XS_GREEN, GHOST_XS_RED, readCardOpen, SUMMARY, SUMMARY_TITLE } from "./parts";
 import {
+  CheckPending,
   CheckRow,
   HintRow,
   IntervalSection,
@@ -392,13 +393,17 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
         <div className="srv-proxy-body mt-3.5">
           <div className="srv-proxy-toggle-row mb-3">
             <CheckRow id="srv-proxy-toggle" label="Enable proxies for client">
-              <input
-                id="srv-proxy-toggle"
-                type="checkbox"
-                className={CHECK}
-                checked={enabled}
-                onChange={(e) => void toggleEnabled(e.target.checked)}
-              />
+              {loaded ? (
+                <input
+                  id="srv-proxy-toggle"
+                  type="checkbox"
+                  className={CHECK}
+                  checked={enabled}
+                  onChange={(e) => void toggleEnabled(e.target.checked)}
+                />
+              ) : (
+                <CheckPending />
+              )}
             </CheckRow>
           </div>
 
@@ -450,51 +455,60 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
             hint={ROTATION_TEXT}
             check={
               <CheckRow id="srv-proxy-rotation-toggle" label="Rotate every">
-                <input
-                  id="srv-proxy-rotation-toggle"
-                  type="checkbox"
-                  className={CHECK}
-                  disabled={locked}
-                  checked={rotOn}
-                  onChange={(e) => {
-                    setRotOn(e.target.checked);
-                    latest.current = { ...latest.current, rotOn: e.target.checked };
-                    scheduleSave();
-                  }}
-                />
+                {loaded ? (
+                  <input
+                    id="srv-proxy-rotation-toggle"
+                    type="checkbox"
+                    className={CHECK}
+                    disabled={locked}
+                    checked={rotOn}
+                    onChange={(e) => {
+                      setRotOn(e.target.checked);
+                      latest.current = { ...latest.current, rotOn: e.target.checked };
+                      scheduleSave();
+                    }}
+                  />
+                ) : (
+                  <CheckPending />
+                )}
               </CheckRow>
             }
             controls={
               <RotationControls on={rotOn}>
-                <input
-                  id="srv-proxy-interval"
-                  type="number"
-                  min={1}
-                  max={1440}
-                  disabled={locked}
-                  value={rotValue}
-                  className={NUM}
-                  onChange={(e) => {
-                    setRotValue(e.target.value);
-                    latest.current = { ...latest.current, rotValue: e.target.value };
-                  }}
-                  onBlur={() => {
-                    const v = Math.max(1, parseInt(rotValue, 10) || 1);
-                    setRotValue(String(v));
-                    latest.current = { ...latest.current, rotValue: String(v) };
-                    scheduleSave();
-                  }}
-                />
-                <UnitSelect
-                  id="srv-proxy-interval-unit"
-                  disabled={locked}
-                  value={rotUnit}
-                  onChange={(unit) => {
-                    setRotUnit(unit);
-                    latest.current = { ...latest.current, rotUnit: unit };
-                    scheduleSave();
-                  }}
-                />
+                {/* Hidden until rotation is on; the skeleton draws none, so neither does the loading state. */}
+                {loaded ? (
+                  <>
+                    <input
+                      id="srv-proxy-interval"
+                      type="number"
+                      min={1}
+                      max={1440}
+                      disabled={locked}
+                      value={rotValue}
+                      className={NUM}
+                      onChange={(e) => {
+                        setRotValue(e.target.value);
+                        latest.current = { ...latest.current, rotValue: e.target.value };
+                      }}
+                      onBlur={() => {
+                        const v = Math.max(1, parseInt(rotValue, 10) || 1);
+                        setRotValue(String(v));
+                        latest.current = { ...latest.current, rotValue: String(v) };
+                        scheduleSave();
+                      }}
+                    />
+                    <UnitSelect
+                      id="srv-proxy-interval-unit"
+                      disabled={locked}
+                      value={rotUnit}
+                      onChange={(unit) => {
+                        setRotUnit(unit);
+                        latest.current = { ...latest.current, rotUnit: unit };
+                        scheduleSave();
+                      }}
+                    />
+                  </>
+                ) : null}
               </RotationControls>
             }
           />
@@ -505,17 +519,21 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
             hint={RECHECK_TEXT}
             check={
               <CheckRow id="srv-proxy-fav-recheck-toggle" label="Return to a favorite every">
-                <input
-                  id="srv-proxy-fav-recheck-toggle"
-                  type="checkbox"
-                  className={CHECK}
-                  disabled={locked}
-                  checked={recheckOn}
-                  onChange={(e) => {
-                    setRecheckOn(e.target.checked);
-                    void saveRecheckNow(e.target.checked);
-                  }}
-                />
+                {loaded ? (
+                  <input
+                    id="srv-proxy-fav-recheck-toggle"
+                    type="checkbox"
+                    className={CHECK}
+                    disabled={locked}
+                    checked={recheckOn}
+                    onChange={(e) => {
+                      setRecheckOn(e.target.checked);
+                      void saveRecheckNow(e.target.checked);
+                    }}
+                  />
+                ) : (
+                  <CheckPending />
+                )}
               </CheckRow>
             }
             controls={

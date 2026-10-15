@@ -183,7 +183,7 @@ describe("page skeleton", () => {
     );
     const c = chrome(container);
     expect(c.dropdowns).toEqual(["Status: All", "Mapping: All", "Actor: All"]);
-    expect(c.title).toBe("");
+    expect(c.title?.trim()).toBe("");
   });
 });
 

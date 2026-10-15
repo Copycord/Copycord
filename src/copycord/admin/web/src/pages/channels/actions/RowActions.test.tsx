@@ -109,7 +109,7 @@ describe("row actions", () => {
   it("saves a category customization", async () => {
     const posts = serve();
     page();
-    await waitFor(() => expect(document.querySelector("article")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector("#channels-root article")).not.toBeNull());
     await userEvent.click(screen.getByRole("button", { name: "Category menu" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Customize category" }));
     const dlg = await screen.findByRole("dialog", { name: "Customize category" });
@@ -143,7 +143,7 @@ describe("row actions", () => {
   it("blacklists a category by its original id", async () => {
     const posts = serve();
     page();
-    await waitFor(() => expect(document.querySelector("article")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector("#channels-root article")).not.toBeNull());
     await userEvent.click(screen.getByRole("button", { name: "Category menu" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Add category to blacklist" }));
     await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Add to blacklist" }));
@@ -166,7 +166,7 @@ describe("row actions", () => {
   it("keeps Delete all orphans disabled with no orphans", async () => {
     serve();
     page();
-    await waitFor(() => expect(document.querySelector("article")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector("#channels-root article")).not.toBeNull());
     expect(document.getElementById("orph-delall")).toBeDisabled();
   });
 
@@ -175,7 +175,7 @@ describe("row actions", () => {
     FakeWs.all = [];
     vi.stubGlobal("WebSocket", FakeWs);
     page();
-    await waitFor(() => expect(document.querySelector("article")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector("#channels-root article")).not.toBeNull());
     // Frames as VerifyController._publish sends them through AdminBus.publish("verify", ...).
     FakeWs.emit("/ws/out", {
       kind: "verify",

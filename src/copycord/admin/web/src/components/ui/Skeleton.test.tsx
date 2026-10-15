@@ -1,6 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import { render, renderHook, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { REVEAL, Skeleton, SkeletonSection, useReveal } from "./Skeleton";
@@ -47,7 +46,8 @@ describe("Skeleton", () => {
   });
 
   it("no page styles a placeholder of its own: cc-skeleton and animate-pulse bars live here only", () => {
-    const root = fileURLToPath(new URL("../..", import.meta.url));
+    // vitest runs from the web app folder.
+    const root = join(process.cwd(), "src");
     const own = new Set(["components/ui/Skeleton.tsx"]);
     const offenders: string[] = [];
     for (const rel of readdirSync(root, { recursive: true }) as string[]) {
