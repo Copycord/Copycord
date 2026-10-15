@@ -19,7 +19,8 @@ from .service import ACTIVE, RunFinished, TaskService, _ids_to_str
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
-TRIGGERS = ("manual", "rerun", "api")
+# What a start may send. A run stored with an older trigger still reads and lists as stored.
+TRIGGERS = ("manual", "api")
 MAX_PER_PAGE = 200
 
 BOTS_DOWN = "Start the bots first"

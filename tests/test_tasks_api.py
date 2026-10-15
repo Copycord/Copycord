@@ -117,8 +117,8 @@ def test_start_get_list_cancel_and_detail(client, events):
                                     "step": "work", "msg": "line 1"}
     assert done["report"] == {"lines": 3, "guild_id": str(2 ** 60)}
 
-    second = _start(client, trigger="rerun").json()["run"]
-    assert second["number"] == 2 and second["trigger"] == "rerun"
+    second = _start(client, trigger="api").json()["run"]
+    assert second["number"] == 2 and second["trigger"] == "api"
     _finished(client, second["id"])
 
     body = client.get("/api/tasks/runs").json()
@@ -228,7 +228,17 @@ def test_start_errors(client):
     resp = client.post("/api/tasks/runs", json={"type": "nope", "inputs": {}})
     assert resp.status_code == 404
     assert _start(client, trigger="cron").status_code == 422
+    assert _start(client, trigger="rerun").status_code == 422
     assert client.get("/api/tasks/runs").json()["total"] == 0
+
+
+def test_a_stored_rerun_trigger_still_reads(client, db):
+    run = _start(client).json()["run"]
+    _finished(client, run["id"])
+    assert db.task_run_update(run["id"], trigger="rerun")
+    assert client.get(f"/api/tasks/runs/{run['id']}").json()["run"]["trigger"] == "rerun"
+    body = client.get("/api/tasks/runs").json()
+    assert body["total"] == 1 and body["runs"][0]["trigger"] == "rerun"
 
 
 def test_spa_pages_serve_index(client):
