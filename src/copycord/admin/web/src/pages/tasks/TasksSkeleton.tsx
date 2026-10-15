@@ -10,6 +10,10 @@ export const RAIL = "w-[240px] shrink-0 max-md:w-full";
 export const RAIL_ITEM =
   "relative flex items-center justify-between gap-2 rounded-rail px-3 py-1.5 text-sm text-text no-underline transition-colors " +
   "focus-visible:outline-2 focus-visible:outline-accent/70";
+/** The selected rail entry: tinted pill plus the accent bar on the rail's left edge, like the sidebar's active item. */
+export const RAIL_ACTIVE =
+  "bg-rail-active font-semibold before:absolute before:top-1 before:bottom-1 before:left-0 before:w-[3px] before:rounded-full " +
+  "before:bg-primary before:content-['']";
 export const RAIL_HEADING = "mt-4 mb-1 px-3 text-xs font-semibold text-muted";
 export const MAIN = "min-w-0 flex-1";
 export const FRAME = "overflow-hidden rounded-card border border-border bg-card";
@@ -35,7 +39,7 @@ export function TasksSkeleton() {
       <TasksHeading />
       <div inert className={PAGE}>
         <nav className={RAIL}>
-          <div className={cx(RAIL_ITEM, "bg-rail-active")}>All tasks</div>
+          <div className={cx(RAIL_ITEM, RAIL_ACTIVE)}>All tasks</div>
           <div className={RAIL_HEADING}>Task types</div>
           {[70, 55].map((w) => (
             <div key={w} className={RAIL_ITEM}>

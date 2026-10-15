@@ -3,7 +3,7 @@
 import { Link } from "react-router";
 import { cx } from "../../components/ui/cx";
 import type { TaskType } from "../../types/tasks";
-import { RAIL, RAIL_HEADING, RAIL_ITEM } from "./TasksSkeleton";
+import { RAIL, RAIL_ACTIVE, RAIL_HEADING, RAIL_ITEM } from "./TasksSkeleton";
 
 export interface TypeRailProps {
   types: TaskType[];
@@ -11,7 +11,7 @@ export interface TypeRailProps {
   selected: string;
 }
 
-const item = (active: boolean) => cx(RAIL_ITEM, active ? "bg-rail-active font-semibold" : "hover:bg-rail-hover");
+const item = (active: boolean) => cx(RAIL_ITEM, active ? RAIL_ACTIVE : "hover:bg-rail-hover");
 
 export function TypeRail({ types, selected }: TypeRailProps) {
   return (
