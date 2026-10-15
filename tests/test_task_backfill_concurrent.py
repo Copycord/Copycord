@@ -175,10 +175,11 @@ async def test_runs_starting_together_never_both_take_a_channel(svc, sent, mappi
         await asyncio.sleep(0.01)
         return await real_log(self, *a, **kw)
 
-    blocker = await _start(svc, mapping, [CH[0]])
-    await _until(lambda: len(_of(sent, "backfill_run")) == 1)
+    blocker = await _start(svc, mapping, [CH[0], CH[2], CH[3]])
+    await _until(lambda: len(_of(sent, "backfill_run")) == 3)
     monkeypatch.setattr(RunContext, "log", slow_log)
-    b = await _start(svc, mapping, [CH[0], CH[1]])
+    # b skips three busy channels (three slow logs) before it reaches CH[1]; a takes CH[1] meanwhile.
+    b = await _start(svc, mapping, [CH[0], CH[2], CH[3], CH[1]])
     await asyncio.sleep(0.015)
     a = await _start(svc, mapping, [CH[1]])
     await asyncio.sleep(0.2)
@@ -398,7 +399,7 @@ class _Db:
 
 
 def _manager():
-    rx = SimpleNamespace(_shutting_down=False, db=_Db(), ratelimit=None)
+    rx = SimpleNamespace(_shutting_down=False, db=_Db(), ratelimit=None, bot=SimpleNamespace())
 
     async def _flush(cid):
         return None
