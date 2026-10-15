@@ -7,39 +7,43 @@ import type { ReactNode } from "react";
 import { cx } from "../../components/ui";
 import type { ChannelTree as Tree, TreeChannel } from "./model";
 import type { ChannelTreeSlots } from "./slots";
-
-// .ch-section-title .cat-chip: 12px system-ui pill with the old good / custom / orphan inks.
-const CAT_CHIP =
-  "inline-flex min-h-6 items-center justify-center rounded-full border px-2.5 py-1 text-center " +
-  "font-[system-ui,sans-serif] text-[12px] font-normal leading-[1.2]";
-const CAT_GOOD = "border-[rgba(16,185,129,0.35)] bg-[rgba(16,185,129,0.12)] text-good";
-// .badge.badge-custom
-const CUSTOM =
-  "border-[color-mix(in_srgb,#facc15_45%,rgba(255,255,255,0.12))] " +
-  "bg-[color-mix(in_srgb,#facc15_12%,rgba(255,255,255,0.045))] text-custom-ink";
-const CAT_ORPHAN = "border-[rgba(239,68,68,0.35)] bg-[#3a1c20] text-[#ffc5cf]";
-
-// .badge inside a card: 600 12px/1.8 system-ui, 2px 8px.
-const BADGE =
-  "inline-block rounded-full border px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] font-semibold leading-[1.8]";
-// .badge.muted: the .muted ink at 80% opacity (its 0.9em loses to the later 12px).
-const BADGE_MUTED = "border-border bg-bg2 text-muted opacity-80";
-const BADGE_GOOD = "border-[rgba(16,185,129,0.35)] bg-[rgba(16,185,129,0.12)] text-good";
-const BADGE_ORPHAN = "border-border bg-[#3a1c20] text-[#ffc5cf]";
+import {
+  BADGE,
+  BADGE_GOOD,
+  BADGE_MUTED,
+  BADGE_ORPHAN,
+  BADGE_ROW,
+  CARD,
+  CARD_ACTIONS,
+  CARD_GRID,
+  CARD_HEAD,
+  CARD_NAME,
+  CAT_CHIP,
+  CAT_GOOD,
+  CAT_ORPHAN,
+  CUSTOM,
+  ID_ROW,
+  SECTION,
+  SECTION_HEAD,
+  SECTION_TITLE,
+  TREE,
+} from "./treeClasses";
 
 export interface ChannelTreeProps extends ChannelTreeSlots {
   tree: Tree;
   /** Hidden until the status gate first opens, as the old page did. */
   hidden?: boolean;
+  /** A refetch is running: the rows stay, marked busy. */
+  busy?: boolean;
 }
 
-export function ChannelTree({ tree, hidden, channelActions, categoryActions }: ChannelTreeProps) {
+export function ChannelTree({ tree, hidden, busy, channelActions, categoryActions }: ChannelTreeProps) {
   return (
-    <div id="channels-root" aria-live="polite" hidden={hidden} className="grid gap-6 xl:gap-7">
+    <div id="channels-root" aria-live="polite" aria-busy={busy || undefined} hidden={hidden} className={TREE}>
       {tree.sections.map((s) => (
-        <section key={s.key} className="ch-section grid gap-3">
-          <div className="flex items-center">
-            <h3 className="m-0 gap-[0.5ch] font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold text-muted">
+        <section key={s.key} className={cx("ch-section", SECTION)}>
+          <div className={SECTION_HEAD}>
+            <h3 className={SECTION_TITLE}>
               <span
                 data-cat-name={s.originalName}
                 title={s.tooltip || undefined}
@@ -51,14 +55,7 @@ export function ChannelTree({ tree, hidden, channelActions, categoryActions }: C
               </span>
             </h3>
           </div>
-          <div
-            className={
-              "grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3 xl:gap-4 " +
-              "max-sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] " +
-              "max-[520px]:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] max-[520px]:gap-2.5 " +
-              "max-[360px]:grid-cols-1"
-            }
-          >
+          <div className={CARD_GRID}>
             {s.channels.map((c) => (
               <ChannelCard key={c.id} channel={c} actions={channelActions?.(c, s)} />
             ))}
@@ -79,21 +76,17 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCa
     <article
       data-cid={c.id}
       data-orphan={c.orphan ? "1" : undefined}
-      className={cx(
-        "ch-card block min-w-0 rounded-panel border bg-[linear-gradient(#1f1237,#160b2a)] p-3 max-[520px]:p-2.5",
-        c.orphan ? "border-white/12" : "border-border",
-      )}
+      className={cx("ch-card", CARD, c.orphan ? "border-white/12" : "border-border")}
     >
-      {/* .ch-head: the name (.ch-name) and the menu button (.ch-top-right) */}
-      <div className="flex items-center justify-between">
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 font-semibold text-text max-[520px]:text-[13px]">
+      <div className={CARD_HEAD}>
+        <span className={CARD_NAME}>
           <bdi title={c.title} className={cx("min-w-0 truncate", c.customized && "text-custom-ink")}>
             # {c.displayName}
           </bdi>
         </span>
-        {actions ? <div className="relative ml-2 flex shrink-0 items-center gap-1.5">{actions}</div> : null}
+        {actions ? <div className={CARD_ACTIONS}>{actions}</div> : null}
       </div>
-      <div className="mt-2 flex gap-1.5">
+      <div className={BADGE_ROW}>
         <span title="Channel type" className={cx(BADGE, BADGE_MUTED)}>
           {c.typeLabel}
         </span>
@@ -112,12 +105,7 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCa
           </>
         ) : null}
       </div>
-      <div
-        className={
-          "mt-1.5 flex gap-1.5 text-[12px] text-muted max-sm:flex-wrap max-[520px]:gap-1 " +
-          "max-sm:*:min-w-0 max-sm:*:[overflow-wrap:anywhere] max-[520px]:*:max-w-full max-[520px]:*:flex-[1_1_100%] max-[520px]:*:truncate"
-        }
-      >
+      <div className={ID_ROW}>
         <span title="Original channel ID">{c.id}</span>
         {/* .muted: 0.9em at 80% opacity, as the old clone id. */}
         {c.clonedId ? (

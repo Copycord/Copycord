@@ -3,11 +3,29 @@
 // where its label goes. Kept out of Channels.tsx so the app shell can show it without the page chunk;
 // the page takes its shared classes and the loading rows from here.
 
-import { Card, SkeletonSection } from "../../components/ui";
+import { Card, Skeleton, cx } from "../../components/ui";
+import { readLastShape } from "../../components/ui/lastCount";
 import { StatusGate } from "../../components/ui/StatusGate";
 import { useStatusGate } from "../../hooks/useStatusGate";
 import { FILTER_OPTIONS, SORT_OPTIONS } from "./model";
 import { ToolbarSelect } from "./ToolbarSelect";
+import {
+  BADGE,
+  BADGE_ROW,
+  CARD,
+  CARD_ACTIONS,
+  CARD_GRID,
+  CARD_HEAD,
+  CARD_NAME,
+  CAT_CHIP,
+  CATEGORY_MENU_BTN,
+  CHANNEL_MENU_BTN,
+  ID_ROW,
+  SECTION,
+  SECTION_HEAD,
+  SECTION_TITLE,
+  TREE,
+} from "./treeClasses";
 
 /** The old .container.wide sat 20px in from the body padding at every width; the shell gives 12px below sm. */
 export const CHANNELS_CARD = "mt-[18px] max-sm:mx-2";
@@ -36,9 +54,61 @@ export function ChannelsTitle() {
   );
 }
 
-/** Channel rows while the list loads, shared with the page. */
-export function ChannelRowsSkeleton() {
-  return <SkeletonSection rows={6} label="Loading channels" className="px-2.5 py-2" />;
+// The tree draws the shape it had on the last load (channels per category), two categories on a first visit.
+export const TREE_SHAPE_KEY = "channels.tree";
+const DEFAULT_SHAPE = [4, 3];
+const NAME_WIDTHS = [118, 92, 140, 104, 80, 126];
+const BAR = "cc-skeleton border-transparent text-transparent";
+
+/** One channel card while the list loads: the card's boxes and menu button, bars on the name, badges and ids. */
+function ChannelCardSkeleton({ index }: { index: number }) {
+  return (
+    <article data-skeleton-row="" className={cx(CARD, "border-border")}>
+      <div className={CARD_HEAD}>
+        <span className={CARD_NAME}>
+          <Skeleton.Text width={NAME_WIDTHS[index % NAME_WIDTHS.length]!} />
+        </span>
+        <div className={CARD_ACTIONS}>
+          <button type="button" tabIndex={-1} className={CHANNEL_MENU_BTN}>
+            ⋯
+          </button>
+        </div>
+      </div>
+      <div className={BADGE_ROW}>
+        <Skeleton.Text className={cx(BADGE, "border-transparent")} width={44} />
+        <Skeleton.Text className={cx(BADGE, "border-transparent")} width={52} />
+      </div>
+      <div className={ID_ROW}>
+        <Skeleton.Text width={140} />
+      </div>
+    </article>
+  );
+}
+
+/** The channel tree while it loads: category sections with their chip and cards, shared with the page. */
+export function ChannelRowsSkeleton({ shape = readLastShape(TREE_SHAPE_KEY, DEFAULT_SHAPE, 6, 8) }: { shape?: number[] }) {
+  let n = 0;
+  return (
+    <div role="status" aria-label="Loading channels" aria-busy="true" className={TREE}>
+      {shape.map((count, i) => (
+        <section key={i} aria-hidden="true" className={SECTION}>
+          <div className={SECTION_HEAD}>
+            <h3 className={SECTION_TITLE}>
+              <span data-skeleton="" className={cx(CAT_CHIP, BAR)} style={{ width: 96 + (i % 3) * 18 }}>
+                {" "}
+                <span className={CATEGORY_MENU_BTN}>⋯</span>
+              </span>
+            </h3>
+          </div>
+          <div className={CARD_GRID}>
+            {Array.from({ length: count }, () => (
+              <ChannelCardSkeleton key={n} index={n++} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
 }
 
 const noop = () => {};
@@ -51,10 +121,10 @@ export function ChannelsSkeleton() {
       <Card className={CHANNELS_CARD} data-testid="card-skeleton">
         <header className="mb-1.5 block gap-3">
           <ChannelsTitle />
-          {/* As at the page's first paint: the mapping list is still empty (disabled), the search box waits for the gate. */}
+          {/* As at the page's first paint: the mapping list is still empty (disabled). */}
           <span inert className={CONTROLS}>
             <ToolbarSelect id="mapping-select-skel" nativeHidden pending label="Guild mapping" value="" disabled options={[]} onChange={noop} />
-            <input type="text" placeholder="Search channels…" aria-label="Search channels" hidden className={SEARCH_INPUT} />
+            <input type="text" placeholder="Search channels…" aria-label="Search channels" readOnly className={SEARCH_INPUT} />
             <ToolbarSelect id="ch-filter-skel" nativeHidden label="Filter" value="all" options={FILTER_OPTIONS} onChange={noop} />
             <ToolbarSelect id="ch-sort-skel" nativeHidden label="Sort" value="name" options={SORT_OPTIONS} onChange={noop} />
             <button type="button" disabled className={DELETE_ALL_BTN}>
@@ -62,6 +132,7 @@ export function ChannelsSkeleton() {
             </button>
           </span>
         </header>
+        <ChannelRowsSkeleton />
       </Card>
     </StatusGate>
   );

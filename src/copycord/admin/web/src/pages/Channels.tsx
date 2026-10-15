@@ -6,7 +6,16 @@
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Card } from "../components/ui";
-import { CHANNELS_CARD, ChannelRowsSkeleton, ChannelsTitle, CONTROLS, DELETE_ALL_BTN, SEARCH_INPUT } from "./channels/ChannelsSkeleton";
+import { useLastShape } from "../components/ui/lastCount";
+import {
+  CHANNELS_CARD,
+  ChannelRowsSkeleton,
+  ChannelsTitle,
+  CONTROLS,
+  DELETE_ALL_BTN,
+  SEARCH_INPUT,
+  TREE_SHAPE_KEY,
+} from "./channels/ChannelsSkeleton";
 
 export { ChannelsSkeleton } from "./channels/ChannelsSkeleton";
 import { StatusGate } from "../components/ui/StatusGate";
@@ -84,6 +93,9 @@ export function Channels() {
   };
 
   const loaded = channels.data !== undefined;
+  // The tree as a fresh visit shows it (no search, all channels, by name) sizes the next loading tree.
+  const pristine = !deferredQuery && filter === "all" && sort.sort === "name" && sort.dir === "asc";
+  useLastShape(TREE_SHAPE_KEY, loaded && pristine ? tree.sections.map((s) => s.channels.length) : undefined);
 
   return (
     <StatusGate gate={gate}>
@@ -111,7 +123,6 @@ export function Channels() {
               placeholder="Search channels…"
               aria-label="Search channels"
               value={query}
-              hidden={!booted}
               onChange={(e) => setQuery(e.target.value)}
               className={SEARCH_INPUT}
             />
@@ -146,12 +157,13 @@ export function Channels() {
         <ChannelTree
           tree={tree}
           hidden={!booted}
+          busy={channels.loading && loaded}
           channelActions={actions.channelActions}
           categoryActions={actions.categoryActions}
         />
         {actions.dialogs}
 
-        {channels.loading && !loaded ? <ChannelRowsSkeleton /> : null}
+        {!loaded && !channels.error ? <ChannelRowsSkeleton /> : null}
 
         {channels.error && !loaded ? (
           <div role="alert" className="flex flex-wrap items-center gap-3 px-2.5 py-2 text-sm text-muted">

@@ -4,6 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "../../../components/ui";
+import { CATEGORY_MENU_BTN, CHANNEL_MENU_BTN } from "../treeClasses";
 
 export interface MenuItem {
   /** The old data-act value. */
@@ -86,9 +87,9 @@ export function RowMenu({ kind, items }: RowMenuProps) {
           "cursor-pointer outline-none",
           kind === "channel"
             ? // .icon-btn.ch-menu-btn
-              "ch-menu-btn rounded-btn border border-border bg-control px-2 py-0.5 text-text"
+              cx("ch-menu-btn", CHANNEL_MENU_BTN)
             : // .cat-menu-trigger
-              "cat-menu-trigger ml-1.5 border-0 bg-transparent px-1 text-[16px] leading-none text-inherit hover:text-[#8b8b8b] focus:text-[#8b8b8b]",
+              cx("cat-menu-trigger", CATEGORY_MENU_BTN),
         )}
       >
         ⋯

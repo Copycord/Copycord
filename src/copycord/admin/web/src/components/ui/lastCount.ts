@@ -16,14 +16,36 @@ export function readLastCount(key: string, fallback: number, max: number): numbe
   }
 }
 
+/** A list of counts (rows per group, as "4,2,7"), each capped at maxEach and at most maxGroups groups. */
+export function readLastShape(key: string, fallback: number[], maxGroups: number, maxEach: number): number[] {
+  try {
+    const raw = localStorage.getItem(PREFIX + key);
+    if (raw === null) return fallback;
+    const parts = raw === "" ? [] : raw.split(",").map(Number);
+    if (!parts.every((n) => Number.isInteger(n) && n >= 0)) return fallback;
+    return parts.slice(0, maxGroups).map((n) => Math.min(n, maxEach));
+  } catch {
+    return fallback;
+  }
+}
+
+/** Stores `shape` once it is known (undefined while the list loads). */
+export function useLastShape(key: string, shape: number[] | undefined): void {
+  useLastStored(key, shape?.join(","));
+}
+
 /** Stores `count` once it is known (undefined while the list loads). */
 export function useLastCount(key: string, count: number | undefined): void {
+  useLastStored(key, count === undefined ? undefined : String(count));
+}
+
+function useLastStored(key: string, value: string | undefined): void {
   useEffect(() => {
-    if (count === undefined) return;
+    if (value === undefined) return;
     try {
-      localStorage.setItem(PREFIX + key, String(count));
+      localStorage.setItem(PREFIX + key, value);
     } catch {
       // Private mode or a full quota: the skeleton falls back to its default.
     }
-  }, [key, count]);
+  }, [key, value]);
 }
