@@ -245,7 +245,6 @@ class ClientListener:
             bot=self.bot, ws=self.ws, msg_serializer=self.msg.serialize, logger=logger
         )
         self.backfill = BackfillEngine(self, logger=logger)
-        self._bf_max = int(os.getenv("BACKFILL_MAX_CONCURRENT", "2"))
         self._bf_queue: asyncio.Queue[tuple[int, dict]] = asyncio.Queue(
             maxsize=int(os.getenv("BACKFILL_QUEUE_MAX", "500"))
         )
