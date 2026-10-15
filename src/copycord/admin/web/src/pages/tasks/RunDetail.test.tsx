@@ -7,6 +7,7 @@ import type { TaskRun, TaskType } from "../../types/tasks";
 import { ReportPanel } from "./ReportPanel";
 import { RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
 import { StepList, stepLabel } from "./StepList";
+import { BUSY, FADE_IN } from "./TasksSkeleton";
 import { describeRunInputs, rangeWords } from "./types";
 
 const BACKFILL: TaskType = { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -233,6 +234,29 @@ describe("Run page structure", () => {
     const body = screen.getByRole("region", { name: "Summary" }).parentElement!;
     expect(body.className).not.toMatch(/grid/);
     expect(Array.from(body.children).map((c) => c.getAttribute("aria-label"))).toEqual(["Summary", "Steps", "Report"]);
+  });
+
+  it("fades in only what stood as bars in the skeleton, and dims the held run while a refetch is out", () => {
+    const run = makeRun({ status: "running", finished_at: null });
+    const { container, rerender } = renderView(run);
+    const fades = (el: Element | null) => (el?.getAttribute("class") ?? "").includes(FADE_IN);
+    expect(fades(screen.getByRole("link", { name: "Backfill channels" }))).toBe(true);
+    expect(fades(screen.getByRole("heading", { level: 2 }).closest(".min-w-0"))).toBe(true);
+    expect(fades(container.querySelector("dl[aria-label=Counts]"))).toBe(true);
+    expect(fades(container.querySelector("dl[aria-label=Inputs]"))).toBe(true);
+    expect(fades(within(screen.getByRole("region", { name: "Steps" })).getByRole("list"))).toBe(true);
+    // The static text the skeleton already showed does not blink.
+    expect(fades(screen.getByRole("link", { name: "All tasks" }))).toBe(false);
+    expect(fades(screen.getByRole("heading", { name: "Steps" }))).toBe(false);
+    const view = container.firstElementChild!;
+    expect(view.className).not.toContain(BUSY);
+    rerender(
+      <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+        <RunView run={run} type={BACKFILL} refreshing />
+      </MemoryRouter>,
+    );
+    expect(view).toHaveAttribute("aria-busy", "true");
+    expect(view.className).toContain(BUSY);
   });
 });
 

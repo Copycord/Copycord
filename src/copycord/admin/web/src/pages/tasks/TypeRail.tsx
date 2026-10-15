@@ -3,7 +3,7 @@
 import { Link } from "react-router";
 import { cx } from "../../components/ui/cx";
 import type { TaskType } from "../../types/tasks";
-import { RAIL, RAIL_ACTIVE, RAIL_HEADING, RAIL_ITEM, RAIL_LIST, RailEntryLoading } from "./TasksSkeleton";
+import { FADE_IN, RAIL, RAIL_ACTIVE, RAIL_HEADING, RAIL_ITEM, RAIL_LIST, RailEntryLoading } from "./TasksSkeleton";
 
 export interface TypeRailProps {
   types: TaskType[];
@@ -25,7 +25,7 @@ export function TypeRail({ types, selected, loading = false }: TypeRailProps) {
       <ul className={RAIL_LIST}>
         {loading && types.length === 0 ? <RailEntryLoading /> : null}
         {types.map((t) => (
-          <li key={t.key}>
+          <li key={t.key} className={FADE_IN}>
             <Link
               to={`/tasks?type=${encodeURIComponent(t.key)}`}
               className={item(selected === t.key)}

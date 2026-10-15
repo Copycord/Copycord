@@ -24,6 +24,10 @@ export const RAIL_ACTIVE =
 export const RAIL_HEADING = "mt-4 mb-1 px-3 text-xs font-semibold text-muted";
 export const RAIL_LIST = "m-0 flex list-none flex-col gap-0.5 p-0";
 export const MAIN = "min-w-0 flex-1";
+/** Content that takes a placeholder's place fades in over 180 ms; no fade under reduced motion. */
+export const FADE_IN = "transition-opacity duration-[180ms] ease-out starting:opacity-0 motion-reduce:transition-none";
+/** Held content while a refetch is out: dimmed only once the fetch passes 300 ms, so a quick answer never flickers. */
+export const BUSY = "opacity-60 delay-300";
 export const FRAME = "overflow-hidden rounded-card border border-border bg-card";
 export const FRAME_HEAD = "flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5 text-sm";
 /** Left of the frame head: the run count and Auto-refresh. */
@@ -123,14 +127,17 @@ export interface TasksHeaderProps {
   title: string | null;
   description: string | null;
   action: ReactNode;
+  /** A type page, whose title and description take the place of bars: they fade in. All tasks is static text. */
+  fade?: boolean;
 }
 
-export function TasksHeader({ title, description, action }: TasksHeaderProps) {
+export function TasksHeader({ title, description, action, fade = false }: TasksHeaderProps) {
+  const text = (v: string) => (fade ? <span className={FADE_IN}>{v}</span> : v);
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <h2 className="m-0 text-[22px] font-bold text-text">{title ?? <TextBar width={180} height={16} />}</h2>
-        <p className="mt-1 mb-0 text-sm text-muted">{description ?? <TextBar width={260} />}</p>
+        <h2 className="m-0 text-[22px] font-bold text-text">{title != null ? text(title) : <TextBar width={180} height={16} />}</h2>
+        <p className="mt-1 mb-0 text-sm text-muted">{description != null ? text(description) : <TextBar width={260} />}</p>
       </div>
       {action}
     </div>

@@ -5,6 +5,7 @@ import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import type { TaskRun } from "../types/tasks";
 import { Tasks } from "./Tasks";
+import { BUSY } from "./tasks/TasksSkeleton";
 
 class FakeWs {
   static OPEN = 1;
@@ -185,6 +186,8 @@ describe("Tasks page", () => {
     expect(screen.queryByText("No task runs yet")).toBeNull();
     expect(within(list).getByRole("link", { name: "Backfill #general" })).toBeInTheDocument();
     expect(list).toHaveAttribute("aria-busy", "true");
+    // Quietly: a dim that waits 300 ms before it shows, and fades back when the answer lands.
+    expect(list.className).toContain(BUSY);
     // Debounced: one search for the settled text, not one per keystroke.
     expect(listCalls(fn).filter((u) => u.includes("q="))).toEqual([expect.stringContaining("q=nope")]);
 

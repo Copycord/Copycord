@@ -120,6 +120,7 @@ export function Tasks() {
                 title={typePending ? null : (selected?.title ?? "All tasks")}
                 description={typePending ? null : (selected?.description ?? ALL_TASKS_DESCRIPTION)}
                 action={runAction}
+                fade={Boolean(typeKey)}
               />
               <RunsView types={types} typeTitle={typeTitle} />
             </>

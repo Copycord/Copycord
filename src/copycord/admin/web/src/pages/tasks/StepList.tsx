@@ -5,7 +5,7 @@
 import { cx } from "../../components/ui/cx";
 import type { TaskRun, TaskStep } from "../../types/tasks";
 import { STATUS_LABEL, StatusIcon } from "./StatusIcon";
-import { CARD_TITLE, FRAME, STEP_LINE, STEP_ROW } from "./TasksSkeleton";
+import { CARD_TITLE, FADE_IN, FRAME, STEP_LINE, STEP_ROW } from "./TasksSkeleton";
 
 const NUM = new Intl.NumberFormat("en-US");
 
@@ -47,7 +47,7 @@ export function StepList({ run }: { run: TaskRun }) {
     <section aria-label="Steps" className={FRAME}>
       <h3 className={CARD_TITLE}>Steps</h3>
       {steps.length ? (
-        <ul className="m-0 list-none p-0">
+        <ul className={cx("m-0 list-none p-0", FADE_IN)}>
           {steps.map((s) => {
             const note = stepLabel(s);
             return (
@@ -65,7 +65,7 @@ export function StepList({ run }: { run: TaskRun }) {
           })}
         </ul>
       ) : (
-        <p className="m-0 px-4 py-3 text-sm text-muted">No steps yet</p>
+        <p className={cx("m-0 px-4 py-3 text-sm text-muted", FADE_IN)}>No steps yet</p>
       )}
     </section>
   );

@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { api, errorText } from "../../lib/api";
 import { ACTIVE_STATUSES } from "../../types/tasks";
@@ -17,6 +18,8 @@ import { runUrl, useTaskRun } from "./runStore";
 import { STATUS_LABEL, StatusIcon } from "./StatusIcon";
 import { StepList, formatCount } from "./StepList";
 import {
+  BUSY,
+  FADE_IN,
   FRAME,
   INPUTS_BOX,
   INPUTS_LIST,
@@ -39,7 +42,7 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
   return (
     <section aria-label="Summary" className={FRAME}>
       {stats.length ? (
-        <dl aria-label="Counts" className="m-0 flex flex-wrap gap-x-8 gap-y-3 border-b border-border px-4 py-3">
+        <dl aria-label="Counts" className={cx("m-0 flex flex-wrap gap-x-8 gap-y-3 border-b border-border px-4 py-3", FADE_IN)}>
           {stats.map((s) => (
             <div key={s.key} className="min-w-0">
               <dt className="text-xs text-muted">{s.label}</dt>
@@ -51,7 +54,7 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
       <div className={INPUTS_BOX}>
         <h3 className={INPUTS_TITLE}>Inputs</h3>
         {rows.length ? (
-          <dl aria-label="Inputs" className={INPUTS_LIST}>
+          <dl aria-label="Inputs" className={cx(INPUTS_LIST, FADE_IN)}>
             {rows.map((r, i) => (
               <div key={`${i}:${r.label}`} className="contents">
                 <dt className="text-muted">{r.label}</dt>
@@ -60,7 +63,7 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
             ))}
           </dl>
         ) : (
-          <p className="m-0 text-sm text-muted">No inputs</p>
+          <p className={cx("m-0 text-sm text-muted", FADE_IN)}>No inputs</p>
         )}
       </div>
     </section>
@@ -107,12 +110,12 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
           All tasks
         </Link>
         {" / "}
-        <Link to={`/tasks?type=${encodeURIComponent(run.type)}`} className={RUN_CRUMB}>
+        <Link to={`/tasks?type=${encodeURIComponent(run.type)}`} className={cx(RUN_CRUMB, FADE_IN)}>
           {typeTitle}
         </Link>
       </nav>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className={cx("min-w-0", FADE_IN)}>
           <div className={RUN_TITLE_ROW}>
             <StatusIcon status={run.status} size={20} />
             <h2 className={RUN_TITLE} title={run.title}>
@@ -166,7 +169,7 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
 /** The run page body for a held run: header, summary and inputs, steps, report. */
 export function RunView({ run, type, refreshing = false }: { run: TaskRun; type?: TaskType; refreshing?: boolean }) {
   return (
-    <div className="flex flex-col" aria-busy={refreshing || undefined}>
+    <div className={cx("flex flex-col transition-opacity motion-reduce:transition-none", refreshing && BUSY)} aria-busy={refreshing || undefined}>
       <RunHeader run={run} typeTitle={type?.title ?? run.type} />
       <div className={RUN_BODY}>
         <RunSummary run={run} schema={type?.inputs_schema} />
@@ -182,7 +185,7 @@ export function RunDetail({ id, typeOf }: { id: string; typeOf: (key: string) =>
   const { run, loading, refreshing, error } = useTaskRun(id);
   if (!run) {
     if (loading) return <RunDetailSkeleton />;
-    return <EmptyState title="Run not found" description={error ? errorText(error, "Could not load the run.") : undefined} />;
+    return <EmptyState plain title="Run not found" description={error ? errorText(error, "Could not load the run.") : undefined} />;
   }
   return <RunView run={run} type={typeOf(run.type)} refreshing={refreshing} />;
 }

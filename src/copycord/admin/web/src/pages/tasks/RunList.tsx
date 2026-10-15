@@ -4,6 +4,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Badge } from "../../components/ui/Badge";
+import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
@@ -11,6 +12,8 @@ import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { StatusIcon } from "./StatusIcon";
 import {
   AUTO_REFRESH_OPTIONS,
+  BUSY,
+  FADE_IN,
   FRAME,
   FRAME_HEAD,
   FRAME_HEAD_FILTERS,
@@ -176,7 +179,7 @@ export function RunList({
     <div className={FRAME}>
       <div className={FRAME_HEAD}>
         <div className={FRAME_HEAD_LEFT}>
-          {loading ? <RunCountLoading /> : <span className={RUN_COUNT}>{runCountText(total)}</span>}
+          {loading ? <RunCountLoading /> : <span className={cx(RUN_COUNT, FADE_IN)}>{runCountText(total)}</span>}
           <ToolbarSelect id="tasks-autorefresh" label="Auto-refresh" value={autoRefresh} options={AUTO_REFRESH_OPTIONS} onChange={onAutoRefresh} />
         </div>
         {filters ? <div className={FRAME_HEAD_FILTERS}>{filters}</div> : null}
@@ -184,9 +187,11 @@ export function RunList({
       {loading ? (
         <RunRowsLoading />
       ) : runs.length === 0 ? (
-        <div aria-busy={refreshing || undefined}>{empty ?? <EmptyState plain title="No task runs yet" />}</div>
+        <div aria-busy={refreshing || undefined} className={cx(FADE_IN, refreshing && BUSY)}>
+          {empty ?? <EmptyState plain title="No task runs yet" />}
+        </div>
       ) : (
-        <ul aria-label="Task runs" aria-busy={refreshing || undefined} className="m-0 list-none p-0">
+        <ul aria-label="Task runs" aria-busy={refreshing || undefined} className={cx("m-0 list-none p-0", FADE_IN, refreshing && BUSY)}>
           {runs.map((r) => (
             <RunRow key={r.id} run={r} typeTitle={typeTitle(r.type)} actions={rowActions?.(r)} />
           ))}

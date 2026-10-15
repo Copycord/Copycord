@@ -5,8 +5,21 @@ import { ToastProvider } from "../../components/Toast";
 import { ConfirmProvider } from "../../components/ui/ConfirmDialog";
 import type { TaskRun } from "../../types/tasks";
 import { Tasks } from "../Tasks";
-import { RunRow } from "./RunList";
-import { FRAME, FRAME_HEAD, FRAME_HEAD_FILTERS, FRAME_HEAD_LEFT, RAIL_LIST, ROW_BOX, RunRowsLoading, TasksSkeleton } from "./TasksSkeleton";
+import { RunList, RunRow } from "./RunList";
+import {
+  ALL_TASKS_DESCRIPTION,
+  BUSY,
+  FADE_IN,
+  FRAME,
+  FRAME_HEAD,
+  FRAME_HEAD_FILTERS,
+  FRAME_HEAD_LEFT,
+  RAIL_LIST,
+  ROW_BOX,
+  RunRowsLoading,
+  TasksHeader,
+  TasksSkeleton,
+} from "./TasksSkeleton";
 
 const RUN: TaskRun = {
   id: "1",
@@ -168,5 +181,41 @@ describe("page skeleton", () => {
     const c = chrome(container);
     expect(c.dropdowns).toEqual(["Status: All", "Mapping: All", "Actor: All"]);
     expect(c.title).toBe("");
+  });
+});
+
+describe("placeholder to content", () => {
+  const list = (loading: boolean, refreshing = false) => (
+    <MemoryRouter>
+      <RunList runs={[RUN]} total={1} loading={loading} refreshing={refreshing} typeTitle={() => "Backfill channels"} autoRefresh="0" onAutoRefresh={() => {}} />
+    </MemoryRouter>
+  );
+
+  it("fades in over 150 to 200 ms, and not at all under reduced motion", () => {
+    const ms = Number(/duration-\[(\d+)ms\]/.exec(FADE_IN)?.[1]);
+    expect(ms).toBeGreaterThanOrEqual(150);
+    expect(ms).toBeLessThanOrEqual(200);
+    expect(FADE_IN.split(" ")).toEqual(expect.arrayContaining(["transition-opacity", "starting:opacity-0", "motion-reduce:transition-none"]));
+  });
+
+  it("fades the count and the rows in where the bars stood, and dims them only while a refetch is out", () => {
+    const { container, rerender } = render(list(true));
+    expect(container.querySelector(`[class~="starting:opacity-0"]`)).toBeNull();
+    rerender(list(false));
+    const rows = screen.getByRole("list", { name: "Task runs" });
+    expect(screen.getByText("1 task run").className).toContain(FADE_IN);
+    expect(rows.className).toContain(FADE_IN);
+    expect(rows.className).not.toContain(BUSY);
+    rerender(list(false, true));
+    expect(screen.getByRole("list", { name: "Task runs" })).toBe(rows);
+    expect(rows.className).toContain(BUSY);
+  });
+
+  it("fades a type page's title in, but leaves the static All tasks header alone", () => {
+    const { rerender } = render(<TasksHeader title="All tasks" description={ALL_TASKS_DESCRIPTION} action={null} />);
+    expect(screen.getByRole("heading", { name: "All tasks" }).querySelector("span")).toBeNull();
+    rerender(<TasksHeader title="Backfill channels" description="Clone message history" action={null} fade />);
+    expect(screen.getByText("Backfill channels")).toHaveClass(...FADE_IN.split(" "));
+    expect(screen.getByText("Clone message history")).toHaveClass(...FADE_IN.split(" "));
   });
 });
