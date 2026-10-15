@@ -175,6 +175,8 @@ logger.setLevel(LEVEL)
 class ServerReceiver:
     # Seconds between backfill_job_delivered frames for one job.
     BF_PROGRESS_INTERVAL = 0.5
+    BF_JOB_END_GRACE = 300.0
+    BF_JOB_STALE_SECS = 6 * 3600.0
 
     def __init__(self):
         self.config = Config(logger=logger)
@@ -1238,6 +1240,100 @@ class ServerReceiver:
         _, job = self._bf_job_for_channel(orig)
         return bool(job and job.get("cancelled"))
 
+    def _bf_skip_cancelled(self, orig: int) -> bool:
+        """_bf_job_cancelled for a send about to go out: a skipped send is counted on the job, so
+        its end can tell a cut short job from one whose cancel came after the last send."""
+        _, job = self._bf_job_for_channel(orig)
+        if not (job and job.get("cancelled")):
+            return False
+        job["skipped"] = int(job.get("skipped") or 0) + 1
+        return True
+
+    def _bf_touch_job(self, job: dict | None) -> None:
+        if job is not None:
+            job["seen"] = time.monotonic()
+
+    def _bf_sweep_stale_jobs(self) -> None:
+        """End jobs nothing has been heard of for BF_JOB_STALE_SECS (the client went away mid job),
+        so their entries and cancel flags do not outlive them."""
+        now = time.monotonic()
+        for job_id, job in list(self._bf_jobs.items()):
+            if job.get("ended") or (job.get("cleanup") is not None and not job["cleanup"].done()):
+                continue
+            if now - float(job.get("seen") or now) >= self.BF_JOB_STALE_SECS:
+                logger.warning("[bf] Ending stale backfill job %s for #%s", job_id, job.get("channel"))
+                self._track(
+                    self._bf_end_job(job_id, {"ok": False, "error": "stale"}),
+                    name="bf-stale-end",
+                )
+
+    async def _bf_end_after_grace(self, job_id: str) -> None:
+        """The server finished the job; end it here if the client's backfill_job_end never comes."""
+        await asyncio.sleep(self.BF_JOB_END_GRACE)
+        job = self._bf_jobs.get(job_id)
+        if job is not None and not job.get("ended"):
+            logger.warning("[bf] No backfill_job_end from the client for job %s; ending it", job_id)
+            await self._bf_end_job(job_id, {"ok": False, "error": "no end from client"})
+
+    async def _bf_end_job(self, job_id: str, data: dict) -> None:
+        """Publish backfill_job_end once the server's cleanup for the job is done and drop the job.
+        data is the client's backfill_job_end (ok, error, last_orig_message_id)."""
+        job = self._bf_jobs.get(job_id) or {}
+        if job.get("ended"):
+            return
+        if job:
+            job["ended"] = True
+        orig = job.get("channel")
+        if (
+            job.get("cleanup") is None
+            and orig is not None
+            and self._bf_job_by_channel.get(orig) == job_id
+            and orig in self._active_backfills
+        ):
+            await self._bf_cleanup_job(orig)
+        delivered = 0
+        if job.get("cleanup") is not None:
+            delivered = await asyncio.shield(job["cleanup"])
+        for key in ("progress_task", "grace_task"):
+            t = job.get(key)
+            if t is not None and t is not asyncio.current_task():
+                t.cancel()
+        self._bf_jobs.pop(job_id, None)
+        if orig is not None and self._bf_job_by_channel.get(orig) == job_id:
+            self._bf_job_by_channel.pop(orig, None)
+        orig_out = orig if orig is not None else data.get("original_channel_id")
+        last_id = data.get("last_orig_message_id")
+        # A job cancelled while the server delivered ended its pull fine on the client; it is
+        # cancelled only when the cancel actually kept sends from going out.
+        cancelled = bool(job.get("cancelled")) and int(job.get("skipped") or 0) > 0
+        if cancelled:
+            ok, error = False, "cancelled"
+        elif job.get("error"):
+            ok, error = False, job["error"]
+        elif job.get("stream_ended") and data.get("error") == "cancelled":
+            # The client pulled everything and the server sent it all: the cancel cut nothing.
+            ok, error = True, None
+        else:
+            ok, error = bool(data.get("ok")), data.get("error")
+        await self.bus.publish(
+            "client",
+            {
+                "type": "backfill_job_end",
+                "data": {
+                    "job_id": job_id,
+                    "original_channel_id": (
+                        str(orig_out) if orig_out is not None else None
+                    ),
+                    "ok": ok,
+                    "error": error,
+                    "delivered": int(delivered or 0),
+                    "last_orig_message_id": (
+                        str(last_id) if last_id is not None else None
+                    ),
+                },
+            },
+        )
+
     def _bf_cancel_job(self, job_id: str) -> dict:
         """backfill_job_cancel from the client. Forwards still waiting on the channel's send gate
         (messages, threads, stickers) return unsent and new ones are dropped, so the drain ends after
@@ -1252,6 +1348,7 @@ class ServerReceiver:
     def _bf_note_delivered(self, orig: int) -> None:
         """BackfillManager.note_sent hook: publish the job's delivered count, at most every BF_PROGRESS_INTERVAL seconds with a trailing publish."""
         job_id, job = self._bf_job_for_channel(orig)
+        self._bf_touch_job(job)
         if job is None or job.get("progress_task") is not None:
             return
         loop = asyncio.get_running_loop()
@@ -1302,7 +1399,13 @@ class ServerReceiver:
         delivered = None
         try:
             if job is not None:
-                await self.backfill.wait_delivered(orig)
+                if not await self.backfill.wait_delivered(orig):
+                    logger.warning(
+                        "[bf] Backfill of #%s (job %s) gave up on sends still running",
+                        orig,
+                        job_id,
+                    )
+                    job["error"] = "delivery timed out"
                 await self._bf_publish_delivered(job_id)
                 with contextlib.suppress(Exception):
                     await self.bus.publish(
@@ -1317,12 +1420,23 @@ class ServerReceiver:
                         },
                     )
             counted, _ = self.backfill.job_counts(orig)
-            delivered = await self._bf_finish_channel(orig)
+            try:
+                delivered = await self._bf_finish_channel(orig)
+            except Exception:
+                logger.exception("[bf] Cleanup failed for #%s (job %s)", orig, job_id)
+                if job is not None:
+                    job["error"] = job.get("error") or "cleanup failed"
+                if job is None:
+                    raise
             if delivered is None:
                 delivered = counted
         finally:
             if job is not None and not job["cleanup"].done():
                 job["cleanup"].set_result(int(delivered or 0))
+            if job is not None and not job.get("ended") and job.get("grace_task") is None:
+                job["grace_task"] = asyncio.get_running_loop().create_task(
+                    self._bf_end_after_grace(job_id)
+                )
 
     async def _bf_finish_channel(self, orig: int) -> int | None:
         """Existing end of stream flow: drain, temp webhook cleanup, buffer flush. Returns messages written."""
@@ -1436,7 +1550,7 @@ class ServerReceiver:
                             orig,
                         )
                         return
-                    if self._bf_job_cancelled(orig):
+                    if self._bf_skip_cancelled(orig):
                         return
                     t = self._track(
                         self._handle_backfill_message(data), name="bf-handle"
@@ -1472,7 +1586,7 @@ class ServerReceiver:
                         parent = int(data.get("thread_parent_id") or 0)
                     except Exception:
                         parent = 0
-                    if parent and self._bf_job_cancelled(parent):
+                    if parent and self._bf_skip_cancelled(parent):
                         return
                     t = self._track(
                         self._handle_backfill_thread_message(data), name="bf-thread"
@@ -1611,6 +1725,9 @@ class ServerReceiver:
                     )
                     return
 
+                _, job = self._bf_job_for_channel(orig)
+                if job is not None:
+                    job["stream_ended"] = True
                 await self._bf_cleanup_job(orig)
                 return
 
@@ -1625,8 +1742,10 @@ class ServerReceiver:
                     except (TypeError, ValueError):
                         orig = None
                     if orig is not None:
+                        self._bf_sweep_stale_jobs()
                         self._bf_jobs[job_id] = {"channel": orig, "cleanup": None}
                         self._bf_job_by_channel[orig] = job_id
+                self._bf_touch_job(self._bf_jobs.get(job_id))
                 await self.bus.publish("client", msg)
                 return
 
@@ -1639,45 +1758,15 @@ class ServerReceiver:
                 job_id = str(data.get("job_id") or "")
                 if not job_id:
                     return
-                job = self._bf_jobs.get(job_id) or {}
-                orig = job.get("channel")
-                if (
-                    job.get("cleanup") is None
-                    and orig is not None
-                    and self._bf_job_by_channel.get(orig) == job_id
-                    and orig in self._active_backfills
-                ):
-                    await self._bf_cleanup_job(orig)
-                delivered = 0
-                if job.get("cleanup") is not None:
-                    delivered = await asyncio.shield(job["cleanup"])
-                if job.get("progress_task") is not None:
-                    job["progress_task"].cancel()
-                self._bf_jobs.pop(job_id, None)
-                if orig is not None and self._bf_job_by_channel.get(orig) == job_id:
-                    self._bf_job_by_channel.pop(orig, None)
-                orig_out = orig if orig is not None else data.get("original_channel_id")
-                last_id = data.get("last_orig_message_id")
-                # A job cancelled while the server delivered ended its pull fine on the client.
-                cancelled = bool(job.get("cancelled"))
-                await self.bus.publish(
-                    "client",
-                    {
-                        "type": "backfill_job_end",
-                        "data": {
-                            "job_id": job_id,
-                            "original_channel_id": (
-                                str(orig_out) if orig_out is not None else None
-                            ),
-                            "ok": bool(data.get("ok")) and not cancelled,
-                            "error": "cancelled" if cancelled else data.get("error"),
-                            "delivered": int(delivered or 0),
-                            "last_orig_message_id": (
-                                str(last_id) if last_id is not None else None
-                            ),
-                        },
-                    },
-                )
+                await self._bf_end_job(job_id, data)
+                return
+
+            elif typ == "backfill_jobs_reset":
+                # The client (re)connected with no job running: whatever it left open here is over.
+                for job_id in list(self._bf_jobs):
+                    await self._bf_end_job(
+                        job_id, {"ok": False, "error": "client disconnected"}
+                    )
                 return
 
             elif typ == "member_joined":
@@ -8723,7 +8812,7 @@ class ServerReceiver:
 
         gate = self._get_backfill_gate_for_source(parent_id)
         async with gate:
-            if self._bf_job_cancelled(parent_id):
+            if self._bf_skip_cancelled(parent_id):
                 return
             return await self.handle_thread_message(data)
 
@@ -8748,7 +8837,7 @@ class ServerReceiver:
 
         gate = self._get_backfill_gate_for_source(source_id)
         async with gate:
-            if self._bf_job_cancelled(source_id):
+            if self._bf_skip_cancelled(source_id):
                 return
             return await self._forward_message_inner(msg)
 

@@ -47,6 +47,7 @@ class FakeBackfill:
 
     async def wait_delivered(self, orig):
         self.waited.append(orig)
+        return True
 
     def job_counts(self, orig):
         return None, None
@@ -197,3 +198,89 @@ def test_webhook_pool_lives_in_its_own_module():
     assert issubclass(BackfillManager, BackfillWebhookPool)
     for name in ("_ensure_temp_webhooks", "pick_url_for_send", "delete_created_temps_for", "cleanup_non_primary_webhooks", "_api_with_retry"):
         assert name in vars(BackfillWebhookPool) and name not in vars(BackfillManager)
+
+
+def _running(job=JOB, cid=CID):
+    return {"type": "backfill_job", "data": {"job_id": job, "original_channel_id": str(cid), "state": "running", "queue_position": None}}
+
+
+def test_cleanup_failure_still_ends_the_job_with_the_counted_delivered(ServerReceiver):
+    async def finish(orig):
+        rx._active_backfills.discard(orig)
+        raise RuntimeError("webhook cleanup blew up")
+
+    rx = _rx(ServerReceiver, finish)
+    rx.backfill.job_counts = lambda orig: (7, 10)
+
+    async def go():
+        await rx._on_ws(_running())
+        await rx._on_ws({"type": "backfill_stream_end", "data": {"channel_id": str(CID)}})
+        await asyncio.wait_for(rx._on_ws({"type": "backfill_job_end", "data": {"job_id": JOB, "ok": True, "error": None, "last_orig_message_id": None}}), 2.0)
+
+    asyncio.run(go())
+
+    end = rx.bus.sent[-1]["payload"]
+    assert end["type"] == "backfill_job_end"
+    assert end["data"]["ok"] is False and end["data"]["error"] == "cleanup failed"
+    assert end["data"]["delivered"] == 7
+    assert rx._bf_jobs == {} and rx._bf_job_by_channel == {}
+
+
+async def _finish_ok(rx, orig):
+    rx._active_backfills.discard(orig)
+    return 4
+
+
+def test_job_ends_when_the_client_never_sends_its_end(ServerReceiver):
+    rx = _rx(ServerReceiver, lambda orig: _finish_ok(rx, orig))
+    rx.BF_JOB_END_GRACE = 0.05
+
+    async def go():
+        await rx._on_ws(_running())
+        await rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": JOB}})
+        await rx._on_ws({"type": "backfill_stream_end", "data": {"channel_id": str(CID)}})
+        await asyncio.sleep(0.2)
+
+    asyncio.run(go())
+
+    ends = [f["payload"]["data"] for f in rx.bus.sent if f["payload"]["type"] == "backfill_job_end"]
+    assert len(ends) == 1
+    assert ends[0]["error"] == "no end from client" and ends[0]["delivered"] == 4
+    assert rx._bf_jobs == {} and rx._bf_job_by_channel == {}
+    assert not rx._bf_job_cancelled(CID)
+
+
+def test_client_reset_ends_the_jobs_it_left_open(ServerReceiver):
+    rx = _rx(ServerReceiver, lambda orig: _finish_ok(rx, orig))
+
+    async def go():
+        await rx._on_ws(_running())
+        await rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": JOB}})
+        await rx._on_ws({"type": "backfill_jobs_reset", "data": {}})
+
+    asyncio.run(go())
+
+    ends = [f["payload"]["data"] for f in rx.bus.sent if f["payload"]["type"] == "backfill_job_end"]
+    assert [(e["job_id"], e["ok"]) for e in ends] == [(JOB, False)]
+    assert rx._bf_jobs == {} and rx._bf_job_by_channel == {}
+    assert not rx._bf_job_cancelled(CID)
+
+
+def test_stale_jobs_are_swept_when_a_new_job_starts(ServerReceiver):
+    rx = _rx(ServerReceiver, lambda orig: _finish_ok(rx, orig))
+    rx._send_tasks = set()
+    other = CID + 1
+
+    async def go():
+        await rx._on_ws(_running("old", CID))
+        await rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": "old"}})
+        rx._bf_jobs["old"]["seen"] -= rx.BF_JOB_STALE_SECS + 1
+        await rx._on_ws(_running("new", other))
+        await asyncio.sleep(0.05)
+
+    asyncio.run(go())
+
+    ends = [f["payload"]["data"] for f in rx.bus.sent if f["payload"]["type"] == "backfill_job_end"]
+    assert [(e["job_id"], e["error"]) for e in ends] == [("old", "stale")]
+    assert set(rx._bf_jobs) == {"new"} and rx._bf_job_by_channel == {other: "new"}
+    assert not rx._bf_job_cancelled(CID)

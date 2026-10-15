@@ -307,3 +307,86 @@ def test_cancel_for_an_unknown_job_is_harmless(ServerReceiver):
     rx, res = asyncio.run(go())
     assert res == {"ok": True, "job_id": "nope", "state": "unknown"}
     assert rx.bus.sent == []
+
+
+def test_delivery_cap_follows_what_is_left_within_floor_and_ceiling(ServerReceiver, monkeypatch):
+    monkeypatch.delenv("BACKFILL_DRAIN_HARD_CAP_SECS", raising=False)
+
+    async def go():
+        bf = _rx(ServerReceiver, asyncio.Event()).backfill
+        caps = []
+        for total in (0, 1000, 10**6):
+            bf.update_expected_total(CID, total)
+            caps.append(bf.delivery_cap(CID))
+        monkeypatch.setenv("BACKFILL_DRAIN_HARD_CAP_SECS", "30")
+        caps.append(bf.delivery_cap(CID))
+        return bf, caps
+
+    bf, caps = asyncio.run(go())
+    assert caps == [bf.DRAIN_CAP_FLOOR_SECS, 1000 * bf.DRAIN_CAP_PER_MESSAGE_SECS, bf.DRAIN_CAP_CEILING_SECS, 30.0]
+
+
+def test_a_send_that_never_returns_ends_the_job_at_the_cap(ServerReceiver, monkeypatch):
+    """No hard cap configured and a forward hangs: cleaning up still ends, with what was delivered."""
+    monkeypatch.delenv("BACKFILL_DRAIN_HARD_CAP_SECS", raising=False)
+
+    async def go():
+        rx = _rx(ServerReceiver, asyncio.Event())
+        rx.backfill.DRAIN_CAP_FLOOR_SECS = 0.2
+        rx.backfill.DRAIN_CAP_PER_MESSAGE_SECS = 0.01
+        await rx._on_ws({"type": "backfill_job", "data": {"job_id": JOB, "original_channel_id": str(CID), "state": "running", "queue_position": None}})
+        rx.backfill.note_sent(CID, 1521898853337409001)
+        rx.backfill.note_sent(CID, 1521898853337409002)
+        await rx._on_ws(_message_frame(1521898853337409003))
+        stream_end = asyncio.create_task(rx._on_ws({"type": "backfill_stream_end", "data": {"channel_id": str(CID)}}))
+        job_end = asyncio.create_task(rx._on_ws({"type": "backfill_job_end", "data": {"job_id": JOB, "ok": True, "error": None, "last_orig_message_id": None}}))
+        await asyncio.wait_for(asyncio.gather(stream_end, job_end), 3.0)
+        return rx
+
+    rx = asyncio.run(go())
+
+    end = rx.bus.sent[-1]["payload"]
+    assert end["type"] == "backfill_job_end"
+    assert end["data"]["ok"] is False and end["data"]["error"] == "delivery timed out"
+    assert end["data"]["delivered"] == 2
+    assert rx._bf_jobs == {} and not rx.backfill._attached.get(CID)
+
+
+def test_cancel_after_every_send_went_out_ends_ok(ServerReceiver):
+    """The cancel arrives once the server sent all it was given: nothing was cut, the job is ok."""
+
+    async def go():
+        gate = asyncio.Event()
+        gate.set()
+        rx = _rx(ServerReceiver, gate)
+        await rx._on_ws({"type": "backfill_job", "data": {"job_id": JOB, "original_channel_id": str(CID), "state": "running", "queue_position": None}})
+        for i in range(3):
+            await rx._on_ws(_message_frame(1521898853337409001 + i))
+        await rx._on_ws({"type": "backfill_stream_end", "data": {"channel_id": str(CID)}})
+        await rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": JOB}})
+        await rx._on_ws({"type": "backfill_job_end", "data": {"job_id": JOB, "ok": False, "error": "cancelled", "last_orig_message_id": None}})
+        return rx
+
+    rx = asyncio.run(go())
+
+    end = rx.bus.sent[-1]["payload"]["data"]
+    assert end["ok"] is True and end["error"] is None and end["delivered"] == 3
+
+
+def test_cancel_mid_pull_still_ends_cancelled(ServerReceiver):
+    """The client cut its pull short (no stream end): the job stays cancelled though no send was skipped."""
+
+    async def go():
+        gate = asyncio.Event()
+        gate.set()
+        rx = _rx(ServerReceiver, gate)
+        await rx._on_ws({"type": "backfill_job", "data": {"job_id": JOB, "original_channel_id": str(CID), "state": "running", "queue_position": None}})
+        await rx._on_ws(_message_frame(1521898853337409001))
+        await rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": JOB}})
+        await rx._on_ws({"type": "backfill_job_end", "data": {"job_id": JOB, "ok": False, "error": "cancelled", "last_orig_message_id": None}})
+        return rx
+
+    rx = asyncio.run(go())
+
+    end = rx.bus.sent[-1]["payload"]["data"]
+    assert end["ok"] is False and end["error"] == "cancelled" and end["delivered"] == 1

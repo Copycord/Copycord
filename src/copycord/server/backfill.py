@@ -332,10 +332,34 @@ class BackfillManager(BackfillWebhookPool):
             total = None
         return delivered, total
 
-    async def wait_delivered(self, original_id: int) -> None:
-        """Wait for every message task attached to the channel (messages, threads and stickers) to finish."""
+    DRAIN_CAP_FLOOR_SECS = 120.0
+    DRAIN_CAP_PER_MESSAGE_SECS = 2.0
+    DRAIN_CAP_CEILING_SECS = 14400.0
+
+    def delivery_cap(self, original_id: int) -> float:
+        """Longest wait for a channel's queued forwards: BACKFILL_DRAIN_HARD_CAP_SECS when set, else
+        DRAIN_CAP_PER_MESSAGE_SECS per message still to send, kept between the floor and the ceiling."""
+        fixed = float(os.getenv("BACKFILL_DRAIN_HARD_CAP_SECS", "0") or 0)
+        if fixed > 0:
+            return fixed
+        cid = int(original_id)
+        remaining = self._inflight.get(cid, 0)
+        delivered, total = self.job_counts(cid)
+        if delivered is not None and total is not None:
+            remaining = max(remaining, total - delivered)
+        return min(
+            self.DRAIN_CAP_CEILING_SECS,
+            max(self.DRAIN_CAP_FLOOR_SECS, remaining * self.DRAIN_CAP_PER_MESSAGE_SECS),
+        )
+
+    async def wait_delivered(self, original_id: int) -> bool:
+        """Wait for every message task attached to the channel (messages, threads and stickers) to
+        finish. False when the delivery cap ran out and the tasks still running were cancelled."""
         stall = float(os.getenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "600"))
-        await self._wait_drain(int(original_id), no_progress_timeout=stall)
+        cid = int(original_id)
+        return await self._wait_drain(
+            cid, no_progress_timeout=stall, hard_cap=self.delivery_cap(cid)
+        )
 
     def note_checkpoint(
         self, channel_id, original_message_id=None, original_timestamp_iso=None
@@ -616,7 +640,10 @@ class BackfillManager(BackfillWebhookPool):
         cid: int,
         no_progress_timeout: float = 1800.0,
         log_every: float = 5.0,
-    ) -> None:
+        hard_cap: float | None = None,
+    ) -> bool:
+        """Wait until no task is in flight for the channel. True when they all finished, False when
+        the hard cap cancelled the ones left."""
         loop = asyncio.get_running_loop()
         first_seen = loop.time()
         last_change_ts = first_seen
@@ -625,7 +652,8 @@ class BackfillManager(BackfillWebhookPool):
         last_attach_count = self._attach_count.get(cid, 0)
         last_log_ts = 0.0
 
-        hard_cap = float(os.getenv("BACKFILL_DRAIN_HARD_CAP_SECS", "0")) or None
+        if hard_cap is None:
+            hard_cap = float(os.getenv("BACKFILL_DRAIN_HARD_CAP_SECS", "0")) or None
 
         while True:
             now = loop.time()
@@ -634,7 +662,7 @@ class BackfillManager(BackfillWebhookPool):
             attach_count = self._attach_count.get(cid, 0)
 
             if inflight == 0:
-                break
+                return True
 
             if (
                 (inflight < last_inflight)
@@ -674,9 +702,10 @@ class BackfillManager(BackfillWebhookPool):
                 for t in stuck:
                     t.cancel()
                 if stuck:
-                    await asyncio.gather(*stuck, return_exceptions=True)
+                    # A task that swallows its cancel must not hold the wait open again.
+                    await asyncio.wait(stuck, timeout=5.0)
                 self._attached.pop(cid, None)
                 self._inflight.pop(cid, None)
-                break
+                return False
 
             await asyncio.sleep(0.05)
