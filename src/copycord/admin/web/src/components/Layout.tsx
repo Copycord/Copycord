@@ -145,10 +145,11 @@ export function Layout() {
         onClick={() => setDrawerOpen(false)}
       />
 
+      {/* The card gradient is translucent, so the solid page colour under it keeps the page from showing through. */}
       <aside
         id="side-menu"
         aria-label="Site menu"
-        className={`fixed top-header bottom-0 left-0 ${Z.drawer} flex w-drawer flex-col overflow-hidden border-r border-r-border bg-(image:--card-gradient) transition-transform duration-[220ms] ${
+        className={`fixed top-header bottom-0 left-0 ${Z.drawer} flex w-drawer flex-col overflow-hidden border-r border-r-border bg-page bg-(image:--card-gradient) transition-transform duration-[220ms] ${
           drawerOpen ? "visible translate-x-0" : "invisible -translate-x-full"
         }`}
         data-open={drawerOpen ? "true" : "false"}

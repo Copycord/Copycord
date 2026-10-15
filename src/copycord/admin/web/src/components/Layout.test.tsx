@@ -73,3 +73,12 @@ describe("Layout stacking", () => {
     expect(layer(screen.getByRole("banner"))).toBeGreaterThan(layer(gate));
   });
 });
+
+describe("Layout drawer", () => {
+  it("paints the card gradient over the solid page colour so the page does not show through", () => {
+    renderAt("/");
+    const classes = document.getElementById("side-menu")!.className.split(/\s+/);
+    expect(classes).toContain("bg-page");
+    expect(classes).toContain("bg-(image:--card-gradient)");
+  });
+});
