@@ -126,7 +126,9 @@ describe("Tasks page", () => {
   it("shows the empty state when there are no runs", async () => {
     serve([]);
     renderAt("/tasks");
-    expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
+    // The loading list stands in the empty state's shape with the same words, so wait for it to go.
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull());
+    expect(screen.getByText("No task runs yet")).toBeInTheDocument();
     expect(screen.getByText("0 task runs")).toBeInTheDocument();
     expect(screen.getByText("Pick a task type on the left to run one")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();

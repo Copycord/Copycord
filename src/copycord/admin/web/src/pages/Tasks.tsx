@@ -7,6 +7,7 @@ import { useToast } from "../components/Toast";
 import { Button } from "../components/ui/Button";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import { EmptyState } from "../components/ui/EmptyState";
+import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
 import { ApiError, api, errorText } from "../lib/api";
 import type { TaskRun, TaskRunResponse, TaskType, TaskTypesResponse } from "../types/tasks";
@@ -14,7 +15,17 @@ import { RunDetail } from "./tasks/RunDetail";
 import { RunFilterSelects, RunSearch, useRunFilters } from "./tasks/RunFilters";
 import { RunList, RunMenu, type RunAction } from "./tasks/RunList";
 import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
-import { ALL_TASKS_DESCRIPTION, AUTO_REFRESH_KEY, MAIN, PAGE, RunPager, TasksHeader, TasksHeading, readAutoRefresh } from "./tasks/TasksSkeleton";
+import {
+  ALL_TASKS_DESCRIPTION,
+  AUTO_REFRESH_KEY,
+  MAIN,
+  PAGE,
+  RUNS_COUNT_KEY,
+  RunPager,
+  TasksHeader,
+  TasksHeading,
+  readAutoRefresh,
+} from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
 import { useBotsRunning } from "./tasks/useBotsRunning";
 import { TaskTypeForm } from "./tasks/types";
@@ -145,6 +156,7 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
   const page = filters.page ?? 1;
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   const onSearch = useCallback((q: string) => set("q", q), [set]);
+  useLastCount(RUNS_COUNT_KEY, settled ? runs.length : undefined);
 
   useEffect(() => {
     const secs = Number(autoRefresh) || (connected ? 0 : SOCKET_DOWN_POLL_S);

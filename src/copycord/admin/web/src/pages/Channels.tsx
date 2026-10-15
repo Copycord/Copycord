@@ -13,6 +13,7 @@ import {
   ChannelsTitle,
   CONTROLS,
   DELETE_ALL_BTN,
+  MAPPING_SELECT,
   SEARCH_INPUT,
   TREE_SHAPE_KEY,
 } from "./channels/ChannelsSkeleton";
@@ -111,6 +112,7 @@ export function Channels() {
               value={mappingId}
               disabled={!list.length}
               pending={!mappingsSettled}
+              className={MAPPING_SELECT}
               onChange={onMapping}
               options={
                 list.length

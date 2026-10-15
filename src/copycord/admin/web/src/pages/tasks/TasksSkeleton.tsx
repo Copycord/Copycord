@@ -8,7 +8,9 @@ import type { ReactNode } from "react";
 import { Link, useMatch, useSearchParams } from "react-router";
 import { Button } from "../../components/ui/Button";
 import { cx } from "../../components/ui/cx";
+import { EmptyState } from "../../components/ui/EmptyState";
 import { Input } from "../../components/ui/Field";
+import { readLastCount } from "../../components/ui/lastCount";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 
@@ -76,6 +78,11 @@ export function ReportSummaryText() {
 }
 
 export const ALL_TASKS_DESCRIPTION = "Showing runs from all task types";
+
+/** Runs per page (runStore.ts asks for this many). */
+export const PER_PAGE = 25;
+/** The rows the run list showed last time (lastCount.ts), so the loading list stands as tall. */
+export const RUNS_COUNT_KEY = "tasks.runs";
 
 export const AUTO_REFRESH_KEY = "tasks:autorefresh";
 export const AUTO_REFRESH_OPTIONS = [
@@ -222,15 +229,35 @@ function RunRowLoading({ titleWidth }: { titleWidth: string }) {
   );
 }
 
-/** The list body while a page of runs loads: rows shaped like the real ones. */
-export function RunRowsLoading({ rows = 3 }: { rows?: number }) {
+/** The empty state (Tasks.tsx) with bars on its two lines, for a list that had no runs last time. */
+function RunsEmptyLoading() {
+  return (
+    <EmptyState
+      plain
+      title={<Skeleton.Text>No task runs yet</Skeleton.Text>}
+      description={<Skeleton.Text>Pick a task type on the left to run one</Skeleton.Text>}
+    />
+  );
+}
+
+/**
+ * The list body while a page of runs loads: as many rows shaped like the real ones as the list had last
+ * time (at most a page), or the empty state's shape when it had none or this is the first visit.
+ */
+export function RunRowsLoading({ rows = readLastCount(RUNS_COUNT_KEY, 0, PER_PAGE) }: { rows?: number }) {
   return (
     <div role="status" aria-label="Loading task runs" aria-busy="true">
-      <ul aria-hidden="true" className="m-0 list-none p-0">
-        {Array.from({ length: rows }, (_, i) => (
-          <RunRowLoading key={i} titleWidth={TITLE_WIDTHS[i % TITLE_WIDTHS.length]!} />
-        ))}
-      </ul>
+      {rows === 0 ? (
+        <div aria-hidden="true">
+          <RunsEmptyLoading />
+        </div>
+      ) : (
+        <ul aria-hidden="true" className="m-0 list-none p-0">
+          {Array.from({ length: rows }, (_, i) => (
+            <RunRowLoading key={i} titleWidth={TITLE_WIDTHS[i % TITLE_WIDTHS.length]!} />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

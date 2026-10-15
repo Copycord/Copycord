@@ -36,6 +36,9 @@ async function login(browser: Browser) {
   }
   const state = await ctx.storageState();
   await ctx.close();
+  // The login lands on / before the seed, and the dashboard stores its pre-seed counts (skel:*, lastCount.ts):
+  // drop them, so every page is measured as a first visit and no skeleton is sized from the unseeded state.
+  for (const o of state.origins) o.localStorage = o.localStorage.filter((e) => !e.name.startsWith("skel:"));
   return state;
 }
 

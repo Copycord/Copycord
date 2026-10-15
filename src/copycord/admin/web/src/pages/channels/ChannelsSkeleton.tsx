@@ -30,6 +30,9 @@ import {
 /** The old .container.wide sat 20px in from the body padding at every width; the shell gives 12px below sm. */
 export const CHANNELS_CARD = "mt-[18px] max-sm:mx-2";
 export const CONTROLS = "flex flex-wrap items-center gap-2.5";
+/** The Guild mapping select: its toggle sizes to its label, so both rows give it one floor that the loading bar
+ *  and a usual mapping name fit under; the search box after it then stands in the same place. */
+export const MAPPING_SELECT = "min-w-[180px]";
 
 export const SEARCH_INPUT =
   "w-auto max-w-[260px] min-w-[220px] flex-none rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[14px] text-[#e6e1ff] " +
@@ -122,7 +125,17 @@ export function ChannelsSkeleton() {
           <ChannelsTitle />
           {/* As at the page's first paint: the mapping list is still empty (disabled). */}
           <span inert className={CONTROLS}>
-            <ToolbarSelect id="mapping-select-skel" nativeHidden pending label="Guild mapping" value="" disabled options={[]} onChange={noop} />
+            <ToolbarSelect
+              id="mapping-select-skel"
+              nativeHidden
+              pending
+              label="Guild mapping"
+              value=""
+              disabled
+              options={[]}
+              onChange={noop}
+              className={MAPPING_SELECT}
+            />
             <input type="text" placeholder="Search channels…" aria-label="Search channels" readOnly className={SEARCH_INPUT} />
             <ToolbarSelect id="ch-filter-skel" nativeHidden label="Filter" value="all" options={FILTER_OPTIONS} onChange={noop} />
             <ToolbarSelect id="ch-sort-skel" nativeHidden label="Sort" value="name" options={SORT_OPTIONS} onChange={noop} />

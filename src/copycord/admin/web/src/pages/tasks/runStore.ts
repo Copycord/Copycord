@@ -11,8 +11,9 @@ import { useWsMessages } from "../../hooks/useWsMessages";
 import { api } from "../../lib/api";
 import type { BusMessage } from "../../types/api";
 import type { RunFilters, TaskContext, TaskRun, TaskRunResponse, TaskRunsResponse, TaskRunUpdated, TaskStep } from "../../types/tasks";
+import { PER_PAGE } from "./TasksSkeleton";
 
-export const PER_PAGE = 25;
+export { PER_PAGE };
 export const RUN_UPDATED = "task.run.updated";
 
 export function runsUrl(filters: RunFilters): string {

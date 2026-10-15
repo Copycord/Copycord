@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
@@ -14,8 +14,10 @@ import {
   FRAME_HEAD,
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
+  PER_PAGE,
   RAIL_LIST,
   ROW_BOX,
+  RUNS_COUNT_KEY,
   RunRowsLoading,
   TasksHeader,
   TasksSkeleton,
@@ -64,6 +66,22 @@ describe("run row skeleton", () => {
     // Title and type lines: a title line and a text-xs line with the same gap.
     expect(skeleton!.children[1]!.children).toHaveLength(2);
     expect(skeleton!.children[1]!.children[1]!.className).toContain("mt-0.5 text-xs");
+  });
+
+  it("draws as many rows as the list had last time, at most a page, and the empty state with none", () => {
+    const rows = () => {
+      const { container, unmount } = render(<RunRowsLoading />);
+      const out = { li: container.querySelectorAll("li").length, empty: container.textContent };
+      unmount();
+      return out;
+    };
+    expect(rows()).toEqual({ li: 0, empty: "No task runs yetPick a task type on the left to run one" });
+    localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "0");
+    expect(rows().li).toBe(0);
+    localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "4");
+    expect(rows().li).toBe(4);
+    localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "90");
+    expect(rows().li).toBe(PER_PAGE);
   });
 });
 
@@ -125,7 +143,9 @@ describe("page skeleton", () => {
       </MemoryRouter>,
     );
     const skeleton = chrome(skel.container);
-    expect(within(skel.container).getAllByRole("listitem", { hidden: true }).filter((li) => li.className === ROW_BOX)).toHaveLength(3);
+    // A first visit has no stored run count: the loading list is the empty state's shape, no rows.
+    const skelEmpty = within(skel.container).getByText("No task runs yet").closest(".flex-col")!.className;
+    expect(within(skel.container).queryAllByRole("listitem", { hidden: true }).filter((li) => li.className === ROW_BOX)).toHaveLength(0);
     skel.unmount();
 
     const page = render(
@@ -137,9 +157,10 @@ describe("page skeleton", () => {
         </ConfirmProvider>
       </ToastProvider>,
     );
-    await screen.findByText("No task runs yet");
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull());
     await screen.findByRole("link", { name: "Backfill channels" });
     const loaded = chrome(page.container);
+    expect(screen.getByText("No task runs yet").closest(".flex-col")!.className).toBe(skelEmpty);
     // The empty state is plain text inside the runs frame, not a second dashed card, and has no Run task.
     expect(page.container.querySelector(".border-dashed")).toBeNull();
     expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
