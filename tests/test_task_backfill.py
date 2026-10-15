@@ -1,6 +1,7 @@
 """Backfill channels task type (Tasks framework, lane L6): a fake client sender
 and job frames handed straight to the dispatcher, as the admin bus watcher does."""
 import asyncio
+import gc
 
 import pytest
 
@@ -239,6 +240,33 @@ async def test_bots_stopped_ends_the_run_at_once_without_telling_the_client(svc,
     assert done.summary["cancelled"] == 3 and done.summary["delivered"] == 7
     assert not any(ln["level"] == "error" for ln in done.log_lines)
     assert backfill._jobs == {} and backfill._late == {}
+
+
+@pytest.mark.asyncio
+async def test_bots_stopped_leaves_no_unretrieved_gather_exception(svc, sent, mapping):
+    # The stop cancels the gather _wait_jobs waits on; its CancelledError must be
+    # retrieved, or the loop's exception handler logs it once the future is collected.
+    loop = asyncio.get_running_loop()
+    seen = []
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda lp, context: seen.append(context))
+    try:
+        run = await svc.start("backfill_channels",
+                              {"mapping_id": mapping, "category_ids": [str(CAT)]})
+        await _until(lambda: len(_of(sent, "backfill_run")) == 3)
+        await _frame("backfill_job", job_id=f"{run.id}:{CH[0]}", state="running")
+
+        await svc.stop_all()
+        await _until(lambda: run.id not in svc._active, timeout=1.0)
+        assert svc.get(run.id).status == "cancelled"
+
+        gc.collect()
+        await asyncio.sleep(0)
+        gc.collect()
+        await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(previous)
+    assert seen == []
 
 
 @pytest.mark.asyncio

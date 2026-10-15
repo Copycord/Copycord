@@ -622,6 +622,9 @@ async def _wait_jobs(ctx: Any, jobs: list[_Job]) -> None:
         cancel_wait.cancel()
         if not all_done.done():
             all_done.cancel()
+        # Retrieve the cancelled futures' results so asyncio never logs
+        # "_GatheringFuture exception was never retrieved" on a bot stop.
+        await asyncio.gather(all_done, cancel_wait, return_exceptions=True)
 
 
 BACKFILL = register(TaskType(
