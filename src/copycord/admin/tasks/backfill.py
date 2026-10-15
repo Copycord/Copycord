@@ -308,7 +308,7 @@ async def dispatch(frame: dict) -> bool:
     if typ not in JOB_FRAMES:
         return False
     job_id = str(data.get("job_id") or "")
-    if typ == "backfill_job_end" and job_id in _late:
+    if typ == "backfill_job_end" and job_id in _late and job_id not in _jobs:
         try:
             await _late_end(_late.pop(job_id), data)
         except Exception:
@@ -495,6 +495,7 @@ async def run(ctx: Any, inputs: BackfillInputs) -> None:
                    str(inputs.mapping_id), ctx, result)
         result["job_id"] = job.job_id
         _jobs[job.job_id] = job
+        _late.pop(job.job_id, None)
         mine.append(job)
 
     try:

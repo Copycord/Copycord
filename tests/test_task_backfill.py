@@ -49,8 +49,10 @@ def sent(db, monkeypatch):
     monkeypatch.setattr(backfill, "_wiring", backfill._Wiring(db=db, send=send))
     monkeypatch.setattr(backfill, "CANCEL_WAIT", 0.2)
     backfill._jobs.clear()
+    backfill._late.clear()
     yield frames
     backfill._jobs.clear()
+    backfill._late.clear()
 
 
 @pytest.fixture()
@@ -347,7 +349,6 @@ async def test_end_keeps_the_larger_delivered_count(svc, sent, mapping):
 
 @pytest.mark.asyncio
 async def test_late_end_after_the_cancel_wait_brings_the_real_count(svc, sent, mapping):
-    backfill._late.clear()
     run = await svc.start("backfill_channels", {"mapping_id": mapping, "channel_ids": [str(CH[0])]})
     await _until(lambda: len(_of(sent, "backfill_run")) == 1)
     job_id = f"{run.id}:{CH[0]}"
