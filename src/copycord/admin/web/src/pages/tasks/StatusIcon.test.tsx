@@ -55,7 +55,8 @@ describe("status glyph alignment", () => {
     );
     const glyphs = Array.from(container.querySelectorAll("[data-status]"));
     // Running steps sort first in the step list.
-    expect(glyphs.map((g) => g.getAttribute("data-status"))).toEqual(["success", "running", "success", "success"]);
+    // The last is the small glyph inside the header's status pill.
+    expect(glyphs.map((g) => g.getAttribute("data-status"))).toEqual(["success", "running", "success", "success", "success"]);
     // Colours and the header glyph's fade in aside.
     const fade = FADE_IN.split(" ");
     const boxes = glyphs.map((g) => classes(g).filter((c) => !c.startsWith("text-") && !fade.includes(c)).sort().join(" "));
@@ -68,7 +69,7 @@ describe("status glyph alignment", () => {
     expect(row!.children[1]!.textContent).toContain("Manual run by admin");
     // A step row is the glyph's parent.
     expect(glyphs[1]!.parentElement!.className).toBe(STEP_ROW);
-    // The header centres the glyph beside both of its lines, like a run row.
+    // The header centres the glyph beside its title line (title, number, status pill).
     expect(header!.className).toBe(RUN_HEAD_MAIN);
     expect(header!.children[1]!.querySelector("h2")).not.toBeNull();
     expect(within(header!.children[1] as HTMLElement).getByTestId("run-status")).toBeInTheDocument();
@@ -86,8 +87,8 @@ describe("status glyph alignment", () => {
     expect(boxes).toHaveLength(4);
     for (const box of boxes) expect(box.querySelector("[data-skeleton]")).not.toBeNull();
     expect(boxes.map((b) => b.parentElement!.className)).toEqual([ROW_BOX, RUN_HEAD_MAIN, STEP_ROW, STEP_ROW]);
-    // The header's glyph sits beside the title and meta lines there too.
+    // The header's glyph sits beside the title line there too; the meta chips row is under it, on the header's left edge.
     expect(boxes[1]!.nextElementSibling!.querySelector("h2")).not.toBeNull();
-    expect(boxes[1]!.nextElementSibling!.querySelector(`[class="${RUN_META}"]`)).not.toBeNull();
+    expect(boxes[1]!.closest("header")!.querySelector(`:scope > [class="${RUN_META}"]`)).not.toBeNull();
   });
 });
