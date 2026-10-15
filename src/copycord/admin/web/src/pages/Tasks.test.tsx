@@ -333,8 +333,12 @@ describe("Tasks page", () => {
     renderAt("/tasks");
     await openMenu("Backfill #general");
     expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Cancel" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cancel run" }));
+    // The run page asks the same, word for word.
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Work already done is kept; the run stops at its next checkpoint.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Keep running" })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
     expect(await screen.findByRole("img", { name: "Cancelled" })).toBeInTheDocument();
     expect(calls).toEqual(["/api/tasks/runs/12/cancel"]);
   });
@@ -346,7 +350,7 @@ describe("Tasks page", () => {
     });
     renderAt("/tasks");
     await openMenu("Backfill #general");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cancel run" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
     expect(await screen.findByText("Run already success")).toBeInTheDocument();
   });
@@ -362,8 +366,9 @@ describe("Tasks page", () => {
     });
     renderAt("/tasks");
     await openMenu("Backfill #general");
-    expect(screen.queryByRole("menuitem", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Cancel run" })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(await screen.findByText("The run and its report are deleted. This cannot be undone.")).toBeInTheDocument();
     const before = listCalls(fn).length;
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByRole("link", { name: "Backfill #general" })).toBeNull());

@@ -10,7 +10,7 @@ import { Button } from "../../components/ui/Button";
 import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { Input } from "../../components/ui/Field";
-import { readLastCount } from "../../components/ui/lastCount";
+import { readLastCount, readLastLabels } from "../../components/ui/lastCount";
 import { Skeleton, useReveal } from "../../components/ui/Skeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { runTypeOf, typeLabel } from "./typeLabels";
@@ -65,6 +65,13 @@ export function typeUrl(key: string): string {
 }
 export const RUN_META = "mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted";
 export const RUN_BODY = "flex flex-col gap-4";
+/** The stat tiles at the top of the summary card: a small label over a count. */
+export const STATS_LIST = "m-0 flex flex-wrap gap-x-8 gap-y-3 border-b border-border px-4 py-3";
+export const STAT_LABEL = "text-xs text-muted";
+export const STAT_VALUE = "m-0 text-lg font-semibold tabular-nums text-text";
+/** The tile and Inputs labels the run page showed last time (lastCount.ts), printed by the skeleton. */
+export const STATS_LABELS_KEY = "tasks.stat-labels";
+export const INPUTS_LABELS_KEY = "tasks.input-labels";
 /** The Inputs list under the stat tiles, and its small heading. */
 export const INPUTS_BOX = "px-4 py-3";
 export const INPUTS_TITLE = "m-0 mb-2 text-xs font-semibold text-muted";
@@ -330,6 +337,7 @@ function InlineBar({ width }: { width: number }) {
 }
 
 const STEP_WIDTHS = [["34%", 72], ["26%", 96], ["30%", 84]] as const;
+const INPUT_WIDTHS = [60, 90, 70, 80];
 
 export interface RunDetailSkeletonProps {
   /** The run's type key when known before the run loads (typeLabels.ts runTypeOf): its title shows as text. */
@@ -342,11 +350,16 @@ export interface RunDetailSkeletonProps {
  * The run page until the run answers, also the page's own loading state: the header with the type's
  * title as text when the run's type is known (bars in its place only when it cannot be), bars for the
  * glyph, number and meta line (the actions depend on the status, so they wait), the summary card with
- * its Inputs heading and bar rows, the Steps card with its real head (bars for the counts and the
+ * the tile and Inputs labels the last run page showed and bars for their values (four bar rows on a first
+ * visit), the Steps card with its real head (bars for the counts and the
  * overall bar, the real filter) and as many bar rows as the last run showed, and the collapsed Report line.
  */
 export function RunDetailSkeleton({ runType = null, steps = readLastCount(STEPS_COUNT_KEY, 2, STEP_ROWS_MAX) }: RunDetailSkeletonProps) {
   const title = runType ? typeLabel(runType).title : null;
+  // The tile and Inputs labels the last run page showed, as text; a first visit has four bar rows.
+  const stats = readLastLabels(STATS_LABELS_KEY, 8);
+  const inputs = readLastLabels(INPUTS_LABELS_KEY, 12);
+  const inputRows: (string | null)[] = inputs ?? [null, null, null, null];
   return (
     <div role="status" aria-busy="true" aria-label="Loading run" className="flex flex-col">
       <div inert>
@@ -385,16 +398,36 @@ export function RunDetailSkeleton({ runType = null, steps = readLastCount(STEPS_
         </header>
         <div className={RUN_BODY}>
           <section aria-label="Summary" className={FRAME}>
-            <div className={INPUTS_BOX}>
-              <h3 className={INPUTS_TITLE}>Inputs</h3>
-              <div className={INPUTS_LIST}>
-                {[60, 90, 70, 80].map((w, i) => (
-                  <div key={i} className="contents">
-                    <TextBar width={w} />
-                    <TextBar width={w + 40} />
+            {stats?.length ? (
+              <dl className={STATS_LIST}>
+                {stats.map((label, i) => (
+                  <div key={i} className="min-w-0">
+                    <dt className={STAT_LABEL}>{label}</dt>
+                    <dd className={STAT_VALUE}>
+                      <Skeleton.Text>00</Skeleton.Text>
+                    </dd>
                   </div>
                 ))}
-              </div>
+              </dl>
+            ) : null}
+            <div className={INPUTS_BOX}>
+              <h3 className={INPUTS_TITLE}>Inputs</h3>
+              {inputs?.length === 0 ? (
+                <p className="m-0 text-sm text-muted">
+                  <Skeleton.Text>No inputs</Skeleton.Text>
+                </p>
+              ) : (
+                <dl className={INPUTS_LIST}>
+                  {inputRows.map((label, i) => (
+                    <div key={i} className="contents">
+                      <dt className="text-muted">{label ?? <TextBar width={INPUT_WIDTHS[i % INPUT_WIDTHS.length]!} />}</dt>
+                      <dd className="m-0">
+                        <TextBar width={INPUT_WIDTHS[(i + 1) % INPUT_WIDTHS.length]! + 40} />
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
             </div>
           </section>
           <section aria-label="Steps" className={FRAME}>

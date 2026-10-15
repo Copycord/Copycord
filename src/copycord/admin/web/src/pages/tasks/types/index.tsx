@@ -9,7 +9,7 @@ import { Modal } from "../../../components/Modal";
 import { Button } from "../../../components/ui/Button";
 import { Checkbox } from "../../../components/ui/Checkbox";
 import { Field, FieldSelect, Input } from "../../../components/ui/Field";
-import type { TaskRun } from "../../../types/tasks";
+import type { TaskRun, TaskStep } from "../../../types/tasks";
 import { formatCount } from "../StepList";
 import { BackfillForm } from "./backfill/BackfillForm";
 import { useStartRun, type TaskFormProps } from "./start";
@@ -36,6 +36,8 @@ export interface TaskTypeEntry {
   describeInputs: (inputs: Record<string, unknown>, run?: Pick<TaskRun, "context">, schema?: Record<string, unknown>) => InputRow[];
   /** Words for the summary keys the type reports; a key without one is shown in words from its name. */
   summaryLabels?: Record<string, string>;
+  /** A finished step's note in the words its running label uses; null keeps the server's note. */
+  stepNote?: (step: TaskStep) => string | null;
 }
 
 const DAY = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -100,13 +102,25 @@ function describeBackfill(inputs: Record<string, unknown>, run?: Pick<TaskRun, "
   return rows;
 }
 
+// The tiles use the Steps card's words: steps done, failed, skipped, cancelled, and messages delivered.
 const BACKFILL_SUMMARY: Record<string, string> = {
-  success: "Succeeded",
+  success: "Done",
   failed: "Failed",
   skipped: "Skipped",
   cancelled: "Cancelled",
-  delivered: "Messages",
+  delivered: "Delivered",
 };
+
+/**
+ * A running channel reads "9 of 36 delivered, 36 pulled"; once it ends it reads "36 delivered" (or "9
+ * delivered, then cancelled") rather than the server's "36 messages", so the step keeps one wording.
+ */
+export function backfillStepNote(step: TaskStep): string | null {
+  if (step.done == null) return null;
+  if (step.state === "success") return `${formatCount(step.done)} delivered`;
+  if (step.state === "cancelled" && step.done > 0) return `${formatCount(step.done)} delivered, then cancelled`;
+  return null;
+}
 
 const BackfillIcon = (
   <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -123,7 +137,13 @@ const GenericIcon = (
 );
 
 export const TASK_TYPES: Record<string, TaskTypeEntry> = {
-  backfill_channels: { icon: BackfillIcon, Form: BackfillForm, describeInputs: describeBackfill, summaryLabels: BACKFILL_SUMMARY },
+  backfill_channels: {
+    icon: BackfillIcon,
+    Form: BackfillForm,
+    describeInputs: describeBackfill,
+    summaryLabels: BACKFILL_SUMMARY,
+    stepNote: backfillStepNote,
+  },
 };
 
 function formatValue(v: unknown): string {

@@ -9,11 +9,12 @@ import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { useLastLabels } from "../../components/ui/lastCount";
 import { api, errorText } from "../../lib/api";
 import { ACTIVE_STATUSES } from "../../types/tasks";
 import type { TaskRun, TaskType } from "../../types/tasks";
 import { ReportPanel, useRunToast } from "./ReportPanel";
-import { ContextBadge, formatWhen, runDuration, triggerText, useNow } from "./RunList";
+import { ContextBadge, formatWhen, runConfirm, runDuration, triggerText, useNow } from "./RunList";
 import { runUrl, useTaskRun } from "./runStore";
 import { STATUS_LABEL, StatusIcon } from "./StatusIcon";
 import { StepList, formatCount } from "./StepList";
@@ -22,6 +23,7 @@ import {
   FADE_IN,
   FRAME,
   INPUTS_BOX,
+  INPUTS_LABELS_KEY,
   INPUTS_LIST,
   INPUTS_TITLE,
   RUN_BODY,
@@ -35,23 +37,30 @@ import {
   RUN_TITLE,
   RUN_TITLE_ROW,
   RunDetailSkeleton,
+  STATS_LABELS_KEY,
+  STATS_LIST,
+  STAT_LABEL,
+  STAT_VALUE,
   typeUrl,
 } from "./TasksSkeleton";
 import { rememberRunTypes, runTypeOf, typeLabel } from "./typeLabels";
-import { describeRunInputs, summaryStats } from "./types";
+import { describeRunInputs, entryFor, summaryStats } from "./types";
 
 /** The counts as stat tiles over the run's Inputs; the tiles show once the run reports counts. */
 export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<string, unknown> }) {
   const stats = summaryStats(run);
   const rows = describeRunInputs(run, schema);
+  // The skeleton of the next run page prints these labels and stands as tall.
+  useLastLabels(STATS_LABELS_KEY, stats.map((s) => s.label));
+  useLastLabels(INPUTS_LABELS_KEY, rows.map((r) => r.label));
   return (
     <section aria-label="Summary" className={FRAME}>
       {stats.length ? (
-        <dl aria-label="Counts" className={cx("m-0 flex flex-wrap gap-x-8 gap-y-3 border-b border-border px-4 py-3", FADE_IN)}>
+        <dl aria-label="Counts" className={cx(STATS_LIST, FADE_IN)}>
           {stats.map((s) => (
             <div key={s.key} className="min-w-0">
-              <dt className="text-xs text-muted">{s.label}</dt>
-              <dd className="m-0 text-lg font-semibold tabular-nums text-text">{formatCount(s.value)}</dd>
+              <dt className={STAT_LABEL}>{s.label}</dt>
+              <dd className={STAT_VALUE}>{formatCount(s.value)}</dd>
             </div>
           ))}
         </dl>
@@ -93,16 +102,17 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
     if (!ok || !what) return;
     setBusy(true);
     try {
+      // The same toasts as the list's menu.
       if (what === "cancel") {
         await api.post(`${runUrl(run.id)}/cancel`);
-        toast.show(`Cancelling ${name}`, { kind: "success" });
+        toast.show(`Cancelling ${name}`, { kind: "info" });
       } else {
         await api.del(runUrl(run.id));
         toast.show(`Deleted ${name}`, { kind: "success" });
         navigate("/tasks");
       }
     } catch (e) {
-      toast.show(errorText(e, what === "cancel" ? "Could not cancel the run." : "Could not delete the run."), { kind: "error" });
+      toast.show(errorText(e, what === "cancel" ? `Could not cancel ${name}` : `Could not delete ${name}`), { kind: "error" });
     } finally {
       setBusy(false);
     }
@@ -161,15 +171,7 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
         </div>
       </div>
       {run.status === "failed" && run.error ? <p className="mt-2 text-sm text-danger">{run.error}</p> : null}
-      <ConfirmDialog
-        open={ask !== null}
-        title={ask === "delete" ? `Delete ${name}?` : `Cancel ${name}?`}
-        body={ask === "delete" ? "The run, its log and its report are removed. This cannot be undone." : "Running steps stop at the next page; queued steps are dropped."}
-        confirmLabel={ask === "delete" ? "Delete" : "Cancel run"}
-        cancelLabel={ask === "delete" ? "Keep" : "Keep running"}
-        confirmVariant="ghost-red"
-        onResult={(ok) => void onConfirm(ok)}
-      />
+      <ConfirmDialog open={ask !== null} {...runConfirm(ask ?? "cancel", name)} onResult={(ok) => void onConfirm(ok)} />
     </header>
   );
 }
@@ -181,7 +183,7 @@ export function RunView({ run, type, refreshing = false }: { run: TaskRun; type?
       <RunHeader run={run} typeTitle={type?.title ?? typeLabel(run.type).title} />
       <div className={RUN_BODY}>
         <RunSummary run={run} schema={type?.inputs_schema} />
-        <StepList run={run} />
+        <StepList run={run} noteOf={entryFor(run.type).stepNote} />
         <ReportPanel run={run} />
       </div>
     </div>

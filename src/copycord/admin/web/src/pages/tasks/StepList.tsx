@@ -27,9 +27,14 @@ export function formatCount(n: number): string {
   return NUM.format(n);
 }
 
-/** The note beside a step's title: the server label, else one derived from its state and counts. */
-export function stepLabel(step: TaskStep): string {
+/** A task type's own note for a step (types/index.tsx stepNote), null to fall through. */
+export type StepNote = (step: TaskStep) => string | null;
+
+/** The note beside a step's title: the server label, the type's note, else one from its state and counts. */
+export function stepLabel(step: TaskStep, noteOf?: StepNote): string {
   if (step.label) return step.label;
+  const typed = noteOf?.(step);
+  if (typed) return typed;
   if (step.state === "queued" && step.queue_position != null) return `Queued #${step.queue_position}`;
   if (step.state === "running" && step.done != null && step.total != null) {
     return `${formatCount(step.done)} / ${formatCount(step.total)}`;
@@ -127,7 +132,7 @@ function StepBar({ step }: { step: TaskStep }) {
   );
 }
 
-export function StepList({ run }: { run: TaskRun }) {
+export function StepList({ run, noteOf }: { run: TaskRun; noteOf?: StepNote }) {
   const steps = useMemo(() => run.steps ?? [], [run.steps]);
   const [filter, setFilter] = useState<StepFilter>("");
   const ordered = useMemo(() => orderSteps(steps), [steps]);
@@ -149,7 +154,7 @@ export function StepList({ run }: { run: TaskRun }) {
       ) : (
         <ul className={cx(STEP_LIST, FADE_IN)}>
           {shown.map((s) => {
-            const note = stepLabel(s);
+            const note = stepLabel(s, noteOf);
             return (
               <li key={s.key} className={STEP_ROW}>
                 <StatusIcon status={s.state} size={14} />

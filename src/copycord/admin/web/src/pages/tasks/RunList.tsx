@@ -4,6 +4,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Badge } from "../../components/ui/Badge";
+import type { ConfirmOptions } from "../../components/ui/ConfirmDialog";
 import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
@@ -146,11 +147,30 @@ export interface RunListProps {
 
 export type RunAction = "view" | "cancel" | "rerun" | "delete";
 
-/** The row kebab: View always; Cancel while queued or running; Re-run and Delete once finished. */
+/** The Cancel run and Delete confirms, word for word the same from the list's menu and the run page. */
+export function runConfirm(act: "cancel" | "delete", name: string): ConfirmOptions {
+  return act === "cancel"
+    ? {
+        title: `Cancel ${name}?`,
+        body: "Work already done is kept; the run stops at its next checkpoint.",
+        confirmLabel: "Cancel run",
+        cancelLabel: "Keep running",
+        confirmVariant: "ghost-red",
+      }
+    : {
+        title: `Delete ${name}?`,
+        body: "The run and its report are deleted. This cannot be undone.",
+        confirmLabel: "Delete",
+        cancelLabel: "Keep",
+        confirmVariant: "ghost-red",
+      };
+}
+
+/** The row kebab: View always; Cancel run while queued or running; Re-run and Delete once finished, as on the run page. */
 export function RunMenu({ run, onAction }: { run: TaskRun; onAction: (act: RunAction, run: TaskRun) => void }) {
   const live = ACTIVE_STATUSES.includes(run.status);
   const items: MenuItem[] = [{ act: "view", label: "View", onSelect: () => onAction("view", run) }];
-  if (live) items.push({ act: "cancel", label: "Cancel", onSelect: () => onAction("cancel", run) });
+  if (live) items.push({ act: "cancel", label: "Cancel run", onSelect: () => onAction("cancel", run) });
   else {
     items.push({ act: "rerun", label: "Re-run", onSelect: () => onAction("rerun", run) });
     items.push({ act: "delete", label: "Delete", danger: true, onSelect: () => onAction("delete", run) });

@@ -13,7 +13,7 @@ import { ApiError, api, errorText } from "../lib/api";
 import type { TaskRun, TaskRunResponse, TaskType, TaskTypesResponse } from "../types/tasks";
 import { RunDetail } from "./tasks/RunDetail";
 import { RunFilterSelects, RunSearch, useRunFilters } from "./tasks/RunFilters";
-import { RunList, RunMenu, type RunAction } from "./tasks/RunList";
+import { RunList, RunMenu, runConfirm, type RunAction } from "./tasks/RunList";
 import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
 import {
   ALL_TASKS_DESCRIPTION,
@@ -179,13 +179,7 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
       // Tasks reads ?rerun= and opens the type's form prefilled from this run.
       navigate(`/tasks?type=${encodeURIComponent(run.type)}&rerun=${encodeURIComponent(run.id)}`);
     } else if (act === "cancel") {
-      const ok = await confirm({
-        title: `Cancel ${name}?`,
-        body: "Work already done is kept; the run stops at its next checkpoint.",
-        confirmLabel: "Cancel run",
-        cancelLabel: "Keep running",
-        confirmVariant: "ghost-red",
-      });
+      const ok = await confirm(runConfirm("cancel", name));
       if (!ok) return;
       try {
         const res = await api.post<TaskRunResponse>(`${runUrl(run.id)}/cancel`);
@@ -197,12 +191,7 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
         toast.show(errorText(e, `Could not cancel ${name}`), { kind: "error" });
       }
     } else {
-      const ok = await confirm({
-        title: `Delete ${name}?`,
-        body: "Its log and report are deleted with it. This cannot be undone.",
-        confirmLabel: "Delete",
-        confirmVariant: "ghost-red",
-      });
+      const ok = await confirm(runConfirm("delete", name));
       if (!ok) return;
       try {
         await api.del(runUrl(run.id));

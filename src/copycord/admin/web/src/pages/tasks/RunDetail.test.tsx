@@ -6,9 +6,10 @@ import { ToastProvider } from "../../components/Toast";
 import type { TaskRun, TaskStep, TaskType } from "../../types/tasks";
 import { ReportPanel } from "./ReportPanel";
 import { RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
+import { runConfirm } from "./RunList";
 import { StepList, orderSteps, overallProgress, stepLabel, stepSummary } from "./StepList";
-import { BUSY, FADE_IN, RUN_HEAD_MAIN, RUN_META, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
-import { describeRunInputs, rangeWords } from "./types";
+import { BUSY, FADE_IN, INPUTS_LIST, RUN_HEAD_MAIN, RUN_META, RunDetailSkeleton, STATS_LIST, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
+import { backfillStepNote, describeRunInputs, rangeWords } from "./types";
 
 const BACKFILL: TaskType = { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 };
 
@@ -155,6 +156,9 @@ describe("RunHeader", () => {
     await user.click(screen.getByRole("button", { name: "Cancel run" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Cancel Backfill channels #12?")).toBeInTheDocument();
+    // The list's menu asks the same, word for word.
+    expect(within(dialog).getByText(runConfirm("cancel", "x").body as string)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Keep running" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancel run" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -180,6 +184,8 @@ describe("RunHeader", () => {
     renderHeader(makeRun());
     await user.click(screen.getByRole("button", { name: "Delete" }));
     const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(runConfirm("delete", "x").body as string)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Keep" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(/^\/tasks$/));
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -205,9 +211,9 @@ describe("Run page structure", () => {
         {
           name: "Summary",
           counts: [
-            ["Succeeded", "2"],
+            ["Done", "2"],
             ["Failed", "0"],
-            ["Messages", "1,234"],
+            ["Delivered", "1,234"],
           ],
           inputs: [
             ["Mapping", "Main mapping"],
@@ -369,6 +375,16 @@ describe("StepList", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(100);
   });
 
+  it("words a finished backfill channel like its running label", () => {
+    const note = (step: TaskStep) => stepLabel(step, backfillStepNote);
+    expect(note({ key: "a", title: "#a", state: "running", done: 9, total: 36, label: "9 of 36 delivered, 36 pulled" })).toBe("9 of 36 delivered, 36 pulled");
+    expect(note({ key: "a", title: "#a", state: "success", done: 1234, total: 5000, note: "1,234 messages" })).toBe("1,234 delivered");
+    expect(note({ key: "a", title: "#a", state: "cancelled", done: 9, note: "Cancelled after 9 messages" })).toBe("9 delivered, then cancelled");
+    expect(note({ key: "a", title: "#a", state: "cancelled", done: 0, note: "Cancelled" })).toBe("Cancelled");
+    expect(note({ key: "a", title: "#a", state: "failed", done: 3, note: "delivery timed out" })).toBe("delivery timed out");
+    expect(note({ key: "a", title: "#a", state: "skipped", note: "Already running in #12" })).toBe("Already running in #12");
+  });
+
   it("says when there are no steps yet", () => {
     render(<StepList run={makeRun({ steps: [] })} />);
     expect(screen.getByText("No steps yet")).toBeInTheDocument();
@@ -397,7 +413,7 @@ describe("RunSummary", () => {
   });
 
   it("falls back to the report's summary", () => {
-    expect(summaryOf(makeRun({ summary: null, report: { summary: { delivered: 7, note: "x" } } })).counts).toEqual([["Messages", "7"]]);
+    expect(summaryOf(makeRun({ summary: null, report: { summary: { delivered: 7, note: "x" } } })).counts).toEqual([["Delivered", "7"]]);
   });
 
   it("a type without a registry entry: counts in words, inputs by schema title in schema order", () => {
@@ -419,6 +435,43 @@ describe("RunSummary", () => {
   it("says when a run has no inputs", () => {
     render(<RunSummary run={makeRun({ inputs: {} })} />);
     expect(screen.getByText("No inputs")).toBeInTheDocument();
+  });
+});
+
+describe("Run skeleton after a finished run", () => {
+  it("prints the last page's tile and Inputs labels in the same boxes, bars only for the values", () => {
+    localStorage.clear();
+    const shape = (root: Element) => {
+      const summary = root.querySelector("section[aria-label=Summary]")!;
+      const tiles = summary.querySelector(`dl[class^="${STATS_LIST}"]`);
+      const inputs = summary.querySelector(`dl[class^="${INPUTS_LIST}"]`);
+      return {
+        tiles: tiles ? Array.from(tiles.querySelectorAll("dt")).map((dt) => [dt.className, dt.textContent, dt.nextElementSibling!.className]) : [],
+        inputs: inputs ? Array.from(inputs.querySelectorAll("dt")).map((dt) => [dt.className, dt.textContent]) : [],
+      };
+    };
+    // A first visit: no tiles, four bar rows for the inputs.
+    const cold = render(
+      <MemoryRouter>
+        <RunDetailSkeleton />
+      </MemoryRouter>,
+    );
+    expect(shape(cold.container).tiles).toEqual([]);
+    expect(cold.container.querySelectorAll("section[aria-label=Summary] dt [data-skeleton]")).toHaveLength(4);
+    cold.unmount();
+
+    const loaded = renderView(makeRun({ summary: { success: 1, failed: 0, skipped: 0, cancelled: 0, delivered: 36 } }));
+    const real = shape(loaded.container);
+    loaded.unmount();
+    const skel = render(
+      <MemoryRouter>
+        <RunDetailSkeleton />
+      </MemoryRouter>,
+    );
+    expect(real.tiles.map((t) => t[1])).toEqual(["Done", "Failed", "Skipped", "Cancelled", "Delivered"]);
+    expect(shape(skel.container)).toEqual(real);
+    expect(skel.container.querySelectorAll("section[aria-label=Summary] dt [data-skeleton]")).toHaveLength(0);
+    expect(skel.container.querySelectorAll("section[aria-label=Summary] dd [data-skeleton]")).toHaveLength(5 + 6);
   });
 });
 
@@ -546,14 +599,16 @@ describe("RunDetail live", () => {
       }),
     );
     expect(screen.getByTestId("run-status")).toHaveTextContent("Success");
-    expect(screen.getByText("36 messages")).toBeInTheDocument();
+    // The server's "36 messages" reads in the running label's words once the channel ends.
+    expect(screen.getByText("36 delivered")).toBeInTheDocument();
+    expect(screen.queryByText("36 messages")).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar", { name: "#general progress" })).not.toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Overall progress" })).toHaveAttribute("aria-valuenow", "100");
     const counts = screen.getByRole("region", { name: "Summary" }).querySelector("dl[aria-label=Counts]");
     expect(pairs(counts)).toEqual([
-      ["Succeeded", "1"],
+      ["Done", "1"],
       ["Failed", "0"],
-      ["Messages", "36"],
+      ["Delivered", "36"],
     ]);
     // The inputs are not in frames; the held ones stay.
     expect(screen.getByText("Last 500 messages")).toBeInTheDocument();
