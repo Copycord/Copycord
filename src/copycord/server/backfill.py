@@ -531,6 +531,35 @@ class BackfillManager(BackfillWebhookPool):
             )
         return written
 
+    def attach_task(self, original_id: int, task: asyncio.Task) -> None:
+        """Track a message task for the channel; on_done drains these before it reads the delivered count."""
+        cid = int(original_id)
+        if task in self._attached[cid]:
+            return
+        self._attached[cid].add(task)
+        self._inflight[cid] = self._inflight.get(cid, 0) + 1
+        self._attach_count[cid] = self._attach_count.get(cid, 0) + 1
+        self._last_attach_ts[cid] = asyncio.get_running_loop().time()
+
+        def _done_cb(t: asyncio.Task, c=cid):
+            self._attached[c].discard(t)
+            self._on_task_done(c, t)
+
+        task.add_done_callback(_done_cb)
+
+    async def cancel_all_active(self) -> None:
+        """Shutdown: cancel every tracked message task and wait for them to unwind."""
+        all_tasks = [t for tasks in self._attached.values() for t in list(tasks)]
+
+        for t in all_tasks:
+            t.cancel()
+
+        if all_tasks:
+            await asyncio.gather(*all_tasks, return_exceptions=True)
+
+        self._attached.clear()
+        self._inflight.clear()
+
     def _on_task_done(self, cid: int, task: asyncio.Task) -> None:
         try:
             task.result()
