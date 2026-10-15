@@ -226,3 +226,34 @@ async def test_progress_throttle_coalesces():
     frames = ws.of("backfill_job_progress")
     assert [f["pulled"] for f in frames] == [1, 5, 9, 11]
     assert frames[-1] == {"job_id": BIG, "pulled": 11, "total_estimate": 40}
+
+
+@pytest.mark.asyncio
+async def test_cancel_lands_locally_before_a_hung_server_send():
+    gate = asyncio.Event()
+    eng = _StubEngine([[1], [2], []], gate=gate)
+    cl = _listener(eng)
+    cl.BF_CANCEL_SEND_TIMEOUT = 0.05
+    await cl._on_ws({"type": "backfill_run", "data": _run("a", "111")})
+    await cl._on_ws({"type": "backfill_run", "data": _run("b", "222")})
+    await asyncio.sleep(0.05)
+    seen = {}
+    send = cl.ws.send
+
+    async def hung_send(payload):
+        if payload.get("type") == "backfill_job_cancel":
+            job_id = payload["data"]["job_id"]
+            seen[job_id] = (cl._bf_jobs[job_id].cancelled, set(cl._bf_queued))
+            await asyncio.Event().wait()
+        await send(payload)
+
+    cl.ws.send = hung_send
+    res = await asyncio.wait_for(cl._on_ws({"type": "backfill_cancel", "data": {"job_id": "b"}}), 1.0)
+    assert res == {"ok": True, "job_id": "b", "state": "queued"}
+    assert seen["b"] == (True, {111})
+    res = await asyncio.wait_for(cl._on_ws({"type": "backfill_cancel", "data": {"job_id": "a"}}), 1.0)
+    assert res["state"] == "running" and seen["a"][0] is True
+    gate.set()
+    await _drain(cl)
+    ends = cl.ws.of("backfill_job_end")
+    assert [(e["job_id"], e["error"]) for e in ends] == [("b", "cancelled"), ("a", "cancelled")]

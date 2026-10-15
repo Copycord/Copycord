@@ -807,6 +807,15 @@ class ClientListener:
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
 
+        if not getattr(self, "_bf_reset_sent", False) and not self._bf_jobs:
+            # A fresh client runs no backfill job: the server drops any a previous run left open.
+            self._bf_reset_sent = True
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(
+                    self.ws.send({"type": "backfill_jobs_reset", "data": {}}),
+                    self.BF_CANCEL_SEND_TIMEOUT,
+                )
+
         asyncio.create_task(self._snapshot_all_guilds_once())
 
     def _rebuild_blocklist(self, kw_map: dict | None = None) -> None:
@@ -2368,24 +2377,34 @@ class ClientListener:
         job = BackfillJob(run.get("job_id"), chan_id, self.ws.send)
         return await self._enqueue_backfill(chan_id, params, job=job)
 
+    BF_CANCEL_SEND_TIMEOUT = 3.0
+
     async def _cancel_backfill_job(self, job_id: str) -> dict:
         """Drop a queued job, or flag a running one to stop at its next page. The server is told
-        too: it may still be forwarding what was pulled, long after this side ended the job."""
-        with contextlib.suppress(Exception):
-            await self.ws.send({"type": "backfill_job_cancel", "data": {"job_id": job_id}})
+        too: it may still be forwarding what was pulled, long after this side ended the job. The
+        local cancel lands first; a slow or dead server link never holds it up."""
         job = self._bf_jobs.get(job_id)
-        if job is None:
-            return {"ok": True, "job_id": job_id, "state": "delivering"}
-        job.cancelled = True
-        pending = getattr(self._bf_queue, "_queue", None)
-        for item in list(pending or []):
-            if isinstance(item[1], dict) and item[1].get("_job") is job:
-                pending.remove(item)
-                self._bf_queue.task_done()
-                self._bf_queued.discard(item[0])
-                await self._end_backfill_job(job, ok=False, error="cancelled")
-                return {"ok": True, "job_id": job_id, "state": "queued"}
-        return {"ok": True, "job_id": job_id, "state": "running"}
+        state = "delivering"
+        dropped = False
+        if job is not None:
+            job.cancelled = True
+            state = "running"
+            pending = getattr(self._bf_queue, "_queue", None)
+            for item in list(pending or []):
+                if isinstance(item[1], dict) and item[1].get("_job") is job:
+                    pending.remove(item)
+                    self._bf_queue.task_done()
+                    self._bf_queued.discard(item[0])
+                    state, dropped = "queued", True
+                    break
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(
+                self.ws.send({"type": "backfill_job_cancel", "data": {"job_id": job_id}}),
+                self.BF_CANCEL_SEND_TIMEOUT,
+            )
+        if dropped:
+            await self._end_backfill_job(job, ok=False, error="cancelled")
+        return {"ok": True, "job_id": job_id, "state": state}
 
     async def _send_backfill_job(self, job: BackfillJob, state: str, position) -> None:
         with contextlib.suppress(Exception):
