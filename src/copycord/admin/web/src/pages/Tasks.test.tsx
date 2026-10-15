@@ -187,6 +187,28 @@ describe("Tasks page", () => {
     expect(screen.getByText("Pick a task type on the left to run one")).toBeInTheDocument();
   });
 
+  it("shows No task runs yet with Run task on an empty type page with no filter", async () => {
+    serve([]);
+    renderAt("/tasks?type=backfill_channels");
+    expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
+    expect(screen.queryByText("No runs match")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+    expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(2);
+  });
+
+  it("shows No runs match on a type page only when a filter is set, and Clear filters stays on the type", async () => {
+    const fn = serve([]);
+    renderAt("/tasks?type=backfill_channels&actor=bot");
+    expect(await screen.findByText("No runs match")).toBeInTheDocument();
+    const clears = screen.getAllByRole("button", { name: "Clear filters" });
+    fireEvent.click(clears[clears.length - 1]!);
+    expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
+    const last = new URL(listCalls(fn).at(-1)!, "http://x").searchParams;
+    expect(last.get("type")).toBe("backfill_channels");
+    expect(last.get("actor")).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
+  });
+
   it("cancels an active run after confirming and patches the row from the response", async () => {
     const live = run({ id: "12", number: 12, status: "running", finished_at: null, seq: 4 });
     const calls: string[] = [];

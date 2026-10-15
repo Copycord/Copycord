@@ -238,7 +238,7 @@ function RunsView({
     <EmptyState
       title="No task runs yet"
       className="m-4"
-      description={runAction ? undefined : "Pick a task type on the left to run one"}
+      description={filters.type ? undefined : "Pick a task type on the left to run one"}
       action={runAction}
     />
   );
