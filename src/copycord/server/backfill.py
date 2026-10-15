@@ -204,6 +204,8 @@ class BackfillManager(BackfillWebhookPool):
         st["started_dt"] = datetime.now(timezone.utc)
         st.setdefault("last_count", 0)
         st.setdefault("delivered", 0)
+        # A resumed run starts from the checkpoint's count; the job reports what it delivers itself.
+        st["delivered_base"] = int(st.get("delivered") or 0)
         st.setdefault("expected_total", None)
         st["last_edit_ts"] = 0.0
         st.setdefault("temp_webhook_ids", [])
@@ -309,6 +311,31 @@ class BackfillManager(BackfillWebhookPool):
             sent_ids.add(oid)
             st["last_orig_id"] = oid
         st["delivered"] = int(st.get("delivered", 0)) + 1
+        hook = getattr(self.r, "_bf_note_delivered", None)
+        if hook is not None:
+            try:
+                hook(int(channel_id))
+            except Exception:
+                logger.debug("[bf] delivered hook failed for #%s", channel_id, exc_info=True)
+
+    def job_counts(self, channel_id: int) -> tuple[int | None, int | None]:
+        """(delivered, expected total) for the channel's current job, counted from its start."""
+        st = self._progress.get(int(channel_id))
+        if not st:
+            return None, None
+        base = int(st.get("delivered_base") or 0)
+        delivered = max(0, int(st.get("delivered") or 0) - base)
+        total = st.get("expected_total")
+        try:
+            total = max(delivered, int(total) - base) if total is not None else None
+        except (TypeError, ValueError):
+            total = None
+        return delivered, total
+
+    async def wait_delivered(self, original_id: int) -> None:
+        """Wait for every message task attached to the channel (messages, threads and stickers) to finish."""
+        stall = float(os.getenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "600"))
+        await self._wait_drain(int(original_id), no_progress_timeout=stall)
 
     def note_checkpoint(
         self, channel_id, original_message_id=None, original_timestamp_iso=None
@@ -415,7 +442,7 @@ class BackfillManager(BackfillWebhookPool):
         wait_cleanup: bool = False,
         expected_task_id: str | None = None,
     ) -> int | None:
-        """Drain, mark the run done, start temp webhook cleanup; returns messages written for the run."""
+        """Drain, mark the run done, start temp webhook cleanup; returns messages written since on_started."""
         cid = int(original_id)
 
         st = self._progress.get(cid) or {}
@@ -446,7 +473,7 @@ class BackfillManager(BackfillWebhookPool):
 
         st = self._progress.get(cid) or {}
         delivered = int(st.get("delivered", 0))
-        written = delivered
+        written = max(0, delivered - int(st.get("delivered_base") or 0))
         total = st.get("expected_total")
         try:
             total = int(total) if total is not None else None

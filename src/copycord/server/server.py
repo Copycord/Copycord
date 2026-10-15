@@ -173,6 +173,9 @@ logger.setLevel(LEVEL)
 
 
 class ServerReceiver:
+    # Seconds between backfill_job_delivered frames for one job.
+    BF_PROGRESS_INTERVAL = 0.5
+
     def __init__(self):
         self.config = Config(logger=logger)
         self.bot = discord.Bot(intents=discord.Intents.all())
@@ -1233,30 +1236,86 @@ class ServerReceiver:
             return True
         return False
 
+    def _bf_job_for_channel(self, orig: int) -> tuple[str | None, dict | None]:
+        job_id = self._bf_job_by_channel.get(int(orig))
+        return job_id, (self._bf_jobs.get(job_id) if job_id else None)
+
+    def _bf_job_cancelled(self, orig: int) -> bool:
+        """The channel's backfill job was cancelled: its queued forwards return without sending."""
+        _, job = self._bf_job_for_channel(orig)
+        return bool(job and job.get("cancelled"))
+
+    def _bf_note_delivered(self, orig: int) -> None:
+        """BackfillManager.note_sent hook: publish the job's delivered count, at most every BF_PROGRESS_INTERVAL seconds with a trailing publish."""
+        job_id, job = self._bf_job_for_channel(orig)
+        if job is None or job.get("progress_task") is not None:
+            return
+        loop = asyncio.get_running_loop()
+        last = job.get("progress_at")
+        wait = 0.0 if last is None else max(0.0, last + self.BF_PROGRESS_INTERVAL - loop.time())
+        job["progress_task"] = loop.create_task(self._bf_publish_delivered(job_id, wait))
+
+    async def _bf_publish_delivered(self, job_id: str, delay: float = 0.0) -> None:
+        """backfill_job_delivered: messages the server sent for the job so far and its expected total."""
+        if delay > 0:
+            await asyncio.sleep(delay)
+        job = self._bf_jobs.get(job_id)
+        if job is None:
+            return
+        pending = job.get("progress_task")
+        if pending is not None and pending is not asyncio.current_task():
+            pending.cancel()
+        job["progress_task"] = None
+        job["progress_at"] = asyncio.get_running_loop().time()
+        delivered, total = self.backfill.job_counts(job["channel"])
+        if delivered is None:
+            return
+        with contextlib.suppress(Exception):
+            await self.bus.publish(
+                "client",
+                {
+                    "type": "backfill_job_delivered",
+                    "data": {
+                        "job_id": job_id,
+                        "original_channel_id": str(job["channel"]),
+                        "delivered": delivered,
+                        "total": total,
+                    },
+                },
+            )
+
     async def _bf_cleanup_job(self, orig: int) -> None:
-        """Run the end of stream cleanup for a channel, bracketed by backfill_job_cleanup and the job's delivered count."""
-        job_id = self._bf_job_by_channel.get(orig)
-        job = self._bf_jobs.get(job_id) if job_id else None
+        """End of stream for a channel. A job first waits for every forward still queued on the
+        channel (messages, then the threads and stickers behind them), publishes its final delivered
+        count, then backfill_job_cleanup, then runs the cleanup; the job's cleanup future carries the
+        messages written."""
+        job_id, job = self._bf_job_for_channel(orig)
         if job is not None and job.get("cleanup") is not None:
             await asyncio.shield(job["cleanup"])
             return
         if job is not None:
             job["cleanup"] = asyncio.get_running_loop().create_future()
-            with contextlib.suppress(Exception):
-                await self.bus.publish(
-                    "client",
-                    {
-                        "type": "backfill_job_cleanup",
-                        "data": {
-                            "job_id": job_id,
-                            "original_channel_id": str(orig),
-                            "state": "cleaning",
-                        },
-                    },
-                )
         delivered = None
         try:
+            if job is not None:
+                await self.backfill.wait_delivered(orig)
+                await self._bf_publish_delivered(job_id)
+                with contextlib.suppress(Exception):
+                    await self.bus.publish(
+                        "client",
+                        {
+                            "type": "backfill_job_cleanup",
+                            "data": {
+                                "job_id": job_id,
+                                "original_channel_id": str(orig),
+                                "state": "cleaning",
+                            },
+                        },
+                    )
+            counted, _ = self.backfill.job_counts(orig)
             delivered = await self._bf_finish_channel(orig)
+            if delivered is None:
+                delivered = counted
         finally:
             if job is not None and not job["cleanup"].done():
                 job["cleanup"].set_result(int(delivered or 0))
@@ -1580,6 +1639,8 @@ class ServerReceiver:
                 delivered = 0
                 if job.get("cleanup") is not None:
                     delivered = await asyncio.shield(job["cleanup"])
+                if job.get("progress_task") is not None:
+                    job["progress_task"].cancel()
                 self._bf_jobs.pop(job_id, None)
                 if orig is not None and self._bf_job_by_channel.get(orig) == job_id:
                     self._bf_job_by_channel.pop(orig, None)

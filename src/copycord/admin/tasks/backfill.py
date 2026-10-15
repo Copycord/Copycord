@@ -11,8 +11,15 @@
 
 One step per channel. Every channel becomes a client job keyed by
 job_id = "<run_id>:<channel_id>"; the admin bus watcher hands the job frames
-(backfill_job, backfill_job_progress, backfill_job_cleanup, backfill_job_end)
-to dispatch(), which routes them by job_id to the run's step.
+(backfill_job, backfill_job_progress, backfill_job_delivered,
+backfill_job_cleanup, backfill_job_end) to dispatch(), which routes them by
+job_id to the run's step.
+
+The client pulls history (backfill_job_progress: pulled, total_estimate) well
+ahead of the server, which forwards each message, thread and sticker in turn
+(backfill_job_delivered: delivered, total). A step's progress is what the
+server delivered; pulled only shows in its label. The server sends
+backfill_job_cleanup once everything it queued for the channel went out.
 
 configure(db=..., send=...) wires the DB and the client command sender
 (an async callable taking {type, data} and returning a dict); app.py does it
@@ -35,7 +42,8 @@ log = logging.getLogger("copycord.tasks.backfill")
 
 TYPE_KEY = "backfill_channels"
 CANCEL_WAIT = 20.0
-JOB_FRAMES = ("backfill_job", "backfill_job_progress", "backfill_job_cleanup", "backfill_job_end")
+JOB_FRAMES = ("backfill_job", "backfill_job_progress", "backfill_job_delivered",
+              "backfill_job_cleanup", "backfill_job_end")
 
 
 # wiring
@@ -223,10 +231,20 @@ class _Job:
     ctx: Any
     result: dict = field(default_factory=dict)
     done: asyncio.Event = field(default_factory=asyncio.Event)
+    pulled: int = 0
+    total_estimate: Optional[int] = None
+    delivered: int = 0
+    server_total: Optional[int] = None
+    cleaning: bool = False
 
     @property
     def terminal(self) -> bool:
         return self.step.data["state"] in STEP_FINAL
+
+    @property
+    def total(self) -> Optional[int]:
+        known = [n for n in (self.total_estimate, self.server_total) if n is not None]
+        return max(known + [self.delivered]) if known else None
 
 
 _jobs: dict[str, _Job] = {}
@@ -247,6 +265,35 @@ def _fmt(n: Any) -> str:
         return f"{int(n):,}"
     except (TypeError, ValueError):
         return "0"
+
+
+def _int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def progress_label(delivered: int, total: Optional[int], pulled: int) -> str:
+    """"12 of 35 delivered, 35 pulled"; without a total "12 delivered, 35 pulled"."""
+    sent = f"{_fmt(delivered)} of {_fmt(total)}" if total is not None else _fmt(delivered)
+    return f"{sent} delivered, {_fmt(pulled)} pulled"
+
+
+async def _show_progress(job: "_Job") -> None:
+    """The step's bar is what the server delivered against the best total known."""
+    label = None if job.cleaning else progress_label(job.delivered, job.total, job.pulled)
+    await job.step.progress(job.delivered, job.total, label=label)
+
+
+async def _live_summary(ctx: Any) -> None:
+    """The run's counts while it goes: finished steps by outcome and the messages delivered so far."""
+    counts = {"success": 0, "failed": 0, "skipped": 0, "cancelled": 0}
+    for s in ctx.steps_dict():
+        if s["state"] in counts:
+            counts[s["state"]] += 1
+    delivered = sum(int(j.result.get("delivered") or 0) for j in _jobs.values() if j.ctx is ctx)
+    await ctx.summary(**counts, delivered=delivered)
 
 
 async def dispatch(frame: dict) -> bool:
@@ -275,15 +322,24 @@ async def dispatch(frame: dict) -> bool:
                     job.result["started_at"] = iso(ctx._clock())
                     await step.start()
                     await ctx.log(f"Started #{name}", step=step.key)
-        elif typ == "backfill_job_progress":
+        elif typ in ("backfill_job_progress", "backfill_job_delivered"):
             if step.data["state"] == "queued":
                 job.result["started_at"] = iso(ctx._clock())
                 await step.start()
-            pulled = int(data.get("pulled") or data.get("delivered") or 0)
-            total = data.get("total_estimate")
-            done = max(pulled, int(step.data.get("done") or 0))
-            await step.progress(done, int(total) if total is not None else None)
+            if typ == "backfill_job_progress":
+                job.pulled = max(job.pulled, _int(data.get("pulled")) or 0)
+                if data.get("total_estimate") is not None:
+                    job.total_estimate = _int(data.get("total_estimate"))
+            else:
+                job.delivered = max(job.delivered, _int(data.get("delivered")) or 0)
+                job.result["delivered"] = job.delivered
+                if data.get("total") is not None:
+                    job.server_total = _int(data.get("total"))
+            await _show_progress(job)
+            if typ == "backfill_job_delivered":
+                await _live_summary(ctx)
         elif typ == "backfill_job_cleanup":
+            job.cleaning = True
             await step.state("Cleaning up")
         elif typ == "backfill_job_end":
             await _end_job(job, data)
@@ -294,23 +350,30 @@ async def dispatch(frame: dict) -> bool:
 
 async def _end_job(job: _Job, data: dict) -> None:
     step, ctx, name = job.step, job.ctx, job.name
-    delivered = int(data.get("delivered") or 0)
+    # The server's count of what it wrote for the job; the last delivered frame if it sent none.
+    delivered = _int(data.get("delivered"))
+    delivered = job.delivered if delivered is None else delivered
+    job.delivered = delivered
     error = data.get("error")
     job.result.update(delivered=delivered, error=None if data.get("ok") else error,
                       last_orig_message_id=data.get("last_orig_message_id"))
-    if delivered:
-        await step.progress(max(delivered, int(step.data.get("done") or 0)))
+    await step.progress(delivered, job.total)
     if data.get("ok"):
         await step.finish("success", f"{_fmt(delivered)} messages")
         await ctx.log(f"Finished #{name}: {_fmt(delivered)} messages", step=step.key)
     elif ctx.cancelled.is_set() or error == "cancelled":
-        await step.finish("cancelled", "Cancelled")
+        await step.finish("cancelled", _cancelled_note(delivered))
         await ctx.log(f"Cancelled #{name} after {_fmt(delivered)} messages", step=step.key)
     else:
         await step.finish("failed", error or "Failed")
         await ctx.log(f"Failed #{name}: {error or 'unknown error'}", level="error", step=step.key)
     job.result["finished_at"] = step.data["finished_at"]
     job.done.set()
+    await _live_summary(ctx)
+
+
+def _cancelled_note(delivered: int) -> str:
+    return f"Cancelled after {_fmt(delivered)} messages" if delivered else "Cancelled"
 
 
 # options

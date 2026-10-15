@@ -39,6 +39,19 @@ class FakeBus:
         self.sent.append(json.loads(json.dumps({"kind": kind, "payload": payload})))
 
 
+class FakeBackfill:
+    """No message tasks: every channel is already delivered."""
+
+    def __init__(self):
+        self.waited = []
+
+    async def wait_delivered(self, orig):
+        self.waited.append(orig)
+
+    def job_counts(self, orig):
+        return None, None
+
+
 def _rx(ServerReceiver, finish):
     rx = ServerReceiver.__new__(ServerReceiver)
     rx._shutting_down = False
@@ -48,6 +61,7 @@ def _rx(ServerReceiver, finish):
     rx._bf_jobs = {}
     rx._bf_job_by_channel = {}
     rx.bus = FakeBus()
+    rx.backfill = FakeBackfill()
     rx._bf_finish_channel = finish
     return rx
 

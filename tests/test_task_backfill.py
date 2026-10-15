@@ -105,7 +105,14 @@ async def test_category_of_three_runs_queued_running_success(svc, sent, mapping)
         await _frame("backfill_job", job_id=r["job_id"], state="running")
         await _frame("backfill_job_progress", job_id=r["job_id"], pulled=50, total_estimate=100)
         await _frame("backfill_job_progress", job_id=r["job_id"], pulled=40, total_estimate=100)
-        assert _steps(svc, run.id)[str(CH[i])]["done"] == 50
+        step = _steps(svc, run.id)[str(CH[i])]
+        # Pulled is not delivered: the bar waits for the server.
+        assert step["done"] == 0 and step["total"] == 100
+        assert step["label"] == "0 of 100 delivered, 50 pulled"
+        await _frame("backfill_job_delivered", job_id=r["job_id"], delivered=12, total=100)
+        step = _steps(svc, run.id)[str(CH[i])]
+        assert step["done"] == 12 and step["label"] == "12 of 100 delivered, 50 pulled"
+        assert svc.get(run.id).summary["delivered"] == sum(1000 + k for k in range(i)) + 12
         await _frame("backfill_job_cleanup", job_id=r["job_id"], state="cleaning")
         assert _steps(svc, run.id)[str(CH[i])]["label"] == "Cleaning up"
         await _frame("backfill_job_end", job_id=r["job_id"], ok=True, error=None,
@@ -128,6 +135,33 @@ async def test_category_of_three_runs_queued_running_success(svc, sent, mapping)
     wire = done.to_wire(detail=True)
     assert wire["report"]["channels"][2]["channel_id"] == str(CH[2])
     assert wire["inputs"]["category_ids"] == [str(CAT)]
+
+
+@pytest.mark.asyncio
+async def test_progress_is_delivered_against_the_larger_total(svc, sent, mapping):
+    """Threads the server creates count as units of its own total, past the client's estimate."""
+    run = await svc.start("backfill_channels", {"mapping_id": mapping, "channel_ids": [str(CH[0])]})
+    await _until(lambda: len(_of(sent, "backfill_run")) == 1)
+    job_id = f"{run.id}:{CH[0]}"
+    await _frame("backfill_job", job_id=job_id, state="running")
+    await _frame("backfill_job_progress", job_id=job_id, pulled=35, total_estimate=35)
+    await _frame("backfill_job_delivered", job_id=job_id, delivered=21, total=37)
+    await _frame("backfill_job_delivered", job_id=job_id, delivered=20, total=37)
+    step = _steps(svc, run.id)[str(CH[0])]
+    assert (step["done"], step["total"]) == (21, 37)
+    assert step["label"] == "21 of 37 delivered, 35 pulled"
+    await _frame("backfill_job_cleanup", job_id=job_id, state="cleaning")
+    await _frame("backfill_job_end", job_id=job_id, ok=True, error=None, delivered=37)
+    done = await _settled(svc, run.id)
+    step = _steps(svc, run.id)[str(CH[0])]
+    assert step["state"] == "success" and step["done"] == 37 and step["note"] == "37 messages"
+    assert done.report["channels"][0]["delivered"] == 37
+    assert done.summary["delivered"] == 37
+
+
+def test_progress_label_words():
+    assert backfill.progress_label(12, 35, 35) == "12 of 35 delivered, 35 pulled"
+    assert backfill.progress_label(1200, None, 3400) == "1,200 delivered, 3,400 pulled"
 
 
 @pytest.mark.asyncio

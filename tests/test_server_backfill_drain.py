@@ -176,3 +176,68 @@ def test_cancel_all_active_cancels_tracked_tasks(ServerReceiver):
         assert not rx.backfill._attached and not rx.backfill._inflight
 
     asyncio.run(go())
+
+
+def _types(rx):
+    return [f["payload"]["type"] for f in rx.bus.sent]
+
+
+def test_cleanup_starts_after_delivery_and_reports_the_count_first(ServerReceiver):
+    """The client has pulled everything; the server still forwards. Cleaning up waits for the last send."""
+
+    async def go():
+        gate = asyncio.Event()
+        rx = _rx(ServerReceiver, gate)
+        await rx._on_ws({"type": "backfill_job", "data": {"job_id": JOB, "original_channel_id": str(CID), "state": "running", "queue_position": None}})
+        for i in range(3):
+            await rx._on_ws(_message_frame(1521898853337409001 + i))
+        await rx._on_ws(_thread_frame(1521898853337409010))
+
+        stream_end = asyncio.create_task(rx._on_ws({"type": "backfill_stream_end", "data": {"channel_id": str(CID)}}))
+        await asyncio.sleep(0.1)
+        assert "backfill_job_cleanup" not in _types(rx), "still delivering"
+
+        gate.set()
+        await asyncio.wait_for(stream_end, 2.0)
+        return rx
+
+    rx = asyncio.run(go())
+
+    types = _types(rx)
+    cleanup = types.index("backfill_job_cleanup")
+    delivered = [f["payload"]["data"] for f in rx.bus.sent[:cleanup] if f["payload"]["type"] == "backfill_job_delivered"]
+    assert delivered[-1] == {"job_id": JOB, "original_channel_id": str(CID), "delivered": 4, "total": None}
+    assert "backfill_job_delivered" not in types[cleanup:]
+
+
+def test_delivered_frames_are_throttled_with_a_trailing_publish(ServerReceiver):
+    async def go():
+        rx = _rx(ServerReceiver, asyncio.Event())
+        rx.BF_PROGRESS_INTERVAL = 0.05
+        rx.backfill.update_expected_total(CID, 35)
+        await rx._on_ws({"type": "backfill_job", "data": {"job_id": JOB, "original_channel_id": str(CID), "state": "running", "queue_position": None}})
+        for i in range(10):
+            rx.backfill.note_sent(CID, 1521898853337409001 + i)
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
+        return rx
+
+    rx = asyncio.run(go())
+
+    frames = [f["payload"]["data"] for f in rx.bus.sent if f["payload"]["type"] == "backfill_job_delivered"]
+    counts = [f["delivered"] for f in frames]
+    assert 2 <= len(frames) < 10
+    assert counts == sorted(counts) and counts[-1] == 10
+    assert all(f["total"] == 35 for f in frames)
+
+
+def test_resumed_job_counts_from_its_own_start(ServerReceiver):
+    async def go():
+        rx = _rx(ServerReceiver, asyncio.Event())
+        st = rx.backfill._progress[CID]
+        st["delivered"], st["delivered_base"], st["expected_total"] = 100, 100, 135
+        for i in range(5):
+            rx.backfill.note_sent(CID, 1521898853337409001 + i)
+        return rx.backfill.job_counts(CID)
+
+    assert asyncio.run(go()) == (5, 35)

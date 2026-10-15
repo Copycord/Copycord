@@ -65,10 +65,13 @@ class Step:
                          started_at=iso(self._ctx._clock()))
         await self._ctx._changed(True, self.key)
 
-    async def progress(self, done: int, total: Optional[int] = None) -> None:
+    async def progress(self, done: int, total: Optional[int] = None, label: Optional[str] = None) -> None:
+        """Counts (and a label that words them) change often, so they publish throttled."""
         self.data["done"] = done
         if total is not None:
             self.data["total"] = total
+        if label is not None:
+            self.data["label"] = label
         await self._ctx._changed(False, self.key)
 
     async def state(self, label: Optional[str]) -> None:
