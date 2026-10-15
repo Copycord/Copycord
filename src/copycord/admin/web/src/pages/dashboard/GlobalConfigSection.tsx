@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChipInput, Spinner, cx } from "../../components/ui";
 import { GlobalConfigLoading } from "./DashboardSkeleton";
+import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { api, errorText } from "../../lib/api";
 import type { StatusResponse } from "../../types/dashboard";
 import type { GlobalConfig, TokenKey } from "../../types/dashboard-config";
@@ -33,8 +34,10 @@ const LOCK_TITLE = "Stop the bot to edit global configuration";
 const START_NEEDS_TOKENS = "Provide SERVER_TOKEN and CLIENT_TOKEN to start.";
 const START_BAD_TOKENS = "Saved tokens are no longer valid. Please update SERVER_TOKEN and CLIENT_TOKEN to start.";
 
-const SELECT_ARROW =
-  "bg-[url(\"data:image/svg+xml,%3Csvg_xmlns='http://www.w3.org/2000/svg'_width='10'_height='6'_fill='none'%3E%3Cpath_d='M1_1l4_4_4-4'_stroke='%239e95b7'_stroke-width='1.5'_stroke-linecap='round'_stroke-linejoin='round'/%3E%3C/svg%3E\")]";
+const LOG_LEVELS = [
+  { value: "INFO", label: "INFO" },
+  { value: "DEBUG", label: "DEBUG" },
+];
 
 export interface GlobalConfigSectionProps {
   /** Why the Bots card's Start is off (missing or rejected tokens), or null; the old updateStartButtonOnly. */
@@ -227,21 +230,14 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
               </SettingRow>
 
               <SettingRow label="Log Level" hint={FIELD_TIPS.LOG_LEVEL}>
-                <select
+                <ToolbarSelect
                   id="LOG_LEVEL"
-                  aria-label="Log Level"
-                  name="LOG_LEVEL"
+                  label="Log Level"
                   value={values.LOG_LEVEL}
-                  onChange={(e) => set("LOG_LEVEL", e.target.value === "DEBUG" ? "DEBUG" : "INFO")}
-                  className={cx(
-                    "ml-auto flex h-[34px] w-[100px] shrink-0 cursor-pointer appearance-none items-center rounded-lg border border-border bg-[#140b26] py-0 pr-7 pl-3 text-[13px] text-text outline-none transition-colors focus:border-accent",
-                    SELECT_ARROW,
-                    "bg-[position:right_10px_center] bg-no-repeat",
-                  )}
-                >
-                  <option value="INFO">INFO</option>
-                  <option value="DEBUG">DEBUG</option>
-                </select>
+                  options={LOG_LEVELS}
+                  onChange={(v) => set("LOG_LEVEL", v === "DEBUG" ? "DEBUG" : "INFO")}
+                  className="ml-auto w-[100px] shrink-0"
+                />
               </SettingRow>
 
               <SettingRow label="Max Log Size" hint={FIELD_TIPS.LOG_MAX_SIZE_MB}>

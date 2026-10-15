@@ -1,5 +1,5 @@
 // Field wraps one control with a label, help text and an error. Input,
-// Textarea, Select and ChipInput read the ids from context so the label and
+// Textarea, Select, FieldSelect and ChipInput read the ids from context so the label and
 // aria-describedby / aria-invalid are wired without extra props.
 
 import { createContext, useContext, useId } from "react";
@@ -10,6 +10,7 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
+import { ToolbarSelect } from "../../pages/channels/ToolbarSelect";
 import { cx } from "./cx";
 
 interface FieldContextValue {
@@ -115,5 +116,33 @@ export function Select({
       ))}
       {children}
     </select>
+  );
+}
+
+export interface FieldSelectProps {
+  id?: string;
+  value: string;
+  options: readonly SelectOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
+}
+
+/** The app's dropdown (ToolbarSelect) as a form control: full width, the Input look, its own listbox. */
+export function FieldSelect({ value, options, onChange, disabled, ...rest }: FieldSelectProps) {
+  const auto = useId();
+  const { id, ...aria } = useFieldControl(rest);
+  return (
+    <ToolbarSelect
+      variant="field"
+      id={id ?? auto}
+      value={value}
+      options={options}
+      onChange={onChange}
+      disabled={disabled}
+      toggleClassName={CONTROL_CLASS}
+      {...aria}
+    />
   );
 }

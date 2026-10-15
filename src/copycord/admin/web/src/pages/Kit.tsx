@@ -9,6 +9,7 @@ import {
   ChipInput,
   EmptyState,
   Field,
+  FieldSelect,
   Input,
   Select,
   Spinner,
@@ -46,6 +47,7 @@ export function Kit() {
   const [words, setWords] = useState<string[]>(["spoiler", "nsfw"]);
   const [ids, setIds] = useState<string[]>(["123456789012345678"]);
   const [answer, setAnswer] = useState("none yet");
+  const [mode, setMode] = useState("copy");
   const [tableMode, setTableMode] = useState<"rows" | "loading" | "empty">("rows");
   const [gated, setGated] = useState(false);
 
@@ -80,7 +82,9 @@ export function Kit() {
             <Input defaultValue="abc" />
           </Field>
           <Field label="Mode">
-            <Select
+            <FieldSelect
+              value={mode}
+              onChange={setMode}
               options={[
                 { value: "copy", label: "Copy" },
                 { value: "mirror", label: "Mirror" },

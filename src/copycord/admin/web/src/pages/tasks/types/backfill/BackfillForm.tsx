@@ -7,7 +7,7 @@ import type { FormEvent, ReactNode } from "react";
 import { Modal, TipLabel } from "../../../../components/Modal";
 import { Button } from "../../../../components/ui/Button";
 import { Checkbox, Radio } from "../../../../components/ui/Checkbox";
-import { Field, Input, Select } from "../../../../components/ui/Field";
+import { Field, FieldSelect, Input } from "../../../../components/ui/Field";
 import { useApi } from "../../../../hooks/useApi";
 import type { GuildMappingListResponse } from "../../../../types/channels";
 import type { BackfillOptionsResponse } from "../../../../types/tasks";
@@ -149,9 +149,9 @@ export function BackfillForm({ type, open, onClose, prefill }: TaskFormProps) {
     <Modal open={open} onClose={onClose} title={prefill ? `Re-run ${type.title}` : `Run ${type.title}`} className="w-[min(640px,92vw)]" footer={footer}>
       <form id="backfill-form" noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <Field label="Mapping" error={errors.mapping} id="bf-mapping">
-          <Select
+          <FieldSelect
             value={mappingId}
-            onChange={(e) => onMapping(e.target.value)}
+            onChange={onMapping}
             disabled={list.length === 0}
             options={list.map((m) => ({
               value: m.mapping_id,

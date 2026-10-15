@@ -27,6 +27,7 @@ import {
   SUMMARY,
   SUMMARY_TITLE,
 } from "./parts";
+import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { ProxyChips } from "./proxy/ProxyChips";
 import { FavHelpModal, ResultsModal, SettingsModal } from "./proxy/ProxyModals";
 import {
@@ -68,25 +69,17 @@ const NUM =
   "h-[34px] w-full rounded-control border border-border bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] " +
   "hover:border-accent/30 hover:bg-[linear-gradient(180deg,#1f1237_0%,#160b2a_100%)] focus:border-accent focus:bg-[linear-gradient(180deg,#1f1237_0%,#160b2a_100%)] disabled:opacity-50 " +
   "[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
-/** The .dd toggle the old page turned select.srv-proxy-interval-select into; the caret sits on top. */
-const UNIT =
-  "dd-toggle relative min-h-[34px] cursor-pointer appearance-none rounded-btn border border-border bg-control py-2 pr-9 pl-2.5 text-left font-sans text-[13px] " +
-  "text-text outline-0 transition-[border,box-shadow,background] duration-200 focus-visible:border-accent disabled:opacity-50";
 /** .srv-proxy-rotation-section */
 const ROTATION_SECTION = "mt-4 border-t border-t-border pt-3.5";
 
+const UNITS = [
+  { value: "60", label: "minutes" },
+  { value: "3600", label: "hours" },
+];
+
+/** The .dd dropdown the old page turned select.srv-proxy-interval-select into. */
 function UnitSelect({ id, value, disabled, onChange }: { id: string; value: string; disabled: boolean; onChange: (v: IntervalUnit) => void }) {
-  return (
-    <div className="dd relative">
-      <select id={id} disabled={disabled} value={value} className={UNIT} onChange={(e) => onChange(e.target.value as IntervalUnit)}>
-        <option value="60">minutes</option>
-        <option value="3600">hours</option>
-      </select>
-      <span aria-hidden="true" className="dd-caret pointer-events-none absolute top-1/2 right-[11px] -translate-y-1/2 text-sm leading-none text-accent">
-        ▾
-      </span>
-    </div>
-  );
+  return <ToolbarSelect id={id} label="Interval unit" value={value} options={UNITS} disabled={disabled} onChange={(v) => onChange(v as IntervalUnit)} />;
 }
 /** .srv-proxy-chip and its .is-on / .is-warn colors. */
 const CHIP_TONE = {

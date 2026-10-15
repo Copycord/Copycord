@@ -7,7 +7,7 @@ import type { ComponentType, FormEvent, ReactNode } from "react";
 import { Modal } from "../../../components/Modal";
 import { Button } from "../../../components/ui/Button";
 import { Checkbox } from "../../../components/ui/Checkbox";
-import { Field, Input, Select } from "../../../components/ui/Field";
+import { Field, FieldSelect, Input } from "../../../components/ui/Field";
 import { BackfillForm } from "./backfill/BackfillForm";
 import { useStartRun, type TaskFormProps } from "./start";
 
@@ -195,9 +195,9 @@ export function SchemaForm({ type, open, onClose, prefill }: TaskFormProps) {
           ) : (
             <Field key={f.key} label={f.label} help={f.help} error={errors[f.key]}>
               {f.kind === "enum" ? (
-                <Select
+                <FieldSelect
                   value={String(values[f.key] ?? "")}
-                  onChange={(e) => set(f.key, e.target.value)}
+                  onChange={(v) => set(f.key, v)}
                   options={[...(f.required ? [] : [{ value: "", label: "" }]), ...f.options.map((o) => ({ value: o, label: o }))]}
                 />
               ) : (

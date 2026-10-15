@@ -97,11 +97,37 @@ describe("BackfillForm", () => {
     const { fn } = serve();
     renderForm();
     expect(await screen.findByRole("checkbox", { name: "#news" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveValue("m1");
+    expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveTextContent("Main mapping");
     expect(screen.queryByRole("checkbox", { name: "#gone" })).toBeNull();
     expect(fn.mock.calls.some((c) => String(c[0]).includes("options?mapping_id=m1"))).toBe(true);
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Mapping" }), { target: { value: "m2" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Mapping" }));
+    fireEvent.click(within(screen.getByRole("listbox", { name: "Mapping" })).getByRole("option", { name: "Second" }));
+    expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveTextContent("Second");
+    expect(await screen.findByText("No channels in this mapping")).toBeInTheDocument();
+  });
+
+  it("the Mapping field is the app dropdown: the label names it, the keys move through its list and Escape closes only the list", async () => {
+    serve();
+    const onClose = renderForm();
+    await screen.findByRole("checkbox", { name: "#news" });
+    const mapping = screen.getByRole("combobox", { name: "Mapping" });
+    expect(mapping).toHaveAttribute("id", "bf-mapping");
+    expect(mapping).toHaveAttribute("aria-expanded", "false");
+    expect(document.querySelector("select")).toBeNull();
+
+    fireEvent.keyDown(mapping, { key: "ArrowDown" });
+    expect(mapping).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("option", { name: "Main mapping" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(mapping, { key: "Escape" });
+    expect(mapping).toHaveAttribute("aria-expanded", "false");
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(mapping, { key: "ArrowDown" });
+    fireEvent.keyDown(mapping, { key: "ArrowDown" });
+    expect(mapping).toHaveAttribute("aria-activedescendant", "bf-mapping-listbox-1");
+    fireEvent.keyDown(mapping, { key: "Enter" });
+    expect(mapping).toHaveTextContent("Second");
     expect(await screen.findByText("No channels in this mapping")).toBeInTheDocument();
   });
 
