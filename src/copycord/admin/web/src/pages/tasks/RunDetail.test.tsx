@@ -369,9 +369,9 @@ describe("StepList", () => {
     const list = within(screen.getByRole("region", { name: "Steps" })).getByRole("list");
     expect(list.className).toContain(STEP_LIST);
     expect(STEP_LIST).toContain("overflow-y-auto");
-    // Rows are 32 px (h-8), so the cap is twelve of them.
-    expect(STEP_ROW).toContain("h-8");
-    expect(STEP_LIST).toContain(`max-h-[${STEP_ROWS_MAX * 32}px]`);
+    // Rows are 36 px (h-9), so the cap is twelve of them.
+    expect(STEP_ROW).toContain("h-9");
+    expect(STEP_LIST).toContain(`max-h-[${STEP_ROWS_MAX * 36}px]`);
     expect(screen.getAllByRole("listitem")).toHaveLength(100);
   });
 
