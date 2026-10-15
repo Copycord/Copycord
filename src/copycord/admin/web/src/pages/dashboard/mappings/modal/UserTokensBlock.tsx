@@ -18,6 +18,7 @@ import type {
 import type { MappingSettingValue, MappingSettings } from "../../../../types/dashboard-mappings";
 import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
+import { ToolbarSelect } from "../../../channels/ToolbarSelect";
 import { normalizeStrategy, toBool } from "./model";
 import { DESC, ROW, SECTION, SectionSummary, Switch, ToggleRow } from "./parts";
 import {
@@ -43,6 +44,14 @@ export interface UserTokensBlockProps {
   /** Current #mappingSettingsSearch text. The old page never filtered this section by it. */
   search: string;
 }
+
+// The old .dd toggle the strategy <select> was turned into: 34px, 13px, purple caret; the field dropdown adds the caret room.
+const STRATEGY_TOGGLE =
+  "user-token-select dd-toggle min-h-[34px] rounded-btn border border-border bg-control py-2 pl-2.5 font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus:border-accent";
+const STRATEGIES = [
+  { value: "round_robin", label: "Rotate evenly" },
+  { value: "sticky_author", label: "Sticky per author" },
+];
 
 // .user-token-num, .user-token-menu-item and .user-token-bulk-results.
 const NUM =
@@ -427,26 +436,15 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                 {STRATEGY_DESCS[strategy]}
               </span>
             </div>
-            <div className="dd relative w-[200px] max-w-[55%] flex-none">
-              <select
+            <div className="w-[200px] max-w-[55%] flex-none">
+              <ToolbarSelect
+                variant="field"
                 id="ut_strategy"
-                className="user-token-select dd-toggle relative min-h-[34px] w-full cursor-pointer appearance-none rounded-btn border border-border bg-control py-2 pr-9 pl-2.5 text-left font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus:border-accent"
                 value={strategy}
-                onChange={(e) => setSetting("USER_TOKEN_STRATEGY", e.target.value)}
-              >
-                <option value="round_robin" className="bg-[#0f0820]">
-                  Rotate evenly
-                </option>
-                <option value="sticky_author" className="bg-[#0f0820]">
-                  Sticky per author
-                </option>
-              </select>
-              <span
-                aria-hidden="true"
-                className="dd-caret pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-sm leading-none text-accent"
-              >
-                ▾
-              </span>
+                options={STRATEGIES}
+                onChange={(v) => setSetting("USER_TOKEN_STRATEGY", v)}
+                toggleClassName={STRATEGY_TOGGLE}
+              />
             </div>
           </div>
 

@@ -13,7 +13,7 @@ import type { FormEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, MODAL_TITLE, useScrollLock } from "../../components/Modal";
 import { Button, ChipInput, cx, Field, Input } from "../../components/ui";
-import { useFieldControl } from "../../components/ui/Field";
+import { FieldSelect } from "../../components/ui/Field";
 import { useApi } from "../../hooks/useApi";
 import type { ClientGuildsResponse, ForwardingRule } from "../../types/forwarding";
 import { useNotify } from "../system/providers";
@@ -106,25 +106,9 @@ function LabelToggle({ id, label, title, checked, enabled, onChange }: {
   );
 }
 
-/** The old .dd toggle the guild <select> was turned into: 34px, 13px, purple caret. */
-function GuildSelect({ value, onChange, children }: { value: string; onChange: (v: string) => void; children: ReactNode }) {
-  const aria = useFieldControl({});
-  return (
-    <div className="dd relative">
-      <select
-        {...aria}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="input dd-toggle relative min-h-[34px] w-full cursor-pointer appearance-none rounded-btn border border-border bg-control py-2 pr-9 pl-2.5 text-left font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus-visible:border-accent"
-      >
-        {children}
-      </select>
-      <span aria-hidden="true" className="dd-caret pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-sm leading-none text-accent">
-        ▾
-      </span>
-    </div>
-  );
-}
+/** The old .dd toggle the guild <select> was turned into: 34px, 13px, purple caret; FieldSelect adds the caret room. */
+const GUILD_TOGGLE =
+  "input dd-toggle min-h-[34px] rounded-btn border border-border bg-control py-2 pl-2.5 font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus-visible:border-accent";
 
 export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
   const open = request !== null;
@@ -265,21 +249,16 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
                     help="If set, this rule only applies to messages from the selected guild."
                     className={GROUP}
                   >
-                    <GuildSelect value={form.guild_id} onChange={(guild_id) => patch({ guild_id })}>
-                      <option value="" className="bg-[#0f0820]">
-                        All guilds
-                      </option>
-                      {guildItems.map((g) => (
-                        <option key={String(g.id)} value={String(g.id)} className="bg-[#0f0820]">
-                          {`${g.name || "Unknown guild"} (${String(g.id)})`}
-                        </option>
-                      ))}
-                      {knownGuild ? null : (
-                        <option value={form.guild_id} className="bg-[#0f0820]">
-                          {form.guild_id}
-                        </option>
-                      )}
-                    </GuildSelect>
+                    <FieldSelect
+                      value={form.guild_id}
+                      onChange={(guild_id) => patch({ guild_id })}
+                      toggleClassName={GUILD_TOGGLE}
+                      options={[
+                        { value: "", label: "All guilds" },
+                        ...guildItems.map((g) => ({ value: String(g.id), label: `${g.name || "Unknown guild"} (${String(g.id)})` })),
+                        ...(knownGuild ? [] : [{ value: form.guild_id, label: form.guild_id }]),
+                      ]}
+                    />
                   </Field>
                   {guilds.error ? (
                     <p role="alert" className="text-xs text-danger">

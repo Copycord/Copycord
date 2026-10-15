@@ -155,12 +155,20 @@ describe("rule modal", () => {
     const fetchMock = server();
     const dialog = await openNew(user);
 
-    const guild = input("fwd_guild_id") as unknown as HTMLSelectElement;
-    await waitFor(() => expect(within(guild).getByRole("option", { name: "Beta (222)" })).toBeInTheDocument());
-    expect(within(guild).getAllByRole("option").map((o) => o.textContent)).toEqual(["All guilds", "Alpha (111)", "Beta (222)"]);
+    // The guild scope is the app dropdown: the Field label names the combobox, which keeps the id.
+    const guild = within(dialog).getByRole("combobox", { name: "Guild scope" });
+    expect(guild).toHaveAttribute("id", "fwd_guild_id");
+    expect(guild).toHaveAttribute("aria-describedby", "fwd_guild_id-help");
+    expect(guild).toHaveTextContent("All guilds");
+    expect(document.querySelector("select")).toBeNull();
+    await user.click(guild);
+    await waitFor(() => expect(within(dialog).getByRole("option", { name: "Beta (222)" })).toBeInTheDocument());
+    expect(within(dialog).getAllByRole("option").map((o) => o.textContent)).toEqual(["All guilds", "Alpha (111)", "Beta (222)"]);
+    await user.click(within(dialog).getByRole("option", { name: "Alpha (111)" }));
+    expect(guild).toHaveTextContent("Alpha (111)");
+    expect(dialog).toBeInTheDocument();
 
     await user.type(input("fwd_label"), "Support <b>pings</b>");
-    await user.selectOptions(guild, "111");
     expect(document.getElementById("provider_discord")).toBeNull();
     await pickProvider(user, "Discord");
     expect(input("fwd_provider").value).toBe("discord");
@@ -267,7 +275,7 @@ describe("rule modal", () => {
 
     expect(input("fwd_id").value).toBe("r1");
     expect(input("fwd_label").value).toBe("Phone alerts");
-    await waitFor(() => expect((input("fwd_guild_id") as unknown as HTMLSelectElement).value).toBe("222"));
+    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "Guild scope" })).toHaveTextContent("Beta (222)"));
     expect(input("fwd_provider").value).toBe("pushover");
     // The old modal shows provider secrets in plain text inputs, unmasked.
     expect(input("pushover_app_token")).toHaveAttribute("type", "text");

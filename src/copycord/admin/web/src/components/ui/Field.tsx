@@ -127,10 +127,12 @@ export interface FieldSelectProps {
   disabled?: boolean;
   "aria-describedby"?: string;
   "aria-invalid"?: boolean;
+  /** Replaces the Input look of the toggle, e.g. the 34px toolbar dropdown look; the caret room stays. */
+  toggleClassName?: string;
 }
 
 /** The app's dropdown (ToolbarSelect) as a form control: full width, the Input look, its own listbox. */
-export function FieldSelect({ value, options, onChange, disabled, ...rest }: FieldSelectProps) {
+export function FieldSelect({ value, options, onChange, disabled, toggleClassName = CONTROL_CLASS, ...rest }: FieldSelectProps) {
   const auto = useId();
   const { id, ...aria } = useFieldControl(rest);
   return (
@@ -141,7 +143,7 @@ export function FieldSelect({ value, options, onChange, disabled, ...rest }: Fie
       options={options}
       onChange={onChange}
       disabled={disabled}
-      toggleClassName={CONTROL_CLASS}
+      toggleClassName={toggleClassName}
       {...aria}
     />
   );
