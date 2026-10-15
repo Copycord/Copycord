@@ -102,18 +102,20 @@ beforeEach(() => {
 
 describe("Tasks page", () => {
   it("lists runs with status, title link, type line and context badge", async () => {
-    serve([run({ id: "12", number: 12 }), run({ id: "11", number: 11, title: "Backfill 3 channels", status: "failed" })]);
+    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 }), run({ id: "9e8d7c6b5a4f4e3d8c2b1a0f9e8d7c6b", number: 11, title: "Backfill 3 channels", status: "failed" })]);
     renderAt("/tasks");
     const list = await screen.findByRole("list", { name: "Task runs" });
     const rows = within(list).getAllByRole("listitem");
     expect(rows).toHaveLength(2);
     expect(screen.getByText("2 task runs")).toBeInTheDocument();
-    expect(within(rows[0]!).getByRole("link", { name: "Backfill #general" })).toHaveAttribute("href", "/tasks/runs/12");
+    expect(within(rows[0]!).getByRole("link", { name: "Backfill #general" })).toHaveAttribute("href", "/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     expect(within(rows[0]!).getByRole("img", { name: "Success" })).toBeInTheDocument();
     expect(within(rows[1]!).getByRole("img", { name: "Failed" })).toBeInTheDocument();
     expect(await within(rows[0]!).findByText("Backfill channels #12: Manual run by admin")).toBeInTheDocument();
     expect(within(rows[0]!).getByText("Main mapping")).toBeInTheDocument();
     expect(within(rows[0]!).getByText("48s")).toBeInTheDocument();
+    // the uuid id only lives in the link; the row shows "#<number>"
+    expect(list).not.toHaveTextContent("4f2a9c1e");
 
     const rail = screen.getByRole("navigation", { name: "Task types" });
     expect(within(rail).getByRole("link", { name: /All tasks/ })).toHaveAttribute("aria-current", "page");
@@ -145,7 +147,7 @@ describe("Tasks page", () => {
 
   it("names the type in the header and on the run page while the types are still loading, never a bar", async () => {
     const pending = (url: string) => (url === "/api/tasks/types" ? new Response(new ReadableStream()) : undefined);
-    serve([run({ id: "12", number: 12 })], { handle: pending });
+    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })], { handle: pending });
     const first = renderAt("/tasks?type=backfill_channels");
     // A first visit: the id in words, no shimmer in the title or the description line.
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Backfill channels");
@@ -160,7 +162,7 @@ describe("Tasks page", () => {
     expect(screen.getByText("Clone message history")).toBeInTheDocument();
     // The list remembered run 12's type, so its page names it while the run loads.
     again.unmount();
-    renderAt("/tasks/runs/12");
+    renderAt("/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     const loading = screen.getByRole("status", { name: "Loading run" });
     expect(within(loading).getByRole("heading", { level: 2, hidden: true })).toHaveTextContent("Backfill history");
     expect(within(loading).getByRole("link", { name: "Backfill history", hidden: true })).toHaveAttribute("href", "/tasks?type=backfill_channels");
@@ -171,8 +173,8 @@ describe("Tasks page", () => {
   });
 
   it("opens a run with its header and the Summary, Steps and Report sections, no log", async () => {
-    serve([run({ id: "12", number: 12 })]);
-    renderAt("/tasks/runs/12");
+    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
+    renderAt("/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     expect(await screen.findByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
     expect(screen.getByText("#12")).toBeInTheDocument();
     for (const name of ["Summary", "Steps", "Report"]) expect(screen.getByRole("region", { name })).toBeInTheDocument();
@@ -180,7 +182,7 @@ describe("Tasks page", () => {
   });
 
   it("sends the URL filters with the list fetch and narrows it from the dropdowns", async () => {
-    const fn = serve([run({ id: "12", number: 12 })]);
+    const fn = serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
     renderAt("/tasks?status=failed&actor=admin&q=general&context=m1&page=2");
     await screen.findByRole("link", { name: "Backfill #general" });
     const first = new URL(listCalls(fn)[0]!, "http://x").searchParams;
@@ -196,7 +198,7 @@ describe("Tasks page", () => {
 
   it("typing a search keeps the rows, with no skeleton and no empty state until the search answers", async () => {
     const held: { answer?: () => void } = {};
-    const fn = serve([run({ id: "12", number: 12 })]);
+    const fn = serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
     const inner = fn.getMockImplementation()!;
     // A search waits until the test answers it, with no match.
     fn.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -226,7 +228,7 @@ describe("Tasks page", () => {
   });
 
   it("pages with Previous and Next, 25 per page", async () => {
-    const fn = serve([run({ id: "12", number: 12 })], { total: 60 });
+    const fn = serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })], { total: 60 });
     renderAt("/tasks");
     await screen.findByText("Page 1 of 3");
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
@@ -312,7 +314,7 @@ describe("Tasks page", () => {
     });
 
     it("Re-run with the bots down toasts Start the bots first and opens no form", async () => {
-      const done = run({ id: "12", number: 12 });
+      const done = run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 });
       serve([done], {
         handle: (url) => {
           if (url === "/api/tasks/types") return Response.json(NEEDS_BOTS);
@@ -320,14 +322,14 @@ describe("Tasks page", () => {
           return undefined;
         },
       });
-      renderAt("/tasks?type=backfill_channels&rerun=12");
+      renderAt("/tasks?type=backfill_channels&rerun=4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
       // The gate's toast, besides the hint next to Run task.
       await waitFor(() => expect(screen.getAllByText("Start the bots first").length).toBeGreaterThanOrEqual(2));
       expect(screen.queryByRole("dialog")).toBeNull();
     });
 
     it("Re-run with the bots up opens the form", async () => {
-      const done = run({ id: "12", number: 12 });
+      const done = run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 });
       serve([done], {
         handle: (url) => {
           if (url === "/api/tasks/types") return Response.json(NEEDS_BOTS);
@@ -335,7 +337,7 @@ describe("Tasks page", () => {
           return undefined;
         },
       });
-      renderAt("/tasks?type=backfill_channels&rerun=12");
+      renderAt("/tasks?type=backfill_channels&rerun=4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       expect(screen.queryByText("Start the bots first")).toBeNull();
     });
@@ -350,7 +352,7 @@ describe("Tasks page", () => {
   });
 
   it("cancels an active run after confirming and patches the row from the response", async () => {
-    const live = run({ id: "12", number: 12, status: "running", finished_at: null, seq: 4 });
+    const live = run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12, status: "running", finished_at: null, seq: 4 });
     const calls: string[] = [];
     serve([live], {
       handle: (url, method) => {
@@ -369,11 +371,11 @@ describe("Tasks page", () => {
     expect(within(dialog).getByRole("button", { name: "Keep running" })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
     expect(await screen.findByRole("img", { name: "Cancelled" })).toBeInTheDocument();
-    expect(calls).toEqual(["/api/tasks/runs/12/cancel"]);
+    expect(calls).toEqual(["/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b/cancel"]);
   });
 
   it("toasts the server message when a cancel is refused with 409", async () => {
-    const live = run({ id: "12", number: 12, status: "running", finished_at: null });
+    const live = run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12, status: "running", finished_at: null });
     serve([live], {
       handle: (_url, method) => (method === "POST" ? Response.json({ detail: "Run already success" }, { status: 409 }) : undefined),
     });
@@ -386,7 +388,7 @@ describe("Tasks page", () => {
 
   it("deletes a finished run after confirming and drops the row without a refetch", async () => {
     const deleted: string[] = [];
-    const fn = serve([run({ id: "12", number: 12 }), run({ id: "11", number: 11, title: "Backfill 3 channels" })], {
+    const fn = serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 }), run({ id: "9e8d7c6b5a4f4e3d8c2b1a0f9e8d7c6b", number: 11, title: "Backfill 3 channels" })], {
       handle: (url, method) => {
         if (method !== "DELETE") return undefined;
         deleted.push(url);
@@ -401,14 +403,14 @@ describe("Tasks page", () => {
     const before = listCalls(fn).length;
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByRole("link", { name: "Backfill #general" })).toBeNull());
-    expect(deleted).toEqual(["/api/tasks/runs/12"]);
+    expect(deleted).toEqual(["/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]);
     expect(screen.getByText("1 task run")).toBeInTheDocument();
     expect(await screen.findByText("Deleted Backfill channels #12")).toBeInTheDocument();
     expect(listCalls(fn).length).toBe(before);
   });
 
   it("toasts the server message when a delete is refused with 409", async () => {
-    serve([run({ id: "12", number: 12 })], {
+    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })], {
       handle: (_url, method) =>
         method === "DELETE" ? Response.json({ detail: "Run is running; cancel it first" }, { status: 409 }) : undefined,
     });
@@ -421,7 +423,7 @@ describe("Tasks page", () => {
   });
 
   it("Re-run goes to the type with the run to copy in the URL", async () => {
-    serve([run({ id: "12", number: 12 })]);
+    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
     renderAt("/tasks");
     await openMenu("Backfill #general");
     fireEvent.click(screen.getByRole("menuitem", { name: "Re-run" }));

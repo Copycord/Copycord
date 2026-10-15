@@ -15,7 +15,7 @@ const BACKFILL: TaskType = { key: "backfill_channels", title: "Backfill channels
 
 function makeRun(over: Partial<TaskRun> = {}): TaskRun {
   return {
-    id: "12",
+    id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b",
     type: "backfill_channels",
     number: 12,
     title: "Backfill #general",
@@ -55,7 +55,7 @@ function Where() {
 function renderHeader(run: TaskRun) {
   return render(
     <ToastProvider>
-      <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+      <MemoryRouter initialEntries={["/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]}>
         <Routes>
           <Route path="*" element={<><RunHeader run={run} typeTitle="Backfill channels" /><Where /></>} />
         </Routes>
@@ -66,7 +66,7 @@ function renderHeader(run: TaskRun) {
 
 function renderView(run: TaskRun, type: TaskType | undefined = BACKFILL) {
   return render(
-    <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+    <MemoryRouter initialEntries={["/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]}>
       <RunView run={run} type={type} />
     </MemoryRouter>,
   );
@@ -144,7 +144,7 @@ describe("RunHeader", () => {
     const user = userEvent.setup();
     renderHeader(makeRun());
     await user.click(screen.getByRole("button", { name: "Re-run" }));
-    expect(screen.getByTestId("where")).toHaveTextContent("/tasks?type=backfill_channels&rerun=12");
+    expect(screen.getByTestId("where")).toHaveTextContent("/tasks?type=backfill_channels&rerun=4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
   });
 
   it("cancels an active run after the confirm", async () => {
@@ -162,7 +162,7 @@ describe("RunHeader", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel run" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("/api/tasks/runs/12/cancel");
+    expect(url).toBe("/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b/cancel");
     expect(init.method).toBe("POST");
     expect(await screen.findByText("Cancelling Backfill channels #12")).toBeInTheDocument();
   });
@@ -189,7 +189,7 @@ describe("RunHeader", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(/^\/tasks$/));
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("/api/tasks/runs/12");
+    expect(url).toBe("/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     expect(init.method).toBe("DELETE");
     expect(await screen.findByText("Deleted Backfill channels #12")).toBeInTheDocument();
   });
@@ -268,7 +268,7 @@ describe("Run page structure", () => {
     const view = container.firstElementChild!;
     expect(view.className).not.toContain(BUSY);
     rerender(
-      <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+      <MemoryRouter initialEntries={["/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]}>
         <RunView run={run} type={BACKFILL} refreshing />
       </MemoryRouter>,
     );
@@ -522,7 +522,7 @@ describe("ReportPanel", () => {
     expect(details.open).toBe(true);
     const json = JSON.stringify(report, null, 2);
     expect(screen.getByLabelText("Report JSON").textContent).toBe(json);
-    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute("href", "/api/tasks/runs/12/report.json");
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute("href", "/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b/report.json");
     expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute("download");
     await user.click(screen.getByRole("button", { name: "Copy" }));
     expect(writeText).toHaveBeenCalledWith(json);
@@ -568,8 +568,8 @@ describe("RunDetail live", () => {
     const first = makeRun({ status: "running", finished_at: null, summary: null, seq: 1 });
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ run: first })));
     render(
-      <MemoryRouter initialEntries={["/tasks/runs/12"]}>
-        <RunDetail id="12" typeOf={(k) => (k === BACKFILL.key ? BACKFILL : undefined)} />
+      <MemoryRouter initialEntries={["/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]}>
+        <RunDetail id="4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b" typeOf={(k) => (k === BACKFILL.key ? BACKFILL : undefined)} />
       </MemoryRouter>,
     );
     expect(screen.getByRole("status", { name: "Loading run" })).toBeInTheDocument();

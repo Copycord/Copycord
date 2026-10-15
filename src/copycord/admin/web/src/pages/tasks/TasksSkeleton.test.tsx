@@ -200,7 +200,7 @@ describe("page skeleton", () => {
 
   it("on a run url shows the run page's header and cards, not the list", () => {
     const { container } = render(
-      <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+      <MemoryRouter initialEntries={["/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]}>
         <TasksSkeleton />
       </MemoryRouter>,
     );
@@ -287,7 +287,7 @@ describe("page skeleton", () => {
   it("names a run's type in the run skeleton's breadcrumb and title once it is known", () => {
     const header = () => {
       const { container, unmount } = render(
-        <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+        <MemoryRouter initialEntries={["/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]}>
           <TasksSkeleton />
         </MemoryRouter>,
       );
@@ -307,7 +307,7 @@ describe("page skeleton", () => {
       { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 },
       { key: "prune_rows", title: "Prune old rows", description: "", inputs_schema: {}, active: 0, total: 0 },
     ]);
-    rememberRunTypes([{ id: "12", type: "prune_rows" }]);
+    rememberRunTypes([{ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", type: "prune_rows" }]);
     expect(header()).toEqual({
       crumbs: [
         ["All tasks", "/tasks"],
