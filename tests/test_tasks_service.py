@@ -186,7 +186,7 @@ async def test_cancel_mid_run(svc):
     with pytest.raises(RunFinished):
         await svc.cancel(run.id)
     with pytest.raises(KeyError):
-        await svc.cancel(999)
+        await svc.cancel("0" * 32)
 
 
 @pytest.mark.asyncio

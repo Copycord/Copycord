@@ -19,6 +19,8 @@ from copycord.admin.tasks.service import MemoryRunRepo, TaskService
 
 KEY = "noop_api"
 ORIGIN = "http://testserver"
+# a well formed run id no run has
+UNKNOWN = "0" * 32
 
 
 class Inputs(BaseModel):
@@ -138,9 +140,11 @@ def test_start_get_list_cancel_and_detail(client, events):
     resp = client.post(f"/api/tasks/runs/{run['id']}/cancel")
     assert resp.status_code == 409
     assert resp.json()["run"]["status"] == "success"
-    assert client.post("/api/tasks/runs/999/cancel").status_code == 404
-    assert client.get("/api/tasks/runs/999").status_code == 404
-    assert client.get("/api/tasks/runs/abc").status_code == 404
+    assert client.post(f"/api/tasks/runs/{UNKNOWN}/cancel").status_code == 404
+    assert client.get(f"/api/tasks/runs/{UNKNOWN}").status_code == 404
+    for bad in ("abc", "999", "0" * 31, "0" * 32 + "0", "%20"):
+        assert client.get(f"/api/tasks/runs/{bad}").status_code == 404
+    assert client.get(f"/api/tasks/runs/{run['id'].upper()}").json()["run"]["id"] == run["id"]
 
     assert client.get(f"/api/tasks/runs/{run['id']}/log").status_code == 404
 
@@ -162,7 +166,7 @@ def test_report_download(client):
     done = _finished(client, bare["id"])
     assert done["report"] is None
     assert client.get(f"/api/tasks/runs/{bare['id']}/report.json").status_code == 404
-    assert client.get("/api/tasks/runs/999/report.json").status_code == 404
+    assert client.get(f"/api/tasks/runs/{UNKNOWN}/report.json").status_code == 404
     assert client.get("/api/tasks/runs/abc/report.json").status_code == 404
 
 
@@ -228,7 +232,7 @@ def test_start_errors(client):
 
 
 def test_spa_pages_serve_index(client):
-    for path in ("/tasks", "/tasks/runs/1"):
+    for path in ("/tasks", f"/tasks/runs/{UNKNOWN}"):
         resp = client.get(path, headers={"accept": "text/html"})
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/html")

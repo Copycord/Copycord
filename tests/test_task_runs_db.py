@@ -33,7 +33,7 @@ def test_fresh_db_has_task_runs_and_indexes(db):
         "inputs_json", "progress_json", "created_at", "started_at", "finished_at",
         "updated_at", "error", "report_json",
     } <= cols
-    assert {"idx_task_runs_type_id", "idx_task_runs_status", "idx_task_runs_created"} <= _indexes(
+    assert {"idx_task_runs_type_created", "idx_task_runs_status", "idx_task_runs_created"} <= _indexes(
         db.conn, "task_runs"
     )
     assert "task_run_id" in db._table_columns("backfill_runs")
@@ -86,7 +86,7 @@ def test_v3_shaped_db_gains_task_runs_and_keeps_backfill_rows(tmp_path, monkeypa
 
 def test_insert_get_update(db):
     rid = _run(db, context_json={"label": "Main > general", "mapping_id": "m1"})
-    assert isinstance(rid, int)
+    assert isinstance(rid, str) and len(rid) == 32 and int(rid, 16) >= 0
     row = db.task_run_get(rid)
     assert row["id"] == rid
     assert row["status"] == "queued"
@@ -101,8 +101,8 @@ def test_insert_get_update(db):
     assert db.task_run_update(rid, progress_json={"steps": []}, status="success") is True
     assert db.task_run_get(rid)["progress_json"] == '{"steps":[]}'
 
-    assert db.task_run_update(999999, status="failed") is False
-    assert db.task_run_get(999999) is None
+    assert db.task_run_update("0" * 32, status="failed") is False
+    assert db.task_run_get("0" * 32) is None
     with pytest.raises(ValueError):
         db.task_run_update(rid, number=5)
     with pytest.raises(ValueError):
@@ -156,7 +156,7 @@ def test_list_filters_paging_and_q(db):
     rows, total = db.task_runs_list()
     assert total == 30
     assert len(rows) == 25
-    assert [r["id"] for r in rows] == sorted(ids, reverse=True)[:25]
+    assert [r["id"] for r in rows] == ids[::-1][:25]
     rows, total = db.task_runs_list(page=2, per_page=25)
     assert total == 30 and len(rows) == 5
 
@@ -227,7 +227,98 @@ def test_task_runs_without_report_json_gains_it_and_keeps_rows(tmp_path, monkeyp
         assert row["status"] == "success" and row["number"] == 1
         assert json.loads(row["progress_json"]) == {"seq": 3}
         assert row["report_json"] is None
-        assert {"idx_task_runs_type_id", "idx_task_runs_status"} <= _indexes(db.conn, "task_runs")
+        assert {"idx_task_runs_type_created", "idx_task_runs_status"} <= _indexes(db.conn, "task_runs")
+    finally:
+        db.close()
+
+
+def test_integer_run_ids_migrate_to_uuid_hex_and_backfill_links_follow(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKUP_DIR", str(tmp_path / "backups"))
+    path = tmp_path / "int-ids.db"
+    conn = sqlite3.connect(path)
+    # the task_runs and backfill_runs shapes from when run ids were integers
+    conn.execute(
+        """
+        CREATE TABLE task_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, number INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued', title TEXT NOT NULL DEFAULT '', context_json TEXT,
+            trigger TEXT NOT NULL DEFAULT 'manual', actor TEXT NOT NULL DEFAULT 'admin',
+            inputs_json TEXT NOT NULL DEFAULT '{}', progress_json TEXT, created_at TEXT NOT NULL,
+            started_at TEXT, finished_at TEXT, updated_at TEXT NOT NULL, error TEXT, report_json TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_task_runs_type_id ON task_runs(type, id DESC)")
+    conn.execute(
+        """
+        CREATE TABLE backfill_runs (
+            run_id TEXT PRIMARY KEY, original_guild_id INTEGER, cloned_guild_id INTEGER,
+            original_channel_id INTEGER NOT NULL, clone_channel_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'running', range_json TEXT,
+            started_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            delivered INTEGER NOT NULL DEFAULT 0, expected_total INTEGER,
+            last_orig_message_id TEXT, last_orig_timestamp TEXT, error TEXT, task_run_id INTEGER
+        )
+        """
+    )
+    steps = {"steps": [{"key": "333", "state": "success"}], "seq": 4}
+    for rid, number, inputs, report, created in (
+        (1, 1, {"channel_ids": ["333"]}, {"delivered": 5}, "2026-10-01T00:00:00Z"),
+        (2, 2, {"channel_ids": ["444"]}, None, "2026-10-02T00:00:00Z"),
+    ):
+        conn.execute(
+            "INSERT INTO task_runs (id, type, number, status, title, inputs_json, progress_json,"
+            " created_at, updated_at, report_json) VALUES (?, 'backfill_channels', ?, 'success',"
+            " ?, ?, ?, ?, ?, ?)",
+            (rid, number, f"Run {rid}", json.dumps(inputs), json.dumps(steps), created, created,
+             json.dumps(report) if report else None),
+        )
+    conn.execute(
+        "INSERT INTO backfill_runs (run_id, original_guild_id, cloned_guild_id, original_channel_id,"
+        " status, started_at, updated_at, delivered, task_run_id)"
+        " VALUES ('2:444', 111, 222, 444, 'completed', 't0', 't1', 9, 2)"
+    )
+    conn.commit()
+    conn.close()
+
+    db = DBManager(str(path), init_schema=True)
+    try:
+        assert db._column_type("task_runs", "id") == "TEXT"
+        assert db._column_type("backfill_runs", "task_run_id") == "TEXT"
+        rows, total = db.task_runs_list()
+        assert total == 2
+        newer, older = rows
+        for row in rows:
+            assert isinstance(row["id"], str) and len(row["id"]) == 32 and int(row["id"], 16) >= 0
+        assert newer["id"] != older["id"]
+        assert (older["number"], older["title"]) == (1, "Run 1")
+        assert (newer["number"], newer["title"]) == (2, "Run 2")
+        assert json.loads(older["inputs_json"]) == {"channel_ids": ["333"]}
+        assert json.loads(newer["inputs_json"]) == {"channel_ids": ["444"]}
+        assert json.loads(older["progress_json"]) == steps
+        assert json.loads(older["report_json"]) == {"delivered": 5}
+        assert newer["report_json"] is None
+        assert older["created_at"] == "2026-10-01T00:00:00Z"
+        assert db.task_run_get(older["id"])["number"] == 1
+
+        bf = dict(db.conn.execute("SELECT * FROM backfill_runs WHERE run_id='2:444'").fetchone())
+        assert bf["task_run_id"] == newer["id"]
+        assert (bf["original_guild_id"], bf["cloned_guild_id"], bf["delivered"]) == (111, 222, 9)
+
+        assert "idx_task_runs_type_id" not in _indexes(db.conn, "task_runs")
+        assert "idx_task_runs_type_created" in _indexes(db.conn, "task_runs")
+        assert db.task_run_next_number("backfill_channels") == 3
+        fresh = _run(db)
+        assert db.task_run_get(fresh)["number"] == 3
+    finally:
+        db.close()
+
+    # a second open leaves the migrated ids alone
+    db = DBManager(str(path), init_schema=True)
+    try:
+        assert {r["id"] for r in db.task_runs_list()[0]} == {older["id"], newer["id"], fresh}
+        bf = db.conn.execute("SELECT task_run_id FROM backfill_runs WHERE run_id='2:444'").fetchone()
+        assert bf[0] == newer["id"]
     finally:
         db.close()
 
