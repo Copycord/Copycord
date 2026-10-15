@@ -10,14 +10,17 @@ import type { StepState, TaskRun, TaskStep } from "../../types/tasks";
 import { STATUS_LABEL, StatusIcon } from "./StatusIcon";
 import {
   FADE_IN,
-  FRAME,
+  RUN_CARD,
   STEPS_BAR,
   STEPS_COUNT_KEY,
   STEP_BAR,
   STEP_EMPTY,
   STEP_LIST,
+  STEP_NOTE,
   STEP_ROW,
+  STEP_TITLE,
   StepsHead,
+  stepRowsHeight,
   type StepFilter,
 } from "./TasksSkeleton";
 
@@ -115,6 +118,13 @@ function OverallBar({ steps }: { steps: TaskStep[] }) {
   );
 }
 
+/** The overall share as a caption beside its bar, empty before the first step lands. */
+function OverallPercent({ steps }: { steps: TaskStep[] }) {
+  const share = overallProgress(steps);
+  if (share == null) return null;
+  return <span className={FADE_IN}>{Math.round(share * 100)}%</span>;
+}
+
 function StepBar({ step }: { step: TaskStep }) {
   if (step.done == null || step.total == null || step.total <= 0) return null;
   const pct = Math.max(0, Math.min(100, (step.done / step.total) * 100));
@@ -139,10 +149,11 @@ export function StepList({ run, noteOf }: { run: TaskRun; noteOf?: StepNote }) {
   const shown = filter ? ordered.filter((s) => s.state === filter) : ordered;
   useLastCount(STEPS_COUNT_KEY, steps.length);
   return (
-    <section aria-label="Steps" className={FRAME}>
+    <section aria-label="Steps" className={RUN_CARD}>
       <StepsHead
         id="steps-filter"
         summary={<span className={FADE_IN}>{stepSummary(steps)}</span>}
+        percent={<OverallPercent steps={steps} />}
         progress={<OverallBar steps={steps} />}
         filter={filter}
         onFilter={setFilter}
@@ -150,7 +161,9 @@ export function StepList({ run, noteOf }: { run: TaskRun; noteOf?: StepNote }) {
       {!steps.length ? (
         <p className={cx(STEP_EMPTY, FADE_IN)}>No steps yet</p>
       ) : !shown.length ? (
-        <p className={STEP_EMPTY}>{filter ? NONE[filter] : null}</p>
+        <p className={STEP_EMPTY} style={{ minHeight: stepRowsHeight(steps.length) }}>
+          {filter ? NONE[filter] : null}
+        </p>
       ) : (
         <ul className={cx(STEP_LIST, FADE_IN)}>
           {shown.map((s) => {
@@ -158,9 +171,9 @@ export function StepList({ run, noteOf }: { run: TaskRun; noteOf?: StepNote }) {
             return (
               <li key={s.key} className={STEP_ROW}>
                 <StatusIcon status={s.state} size={14} />
-                <span className="min-w-0 flex-1 truncate font-semibold text-text">{s.title}</span>
+                <span className={STEP_TITLE}>{s.title}</span>
                 {s.state === "running" ? <StepBar step={s} /> : null}
-                <span title={note} className={cx("max-w-[50%] truncate text-right text-xs", s.state === "failed" ? "text-danger" : "text-muted")}>
+                <span title={note} className={cx(STEP_NOTE, s.state === "failed" ? "text-danger" : "text-muted")}>
                   {note}
                 </span>
               </li>

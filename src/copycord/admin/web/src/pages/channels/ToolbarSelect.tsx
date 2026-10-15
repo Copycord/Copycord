@@ -29,6 +29,8 @@ export interface ToolbarSelectProps {
   nativeHidden?: boolean;
   /** The options are still loading: a bar stands where the chosen label goes. */
   pending?: boolean;
+  /** Prints before the chosen label on the closed control ("Status" reads "Status: All"); the options stay plain. */
+  prefix?: string;
   /** Text that sizes the pending bar, about as wide as the label that replaces it. */
   pendingLabel?: string;
   /** "field": block, full width, the toggle is a role combobox with the id and toggleClassName for its look. */
@@ -55,6 +57,7 @@ export function ToolbarSelect({
   disabled,
   nativeHidden,
   pending,
+  prefix,
   pendingLabel = "Guild mapping",
   variant = "toolbar",
   className,
@@ -173,7 +176,9 @@ export function ToolbarSelect({
         {pending ? (
           <Skeleton.Text className="align-middle">{pendingLabel}</Skeleton.Text>
         ) : (
-          <span className={cx(field && "block truncate")}>{options[selected]?.label || (field ? "\u00a0" : "")}</span>
+          <span className={cx(field && "block truncate")}>
+            {prefix && options[selected] ? `${prefix}: ${options[selected].label}` : options[selected]?.label || (field ? "\u00a0" : "")}
+          </span>
         )}
         <span
           aria-hidden

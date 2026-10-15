@@ -7,14 +7,23 @@ import type { TaskRun, TaskStep } from "../../types/tasks";
 import { Tasks } from "../Tasks";
 import { RunList, RunRow } from "./RunList";
 import { REVEAL } from "../../components/ui/Skeleton";
+import userEvent from "@testing-library/user-event";
+import { RunView } from "./RunDetail";
 import { StepList } from "./StepList";
 import { rememberRunTypes, rememberTypes } from "./typeLabels";
 import {
   ALL_TASKS_DESCRIPTION,
+  CARD_HEAD,
+  RUN_META,
+  STAT_TILE,
+  STEP_EMPTY,
+  STEP_ROW_PX,
   RunDetailSkeleton,
   STEPS_BAR,
   STEPS_COUNT_KEY,
   STEPS_HEAD,
+  STEPS_PCT,
+  STEPS_PROGRESS,
   STEP_LIST,
   BUSY,
   FADE_IN,
@@ -228,16 +237,20 @@ describe("page skeleton", () => {
     };
     const skelHead = head(skel!);
     const realHead = head(real!);
-    // Title, counts line and filter in the same boxes; the third part is the overall bar.
+    // Title, counts line, the overall bar with its percent and the filter, in the same boxes.
     expect(skelHead.parts).toHaveLength(4);
-    expect(skelHead.parts.filter((_, i) => i !== 2)).toEqual(realHead.parts.filter((_, i) => i !== 2));
-    // The skeleton's bar takes the track's size (w-28 h-1, 112 by 4 px) and hides with it on small screens.
-    const skelBar = skel!.querySelector(`[class="${STEPS_HEAD}"]`)!.children[2] as HTMLElement;
+    expect(skelHead.parts).toEqual(realHead.parts);
+    const progress = (s: Element) => s.querySelector(`[class="${STEPS_HEAD}"]`)!.children[2] as HTMLElement;
+    expect(progress(skel!).className).toBe(STEPS_PROGRESS);
+    expect(progress(skel!).firstElementChild!.className).toBe(STEPS_PCT);
+    expect(progress(real!).firstElementChild).toHaveTextContent("42%");
+    // The skeleton's bar takes the track's size (w-28 h-1, 112 by 4 px); the pair hides on small screens.
+    const skelBar = progress(skel!).children[1] as HTMLElement;
     expect(skelBar.style.width).toBe("112px");
     expect(skelBar.style.height).toBe("4px");
-    expect(STEPS_BAR.split(" ")).toEqual(expect.arrayContaining(["w-28", "h-1", "shrink-0", "max-sm:hidden"]));
-    expect(skelBar.className).toContain("shrink-0 max-sm:hidden");
-    expect(real!.querySelector(`[class="${STEPS_HEAD}"]`)!.children[2]!.className.startsWith(STEPS_BAR)).toBe(true);
+    expect(STEPS_BAR.split(" ")).toEqual(expect.arrayContaining(["w-28", "h-1", "shrink-0"]));
+    expect(STEPS_PROGRESS.split(" ")).toContain("max-sm:hidden");
+    expect(progress(real!).children[1]!.className.startsWith(STEPS_BAR)).toBe(true);
     expect(skelHead).toMatchObject({ title: "Steps", filter: "Status: All" });
     expect(realHead).toMatchObject({ title: "Steps", filter: "Status: All" });
     // Bars only where the run's data lands: the counts line and the overall bar, not the title or the filter.
@@ -347,5 +360,65 @@ describe("placeholder to content", () => {
     expect(screen.getByRole("heading", { name: "Backfill channels" }).children).toHaveLength(0);
     rerender(<TasksHeader title="All tasks" description={ALL_TASKS_DESCRIPTION} action={null} />);
     expect(screen.getByRole("heading", { name: "All tasks" }).querySelector("span")).toBeNull();
+  });
+});
+
+describe("run page skeleton structure", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("draws as many blocks as the loaded page in the header, tiles, inputs and steps", () => {
+    const run: TaskRun = {
+      ...RUN,
+      status: "failed",
+      error: "1 of 6 channels failed",
+      summary: { channels: 6, delivered: 224, failed: 1 },
+      inputs: { since: "2026-10-01", limit: 100 },
+      steps: [
+        { key: "a", title: "#a", state: "success" },
+        { key: "b", title: "#b", state: "success" },
+        { key: "c", title: "#c", state: "success" },
+        { key: "d", title: "#d", state: "success" },
+        { key: "e", title: "#e", state: "failed", note: "Missing access" },
+        { key: "f", title: "#f", state: "cancelled" },
+      ],
+    };
+    const blocks = (root: Element) => ({
+      metaRows: root.querySelectorAll(`header [class^="${RUN_META}"]`).length,
+      headerLines: root.querySelectorAll("header p").length,
+      cardHeads: root.querySelectorAll(`[class="${CARD_HEAD}"]`).length,
+      tiles: root.querySelectorAll(`section[aria-label=Summary] dl > [class="${STAT_TILE}"]`).length,
+      inputs: root.querySelectorAll("section[aria-label=Summary] dl > .contents").length,
+      steps: root.querySelectorAll("section[aria-label=Steps] li").length,
+    });
+    const loaded = render(
+      <MemoryRouter>
+        <RunView run={run} />
+      </MemoryRouter>,
+    );
+    const real = blocks(loaded.container);
+    loaded.unmount();
+    const { container } = render(
+      <MemoryRouter>
+        <RunDetailSkeleton runType="backfill_channels" />
+      </MemoryRouter>,
+    );
+    const skel = blocks(container);
+    expect(real).toMatchObject({ metaRows: 1, cardHeads: 2, tiles: 3, steps: 6 });
+    expect(real.inputs).toBeGreaterThan(0);
+    // The error sits in the meta line, so the header has no line the skeleton lacks.
+    expect(skel).toEqual(real);
+  });
+
+  it("keeps the Steps list's height when the filter matches nothing", async () => {
+    const user = userEvent.setup();
+    const steps: TaskStep[] = Array.from({ length: 6 }, (_, i) => ({ key: `s${i}`, title: `#s${i}`, state: i === 4 ? "failed" : "success" }));
+    render(<StepList run={{ ...RUN, steps }} />);
+    await user.click(screen.getByRole("button", { name: /^Status: / }));
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["All", "Running", "Queued", "Failed", "Done"]);
+    await user.click(screen.getByRole("option", { name: "Queued" }));
+    expect(screen.getByRole("button", { name: /^Status: / })).toHaveTextContent("Status: Queued");
+    const empty = screen.getByText("No queued steps");
+    expect(empty.className).toBe(STEP_EMPTY);
+    expect(empty.style.minHeight).toBe(`${6 * STEP_ROW_PX}px`);
   });
 });

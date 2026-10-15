@@ -16,31 +16,36 @@ import type { TaskRun, TaskType } from "../../types/tasks";
 import { ReportPanel, useRunToast } from "./ReportPanel";
 import { ContextBadge, formatWhen, runConfirm, runDuration, triggerText, useNow } from "./RunList";
 import { runUrl, useTaskRun } from "./runStore";
-import { STATUS_LABEL, StatusIcon } from "./StatusIcon";
+import { COLOUR, STATUS_LABEL, StatusIcon } from "./StatusIcon";
 import { StepList, formatCount } from "./StepList";
 import {
   BUSY,
   FADE_IN,
-  FRAME,
   INPUTS_BOX,
   INPUTS_LABELS_KEY,
   INPUTS_LIST,
   INPUTS_TITLE,
+  RUN_ACTION,
   RUN_BODY,
   RUN_BREADCRUMB,
+  RUN_CARD,
   RUN_CRUMB,
+  RUN_ERROR,
   RUN_HEADER,
   RUN_HEAD_MAIN,
   RUN_HEAD_ROW,
   RUN_META,
   RUN_NUMBER,
+  RUN_STATUS,
   RUN_TITLE,
   RUN_TITLE_ROW,
   RunDetailSkeleton,
   STATS_LABELS_KEY,
   STATS_LIST,
   STAT_LABEL,
+  STAT_TILE,
   STAT_VALUE,
+  SummaryHead,
   typeUrl,
 } from "./TasksSkeleton";
 import { rememberRunTypes, runTypeOf, typeLabel } from "./typeLabels";
@@ -54,11 +59,12 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
   useLastLabels(STATS_LABELS_KEY, stats.map((s) => s.label));
   useLastLabels(INPUTS_LABELS_KEY, rows.map((r) => r.label));
   return (
-    <section aria-label="Summary" className={FRAME}>
+    <section aria-label="Summary" className={RUN_CARD}>
+      <SummaryHead />
       {stats.length ? (
         <dl aria-label="Counts" className={cx(STATS_LIST, FADE_IN)}>
           {stats.map((s) => (
-            <div key={s.key} className="min-w-0">
+            <div key={s.key} className={STAT_TILE}>
               <dt className={STAT_LABEL}>{s.label}</dt>
               <dd className={STAT_VALUE}>{formatCount(s.value)}</dd>
             </div>
@@ -145,13 +151,21 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
               <ContextBadge run={run} />
               <span title="Started">{formatWhen(run.started_at ?? run.created_at)}</span>
               {duration ? <span title="Duration">{duration}</span> : null}
-              <span data-testid="run-status">{STATUS_LABEL[run.status]}</span>
+              <span data-testid="run-status" className={cx(RUN_STATUS, COLOUR[run.status])}>
+                {STATUS_LABEL[run.status]}
+              </span>
+              {/* In the meta line, not a line of its own, so the page stands as tall as its skeleton. */}
+              {run.status === "failed" && run.error ? (
+                <span data-testid="run-error" title={run.error} className={RUN_ERROR}>
+                  {run.error}
+                </span>
+              ) : null}
             </div>
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
           {active ? (
-            <Button variant="ghost-red" size="sm" loading={busy} disabled={busy} onClick={() => setAsk("cancel")}>
+            <Button variant="ghost-red" size="sm" className={RUN_ACTION} loading={busy} disabled={busy} onClick={() => setAsk("cancel")}>
               Cancel run
             </Button>
           ) : (
@@ -159,18 +173,18 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
               <Button
                 variant="ghost"
                 size="sm"
+                className={RUN_ACTION}
                 onClick={() => navigate(`/tasks?type=${encodeURIComponent(run.type)}&rerun=${encodeURIComponent(run.id)}`)}
               >
                 Re-run
               </Button>
-              <Button variant="ghost-red" size="sm" loading={busy} disabled={busy} onClick={() => setAsk("delete")}>
+              <Button variant="ghost-red" size="sm" className={RUN_ACTION} loading={busy} disabled={busy} onClick={() => setAsk("delete")}>
                 Delete
               </Button>
             </>
           )}
         </div>
       </div>
-      {run.status === "failed" && run.error ? <p className="mt-2 text-sm text-danger">{run.error}</p> : null}
       <ConfirmDialog open={ask !== null} {...runConfirm(ask ?? "cancel", name)} onResult={(ok) => void onConfirm(ok)} />
     </header>
   );

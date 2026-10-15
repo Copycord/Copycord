@@ -16,7 +16,7 @@ export const STATUS_LABEL: Record<RunStatus | StepState, string> = {
   skipped: "Skipped",
 };
 
-const COLOUR: Record<RunStatus | StepState, string> = {
+export const COLOUR: Record<RunStatus | StepState, string> = {
   queued: "text-muted",
   running: "text-primary",
   success: "text-good",

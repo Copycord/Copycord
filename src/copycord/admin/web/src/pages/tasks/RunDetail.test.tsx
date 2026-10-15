@@ -101,7 +101,7 @@ function outline(root: HTMLElement) {
           filter: text(s.querySelector("button[aria-haspopup=listbox]")?.firstElementChild),
           rows: Array.from(s.querySelectorAll("li")).map((li) => [
             li.querySelector("[role=img]")?.getAttribute("aria-label"),
-            text(li.querySelector(".font-semibold")),
+            text(li.querySelector(".font-medium")),
             text(li.querySelector("[title]:not([role])")),
             li.querySelector("[role=progressbar]") ? "bar" : "",
           ]),
@@ -333,7 +333,7 @@ describe("StepList", () => {
     ];
     expect(orderSteps(steps).map((s) => s.key)).toEqual(["e", "g", "c", "d", "b", "a", "f"]);
     render(<StepList run={makeRun({ steps })} />);
-    expect(screen.getAllByRole("listitem").map((li) => li.querySelector(".font-semibold")?.textContent)).toEqual(["#e", "#g", "#c", "#d", "#b", "#a", "#f"]);
+    expect(screen.getAllByRole("listitem").map((li) => li.querySelector(".font-medium")?.textContent)).toEqual(["#e", "#g", "#c", "#d", "#b", "#a", "#f"]);
   });
 
   it("filters by state from the head, All by default, and says when a state has none", async () => {
@@ -344,22 +344,22 @@ describe("StepList", () => {
       { key: "c", title: "#c", state: "success" },
     ];
     render(<StepList run={makeRun({ steps })} />);
-    const titles = () => screen.queryAllByRole("listitem").map((li) => li.querySelector(".font-semibold")?.textContent);
+    const titles = () => screen.queryAllByRole("listitem").map((li) => li.querySelector(".font-medium")?.textContent);
     expect(titles()).toEqual(["#b", "#a", "#c"]);
     const pick = async (label: string) => {
       await user.click(screen.getByRole("button", { name: /^Status: / }));
       await user.click(screen.getByRole("option", { name: label }));
     };
-    await pick("Status: Done");
+    await pick("Done");
     expect(titles()).toEqual(["#a", "#c"]);
-    await pick("Status: Failed");
+    await pick("Failed");
     expect(titles()).toEqual(["#b"]);
-    await pick("Status: Running");
+    await pick("Running");
     expect(titles()).toEqual([]);
     expect(screen.getByText("No running steps")).toBeInTheDocument();
     // The head still counts every step.
     expect(screen.getByTestId("steps-summary")).toHaveTextContent("2 done, 1 failed");
-    await pick("Status: All");
+    await pick("All");
     expect(titles()).toEqual(["#b", "#a", "#c"]);
   });
 
