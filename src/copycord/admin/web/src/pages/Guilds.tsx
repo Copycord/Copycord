@@ -15,7 +15,7 @@ import { GuildCard } from "./guilds/GuildCard";
 import { GuildDetailsDialog } from "./guilds/GuildDetailsDialog";
 import { sortLabel, visibleGuilds } from "./guilds/model";
 import type { Point, SortDir } from "./guilds/model";
-import { GuildTileSkeletons } from "./guilds/GuildsSkeleton";
+import { CONTROLS, GuildTileSkeletons, GuildsTitle, SEARCH_INPUT, SORT_BTN } from "./guilds/GuildsSkeleton";
 
 export { GuildsSkeleton } from "./guilds/GuildsSkeleton";
 
@@ -58,11 +58,8 @@ export function Guilds() {
         <Card className="mt-[18px]">
           {/* .card-titlebar: the h2, then the search and the sort direction button (.titlebar-actions). */}
           <header className="mb-1.5 block gap-3">
-            {/* The old visible h2, still the page's top heading. */}
-            <h2 aria-level={1} className="my-[0.83em] text-[24px] font-bold">
-              Guilds
-            </h2>
-            <span className="flex flex-wrap items-center gap-2.5">
+            <GuildsTitle />
+            <span className={CONTROLS}>
               <input
                 id="g-search"
                 type="text"
@@ -71,14 +68,8 @@ export function Guilds() {
                 value={query}
                 hidden={!booted}
                 onChange={(e) => setQuery(e.target.value)}
-                className={
-                  "w-auto max-w-[260px] min-w-[220px] flex-none rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[14px] text-[#e6e1ff] " +
-                  "caret-[#7c5cff] outline-none transition-[border-color,box-shadow,background-color] duration-150 " +
-                  "placeholder:text-[color-mix(in_srgb,#e6e1ff_55%,transparent)] placeholder:opacity-75 " +
-                  "hover:border-[#7c5cff] hover:[box-shadow:0_0_0_1px_#7c5cff] focus:border-[#7c5cff] focus:[box-shadow:0_0_0_1px_#7c5cff]"
-                }
+                className={SEARCH_INPUT}
               />
-              {/* .btn.btn-select */}
               <button
                 id="g-sortdir"
                 type="button"
@@ -86,11 +77,7 @@ export function Guilds() {
                 aria-pressed={dir === "desc"}
                 hidden={!booted}
                 onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))}
-                className={
-                  "flex min-h-[34px] cursor-pointer items-center justify-center rounded-btn border border-border bg-control px-2.5 py-2 " +
-                  "text-[13px] leading-none font-semibold text-text outline-none hover:border-[#7c5cff] hover:shadow-[0_0_0_0.25px_#7c5cff] " +
-                  "focus-visible:border-accent focus-visible:shadow-[0_0_0_4px_rgba(167,139,250,0.18)]"
-                }
+                className={SORT_BTN}
               >
                 {sortLabel(dir)}
               </button>

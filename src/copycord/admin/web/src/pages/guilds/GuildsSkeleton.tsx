@@ -1,9 +1,30 @@
-// The Guilds page while its chunk downloads: the same card and title as the page with the guild tiles it
-// shows while the list loads. Kept out of Guilds.tsx so the app shell can show it without the page chunk.
+// The Guilds page while its chunk downloads: the same card, title and control row as the page at first
+// paint (the search and the sort button wait for the gate), as inert chrome, and the guild tiles it shows
+// while the list loads. Kept out of Guilds.tsx so the app shell can show it without the page chunk; the
+// page takes its shared classes and the loading tiles from here.
 
 import { Card, Skeleton } from "../../components/ui";
 import { StatusGate } from "../../components/ui/StatusGate";
 import { useStatusGate } from "../../hooks/useStatusGate";
+import { CONTROLS, SEARCH_INPUT } from "../channels/ChannelsSkeleton";
+import { sortLabel } from "./model";
+
+export { CONTROLS, SEARCH_INPUT };
+
+/** .btn.btn-select */
+export const SORT_BTN =
+  "flex min-h-[34px] cursor-pointer items-center justify-center rounded-btn border border-border bg-control px-2.5 py-2 " +
+  "text-[13px] leading-none font-semibold text-text outline-none hover:border-[#7c5cff] hover:shadow-[0_0_0_0.25px_#7c5cff] " +
+  "focus-visible:border-accent focus-visible:shadow-[0_0_0_4px_rgba(167,139,250,0.18)]";
+
+/** The old visible h2, still the page's top heading. */
+export function GuildsTitle() {
+  return (
+    <h2 aria-level={1} className="my-[0.83em] text-[24px] font-bold">
+      Guilds
+    </h2>
+  );
+}
 
 /** Guild tiles while the list loads, shared with the page. */
 export function GuildTileSkeletons() {
@@ -27,10 +48,13 @@ export function GuildsSkeleton() {
     <StatusGate gate={gate}>
       <Card className="mt-[18px]" data-testid="card-skeleton">
         <header className="mb-1.5 block gap-3">
-          <h2 aria-level={1} className="my-[0.83em] text-[24px] font-bold">
-            Guilds
-          </h2>
-          <span className="flex flex-wrap items-center gap-2.5" />
+          <GuildsTitle />
+          <span inert className={CONTROLS}>
+            <input type="text" placeholder="Search guilds…" aria-label="Search guilds" hidden className={SEARCH_INPUT} />
+            <button type="button" hidden className={SORT_BTN}>
+              {sortLabel("asc")}
+            </button>
+          </span>
         </header>
       </Card>
     </StatusGate>
