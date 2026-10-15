@@ -7,12 +7,11 @@ import { Button, Card, cx, Input } from "../../components/ui";
 import { connectSse } from "../../lib/sse";
 import type { ScraperLogEvent } from "../../types/scraper";
 import { clearLogFile, LOG_STREAM_URL } from "./scraperApi";
-import { CHECK_SPAN } from "./ConfigCard";
-import { SC_CARD, TITLE } from "./TokensCard";
+import { AUTOCLEAR_INPUT, AUTOCLEAR_KEY, CHECK_SPAN, LOG_BODY, readAutoclear, SC_CARD, TITLE } from "./ScraperSkeleton";
 import type { LogSignal } from "./useScraperLive";
 
 export const MAX_LINES = 10000;
-export const AUTOCLEAR_KEY = "scraper_log_autoclear";
+export { AUTOCLEAR_KEY };
 /** Search keystrokes settle this long before the view filters. */
 export const SEARCH_DEBOUNCE_MS = 80;
 /** Within this many pixels of the bottom the view keeps following new lines. */
@@ -33,14 +32,6 @@ export function parseLogEvent(raw: string): string[] {
 export function filterLines(lines: string[], query: string): string[] {
   const q = query.trim().toLowerCase();
   return q ? lines.filter((l) => l.toLowerCase().includes(q)) : lines;
-}
-
-function readAutoclear(): boolean {
-  try {
-    return localStorage.getItem(AUTOCLEAR_KEY) !== "false";
-  } catch {
-    return true;
-  }
 }
 
 export interface ScraperLogsCardProps {
@@ -135,7 +126,7 @@ export function ScraperLogsCard({ signal, EventSourceImpl }: ScraperLogsCardProp
             <input
               id="sc-log-autoclear"
               type="checkbox"
-              className="peer pointer-events-none absolute my-[3px] mr-[3px] ml-1 size-0 opacity-0"
+              className={AUTOCLEAR_INPUT}
               checked={autoclear}
               onChange={(e) => onAutoclear(e.target.checked)}
             />
@@ -171,7 +162,7 @@ export function ScraperLogsCard({ signal, EventSourceImpl }: ScraperLogsCardProp
         onScroll={onScroll}
         aria-live="polite"
         aria-label="Scraper log output"
-        className="m-0 mt-3 h-[420px] overflow-y-auto overscroll-contain whitespace-pre-wrap rounded-b-2xl bg-[#0e0720] px-4 py-3 font-mono text-xs leading-normal text-[#e6e1ff]"
+        className={LOG_BODY}
       >
         {text}
       </pre>

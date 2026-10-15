@@ -17,27 +17,11 @@ import {
   startScrape,
   validateSetup,
 } from "./scraperApi";
-import { CHECK_BOX, CHECK_SPAN, SC_CARD, SC_CHECK, SC_LABEL, TITLE, TITLEBAR } from "./ScraperSkeleton";
+import { CHECK_BOX, CHECK_SPAN, DEFAULT_OPTS, INCLUDE_OPTS, OLD_BTN, SC_CARD, SC_CHECK, SC_LABEL, TITLE, TITLEBAR } from "./ScraperSkeleton";
+import type { IncludeOpts } from "./ScraperSkeleton";
 
-export { CHECK_BOX, CHECK_SPAN, SC_CHECK };
-// The old .btn had no gap between the icon and the label.
-const OLD_BTN = "has-[svg]:gap-0!";
-
-export interface IncludeOpts {
-  username: boolean;
-  avatar: boolean;
-  roles: boolean;
-  bio: boolean;
-}
-
-export const DEFAULT_OPTS: IncludeOpts = { username: true, avatar: true, roles: false, bio: false };
-
-const OPTS: Array<{ key: keyof IncludeOpts; id: string; label: string }> = [
-  { key: "username", id: "sc-opt-username", label: "Username" },
-  { key: "avatar", id: "sc-opt-avatar", label: "Avatar URL" },
-  { key: "roles", id: "sc-opt-roles", label: "Roles" },
-  { key: "bio", id: "sc-opt-bio", label: "Bio" },
-];
+export { CHECK_BOX, CHECK_SPAN, DEFAULT_OPTS, SC_CHECK };
+export type { IncludeOpts };
 
 /** How long the validation result stays up, as on the old page. */
 export const RESULT_MS = 5000;
@@ -196,7 +180,7 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
         <fieldset className="m-0 rounded-control border border-border bg-[rgba(20,11,38,0.35)] px-4 py-3.5">
           <legend className={cx(SC_LABEL, "px-1.5")}>Include fields</legend>
           <div className="mt-2 grid grid-cols-2 gap-2.5">
-            {OPTS.map((o) => (
+            {INCLUDE_OPTS.map((o) => (
               <label key={o.key} className={SC_CHECK}>
                 <input
                   id={o.id}

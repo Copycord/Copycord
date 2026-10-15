@@ -12,7 +12,7 @@ import { ProxyCard } from "./scraper/ProxyCard";
 import { QueueCard } from "./scraper/QueueCard";
 import { ScraperLogsCard } from "./scraper/ScraperLogsCard";
 import { SCRAPES_URL, STATUS_URL, TOKENS_URL } from "./scraper/scraperApi";
-import { IDLE_PILL, PILL_BOX, ScraperTitle } from "./scraper/ScraperSkeleton";
+import { IDLE_PILL, PILL_BOX, PillPending, ScraperTitle } from "./scraper/ScraperSkeleton";
 import { TokensCard } from "./scraper/TokensCard";
 import { useScraperLive } from "./scraper/useScraperLive";
 import { useNotify, useSafeConfirm } from "./system/providers";
@@ -41,6 +41,8 @@ export function Scraper() {
   const busy = live.pill === "running";
 
   const pill = PILL[live.pill] ?? IDLE_PILL;
+  // A bar, like the page skeleton's, until the first status answer unless a live event got there first.
+  const pillPending = status.data === undefined && status.loading && live.pill === "idle";
 
   // min-w-fit: like the old .scraper-wide column, the page is never narrower than its widest
   // unbreakable row (the log card toolbar), so on phones it keeps the old one-line title.
@@ -49,14 +51,18 @@ export function Scraper() {
       <h1 className="sr-only">Scraper</h1>
       <div className="mt-7 mb-1 flex flex-wrap items-start justify-between gap-4">
         <ScraperTitle />
-        <span
-          id="sc-status-pill"
-          data-status={live.pill}
-          className={cx(PILL_BOX, pill.box)}
-        >
-          <span aria-hidden="true" className={cx("size-2 rounded-full transition-all duration-[250ms]", pill.dot, busy && "animate-pulse")} />
-          <span id="sc-status-label">{live.pillLabel}</span>
-        </span>
+        {pillPending ? (
+          <PillPending />
+        ) : (
+          <span
+            id="sc-status-pill"
+            data-status={live.pill}
+            className={cx(PILL_BOX, pill.box)}
+          >
+            <span aria-hidden="true" className={cx("size-2 rounded-full transition-all duration-[250ms]", pill.dot, busy && "animate-pulse")} />
+            <span id="sc-status-label">{live.pillLabel}</span>
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-[1fr] items-start gap-[18px] min-[961px]:grid-cols-[1fr_1fr]">

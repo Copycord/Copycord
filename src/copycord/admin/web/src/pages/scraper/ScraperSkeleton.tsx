@@ -1,9 +1,10 @@
-// The Scraper page while its chunk downloads: the same header, card grid and cards as the page, with
-// the token and saved scrape placeholders the cards show while their lists load. Kept out of
-// Scraper.tsx so the app shell can show it without pulling the page chunk in; the cards take their
-// shared classes and placeholders from here.
+// The Scraper page while its chunk downloads: the same header, card grid and cards as the page, their
+// titles, inputs, checkboxes, buttons and icons as inert chrome, with bars only where the API fills in
+// (the token count, the token list and the saved scrapes). Kept out of Scraper.tsx so the app shell can
+// show it without pulling the page chunk in; the cards take their shared classes and pieces from here.
 
 import { Button, Card, Input, Skeleton, cx } from "../../components/ui";
+import { PlayIcon, QueueIcon, RefreshIcon } from "./icons";
 
 // .scraper-card .card-titlebar h3 and the .card-titlebar row; every scraper card sits 18px below the last.
 export const TITLE = "m-0 text-[15px] font-bold whitespace-nowrap text-accent";
@@ -28,11 +29,21 @@ export const CHECK_SPAN =
   "after:rounded-[2px] after:content-[''] peer-checked:border-primary peer-checked:bg-[rgba(139,92,246,0.18)] " +
   "peer-checked:after:bg-primary peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary";
 
-// .scraper-status-pill at idle, the state the page opens in.
+// .scraper-status-pill and its idle look.
 export const PILL_BOX =
   "mt-1 inline-flex shrink-0 items-center gap-[7px] rounded-[20px] border px-3.5 py-1.5 text-xs font-semibold " +
   "tracking-[0.03em] whitespace-nowrap transition-all duration-[250ms]";
 export const IDLE_PILL = { box: "border-border bg-[rgba(255,255,255,0.04)] text-muted", dot: "bg-muted" };
+
+/** The status pill until the first status answer: the pill's box with a bar over it. */
+export function PillPending() {
+  return (
+    <span data-skeleton="" className={cx(PILL_BOX, "cc-skeleton border-transparent text-transparent")}>
+      <span aria-hidden="true" className="size-2 rounded-full" />
+      <span>Idle</span>
+    </span>
+  );
+}
 
 /** The 26px magnifier before the page title. */
 export function SearchIcon({ className }: { className?: string }) {
@@ -88,7 +99,78 @@ export function ScrapesPlaceholder() {
   );
 }
 
-const OPTS = ["Username", "Avatar URL", "Roles", "Bio"];
+// The old .btn had no gap between the icon and the label.
+export const OLD_BTN = "has-[svg]:gap-0!";
+
+export interface IncludeOpts {
+  username: boolean;
+  avatar: boolean;
+  roles: boolean;
+  bio: boolean;
+}
+
+export const DEFAULT_OPTS: IncludeOpts = { username: true, avatar: true, roles: false, bio: false };
+
+/** The Include fields checkboxes, shared by the Configuration card and the skeleton. */
+export const INCLUDE_OPTS: Array<{ key: keyof IncludeOpts; id: string; label: string }> = [
+  { key: "username", id: "sc-opt-username", label: "Username" },
+  { key: "avatar", id: "sc-opt-avatar", label: "Avatar URL" },
+  { key: "roles", id: "sc-opt-roles", label: "Roles" },
+  { key: "bio", id: "sc-opt-bio", label: "Bio" },
+];
+
+const COUNT_BOX = "rounded-xl border px-2.5 py-[3px] text-[11px] font-semibold whitespace-nowrap";
+
+/** The token count badge; a bar the badge's size until the token list answers. */
+export function TokenCount({ text }: { text: string | null }) {
+  return text === null ? (
+    <span id="sc-token-count" data-skeleton="" className={cx(COUNT_BOX, "cc-skeleton border-transparent text-transparent")}>
+      0 tokens
+    </span>
+  ) : (
+    <span id="sc-token-count" className={cx(COUNT_BOX, "border-[rgba(139,92,246,0.25)] bg-[rgba(139,92,246,0.12)] text-primary")}>
+      {text}
+    </span>
+  );
+}
+
+/** The Proxies card's expand button look. */
+export const PROXY_TOGGLE = cx(
+  "flex size-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-btn border border-border text-sm leading-[14px] font-semibold",
+  "bg-[rgba(255,255,255,0.04)] text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60",
+  "hover:-translate-y-0.5 hover:border-accent/30 hover:bg-white/8",
+);
+
+/** The Proxies card's note pointing at the Configuration page. */
+export function ProxyNote() {
+  return (
+    <p className="m-0 text-xs leading-normal text-muted">
+      The scraper uses the shared proxy list from the{" "}
+      <a href="/" className="text-accent underline">
+        Configuration
+      </a>{" "}
+      page. Add or manage proxies in the <strong>Proxy</strong> section.
+    </p>
+  );
+}
+
+export const AUTOCLEAR_KEY = "scraper_log_autoclear";
+
+/** The log card's Auto-clear choice, kept in the browser; on unless turned off. */
+export function readAutoclear(): boolean {
+  try {
+    return localStorage.getItem(AUTOCLEAR_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+/** The log card's hidden checkbox and the box drawn after it. */
+export const AUTOCLEAR_INPUT = "peer pointer-events-none absolute my-[3px] mr-[3px] ml-1 size-0 opacity-0";
+export const LOG_BODY =
+  "m-0 mt-3 h-[420px] overflow-y-auto overscroll-contain whitespace-pre-wrap rounded-b-2xl bg-[#0e0720] px-4 py-3 font-mono text-xs leading-normal text-[#e6e1ff]";
+
+const noop = () => undefined;
 
 export function ScraperSkeleton() {
   return (
@@ -96,25 +178,20 @@ export function ScraperSkeleton() {
       <h1 className="sr-only">Scraper</h1>
       <div className="mt-7 mb-1 flex flex-wrap items-start justify-between gap-4">
         <ScraperTitle />
-        <span className={cx(PILL_BOX, IDLE_PILL.box)}>
-          <span aria-hidden="true" className={cx("size-2 rounded-full transition-all duration-[250ms]", IDLE_PILL.dot)} />
-          <span>Idle</span>
-        </span>
+        <PillPending />
       </div>
 
       <div inert className="grid grid-cols-[1fr] items-start gap-[18px] min-[961px]:grid-cols-[1fr_1fr]">
         <Card aria-label="Tokens" className={cx(SC_CARD, "min-w-0")}>
           <div className={TITLEBAR}>
             <h3 className={TITLE}>Tokens</h3>
-            <span className="rounded-xl border border-[rgba(139,92,246,0.25)] bg-[rgba(139,92,246,0.12)] px-2.5 py-[3px] text-[11px] font-semibold whitespace-nowrap text-primary">
-              0 tokens
-            </span>
+            <TokenCount text={null} />
           </div>
           <div className="mt-3.5 mb-2 rounded-control border border-border bg-[rgba(20,11,38,0.6)] p-3.5">
             <div className="flex items-center gap-2 max-[600px]:flex-col">
-              <Input type="text" disabled aria-label="Discord token" placeholder="Paste Discord token…" className="min-w-0 flex-[2]" />
-              <Input disabled aria-label="Token label" placeholder="Label (optional)" className="min-w-0 flex-1" />
-              <Button type="button" variant="primary" size="sm" disabled>
+              <Input type="text" aria-label="Discord token" placeholder="Paste Discord token…" className="min-w-0 flex-[2]" />
+              <Input aria-label="Token label" placeholder="Label (optional)" className="min-w-0 flex-1" />
+              <Button type="button" variant="primary" size="sm">
                 Add
               </Button>
             </div>
@@ -131,15 +208,15 @@ export function ScraperSkeleton() {
           <div className="mt-3.5 flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <span className={SC_LABEL}>Server (Guild) ID</span>
-              <Input disabled aria-label="Server (Guild) ID" placeholder="e.g. 123456789012345678" />
+              <Input aria-label="Server (Guild) ID" placeholder="e.g. 123456789012345678" />
             </div>
-            <fieldset disabled className="m-0 rounded-control border border-border bg-[rgba(20,11,38,0.35)] px-4 py-3.5">
+            <fieldset className="m-0 rounded-control border border-border bg-[rgba(20,11,38,0.35)] px-4 py-3.5">
               <legend className={cx(SC_LABEL, "px-1.5")}>Include fields</legend>
               <div className="mt-2 grid grid-cols-2 gap-2.5">
-                {OPTS.map((label, i) => (
-                  <label key={label} className={SC_CHECK}>
-                    <input type="checkbox" className={CHECK_BOX} defaultChecked={i < 2} />
-                    <span>{label}</span>
+                {INCLUDE_OPTS.map((o) => (
+                  <label key={o.key} className={SC_CHECK}>
+                    <input type="checkbox" className={CHECK_BOX} defaultChecked={DEFAULT_OPTS[o.key]} />
+                    <span>{o.label}</span>
                   </label>
                 ))}
               </div>
@@ -148,16 +225,14 @@ export function ScraperSkeleton() {
               </p>
             </fieldset>
             <div className="flex items-center gap-2.5 pt-1">
-              <Button variant="ghost" disabled>
-                Validate
-              </Button>
+              <Button variant="ghost">Validate</Button>
               <div className="ml-auto flex gap-2.5">
-                <Button variant="outline" className="has-[svg]:gap-0!" disabled>
-                  <svg width={14} height={14} aria-hidden="true" />
+                <Button variant="outline" title="Add to queue" className={OLD_BTN}>
+                  <QueueIcon />
                   Add to Queue
                 </Button>
-                <Button variant="primary" className="has-[svg]:gap-0!" disabled>
-                  <svg width={14} height={14} aria-hidden="true" />
+                <Button variant="primary" className={OLD_BTN}>
+                  <PlayIcon />
                   Start Scrape
                 </Button>
               </div>
@@ -169,44 +244,36 @@ export function ScraperSkeleton() {
       <Card inert aria-label="Proxies" className={SC_CARD}>
         <div className="mb-2 flex items-center justify-between gap-2.5">
           <h3 className={TITLE}>Proxies</h3>
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-btn border border-border bg-[rgba(255,255,255,0.04)] text-sm leading-[14px] font-semibold text-accent">
+          <button type="button" className={PROXY_TOGGLE}>
             <span aria-hidden="true">▾</span>
-          </span>
+          </button>
         </div>
-        <p className="m-0 text-xs leading-normal text-muted">
-          The scraper uses the shared proxy list from the <span className="text-accent underline">Configuration</span> page. Add
-          or manage proxies in the <strong>Proxy</strong> section.
-        </p>
+        <ProxyNote />
       </Card>
 
       <Card inert aria-label="Scraper Logs" className={cx(SC_CARD, "sc-log-card")}>
         <div className="mb-1.5 flex flex-nowrap items-center justify-between gap-2.5">
           <h3 className={TITLE}>Scraper Logs</h3>
           <div className="ml-auto flex min-w-0 shrink flex-nowrap items-center gap-2">
-            <label className="flex items-center gap-[5px] text-[11px] whitespace-nowrap text-muted select-none">
-              <input
-                type="checkbox"
-                disabled
-                defaultChecked
-                className="peer pointer-events-none absolute my-[3px] mr-[3px] ml-1 size-0 opacity-0"
-              />
+            <label className="flex cursor-pointer items-center gap-[5px] text-[11px] whitespace-nowrap text-muted select-none">
+              <input type="checkbox" defaultChecked={readAutoclear()} onChange={noop} className={AUTOCLEAR_INPUT} />
               <span aria-hidden="true" className={CHECK_SPAN} />
               <span>Auto-clear</span>
             </label>
-            <Input type="text" disabled aria-label="Search logs" placeholder="Search logs…" className="block min-w-[60px] shrink" />
-            <Button size="sm" variant="ghost" className="shrink-0" disabled>
+            <Input type="text" aria-label="Search logs" placeholder="Search logs…" className="block min-w-[60px] shrink" />
+            <Button size="sm" variant="ghost" className="shrink-0">
               Clear
             </Button>
           </div>
         </div>
-        <pre className="m-0 mt-3 h-[420px] overflow-y-auto overscroll-contain whitespace-pre-wrap rounded-b-2xl bg-[#0e0720] px-4 py-3 font-mono text-xs leading-normal text-[#e6e1ff]" />
+        <pre className={LOG_BODY} />
       </Card>
 
       <Card inert aria-label="Past Scrapes" className={SC_CARD}>
         <div className={TITLEBAR}>
           <h3 className={TITLE}>Past Scrapes</h3>
-          <Button size="sm" variant="ghost" aria-label="Refresh" disabled>
-            <svg width={14} height={14} aria-hidden="true" />
+          <Button size="sm" variant="ghost" title="Refresh" aria-label="Refresh">
+            <RefreshIcon />
           </Button>
         </div>
         <div className="mt-3">

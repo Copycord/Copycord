@@ -8,7 +8,7 @@ import type { Confirm, Notify } from "../system/providers";
 import { CheckIcon, KeyIcon, RefreshIcon, TrashIcon, XIcon } from "./icons";
 import { displayMask } from "./mask";
 import { addToken, deleteToken, plural, reason, validateToken } from "./scraperApi";
-import { SC_CARD, TITLE, TITLEBAR, TokenListPlaceholder } from "./ScraperSkeleton";
+import { SC_CARD, TITLE, TITLEBAR, TokenCount, TokenListPlaceholder } from "./ScraperSkeleton";
 
 export { SC_CARD, TITLE, TITLEBAR };
 
@@ -94,12 +94,7 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
     <Card id="sc-tokens-card" aria-label="Tokens" className={cx(SC_CARD, "min-w-0")}>
       <div className={TITLEBAR}>
         <h3 className={TITLE}>Tokens</h3>
-        <span
-          id="sc-token-count"
-          className="rounded-xl border border-[rgba(139,92,246,0.25)] bg-[rgba(139,92,246,0.12)] px-2.5 py-[3px] text-[11px] font-semibold whitespace-nowrap text-primary"
-        >
-          {plural(tokens.length, "token")}
-        </span>
+        <TokenCount text={loading && tokens.length === 0 ? null : plural(tokens.length, "token")} />
       </div>
 
       <form
