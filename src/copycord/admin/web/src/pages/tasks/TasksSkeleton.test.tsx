@@ -125,6 +125,9 @@ describe("page skeleton", () => {
     await screen.findByText("No task runs yet");
     await screen.findByRole("link", { name: "Backfill channels" });
     const loaded = chrome(page.container);
+    // The empty state is plain text inside the runs frame, not a second dashed card, and has no Run task.
+    expect(page.container.querySelector(".border-dashed")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
 
     expect(skeleton).toEqual(loaded);
     expect(loaded).toMatchObject({

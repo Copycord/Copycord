@@ -2,7 +2,6 @@
 // task type (?type=), the list shows its runs live, and /tasks/runs/:id opens one run.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useToast } from "../components/Toast";
 import { Button } from "../components/ui/Button";
@@ -122,7 +121,7 @@ export function Tasks() {
                 description={typePending ? null : (selected?.description ?? ALL_TASKS_DESCRIPTION)}
                 action={runAction}
               />
-              <RunsView types={types} typeTitle={typeTitle} runAction={runAction} />
+              <RunsView types={types} typeTitle={typeTitle} />
             </>
           )}
         </div>
@@ -135,15 +134,7 @@ export function Tasks() {
 /** Poll this often while the socket is down and auto-refresh is Off, so the list still moves. */
 const SOCKET_DOWN_POLL_S = 30;
 
-function RunsView({
-  types,
-  typeTitle,
-  runAction,
-}: {
-  types: TaskType[];
-  typeTitle: (key: string) => string;
-  runAction: ReactNode;
-}) {
+function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: string) => string }) {
   const { filters, active, set, setPage, clear } = useRunFilters();
   const { runs, total, loading, refreshing, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
@@ -213,10 +204,11 @@ function RunsView({
     }
   };
 
+  // Plain text inside the runs frame; the header's Run task is the only one on the page.
   const empty = active ? (
     <EmptyState
+      plain
       title="No runs match"
-      className="m-4"
       action={
         <Button variant="ghost" onClick={clear}>
           Clear filters
@@ -225,10 +217,9 @@ function RunsView({
     />
   ) : (
     <EmptyState
+      plain
       title="No task runs yet"
-      className="m-4"
-      description={filters.type ? undefined : "Pick a task type on the left to run one"}
-      action={runAction}
+      description={filters.type ? "Run task above to start one" : "Pick a task type on the left to run one"}
     />
   );
 

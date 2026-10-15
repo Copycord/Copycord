@@ -129,6 +129,7 @@ describe("Tasks page", () => {
     expect(screen.getByText("0 task runs")).toBeInTheDocument();
     expect(screen.getByText("Pick a task type on the left to run one")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
+    expect(screen.getByText("No task runs yet").parentElement!.className).not.toMatch(/border-dashed/);
   });
 
   it("shows the type title and description when a type is picked", async () => {
@@ -139,12 +140,13 @@ describe("Tasks page", () => {
     expect(screen.getAllByRole("button", { name: "Run task" }).length).toBeGreaterThan(0);
   });
 
-  it("opens a run with its header and the Steps, Log and Report sections", async () => {
+  it("opens a run with its header and the Summary, Steps and Report sections, no log", async () => {
     serve([run({ id: "12", number: 12 })]);
     renderAt("/tasks/runs/12");
-    expect(await screen.findByRole("heading", { level: 2, name: "Backfill #general" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
     expect(screen.getByText("#12")).toBeInTheDocument();
-    for (const name of ["Steps", "Log", "Report"]) expect(screen.getByRole("region", { name })).toBeInTheDocument();
+    for (const name of ["Summary", "Steps", "Report"]) expect(screen.getByRole("region", { name })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Log" })).toBeNull();
   });
 
   it("sends the URL filters with the list fetch and narrows it from the dropdowns", async () => {
@@ -187,13 +189,18 @@ describe("Tasks page", () => {
     expect(screen.getByText("Pick a task type on the left to run one")).toBeInTheDocument();
   });
 
-  it("shows No task runs yet with Run task on an empty type page with no filter", async () => {
+  it("shows No task runs yet with the Run task hint on an empty type page with no filter, Run task only in the header", async () => {
     serve([]);
     renderAt("/tasks?type=backfill_channels");
-    expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
+    const title = await screen.findByText("No task runs yet");
+    expect(screen.getByText("Run task above to start one")).toBeInTheDocument();
     expect(screen.queryByText("No runs match")).toBeNull();
     expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
-    expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(2);
+    expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(1);
+    // Plain text in the runs frame: no second dashed card, no button inside.
+    const box = title.parentElement!;
+    expect(box.className).not.toMatch(/border/);
+    expect(within(box).queryByRole("button")).toBeNull();
   });
 
   it("shows No runs match on a type page only when a filter is set, and Clear filters stays on the type", async () => {
@@ -227,7 +234,7 @@ describe("Tasks page", () => {
     it("keeps Run task off with Start the bots first beside it while the bots are down", async () => {
       serveBots({ value: false });
       renderAt("/tasks?type=backfill_channels");
-      expect(await screen.findAllByText("Start the bots first")).toHaveLength(2);
+      expect(await screen.findAllByText("Start the bots first")).toHaveLength(1);
       for (const b of screen.getAllByRole("button", { name: "Run task" })) expect(b).toBeDisabled();
     });
 
@@ -236,7 +243,7 @@ describe("Tasks page", () => {
       const up = { value: false };
       serveBots(up);
       renderAt("/tasks?type=backfill_channels");
-      expect(await screen.findAllByText("Start the bots first")).toHaveLength(2);
+      expect(await screen.findAllByText("Start the bots first")).toHaveLength(1);
       up.value = true;
       await act(() => vi.advanceTimersByTimeAsync(4000));
       await waitFor(() => expect(screen.queryByText("Start the bots first")).toBeNull());
@@ -246,7 +253,7 @@ describe("Tasks page", () => {
     it("does not ask for the status on a type that does not need the bots", async () => {
       const fn = serve([]);
       renderAt("/tasks?type=backfill_channels");
-      expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(2);
+      expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(1);
       for (const b of screen.getAllByRole("button", { name: "Run task" })) expect(b).toBeEnabled();
       expect(fn.mock.calls.some((c) => String(c[0]) === "/api/status")).toBe(false);
     });

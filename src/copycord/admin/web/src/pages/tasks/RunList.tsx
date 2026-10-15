@@ -184,7 +184,7 @@ export function RunList({
       {loading ? (
         <RunRowsLoading />
       ) : runs.length === 0 ? (
-        (empty ?? <EmptyState title="No task runs yet" className="m-4" />)
+        (empty ?? <EmptyState plain title="No task runs yet" />)
       ) : (
         <ul aria-label="Task runs" aria-busy={refreshing || undefined} className="m-0 list-none p-0">
           {runs.map((r) => (

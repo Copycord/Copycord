@@ -215,5 +215,14 @@ describe("Card, Spinner, EmptyState", () => {
     expect(screen.getByRole("status", { name: "Loading guilds" })).toBeInTheDocument();
     expect(screen.getByText("No mappings")).toBeInTheDocument();
     expect(screen.getByText("Add one to start")).toBeInTheDocument();
+    expect(screen.getByText("No mappings").parentElement).toHaveClass("border-dashed");
+  });
+
+  it("EmptyState plain is centred text with no card border", () => {
+    render(<EmptyState plain title="No runs" description="Run one above" />);
+    const box = screen.getByText("No runs").parentElement!;
+    expect(box.className).not.toMatch(/border/);
+    expect(box).toHaveClass("text-center");
+    expect(screen.getByText("Run one above")).toBeInTheDocument();
   });
 });
