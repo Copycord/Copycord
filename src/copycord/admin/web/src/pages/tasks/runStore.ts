@@ -16,6 +16,9 @@ import { PER_PAGE } from "./TasksSkeleton";
 
 export { PER_PAGE };
 export const RUN_UPDATED = "task.run.updated";
+// The ended run's report fetch: tries, and the wait before the first retry (doubling after).
+export const FINAL_FETCH_ATTEMPTS = 3;
+export const FINAL_FETCH_BACKOFF_MS = 1000;
 
 export function runsUrl(filters: RunFilters): string {
   const qs = new URLSearchParams();
@@ -253,14 +256,27 @@ export function useTaskRun(id: string | null): TaskRunState {
     finalFetch.current?.abort();
     const ctl = new AbortController();
     finalFetch.current = ctl;
-    api
-      .get<TaskRunResponse>(runUrl(runId), { signal: ctl.signal })
-      .then((d) => {
-        if (ctl.signal.aborted) return;
-        const fresh: TaskRun = { ...d.run, id: String(d.run.id) };
-        setRun((held) => (held && held.id === fresh.id && fresh.seq >= held.seq ? fresh : held));
-      })
-      .catch(() => undefined);
+    const attempt = (n: number): void => {
+      api
+        .get<TaskRunResponse>(runUrl(runId), { signal: ctl.signal })
+        .then((d) => {
+          if (ctl.signal.aborted) return;
+          const fresh: TaskRun = { ...d.run, id: String(d.run.id) };
+          setRun((held) => (held && held.id === fresh.id && fresh.seq >= held.seq ? fresh : held));
+          setError(undefined);
+        })
+        .catch((e: unknown) => {
+          if (ctl.signal.aborted) return;
+          if (n + 1 < FINAL_FETCH_ATTEMPTS) {
+            const timer = setTimeout(() => attempt(n + 1), FINAL_FETCH_BACKOFF_MS * 2 ** n);
+            ctl.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+            return;
+          }
+          // The run ended but its report did not load: say so instead of holding the live view.
+          setError(e instanceof Error ? e : new Error(String(e)));
+        });
+    };
+    attempt(0);
   }, []);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);

@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskRun, TaskStep } from "../../types/tasks";
-import { applyFrame, mergeIntoList, parseRunFrame, runsUrl, useTaskRun, useTaskRuns } from "./runStore";
+import { applyFrame, FINAL_FETCH_ATTEMPTS, mergeIntoList, parseRunFrame, runsUrl, useTaskRun, useTaskRuns } from "./runStore";
 
 function makeRun(over: Partial<TaskRun> = {}): TaskRun {
   return {
@@ -186,6 +186,48 @@ describe("runStore hooks", () => {
     expect(result.current.run?.seq).toBe(6);
     expect(result.current.run?.summary).toEqual({ failed: 1 });
   });
+});
+
+describe("runStore final report fetch retries", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    FakeWs.all = [];
+    vi.stubGlobal("WebSocket", FakeWs);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const ended = makeRun({ id: "1", seq: 2, status: "success", report: { summary: { delivered: 3 } } });
+
+  async function endRun(failures: number) {
+    let finals = 0;
+    fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) return Response.json({ run: makeRun({ id: "1", seq: 1, steps: [] }) });
+      finals += 1;
+      return finals <= failures ? new Response("down", { status: 503 }) : Response.json({ run: ended });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useTaskRun("1"));
+    await waitFor(() => expect(result.current.run?.id).toBe("1"));
+    const ws = FakeWs.all[0]!;
+    act(() => ws.open());
+    act(() => ws.emit(frame(makeRun({ id: "1", seq: 2, status: "success" }))));
+    return result;
+  }
+
+  it("retries a failed final fetch and lands the report", async () => {
+    const result = await endRun(2);
+    await waitFor(() => expect(result.current.run?.report).toEqual({ summary: { delivered: 3 } }), { timeout: 6000 });
+    expect(fetchMock.mock.calls.length).toBe(1 + FINAL_FETCH_ATTEMPTS);
+    expect(result.current.error).toBeUndefined();
+  }, 10000);
+
+  it("surfaces the last error after the final attempt", async () => {
+    const result = await endRun(FINAL_FETCH_ATTEMPTS);
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error), { timeout: 6000 });
+    expect(fetchMock.mock.calls.length).toBe(1 + FINAL_FETCH_ATTEMPTS);
+    expect(result.current.run?.status).toBe("success");
+    expect(result.current.run?.report).toBeUndefined();
+  }, 10000);
 });
 
 describe("runStore refetch keeps what is on screen", () => {
