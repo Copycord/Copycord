@@ -1,5 +1,6 @@
 // The filters of the Tasks runs list, all kept in the URL so a link reproduces the view:
-// ?type= ?status= ?context= ?actor= ?q= ?page=. Any change but paging goes back to page 1.
+// ?status= ?context= ?actor= ?q= ?page=. Any change but paging goes back to page 1. ?type= is the
+// rail selection, the page scope rather than a filter: it never counts as active and Clear filters keeps it.
 //   const { filters, set, clear, active } = useRunFilters();
 //   <RunSearch value={filters.q ?? ""} onSearch={(q) => set("q", q)} />
 
@@ -10,8 +11,11 @@ import type { RunFilters, RunStatus, TaskContext, TaskType } from "../../types/t
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 
 export const SEARCH_DEBOUNCE_MS = 300;
-export const FILTER_PARAMS = ["type", "status", "context", "actor", "q"] as const;
-export type FilterParam = (typeof FILTER_PARAMS)[number];
+/** The rail selection: the page scope, not a filter. */
+export const SCOPE_PARAM = "type";
+/** The filters proper: any of them makes the list active, and Clear filters drops them all. */
+export const FILTER_PARAMS = ["status", "context", "actor", "q"] as const;
+export type FilterParam = (typeof FILTER_PARAMS)[number] | typeof SCOPE_PARAM;
 
 const STATUSES: { value: RunStatus; label: string }[] = [
   { value: "queued", label: "Queued" },
@@ -40,7 +44,7 @@ export function filtersFromParams(params: URLSearchParams): RunFilters {
 
 export interface RunFiltersApi {
   filters: RunFilters;
-  /** Some filter besides paging is set. */
+  /** Some filter besides paging and the rail type is set. */
   active: boolean;
   set: (key: FilterParam, value: string) => void;
   setPage: (page: number) => void;
@@ -77,6 +81,7 @@ export function useRunFilters(): RunFiltersApi {
       }),
     [setParams],
   );
+  // Keeps ?type=: Clear filters on a type page stays on that type.
   const clear = useCallback(
     () =>
       setParams((prev) => {
@@ -160,7 +165,10 @@ export interface RunFilterSelectsProps {
   onClear: () => void;
 }
 
-/** Task type, Status, Mapping and Actor dropdowns plus Clear filters, for the list frame header. */
+/**
+ * Task type, Status, Mapping and Actor dropdowns plus Clear filters, for the list frame header.
+ * Task type shows on All tasks only; on a type page the rail already names the type.
+ */
 export function RunFilterSelects({ filters, types, actors, contexts, onChange, active, onClear }: RunFilterSelectsProps) {
   // Keep a value the URL names even when the current page did not list it.
   const actorList: string[] = filters.actor && !actors.includes(filters.actor) ? [...actors, filters.actor] : actors;
@@ -168,18 +176,18 @@ export function RunFilterSelects({ filters, types, actors, contexts, onChange, a
     filters.context && !contexts.some((c) => contextValue(c) === filters.context)
       ? [...contexts, { label: filters.context, mapping_id: filters.context }]
       : contexts;
-  const typeList: { key: string; title: string }[] =
-    filters.type && !types.some((t) => t.key === filters.type) ? [...types, { key: filters.type, title: filters.type }] : types;
 
   return (
     <>
-      <ToolbarSelect
-        id="tasks-filter-type"
-        label="Task type"
-        value={filters.type ?? ""}
-        options={[{ value: "", label: "Task type: All" }, ...typeList.map((t) => ({ value: t.key, label: t.title }))]}
-        onChange={(v) => onChange("type", v)}
-      />
+      {filters.type ? null : (
+        <ToolbarSelect
+          id="tasks-filter-type"
+          label="Task type"
+          value=""
+          options={[{ value: "", label: "Task type: All" }, ...types.map((t) => ({ value: t.key, label: t.title }))]}
+          onChange={(v) => onChange(SCOPE_PARAM, v)}
+        />
+      )}
       <ToolbarSelect
         id="tasks-filter-status"
         label="Status"

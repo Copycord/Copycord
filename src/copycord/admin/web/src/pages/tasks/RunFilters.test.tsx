@@ -73,9 +73,27 @@ describe("RunFilters", () => {
     fireEvent.click(screen.getByRole("button", { name: "next" }));
     expect(where().get("page")).toBe("2");
 
+    // The type is the page scope: Clear filters keeps it.
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(where().toString()).toBe("");
+    expect(where().toString()).toBe("type=backfill_channels");
     expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+
+  it("shows Task type on All tasks only and never counts the rail type as a filter", () => {
+    const view = renderAt("/tasks");
+    expect(sel("type")).not.toBeNull();
+    view.unmount();
+
+    renderAt("/tasks?type=backfill_channels");
+    expect(sel("type")).toBeNull();
+    expect(sel("status")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+
+  it("clears the filters on a type page and stays on that type", () => {
+    renderAt("/tasks?type=backfill_channels&status=failed&actor=admin&q=gen&page=3");
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(where().toString()).toBe("type=backfill_channels");
   });
 
   it("keeps a URL value the choices do not list", () => {
