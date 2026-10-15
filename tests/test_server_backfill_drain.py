@@ -300,7 +300,10 @@ def test_cancel_while_delivering_stops_the_queued_forwards(ServerReceiver):
 
 
 def test_cancel_for_an_unknown_job_is_harmless(ServerReceiver):
-    rx = _rx(ServerReceiver, asyncio.Event())
-    res = asyncio.run(rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": "nope"}}))
+    async def go():
+        rx = _rx(ServerReceiver, asyncio.Event())
+        return rx, await rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": "nope"}})
+
+    rx, res = asyncio.run(go())
     assert res == {"ok": True, "job_id": "nope", "state": "unknown"}
     assert rx.bus.sent == []
