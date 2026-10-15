@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useWsMessages } from "../../hooks/useWsMessages";
 import { api } from "../../lib/api";
 import type { BusMessage } from "../../types/api";
+import { ACTIVE_STATUSES } from "../../types/tasks";
 import type { RunFilters, TaskContext, TaskRun, TaskRunResponse, TaskRunsResponse, TaskRunUpdated, TaskStep } from "../../types/tasks";
 import { PER_PAGE } from "./TasksSkeleton";
 
@@ -204,9 +205,17 @@ export interface TaskRunState {
   reload: () => void;
 }
 
-/** One run with its steps, log lines and report, live. Pass null to skip. Refetches keep the held run. */
+/**
+ * One run with its steps, log lines and report, live. Pass null to skip. Refetches keep the held run.
+ * Frames carry the run and its changed steps but not the log lines or the report, so the frame that
+ * ends the run fetches the detail once more, quietly (no refreshing), and takes it unless a newer
+ * frame got there first.
+ */
 export function useTaskRun(id: string | null): TaskRunState {
   const [run, setRun] = useState<TaskRun | undefined>(undefined);
+  const runRef = useRef(run);
+  runRef.current = run;
+  const finalFetch = useRef<AbortController | null>(null);
   // The id the held run (or error) answers.
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -238,13 +247,31 @@ export function useTaskRun(id: string | null): TaskRunState {
     return () => ctl.abort();
   }, [id, tick]);
 
+  useEffect(() => () => finalFetch.current?.abort(), [id]);
+
+  const fetchFinal = useCallback((runId: string) => {
+    finalFetch.current?.abort();
+    const ctl = new AbortController();
+    finalFetch.current = ctl;
+    api
+      .get<TaskRunResponse>(runUrl(runId), { signal: ctl.signal })
+      .then((d) => {
+        if (ctl.signal.aborted) return;
+        const fresh: TaskRun = { ...d.run, id: String(d.run.id) };
+        setRun((held) => (held && held.id === fresh.id && fresh.seq >= held.seq ? fresh : held));
+      })
+      .catch(() => undefined);
+  }, []);
+
   const reload = useCallback(() => setTick((t) => t + 1), []);
   const { connected } = useWsMessages(
     "/ws/out",
     (msg) => {
       const frame = parseRunFrame(msg);
       if (!frame || frame.run.id !== id) return;
-      setRun((held) => (held ? applyFrame(held, frame) : held));
+      const held = runRef.current;
+      if (held && frame.run.seq > held.seq && !ACTIVE_STATUSES.includes(frame.run.status)) fetchFinal(frame.run.id);
+      setRun((h) => (h ? applyFrame(h, frame) : h));
     },
     { types: [RUN_UPDATED], enabled: id !== null },
   );

@@ -217,7 +217,8 @@ class RunContext:
         if self._trailing is not None and self._trailing is not asyncio.current_task():
             self._trailing.cancel()
             self._trailing = None
-        steps = [self._steps[k].data for k in self._dirty_steps if k in self._steps]
+        # In run order: the SPA appends steps it does not hold in frame order.
+        steps = [s.data for k, s in self._steps.items() if k in self._dirty_steps]
         self._dirty_steps.clear()
         event = {
             "type": "task.run.updated",

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TaskRun } from "../../types/tasks";
+import type { TaskRun, TaskStep } from "../../types/tasks";
 import { applyFrame, mergeIntoList, parseRunFrame, runsUrl, useTaskRun, useTaskRuns } from "./runStore";
 
 function makeRun(over: Partial<TaskRun> = {}): TaskRun {
@@ -125,6 +125,66 @@ describe("runStore hooks", () => {
     act(() => ws.emit(frame(makeRun({ id: "1", seq: 2, status: "success" }), [{ key: "a", title: "#a", state: "success" }])));
     expect(result.current.run?.status).toBe("success");
     expect(result.current.run?.steps).toHaveLength(1);
+  });
+
+  it("useTaskRun keeps steps and summary live and fetches the report once the run ends", async () => {
+    let detail = makeRun({ id: "1", seq: 1, steps: [] });
+    fetchMock.mockImplementation(async () => Response.json({ run: detail }));
+    const { result } = renderHook(() => useTaskRun("1"));
+    await waitFor(() => expect(result.current.run?.id).toBe("1"));
+    const ws = FakeWs.all[0]!;
+    act(() => ws.open());
+    const calls = fetchMock.mock.calls.length;
+
+    const running: TaskStep = { key: "a", title: "#a", state: "running", done: 12, total: 35, label: "12 of 35 delivered, 35 pulled" };
+    act(() => ws.emit(frame(makeRun({ id: "1", seq: 2, summary: { success: 0, delivered: 12 } }), [running])));
+    expect(result.current.run?.summary).toEqual({ success: 0, delivered: 12 });
+    expect(result.current.run?.steps).toEqual([running]);
+    expect(result.current.run?.report).toBeUndefined();
+    expect(fetchMock.mock.calls.length).toBe(calls);
+
+    const finished: TaskStep = { key: "a", title: "#a", state: "success", done: 35, total: 35, label: null, note: "35 messages" };
+    const summary = { success: 1, delivered: 35 };
+    detail = makeRun({
+      id: "1",
+      seq: 3,
+      status: "success",
+      summary,
+      steps: [finished],
+      report: { summary },
+      log_lines: [{ n: 1, msg: "Finished #a: 35 messages" }],
+    });
+    act(() => ws.emit(frame(makeRun({ id: "1", seq: 3, status: "success", summary }), [finished])));
+    expect(result.current.run?.status).toBe("success");
+    expect(result.current.run?.steps?.[0]?.note).toBe("35 messages");
+    await waitFor(() => expect(result.current.run?.report).toEqual({ summary }));
+    expect(result.current.run?.log_lines).toEqual([{ n: 1, msg: "Finished #a: 35 messages" }]);
+    expect(fetchMock.mock.calls.length).toBe(calls + 1);
+    expect(fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[0]).toBe("/api/tasks/runs/1");
+    expect(result.current.refreshing).toBe(false);
+
+    // A later frame for the ended run (the same seq or older) fetches nothing more.
+    act(() => ws.emit(frame(makeRun({ id: "1", seq: 3, status: "success", summary }))));
+    expect(fetchMock.mock.calls.length).toBe(calls + 1);
+  });
+
+  it("useTaskRun keeps a newer frame over a detail that answers late", async () => {
+    let answer: ((r: Response) => void) | null = null;
+    fetchMock.mockImplementation(async () =>
+      answer === null && fetchMock.mock.calls.length === 1
+        ? Response.json({ run: makeRun({ id: "1", seq: 1, steps: [] }) })
+        : new Promise<Response>((r) => (answer = r)),
+    );
+    const { result } = renderHook(() => useTaskRun("1"));
+    await waitFor(() => expect(result.current.run?.id).toBe("1"));
+    const ws = FakeWs.all[0]!;
+    act(() => ws.open());
+    act(() => ws.emit(frame(makeRun({ id: "1", seq: 4, status: "failed", error: "boom" }))));
+    await waitFor(() => expect(answer).not.toBeNull());
+    act(() => ws.emit(frame(makeRun({ id: "1", seq: 6, status: "failed", error: "boom", summary: { failed: 1 } }))));
+    await act(async () => answer?.(Response.json({ run: makeRun({ id: "1", seq: 5, status: "failed", report: { stale: true } }) })));
+    expect(result.current.run?.seq).toBe(6);
+    expect(result.current.run?.summary).toEqual({ failed: 1 });
   });
 });
 

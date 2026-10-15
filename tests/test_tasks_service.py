@@ -356,6 +356,56 @@ async def test_publish_throttle_transitions_immediate_progress_coalesced():
 
 
 @pytest.mark.asyncio
+async def test_frame_lists_changed_steps_in_run_order():
+    """New steps reach the SPA in a frame and are appended in frame order, so the frame keeps
+    the run's order (a set of dirty keys did not)."""
+    events = []
+
+    async def publish(event):
+        events.append(event)
+
+    repo = MemoryRunRepo()
+    run = TaskRun(type="t_noop", number=1, status="running", title="x", trigger="manual",
+                  actor="admin", inputs={})
+    run.id = repo.insert_run(run)
+    ctx = RunContext(run, repo, publish, lambda: 1000.0)
+    keys = [str(2**60 + i * 7919) for i in range(40)]
+    for key in keys:
+        ctx.step(key, f"#{key}")
+    await ctx.flush()
+    assert [s["key"] for s in events[-1]["steps"]] == keys
+    for key in (keys[30], keys[5], keys[17]):
+        await ctx.step(key).progress(1, 2)
+    await ctx.flush()
+    assert [s["key"] for s in events[-1]["steps"]] == [keys[5], keys[17], keys[30]]
+    ctx.close()
+
+
+@pytest.mark.asyncio
+async def test_progress_label_publishes_with_the_counts():
+    events = []
+
+    async def publish(event):
+        events.append(event)
+
+    repo = MemoryRunRepo()
+    run = TaskRun(type="t_noop", number=1, status="running", title="x", trigger="manual",
+                  actor="admin", inputs={})
+    run.id = repo.insert_run(run)
+    ctx = RunContext(run, repo, publish, lambda: 1000.0)
+    step = ctx.step("a", "A")
+    await step.start()
+    count = len(events)
+    await step.progress(3, 10, label="3 of 10 delivered, 10 pulled")
+    assert len(events) == count, "a label with the counts is not a transition"
+    await asyncio.sleep(0.6)
+    assert events[-1]["steps"][0]["label"] == "3 of 10 delivered, 10 pulled"
+    await step.progress(4)
+    assert step.data["label"] == "3 of 10 delivered, 10 pulled" and step.data["total"] == 10
+    ctx.close()
+
+
+@pytest.mark.asyncio
 async def test_invalid_inputs_raise_value_error_dict(svc):
     with pytest.raises(ValueError) as err:
         await svc.start("t_noop", {"n": 0})
