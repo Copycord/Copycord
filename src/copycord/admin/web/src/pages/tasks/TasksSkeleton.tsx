@@ -358,9 +358,9 @@ function RunsEmptyLoading() {
 
 /**
  * The list body while a page of runs loads: as many rows shaped like the real ones as the list had last
- * time (at most a page), or the empty state's shape when it had none or this is the first visit.
+ * time (at most a page), one on a first visit, or the empty state's shape when it had none.
  */
-export function RunRowsLoading({ rows = readLastCount(RUNS_COUNT_KEY, 0, PER_PAGE) }: { rows?: number }) {
+export function RunRowsLoading({ rows = readLastCount(RUNS_COUNT_KEY, 1, PER_PAGE) }: { rows?: number }) {
   return (
     <div role="status" aria-label="Loading task runs" aria-busy="true">
       {rows === 0 ? (
@@ -389,6 +389,11 @@ function InlineBar({ width }: { width: number }) {
 
 const STEP_WIDTHS = [["34%", 72], ["26%", 96], ["30%", 84]] as const;
 const INPUT_WIDTHS = [60, 90, 70, 80];
+/** A first visit draws a backfill run's shape: its five tiles, its six inputs and six steps, bars for every label. */
+const FIRST_VISIT_TILES = 5;
+const FIRST_VISIT_INPUTS = 6;
+const FIRST_VISIT_STEPS = 6;
+const TILE_WIDTHS = [36, 40, 44, 52, 48];
 
 export interface RunDetailSkeletonProps {
   /** The run's type key when known before the run loads (typeLabels.ts runTypeOf): its title shows as text. */
@@ -401,16 +406,21 @@ export interface RunDetailSkeletonProps {
  * The run page until the run answers, also the page's own loading state: the header with the type's
  * title as text when the run's type is known (bars in its place only when it cannot be), bars for the
  * glyph, number and meta line (the actions depend on the status, so they wait), the summary card with
- * the tile and Inputs labels the last run page showed and bars for their values (four bar rows on a first
- * visit), the Steps card with its real head (bars for the counts and the
- * overall bar, the real filter) and as many bar rows as the last run showed, and the collapsed Report line.
+ * the tile and Inputs labels the last run page showed and bars for their values (a backfill run's five
+ * tiles and six rows, all bars, on a first visit), the Steps card with its real head (bars for the counts
+ * and the overall bar, the real filter) and as many bar rows as the last run showed, and the collapsed
+ * Report line.
  */
-export function RunDetailSkeleton({ runType = null, steps = readLastCount(STEPS_COUNT_KEY, 2, STEP_ROWS_MAX) }: RunDetailSkeletonProps) {
+export function RunDetailSkeleton({
+  runType = null,
+  steps = readLastCount(STEPS_COUNT_KEY, FIRST_VISIT_STEPS, STEP_ROWS_MAX),
+}: RunDetailSkeletonProps) {
   const title = runType ? typeLabel(runType).title : null;
-  // The tile and Inputs labels the last run page showed, as text; a first visit has four bar rows.
-  const stats = readLastLabels(STATS_LABELS_KEY, 8);
+  // The tile and Inputs labels the last run page showed, as text; a first visit has bars in their place.
+  const lastStats = readLastLabels(STATS_LABELS_KEY, 8);
   const inputs = readLastLabels(INPUTS_LABELS_KEY, 12);
-  const inputRows: (string | null)[] = inputs ?? [null, null, null, null];
+  const stats: (string | null)[] = lastStats ?? Array.from({ length: FIRST_VISIT_TILES }, () => null);
+  const inputRows: (string | null)[] = inputs ?? Array.from({ length: FIRST_VISIT_INPUTS }, () => null);
   return (
     <div role="status" aria-busy="true" aria-label="Loading run" className="flex flex-col">
       <div inert>
@@ -451,11 +461,11 @@ export function RunDetailSkeleton({ runType = null, steps = readLastCount(STEPS_
         <div className={RUN_BODY}>
           <section aria-label="Summary" className={RUN_CARD}>
             <SummaryHead />
-            {stats?.length ? (
+            {stats.length ? (
               <dl className={STATS_LIST}>
                 {stats.map((label, i) => (
                   <div key={i} className={STAT_TILE}>
-                    <dt className={STAT_LABEL}>{label}</dt>
+                    <dt className={STAT_LABEL}>{label ?? <TextBar width={TILE_WIDTHS[i % TILE_WIDTHS.length]!} />}</dt>
                     <dd className={STAT_VALUE}>
                       <Skeleton.Text>00</Skeleton.Text>
                     </dd>

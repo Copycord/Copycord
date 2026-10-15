@@ -85,16 +85,16 @@ describe("run row skeleton", () => {
     expect(skeleton!.children[1]!.children[1]!.className).toContain("mt-0.5 text-xs");
   });
 
-  it("draws as many rows as the list had last time, at most a page, and the empty state with none", () => {
+  it("draws as many rows as the list had last time, at most a page, one on a first visit, and the empty state with none", () => {
     const rows = () => {
       const { container, unmount } = render(<RunRowsLoading />);
       const out = { li: container.querySelectorAll("li").length, empty: container.textContent };
       unmount();
       return out;
     };
-    expect(rows()).toEqual({ li: 0, empty: "No task runs yetPick a task type on the left to run one" });
+    expect(rows().li).toBe(1);
     localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "0");
-    expect(rows().li).toBe(0);
+    expect(rows()).toEqual({ li: 0, empty: "No task runs yetPick a task type on the left to run one" });
     localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "4");
     expect(rows().li).toBe(4);
     localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "90");
@@ -154,13 +154,15 @@ describe("page skeleton", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("has the loaded page's structure with zero runs: header text, search, one rail entry, the toolbar controls, the pager", async () => {
+    // The list had no runs last time.
+    localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "0");
     const skel = render(
       <MemoryRouter initialEntries={["/tasks"]}>
         <TasksSkeleton />
       </MemoryRouter>,
     );
     const skeleton = chrome(skel.container);
-    // A first visit has no stored run count: the loading list is the empty state's shape, no rows.
+    // No runs last time: the loading list is the empty state's shape, no rows.
     const skelEmpty = within(skel.container).getByText("No task runs yet").closest(".flex-col")!.className;
     expect(within(skel.container).queryAllByRole("listitem", { hidden: true }).filter((li) => li.className === ROW_BOX)).toHaveLength(0);
     skel.unmount();

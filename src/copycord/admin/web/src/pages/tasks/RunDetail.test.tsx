@@ -450,14 +450,15 @@ describe("Run skeleton after a finished run", () => {
         inputs: inputs ? Array.from(inputs.querySelectorAll("dt")).map((dt) => [dt.className, dt.textContent]) : [],
       };
     };
-    // A first visit: no tiles, four bar rows for the inputs.
+    // A first visit: a backfill run's five tiles and six inputs, bars for every label.
     const cold = render(
       <MemoryRouter>
         <RunDetailSkeleton />
       </MemoryRouter>,
     );
-    expect(shape(cold.container).tiles).toEqual([]);
-    expect(cold.container.querySelectorAll("section[aria-label=Summary] dt [data-skeleton]")).toHaveLength(4);
+    expect(shape(cold.container).tiles).toHaveLength(5);
+    expect(shape(cold.container).inputs).toHaveLength(6);
+    expect(cold.container.querySelectorAll("section[aria-label=Summary] dt [data-skeleton]")).toHaveLength(5 + 6);
     cold.unmount();
 
     const loaded = renderView(makeRun({ summary: { success: 1, failed: 0, skipped: 0, cancelled: 0, delivered: 36 } }));
