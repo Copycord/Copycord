@@ -1,12 +1,12 @@
-// The Logs page while its chunk downloads: the same header, toolbar, table head and loading rows as
-// the page, and the empty pagination row it opens with. Kept out of Logs.tsx so the app shell can show
-// it without pulling the page chunk in; the page takes its shared classes and placeholder from here.
+// The Logs page while its chunk downloads: the same header, toolbar, table head, rows and pager as
+// the page. Kept out of Logs.tsx so the app shell can show it without pulling the page chunk in; the
+// page and LogRow take their shared classes and loading rows from here.
 
 import { cx } from "../../components/ui/cx";
-import { SkeletonSection } from "../../components/ui/Skeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { LogsIcon } from "./icons";
 import type { SortColumn } from "./model";
+import { Pagination } from "./Pagination";
 
 export const CONTROL =
   "rounded-lg border border-border bg-[rgba(20,10,40,0.6)] text-[13px] text-text outline-none transition-colors focus:border-accent";
@@ -51,8 +51,84 @@ export const TH = "relative border-b border-b-border py-2.5 text-[11px] leading-
 export const SORT_BTN = "cursor-pointer uppercase outline-none select-none hover:text-text focus-visible:text-text";
 export const ACTIONS_TH = cx(TH, "w-11 px-3.5 text-center");
 
-// With one page the old .logs-pagination stayed in the flow, empty, keeping its 16px padding.
-export const PAGINATION = "flex flex-wrap items-center justify-center gap-1 py-4";
+// One log row: the row, its five cells and what each cell holds. LogRow and the loading rows both
+// build from these, so a loading row has the cells, paddings and line boxes of a loaded one.
+export const ROW = "group border-[gray] transition-colors hover:bg-[rgba(139,92,246,0.06)]";
+const TD = "border-b py-2.5 align-middle text-[13px] text-text";
+export function rowCells(expanded: boolean) {
+  const edge = cx(TD, expanded ? "border-b-transparent" : "border-b-white/4");
+  const td = cx(edge, "px-3.5 text-left");
+  return { td, guild: cx(td, "max-md:hidden"), actions: cx(edge, "px-3.5 text-center") };
+}
+export const TIMESTAMP_TEXT = "whitespace-nowrap font-mono text-xs text-muted";
+export const BADGE =
+  "inline-block whitespace-nowrap rounded-md border px-2.5 py-[3px] text-[11px] font-semibold tracking-[0.2px] capitalize";
+export const GUILD_TEXT = "text-xs font-medium text-muted";
+export const DETAILS_TEXT = "text-[13px] text-white/80";
+export const DELETE_BTN = cx(
+  "inline-flex cursor-pointer items-center justify-center rounded-md p-1 text-muted opacity-0 transition",
+  "group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100",
+  "hover:bg-[rgba(239,68,68,0.1)] hover:text-[#f87171] disabled:cursor-wait",
+);
+
+/** A shimmer in the line box of the text it stands for: the text's own classes, a fixed width, no text. */
+function Bar({ className, width }: { className: string; width: number }) {
+  return (
+    <span aria-hidden="true" data-skeleton="" className={cx(className, "cc-skeleton inline-block rounded-md")} style={{ width }}>
+      {" "}
+    </span>
+  );
+}
+
+// A timestamp is 19 monospace characters; the type, guild and details widths vary like real rows do.
+const ROW_WIDTHS: Array<[number, number, number]> = [
+  [104, 72, 260],
+  [92, 88, 340],
+  [118, 64, 220],
+  [86, 80, 300],
+  [110, 72, 380],
+  [96, 88, 240],
+];
+export const LOADING_ROWS = 14;
+
+/** The table body while the first page of logs loads: rows shaped like LogRow, a shimmer where each value lands. */
+export function LogsLoadingRows({ rows = LOADING_ROWS }: { rows?: number }) {
+  const cells = rowCells(false);
+  return (
+    <>
+      {Array.from({ length: rows }, (_, i) => {
+        const [type, guild, details] = ROW_WIDTHS[i % ROW_WIDTHS.length]!;
+        return (
+          <tr key={i} data-skeleton-row="" className={ROW}>
+            <td className={cells.td}>
+              {i === 0 ? <span role="status" aria-label="Loading event logs" className="sr-only" /> : null}
+              <Bar className={TIMESTAMP_TEXT} width={137} />
+            </td>
+            <td className={cells.td}>
+              <Bar className={cx(BADGE, "border-transparent")} width={type} />
+            </td>
+            <td className={cells.guild}>
+              <Bar className={GUILD_TEXT} width={guild} />
+            </td>
+            <td className={cells.td}>
+              <Bar className={DETAILS_TEXT} width={details} />
+            </td>
+            <td className={cells.actions}>
+              <button type="button" aria-hidden="true" tabIndex={-1} className={DELETE_BTN}>
+                <LogsIcon name="x" size={14} />
+              </button>
+            </td>
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
+/** The count while the first page loads, in the line box of "Showing 1-50 of 120". */
+export function CountBar() {
+  return <Bar className={COUNT} width={112} />;
+}
 
 export function LogsHeader() {
   return (
@@ -62,17 +138,6 @@ export function LogsHeader() {
         <h2 className="m-0 text-[22px] font-bold text-text">Event Logs</h2>
       </div>
     </>
-  );
-}
-
-/** The table body while the first page of logs loads. */
-export function LogsLoadingRow() {
-  return (
-    <tr>
-      <td colSpan={COLS} className="px-3.5 py-2">
-        <SkeletonSection rows={8} rowHeight={41} label="Loading event logs" />
-      </td>
-    </tr>
   );
 }
 
@@ -94,7 +159,9 @@ export function LogsSkeleton() {
           </div>
         </div>
         <div className={TOOLBAR_RIGHT}>
-          <span className={COUNT} />
+          <span className={COUNT}>
+            <CountBar />
+          </span>
           <button type="button" aria-label="Refresh logs" className={REFRESH_BTN}>
             <LogsIcon name="refresh" size={16} className="animate-spin" />
           </button>
@@ -124,12 +191,12 @@ export function LogsSkeleton() {
             </tr>
           </thead>
           <tbody>
-            <LogsLoadingRow />
+            <LogsLoadingRows />
           </tbody>
         </table>
       </div>
 
-      <nav aria-label="Pagination" className={PAGINATION} />
+      <Pagination page={1} pages={1} inert />
     </section>
   );
 }

@@ -5,7 +5,7 @@ import type { KeyboardEvent } from "react";
 import { cx } from "../../components/ui/cx";
 import type { EventLog } from "../../types/logs";
 import { LogsIcon } from "./icons";
-import { COLS } from "./LogsSkeleton";
+import { BADGE, COLS, DELETE_BTN, DETAILS_TEXT, GUILD_TEXT, ROW, rowCells, TIMESTAMP_TEXT } from "./LogsSkeleton";
 import { fmtTimestamp, guildText, hasMetadata, metadataRows, typeMeta } from "./model";
 import type { TypeTone } from "./model";
 
@@ -30,20 +30,11 @@ const TONE: Record<TypeTone, string> = {
 export function TypeBadge({ type }: { type: string }) {
   const meta = typeMeta(type);
   return (
-    <span
-      data-tone={meta.tone}
-      className={cx(
-        "inline-block whitespace-nowrap rounded-md border px-2.5 py-[3px] text-[11px] font-semibold tracking-[0.2px] capitalize",
-        TONE[meta.tone],
-      )}
-    >
+    <span data-tone={meta.tone} className={cx(BADGE, TONE[meta.tone])}>
       {meta.label}
     </span>
   );
 }
-
-// Cells pick their own horizontal padding so no two utilities fight over one property.
-export const TD = "border-b py-2.5 align-middle text-[13px] text-text";
 
 export interface LogRowProps {
   log: EventLog;
@@ -63,45 +54,37 @@ export function LogRow({ log, expanded, deleting, onToggle, onDelete }: LogRowPr
       toggle();
     }
   };
-  const edge = cx(TD, expanded ? "border-b-transparent" : "border-b-white/4");
-  const td = cx(edge, "px-3.5 text-left");
+  const cells = rowCells(expanded);
 
   return (
     <>
       <tr
         data-log-id={log.log_id}
-        className={cx(
-          "group border-[gray] transition-colors hover:bg-[rgba(139,92,246,0.06)]",
-          expandable && "cursor-pointer outline-none focus-visible:bg-[rgba(139,92,246,0.06)]",
-        )}
+        className={cx(ROW, expandable && "cursor-pointer outline-none focus-visible:bg-[rgba(139,92,246,0.06)]")}
         onClick={toggle}
         onKeyDown={toggle ? onKey : undefined}
         tabIndex={expandable ? 0 : undefined}
         aria-expanded={expandable ? expanded : undefined}
       >
-        <td className={td}>
-          <span className="whitespace-nowrap font-mono text-xs text-muted">{fmtTimestamp(log.created_at)}</span>
+        <td className={cells.td}>
+          <span className={TIMESTAMP_TEXT}>{fmtTimestamp(log.created_at)}</span>
         </td>
-        <td className={td}>
+        <td className={cells.td}>
           <TypeBadge type={log.event_type} />
         </td>
-        <td className={cx(td, "max-md:hidden")}>
-          <span className="text-xs font-medium text-muted">{guildText(log)}</span>
+        <td className={cells.guild}>
+          <span className={GUILD_TEXT}>{guildText(log)}</span>
         </td>
-        <td className={td}>
-          <span className="text-[13px] text-white/80">{log.details ?? ""}</span>
+        <td className={cells.td}>
+          <span className={DETAILS_TEXT}>{log.details ?? ""}</span>
         </td>
-        <td className={cx(edge, "px-3.5 text-center")}>
+        <td className={cells.actions}>
           <button
             type="button"
             title="Delete"
             aria-label="Delete log"
             disabled={deleting}
-            className={cx(
-              "inline-flex cursor-pointer items-center justify-center rounded-md p-1 text-muted opacity-0 transition",
-              "group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100",
-              "hover:bg-[rgba(239,68,68,0.1)] hover:text-[#f87171] disabled:cursor-wait",
-            )}
+            className={DELETE_BTN}
             onClick={(e) => {
               e.stopPropagation();
               onDelete(log);

@@ -24,10 +24,11 @@ import {
   ACTIONS_TH,
   CLEAR_ALL_BTN,
   COUNT,
+  CountBar,
   HEAD_ROW,
   HEADERS,
   LogsHeader,
-  LogsLoadingRow,
+  LogsLoadingRows,
   REFRESH_BTN,
   SEARCH_INPUT,
   SORT_BTN,
@@ -255,7 +256,7 @@ export function Logs() {
 
         <div className={TOOLBAR_RIGHT}>
           <span id="logs-count" className={COUNT} aria-live="polite">
-            {list.data ? countText(page, logs.length, total) : ""}
+            {list.data ? countText(page, logs.length, total) : firstLoad ? <CountBar /> : ""}
           </span>
           {filtersActive ? (
             <button
@@ -343,7 +344,7 @@ export function Logs() {
           </thead>
           <tbody id="logs-tbody">
             {firstLoad ? (
-              <LogsLoadingRow />
+              <LogsLoadingRows />
             ) : (
               rows.map((log) => (
                 <LogRow
