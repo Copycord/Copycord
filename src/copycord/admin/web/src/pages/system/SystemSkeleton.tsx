@@ -102,8 +102,10 @@ export function SystemSkeleton() {
               </span>
             </div>
           </div>
-          <button type="button" inert aria-hidden="true" className={CHEV_BUTTON}>
-            <span className={CHEV}>▸</span>
+          <button type="button" inert aria-label="Expand panel" aria-expanded={false} className={CHEV_BUTTON}>
+            <span aria-hidden="true" className={CHEV}>
+              ▸
+            </span>
           </button>
         </div>
         <div inert className="mt-1.5">

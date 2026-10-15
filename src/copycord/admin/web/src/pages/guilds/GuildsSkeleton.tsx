@@ -70,7 +70,7 @@ export function GuildsSkeleton() {
           <GuildsTitle />
           <span inert className={CONTROLS}>
             <input type="text" placeholder="Search guilds…" aria-label="Search guilds" readOnly className={SEARCH_INPUT} />
-            <button type="button" className={SORT_BTN}>
+            <button type="button" aria-label="Toggle sort direction" aria-pressed={false} className={SORT_BTN}>
               {sortLabel("asc")}
             </button>
           </span>
