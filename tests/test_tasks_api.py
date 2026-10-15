@@ -15,7 +15,7 @@ from copycord.admin.security import CSRF_HEADER
 from copycord.admin.tasks import registry
 from copycord.admin.tasks import routes as task_routes
 from copycord.admin.tasks.repo import SqliteTaskRepo
-from copycord.admin.tasks.service import TaskService
+from copycord.admin.tasks.service import MemoryRunRepo, TaskService
 
 KEY = "noop_api"
 ORIGIN = "http://testserver"
@@ -166,6 +166,42 @@ def test_report_download(client):
     assert client.get("/api/tasks/runs/abc/report.json").status_code == 404
 
 
+def test_stop_cancels_the_running_run_before_the_bots_go(client, events, monkeypatch):
+    async def held(ctx, inputs):
+        step = ctx.step("work", "Work")
+        await step.start()
+        await ctx.cancelled.wait()
+
+    registry.register(registry.TaskType(key="held_api", title="Held", run=held, inputs=Inputs))
+    try:
+        cmds = []
+
+        async def fake_ws_cmd(url, payload, timeout=0.7):
+            svc = task_routes.get_service()
+            cmds.append((payload["cmd"], [r.status for r in svc.active_runs()]))
+            return {"ok": True}
+
+        monkeypatch.setattr(app_module, "_ws_cmd", fake_ws_cmd)
+        run = client.post("/api/tasks/runs", json={"type": "held_api", "inputs": {}}).json()["run"]
+        end = time.monotonic() + 3
+        while client.get(f"/api/tasks/runs/{run['id']}").json()["run"]["status"] != "running":
+            assert time.monotonic() < end
+            time.sleep(0.02)
+
+        resp = client.post("/stop", headers={"accept": "application/json"})
+        assert resp.status_code == 200 and resp.json() == {"ok": True}
+        # Both bots were told to stop with the run already ended.
+        assert [c for c, _ in cmds] == ["stop", "stop"]
+        assert all(statuses in ([], ["cancelled"]) for _, statuses in cmds)
+        done = _finished(client, run["id"])
+        assert done["status"] == "cancelled" and done["error"] is None
+        assert done["steps"][0]["state"] == "cancelled" and done["steps"][0]["note"] == "Bots stopped"
+        ended = [e for e in events if e["run"]["id"] == run["id"] and e["run"]["status"] == "cancelled"]
+        assert ended and ended[0]["steps"][0]["note"] == "Bots stopped"
+    finally:
+        registry.unregister("held_api")
+
+
 def test_delete_run(client):
     held = _start(client, {"hold": True}).json()["run"]
     resp = client.delete(f"/api/tasks/runs/{held['id']}")
@@ -224,3 +260,49 @@ def test_publish_relay_frame(monkeypatch):
     frame = json.loads(sent[-1])
     assert frame == {"kind": "task.run.updated", "role": "unknown",
                      "payload": {"type": "task.run.updated", "run": run, "steps": [{"key": "a"}]}}
+
+
+def test_a_bot_stopped_status_cancels_active_runs(monkeypatch):
+    """The role's _shutdown sends status Stopped however it went down (stop, crash, signal)."""
+    async def held(ctx, inputs):
+        step = ctx.step("work", "Work")
+        await step.start()
+        await ctx.cancelled.wait()
+
+    async def fake_broadcast_text(text):
+        return None
+
+    async def quiet(*args, **kwargs):
+        return None
+
+    hub = app_module.hub
+    monkeypatch.setattr(hub, "_broadcast_text", fake_broadcast_text)
+    monkeypatch.setattr(hub, "_check_notifications", quiet)
+    monkeypatch.setattr(hub, "recent", collections.deque(maxlen=50))
+    monkeypatch.setattr(hub, "subscribers", set())
+    monkeypatch.setattr(hub, "status", {"server": {}, "client": {}})
+    monkeypatch.setattr(hub, "_last_seen", {})
+    monkeypatch.setattr(hub, "_watchdog_notified", {})
+    registry.register(registry.TaskType(key="held_bus", title="Held", run=held, inputs=Inputs))
+
+    async def main():
+        svc = TaskService(MemoryRunRepo(), cancel_grace=0.1)
+        task_routes.set_service(svc)
+        run = await svc.start("held_bus", {})
+        await asyncio.sleep(0.02)
+        await hub.publish("status", "client", {"running": True, "status": "Running"})
+        await asyncio.sleep(0.02)
+        assert svc.get(run.id).status == "running"
+        await hub.publish("status", "client", {"running": False, "status": "Stopped"})
+        for _ in range(100):
+            if run.id not in svc._active:
+                break
+            await asyncio.sleep(0.01)
+        return svc.get(run.id)
+
+    try:
+        done = asyncio.run(main())
+    finally:
+        task_routes.set_service(None)
+        registry.unregister("held_bus")
+    assert done.status == "cancelled" and done.steps[0]["note"] == "Bots stopped"

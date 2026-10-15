@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel, Field
 
 from copycord.admin.tasks import registry
+from copycord.admin.tasks import service as service_module
 from copycord.admin.tasks.context import RunContext
 from copycord.admin.tasks.service import (
     INTERRUPTED,
@@ -198,6 +199,49 @@ async def test_cancel_grace_timeout_forces_cancelled(svc):
     done = await _settled(svc, run.id)
     assert done.status == "cancelled"
     assert svc.repo.get_run(run.id).status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_bots_stopped_cancels_running_and_queued_runs_at_once(svc, events):
+    GATES[1], GATES[2] = Gate(), Gate()
+    stuck = await svc.start("t_stubborn", {})
+    holder = await svc.start("t_gated", {})
+    waiting = await svc.start("t_gated", {})
+    await asyncio.wait_for(GATES[1].started.wait(), 1)
+    await asyncio.sleep(0.02)
+    assert svc.get(stuck.id).status == "running" and svc.get(waiting.id).status == "queued"
+    events.clear()
+
+    stopped = await svc.stop_all()
+
+    # Ended on return, before the runners get another turn of the loop.
+    assert {r.id for r in stopped} == {stuck.id, holder.id, waiting.id}
+    run = svc.get(stuck.id)
+    assert run.status == "cancelled" and run.finished_at and run.error is None
+    assert run.steps[0]["state"] == "cancelled" and run.steps[0]["note"] == "Bots stopped"
+    assert any(ln["msg"] == "Bots stopped" and ln["level"] == "warning" for ln in run.log_lines)
+    assert svc.repo.get_run(stuck.id).status == "cancelled"
+    assert svc.get(waiting.id).status == "cancelled" and svc.get(waiting.id).started_at is None
+    ended = {e["run"]["id"]: e for e in events if e["run"]["status"] == "cancelled"}
+    assert set(ended) == {str(stuck.id), str(holder.id), str(waiting.id)}
+    assert ended[str(stuck.id)]["steps"][0]["note"] == "Bots stopped"
+
+    for r in (stuck, holder, waiting):
+        assert (await _settled(svc, r.id)).status == "cancelled"
+    assert not GATES[2].started.is_set()
+    assert svc.repo.get_run(stuck.id).steps[0]["note"] == "Bots stopped"
+    assert await svc.stop_all() == []
+
+
+@pytest.mark.asyncio
+async def test_shutdown_ends_runs_cancelled_bots_stopped(svc, monkeypatch):
+    monkeypatch.setattr(service_module, "SHUTDOWN_WAIT", 0.05)
+    run = await svc.start("t_stubborn", {})
+    await asyncio.sleep(0.02)
+    await svc.shutdown()
+    row = svc.repo.get_run(run.id)
+    assert row.status == "cancelled" and row.steps[0]["note"] == "Bots stopped"
+    assert svc._active == {} and svc._watchdogs == {}
 
 
 @pytest.mark.asyncio

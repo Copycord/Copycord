@@ -215,6 +215,33 @@ async def test_cancel_without_end_frames_still_ends_cancelled(svc, sent, mapping
 
 
 @pytest.mark.asyncio
+async def test_bots_stopped_ends_the_run_at_once_without_telling_the_client(svc, sent, mapping,
+                                                                            monkeypatch):
+    # A cancel wait would show: the stopped run must not sit in it.
+    monkeypatch.setattr(backfill, "CANCEL_WAIT", 30.0)
+    run = await svc.start("backfill_channels", {"mapping_id": mapping, "category_ids": [str(CAT)]})
+    await _until(lambda: len(_of(sent, "backfill_run")) == 3)
+    await _frame("backfill_job", job_id=f"{run.id}:{CH[0]}", state="running")
+    await _frame("backfill_job_delivered", job_id=f"{run.id}:{CH[0]}", delivered=7, total=20)
+
+    await svc.stop_all()
+    assert svc.get(run.id).status == "cancelled"
+    assert {s["state"] for s in svc.get(run.id).steps} == {"cancelled"}
+    assert {s["note"] for s in svc.get(run.id).steps} == {"Bots stopped"}
+
+    await _until(lambda: run.id not in svc._active, timeout=1.0)
+    done = svc.get(run.id)
+    assert done.status == "cancelled"
+    assert _of(sent, "backfill_cancel") == []
+    assert [c["note"] for c in done.report["channels"]] == ["Bots stopped"] * 3
+    assert [c["outcome"] for c in done.report["channels"]] == ["cancelled"] * 3
+    assert done.report["channels"][0]["delivered"] == 7
+    assert done.summary["cancelled"] == 3 and done.summary["delivered"] == 7
+    assert not any(ln["level"] == "error" for ln in done.log_lines)
+    assert backfill._jobs == {} and backfill._late == {}
+
+
+@pytest.mark.asyncio
 async def test_cancel_while_the_server_delivers_waits_for_its_count(svc, sent, mapping):
     """The client pulled everything; the server is forwarding. The step stays running until the
     server's backfill_job_end, then ends cancelled with what it delivered."""
