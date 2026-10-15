@@ -840,22 +840,27 @@ class ServerReceiver:
             except Exception:
                 logger.debug("[status] heartbeat publish failed", exc_info=True)
 
+    def _start_verify(self) -> None:
+        """Subscribe to the admin bus for the UI's verify requests, once per process. VerifyController
+        owns the subscription (config.ADMIN_WS_URL) and the handling."""
+        if hasattr(self, "verify"):
+            return
+        self.verify = VerifyController(
+            bus=self.bus,
+            admin_base_url=self.config.ADMIN_WS_URL,
+            bot=self.bot,
+            guild_id=self._pick_verify_guild_id(),
+            db=self.db,
+            ratelimit=self.ratelimit,
+            get_protected_channel_ids=self._protected_channel_ids,
+            action_type_delete_channel=ActionType.DELETE_CHANNEL,
+            logger=logger,
+        )
+        self.verify.start()
+
     async def on_ready(self):
         """Called when the bot is ready."""
-        if not hasattr(self, "verify"):
-            self.verify = VerifyController(
-                bus=self.bus,
-                admin_base_url=self.config.ADMIN_WS_URL,
-                bot=self.bot,
-                guild_id=self._pick_verify_guild_id(),
-                db=self.db,
-                ratelimit=self.ratelimit,
-                get_protected_channel_ids=self._protected_channel_ids,
-                action_type_delete_channel=ActionType.DELETE_CHANNEL,
-                logger=logger,
-            )
-            self.verify.start()
-        self._verify_task = asyncio.create_task(self._verify_listen_loop())
+        self._start_verify()
         await self._load_blocked_keywords_cache()
         await self._load_channel_name_blacklist_cache()
         await self._load_user_filters_cache()
@@ -1182,18 +1187,6 @@ class ServerReceiver:
         await self.bot.ws_manager.send(
             {"type": "sitemap_request", "data": {"guild_id": str(host_guild_id)}}
         )
-
-    async def _verify_listen_loop(self):
-        """Subscribe to /ws/out and handle UI 'verify' requests."""
-        base = self._admin_base()
-
-        async def _handler(ev: dict):
-            if ev.get("kind") != "verify" or ev.get("role") != "ui":
-                return
-            payload = ev.get("payload") or {}
-            await self._handle_verify_payload(payload)
-
-        await self.bus.subscribe(base, _handler)
 
     def _bf_channel_key_for_event(self, typ: str, data: dict) -> int | None:
         """Origin channel id used to track backfills for an event: the parent channel for threads, else channel_id."""

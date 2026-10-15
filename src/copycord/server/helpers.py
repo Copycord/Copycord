@@ -156,7 +156,7 @@ class VerifyController:
         bus,
         admin_base_url: str,
         bot,
-        guild_id: int,
+        guild_id: Optional[int],
         db,
         ratelimit,
         get_protected_channel_ids: Callable[[discord.Guild], Iterable[int]],
@@ -166,7 +166,8 @@ class VerifyController:
         self.bus = bus
         self.admin_base_url = admin_base_url.rstrip("/")
         self.bot = bot
-        self.guild_id = int(guild_id)
+        # None until the bot is in a guild; a request then has to name its guild.
+        self.guild_id = int(guild_id) if guild_id is not None else None
         self.db = db
         self.ratelimit = ratelimit
         self._get_protected = get_protected_channel_ids
@@ -314,7 +315,7 @@ class VerifyController:
         if target_guild_id is None:
             target_guild_id = self.guild_id
 
-        guild = self.bot.get_guild(int(target_guild_id))
+        guild = self.bot.get_guild(int(target_guild_id)) if target_guild_id is not None else None
 
         if not guild:
             self.log.warning(
