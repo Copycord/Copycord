@@ -475,7 +475,6 @@ async def run(ctx: Any, inputs: BackfillInputs) -> None:
 
     results: list[dict] = []
     mine: list[_Job] = []
-    busy = busy_channels()
     for c in channels:
         cid = str(c["original_channel_id"])
         name = c.get("original_channel_name") or cid
@@ -484,7 +483,8 @@ async def run(ctx: Any, inputs: BackfillInputs) -> None:
                   "delivered": 0, "error": None, "started_at": None, "finished_at": None,
                   "checkpoint": None, "note": None}
         results.append(result)
-        other = busy.get(cid)
+        # Looked up per channel: a skip awaits, and another run may take channels meanwhile.
+        other = busy_channels().get(cid)
         if other is not None and other.run.id != task_run.id:
             note = f"Already running in #{other.run.number}"
             await step.finish("skipped", note)
