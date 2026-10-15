@@ -7,7 +7,7 @@ import type { TaskRun, TaskStep, TaskType } from "../../types/tasks";
 import { ReportPanel } from "./ReportPanel";
 import { RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
 import { StepList, orderSteps, overallProgress, stepLabel, stepSummary } from "./StepList";
-import { BUSY, FADE_IN, RUN_HEAD_MAIN, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
+import { BUSY, FADE_IN, RUN_HEAD_MAIN, RUN_META, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
 import { describeRunInputs, rangeWords } from "./types";
 
 const BACKFILL: TaskType = { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -244,15 +244,20 @@ describe("Run page structure", () => {
     const run = makeRun({ status: "running", finished_at: null });
     const { container, rerender } = renderView(run);
     const fades = (el: Element | null) => (el?.getAttribute("class") ?? "").includes(FADE_IN);
-    expect(fades(screen.getByRole("link", { name: "Backfill channels" }))).toBe(true);
-    expect(fades(container.querySelector(`[class^="${RUN_HEAD_MAIN} "]`))).toBe(true);
+    const header = container.querySelector("header")!;
+    expect(fades(header.querySelector("[data-status]"))).toBe(true);
+    expect(fades(header.querySelector("h2 + span"))).toBe(true);
+    expect(fades(header.querySelector(`[class^="${RUN_META} "]`))).toBe(true);
     expect(fades(container.querySelector("dl[aria-label=Counts]"))).toBe(true);
     expect(fades(container.querySelector("dl[aria-label=Inputs]"))).toBe(true);
     expect(fades(within(screen.getByRole("region", { name: "Steps" })).getByRole("list"))).toBe(true);
     expect(fades(screen.getByTestId("steps-summary").firstElementChild)).toBe(true);
     expect(fades(screen.getByRole("progressbar", { name: "Overall progress" }))).toBe(true);
-    // The static text the skeleton already showed does not blink.
+    // The static text the skeleton already showed does not blink, the type's title included.
     expect(fades(screen.getByRole("link", { name: "All tasks" }))).toBe(false);
+    expect(fades(screen.getByRole("link", { name: "Backfill channels" }))).toBe(false);
+    expect(fades(header.querySelector(`[class="${RUN_HEAD_MAIN}"]`))).toBe(false);
+    expect(fades(screen.getByRole("heading", { level: 2 }))).toBe(false);
     expect(fades(screen.getByRole("heading", { name: "Steps" }))).toBe(false);
     const view = container.firstElementChild!;
     expect(view.className).not.toContain(BUSY);

@@ -6,7 +6,9 @@ import { ConfirmProvider } from "../../components/ui/ConfirmDialog";
 import type { TaskRun, TaskStep } from "../../types/tasks";
 import { Tasks } from "../Tasks";
 import { RunList, RunRow } from "./RunList";
+import { REVEAL } from "../../components/ui/Skeleton";
 import { StepList } from "./StepList";
+import { rememberRunTypes, rememberTypes } from "./typeLabels";
 import {
   ALL_TASKS_DESCRIPTION,
   RunDetailSkeleton,
@@ -247,15 +249,59 @@ describe("page skeleton", () => {
     expect(real!.querySelector("ul")!.className.startsWith(STEP_LIST)).toBe(true);
   });
 
-  it("leaves Task type out and bars the header on a type page, as the page does", () => {
-    const { container } = render(
-      <MemoryRouter initialEntries={["/tasks?type=backfill_channels"]}>
-        <TasksSkeleton />
-      </MemoryRouter>,
-    );
-    const c = chrome(container);
-    expect(c.dropdowns).toEqual(["Status: All", "Mapping: All", "Actor: All"]);
-    expect(c.title?.trim()).toBe("");
+  it("leaves Task type out on a type page and names the type there, never a bar", () => {
+    const at = (path: string) => {
+      const { container, unmount } = render(
+        <MemoryRouter initialEntries={[path]}>
+          <TasksSkeleton />
+        </MemoryRouter>,
+      );
+      const out = { ...chrome(container), bars: container.querySelectorAll("h2 [data-skeleton], h2 + p [data-skeleton]").length };
+      unmount();
+      return out;
+    };
+    // A first visit: the id in words, the description line held empty.
+    const cold = at("/tasks?type=backfill_channels");
+    expect(cold.dropdowns).toEqual(["Status: All", "Mapping: All", "Actor: All"]);
+    expect(cold).toMatchObject({ title: "Backfill channels", subtitle: " ", bars: 0 });
+    // Once the page has fetched the types, their own words.
+    rememberTypes([{ key: "prune_rows", title: "Prune old rows", description: "Drop rows past the limit", inputs_schema: {}, active: 0, total: 0 }]);
+    expect(at("/tasks?type=prune_rows")).toMatchObject({ title: "Prune old rows", subtitle: "Drop rows past the limit", bars: 0 });
+  });
+
+  it("names a run's type in the run skeleton's breadcrumb and title once it is known", () => {
+    const header = () => {
+      const { container, unmount } = render(
+        <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+          <TasksSkeleton />
+        </MemoryRouter>,
+      );
+      const h = container.querySelector("header")!;
+      const out = {
+        crumbs: Array.from(h.querySelectorAll("nav a")).map((a) => [a.textContent, a.getAttribute("href")]),
+        title: h.querySelector("h2")?.textContent?.trim(),
+        titleBar: h.querySelector("h2 [data-skeleton]") !== null,
+        crumbBar: h.querySelector("nav [data-skeleton]") !== null,
+      };
+      unmount();
+      return out;
+    };
+    // Nothing known about run 12 or the types: bars, the one case left.
+    expect(header()).toEqual({ crumbs: [["All tasks", "/tasks"]], title: "", titleBar: true, crumbBar: true });
+    rememberTypes([
+      { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 },
+      { key: "prune_rows", title: "Prune old rows", description: "", inputs_schema: {}, active: 0, total: 0 },
+    ]);
+    rememberRunTypes([{ id: "12", type: "prune_rows" }]);
+    expect(header()).toEqual({
+      crumbs: [
+        ["All tasks", "/tasks"],
+        ["Prune old rows", "/tasks?type=prune_rows"],
+      ],
+      title: "Prune old rows",
+      titleBar: false,
+      crumbBar: false,
+    });
   });
 });
 
@@ -286,11 +332,20 @@ describe("placeholder to content", () => {
     expect(rows.className).toContain(BUSY);
   });
 
-  it("fades a type page's title in, but leaves the static All tasks header alone", () => {
-    const { rerender } = render(<TasksHeader title="All tasks" description={ALL_TASKS_DESCRIPTION} action={null} />);
+  it("shows a type's title as text from the first paint, and fades in only a description that arrives later", () => {
+    const { unmount } = render(<TasksHeader title="Backfill channels" description="Clone message history" action={null} />);
+    // Remembered from an earlier visit: nothing fades, nothing shimmers.
+    expect(screen.getByRole("heading", { name: "Backfill channels" }).children).toHaveLength(0);
+    expect(screen.getByText("Clone message history")).not.toHaveClass(REVEAL);
+    unmount();
+    // A first visit: the id in words over an empty line, then the fetched description fades in.
+    const { container, rerender } = render(<TasksHeader title="Backfill channels" description="" action={null} />);
+    expect(container.querySelector("[data-skeleton]")).toBeNull();
+    expect(container.querySelector("h2 + p")?.textContent).toBe(" ");
+    rerender(<TasksHeader title="Backfill channels" description="Clone message history" action={null} />);
+    expect(screen.getByText("Clone message history")).toHaveClass(REVEAL);
+    expect(screen.getByRole("heading", { name: "Backfill channels" }).children).toHaveLength(0);
+    rerender(<TasksHeader title="All tasks" description={ALL_TASKS_DESCRIPTION} action={null} />);
     expect(screen.getByRole("heading", { name: "All tasks" }).querySelector("span")).toBeNull();
-    rerender(<TasksHeader title="Backfill channels" description="Clone message history" action={null} fade />);
-    expect(screen.getByText("Backfill channels")).toHaveClass(...FADE_IN.split(" "));
-    expect(screen.getByText("Clone message history")).toHaveClass(...FADE_IN.split(" "));
   });
 });

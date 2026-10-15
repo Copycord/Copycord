@@ -6,7 +6,7 @@ import { RunHeader } from "./RunDetail";
 import { RunRow } from "./RunList";
 import { StatusIcon } from "./StatusIcon";
 import { StepList } from "./StepList";
-import { ROW_BOX, RUN_HEAD_MAIN, RUN_META, RunDetailSkeleton, RunRowsLoading, STATUS_BOX, STEP_ROW } from "./TasksSkeleton";
+import { FADE_IN, ROW_BOX, RUN_HEAD_MAIN, RUN_META, RunDetailSkeleton, RunRowsLoading, STATUS_BOX, STEP_ROW } from "./TasksSkeleton";
 
 const RUN: TaskRun = {
   id: "1",
@@ -56,7 +56,9 @@ describe("status glyph alignment", () => {
     const glyphs = Array.from(container.querySelectorAll("[data-status]"));
     // Running steps sort first in the step list.
     expect(glyphs.map((g) => g.getAttribute("data-status"))).toEqual(["success", "running", "success", "success"]);
-    const boxes = glyphs.map((g) => classes(g).filter((c) => !c.startsWith("text-")).sort().join(" "));
+    // Colours and the header glyph's fade in aside.
+    const fade = FADE_IN.split(" ");
+    const boxes = glyphs.map((g) => classes(g).filter((c) => !c.startsWith("text-") && !fade.includes(c)).sort().join(" "));
     expect(new Set(boxes)).toEqual(new Set([[...BOX].sort().join(" ")]));
     const [row, , , header] = glyphs.map((g) => g.parentElement!);
     // The run row keeps its other columns at the top; the glyph, a direct child, centres on the title and meta lines.
@@ -67,7 +69,7 @@ describe("status glyph alignment", () => {
     // A step row is the glyph's parent.
     expect(glyphs[1]!.parentElement!.className).toBe(STEP_ROW);
     // The header centres the glyph beside both of its lines, like a run row.
-    expect(header!.className.startsWith(`${RUN_HEAD_MAIN} `)).toBe(true);
+    expect(header!.className).toBe(RUN_HEAD_MAIN);
     expect(header!.children[1]!.querySelector("h2")).not.toBeNull();
     expect(within(header!.children[1] as HTMLElement).getByTestId("run-status")).toBeInTheDocument();
   });

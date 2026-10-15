@@ -11,8 +11,9 @@ import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { Input } from "../../components/ui/Field";
 import { readLastCount } from "../../components/ui/lastCount";
-import { Skeleton } from "../../components/ui/Skeleton";
+import { Skeleton, useReveal } from "../../components/ui/Skeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
+import { runTypeOf, typeLabel } from "./typeLabels";
 
 export const PAGE = "my-3 flex w-full gap-6 max-md:flex-col";
 export const RAIL = "w-[240px] shrink-0 max-md:w-full";
@@ -50,10 +51,18 @@ export const SEARCH_BUTTON = "rounded-l-none border-l-0";
 export const RUN_HEADER = "mb-4";
 export const RUN_BREADCRUMB = "mb-2 text-sm text-muted";
 export const RUN_CRUMB = "text-accent no-underline hover:underline";
+/** The header's main block on the left, the run's actions on the right. */
+export const RUN_HEAD_ROW = "flex flex-wrap items-start justify-between gap-3";
 /** The header's glyph beside its two lines (the title row, the meta line), as in a run list row. */
 export const RUN_HEAD_MAIN = "flex min-w-0 items-center gap-3";
 export const RUN_TITLE_ROW = "flex items-center gap-2";
 export const RUN_TITLE = "m-0 text-[22px] font-bold text-text";
+export const RUN_NUMBER = "text-[22px] text-muted";
+
+/** A type's page, where the run page's breadcrumb leads. */
+export function typeUrl(key: string): string {
+  return `/tasks?type=${encodeURIComponent(key)}`;
+}
 export const RUN_META = "mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted";
 export const RUN_BODY = "flex flex-col gap-4";
 /** The Inputs list under the stat tiles, and its small heading. */
@@ -181,21 +190,21 @@ function TextBar({ width, className }: { width: number | string; className?: str
 }
 
 export interface TasksHeaderProps {
-  /** null while the type is not known yet: a bar in the title's line. */
-  title: string | null;
-  description: string | null;
+  /** A label, never a bar: All tasks, or the type's title (typeLabels.ts has it before the types load). */
+  title: string;
+  /** "" while a first visit does not know the type's description yet: the line keeps its height. */
+  description: string;
   action: ReactNode;
-  /** A type page, whose title and description take the place of bars: they fade in. All tasks is static text. */
-  fade?: boolean;
 }
 
-export function TasksHeader({ title, description, action, fade = false }: TasksHeaderProps) {
-  const text = (v: string) => (fade ? <span className={FADE_IN}>{v}</span> : v);
+export function TasksHeader({ title, description, action }: TasksHeaderProps) {
+  // A description that arrives after the first paint fades in; one there from the start does not.
+  const reveal = useReveal(description !== "");
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <h2 className="m-0 text-[22px] font-bold text-text">{title != null ? text(title) : <TextBar width={180} />}</h2>
-        <p className="mt-1 mb-0 text-sm text-muted">{description != null ? text(description) : <TextBar width={260} />}</p>
+        <h2 className="m-0 text-[22px] font-bold text-text">{title}</h2>
+        <p className="mt-1 mb-0 text-sm text-muted">{description ? <span className={reveal}>{description}</span> : " "}</p>
       </div>
       {action}
     </div>
@@ -322,13 +331,22 @@ function InlineBar({ width }: { width: number }) {
 
 const STEP_WIDTHS = [["34%", 72], ["26%", 96], ["30%", 84]] as const;
 
+export interface RunDetailSkeletonProps {
+  /** The run's type key when known before the run loads (typeLabels.ts runTypeOf): its title shows as text. */
+  runType?: string | null;
+  /** Step rows to draw; the count the last run page showed by default. */
+  steps?: number;
+}
+
 /**
- * The run page until the run answers, also the page's own loading state: the header with bars for the
- * type, glyph, title and meta line (the actions depend on the status, so they wait), the summary card
- * with its Inputs heading and bar rows, the Steps card with its real head (bars for the counts and the
+ * The run page until the run answers, also the page's own loading state: the header with the type's
+ * title as text when the run's type is known (bars in its place only when it cannot be), bars for the
+ * glyph, number and meta line (the actions depend on the status, so they wait), the summary card with
+ * its Inputs heading and bar rows, the Steps card with its real head (bars for the counts and the
  * overall bar, the real filter) and as many bar rows as the last run showed, and the collapsed Report line.
  */
-export function RunDetailSkeleton({ steps = readLastCount(STEPS_COUNT_KEY, 2, STEP_ROWS_MAX) }: { steps?: number }) {
+export function RunDetailSkeleton({ runType = null, steps = readLastCount(STEPS_COUNT_KEY, 2, STEP_ROWS_MAX) }: RunDetailSkeletonProps) {
+  const title = runType ? typeLabel(runType).title : null;
   return (
     <div role="status" aria-busy="true" aria-label="Loading run" className="flex flex-col">
       <div inert>
@@ -338,22 +356,29 @@ export function RunDetailSkeleton({ steps = readLastCount(STEPS_COUNT_KEY, 2, ST
               All tasks
             </Link>
             {" / "}
-            <InlineBar width={110} />
+            {runType && title ? (
+              <Link to={typeUrl(runType)} className={RUN_CRUMB}>
+                {title}
+              </Link>
+            ) : (
+              <InlineBar width={110} />
+            )}
           </nav>
-          <div className={RUN_HEAD_MAIN}>
-            <span className={STATUS_BOX}>
-              <Skeleton width={20} height={20} rounded="rounded-full" />
-            </span>
-            <div className="min-w-0">
-              <div className={RUN_TITLE_ROW}>
-                <h2 className={RUN_TITLE}>
-                  <TextBar width={240} />
-                </h2>
-              </div>
-              <div className={RUN_META}>
-                <TextBar width={130} />
-                <TextBar width={90} />
-                <TextBar width={110} />
+          <div className={RUN_HEAD_ROW}>
+            <div className={RUN_HEAD_MAIN}>
+              <span className={STATUS_BOX}>
+                <Skeleton width={20} height={20} rounded="rounded-full" />
+              </span>
+              <div className="min-w-0">
+                <div className={RUN_TITLE_ROW}>
+                  <h2 className={RUN_TITLE}>{title ?? <TextBar width={180} />}</h2>
+                  <Skeleton.Text className="text-[22px]">#00</Skeleton.Text>
+                </div>
+                <div className={RUN_META}>
+                  <TextBar width={130} />
+                  <TextBar width={90} />
+                  <TextBar width={110} />
+                </div>
               </div>
             </div>
           </div>
@@ -419,7 +444,8 @@ const noop = () => {};
 /** The page as Tasks first paints it, the controls inert under the section: the same rail, header, search and toolbar. */
 export function TasksSkeleton() {
   const [params] = useSearchParams();
-  const runPage = useMatch("/tasks/runs/:id") !== null;
+  const runMatch = useMatch("/tasks/runs/:id");
+  const runPage = runMatch !== null;
   const typeKey = params.get("type") ?? "";
   const filters: FilterKey[] = typeKey ? ["status", "context", "actor"] : ["type", "status", "context", "actor"];
   return (
@@ -435,12 +461,12 @@ export function TasksSkeleton() {
           </ul>
         </nav>
         <div className={MAIN}>
-          {runPage ? (
-            <RunDetailSkeleton />
+          {runMatch ? (
+            <RunDetailSkeleton runType={runTypeOf(runMatch.params.id ?? "")} />
           ) : (
             <>
               {typeKey ? (
-                <TasksHeader title={null} description={null} action={null} />
+                <TasksHeader {...typeLabel(typeKey)} action={null} />
               ) : (
                 <TasksHeader title="All tasks" description={ALL_TASKS_DESCRIPTION} action={null} />
               )}

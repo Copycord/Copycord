@@ -3,7 +3,7 @@
 // summary card (the counts the type reports as stat tiles, then its Inputs), the Steps card and the
 // collapsed "Report (JSON)" panel. Everything type specific comes from the registry in ./types.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
@@ -29,11 +29,15 @@ import {
   RUN_CRUMB,
   RUN_HEADER,
   RUN_HEAD_MAIN,
+  RUN_HEAD_ROW,
   RUN_META,
+  RUN_NUMBER,
   RUN_TITLE,
   RUN_TITLE_ROW,
   RunDetailSkeleton,
+  typeUrl,
 } from "./TasksSkeleton";
+import { rememberRunTypes, runTypeOf, typeLabel } from "./typeLabels";
 import { describeRunInputs, summaryStats } from "./types";
 
 /** The counts as stat tiles over the run's Inputs; the tiles show once the run reports counts. */
@@ -111,21 +115,22 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
           All tasks
         </Link>
         {" / "}
-        <Link to={`/tasks?type=${encodeURIComponent(run.type)}`} className={cx(RUN_CRUMB, FADE_IN)}>
+        <Link to={typeUrl(run.type)} className={RUN_CRUMB}>
           {typeTitle}
         </Link>
       </nav>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className={cx(RUN_HEAD_MAIN, FADE_IN)}>
-          <StatusIcon status={run.status} size={20} />
+      <div className={RUN_HEAD_ROW}>
+        {/* The type's title is a label the skeleton already showed; the run's own parts fade in. */}
+        <div className={RUN_HEAD_MAIN}>
+          <StatusIcon status={run.status} size={20} className={FADE_IN} />
           <div className="min-w-0">
             <div className={RUN_TITLE_ROW}>
               <h2 className={RUN_TITLE} title={run.title}>
                 {typeTitle}
               </h2>
-              <span className="text-[22px] text-muted">#{run.number}</span>
+              <span className={cx(RUN_NUMBER, FADE_IN)}>#{run.number}</span>
             </div>
-            <div className={RUN_META}>
+            <div className={cx(RUN_META, FADE_IN)}>
               <span>{triggerText(run)}</span>
               <ContextBadge run={run} />
               <span title="Started">{formatWhen(run.started_at ?? run.created_at)}</span>
@@ -173,7 +178,7 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
 export function RunView({ run, type, refreshing = false }: { run: TaskRun; type?: TaskType; refreshing?: boolean }) {
   return (
     <div className={cx("flex flex-col transition-opacity motion-reduce:transition-none", refreshing && BUSY)} aria-busy={refreshing || undefined}>
-      <RunHeader run={run} typeTitle={type?.title ?? run.type} />
+      <RunHeader run={run} typeTitle={type?.title ?? typeLabel(run.type).title} />
       <div className={RUN_BODY}>
         <RunSummary run={run} schema={type?.inputs_schema} />
         <StepList run={run} />
@@ -186,8 +191,11 @@ export function RunView({ run, type, refreshing = false }: { run: TaskRun; type?
 export function RunDetail({ id, typeOf }: { id: string; typeOf: (key: string) => TaskType | undefined }) {
   // Live over task.run.updated; a refetch keeps the held run on screen (no shimmer after the first load).
   const { run, loading, refreshing, error } = useTaskRun(id);
+  useEffect(() => {
+    if (run) rememberRunTypes([run]);
+  }, [run]);
   if (!run) {
-    if (loading) return <RunDetailSkeleton />;
+    if (loading) return <RunDetailSkeleton runType={runTypeOf(id)} />;
     return <EmptyState plain title="Run not found" description={error ? errorText(error, "Could not load the run.") : undefined} />;
   }
   return <RunView run={run} type={typeOf(run.type)} refreshing={refreshing} />;

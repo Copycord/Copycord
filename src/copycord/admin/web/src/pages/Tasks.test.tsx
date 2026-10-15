@@ -143,6 +143,31 @@ describe("Tasks page", () => {
     expect(screen.getAllByRole("button", { name: "Run task" }).length).toBeGreaterThan(0);
   });
 
+  it("names the type in the header and on the run page while the types are still loading, never a bar", async () => {
+    const pending = (url: string) => (url === "/api/tasks/types" ? new Response(new ReadableStream()) : undefined);
+    serve([run({ id: "12", number: 12 })], { handle: pending });
+    const first = renderAt("/tasks?type=backfill_channels");
+    // A first visit: the id in words, no shimmer in the title or the description line.
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Backfill channels");
+    expect(first.container.querySelector("h2 [data-skeleton], h2 + p [data-skeleton]")).toBeNull();
+    await screen.findByRole("link", { name: "Backfill #general" });
+    first.unmount();
+
+    // A visit after the types loaded once: their own title and description, still before they answer.
+    localStorage.setItem("tasks:types", JSON.stringify({ backfill_channels: { title: "Backfill history", description: "Clone message history" } }));
+    const again = renderAt("/tasks?type=backfill_channels");
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Backfill history");
+    expect(screen.getByText("Clone message history")).toBeInTheDocument();
+    // The list remembered run 12's type, so its page names it while the run loads.
+    again.unmount();
+    renderAt("/tasks/runs/12");
+    const loading = screen.getByRole("status", { name: "Loading run" });
+    expect(within(loading).getByRole("heading", { level: 2, hidden: true })).toHaveTextContent("Backfill history");
+    expect(within(loading).getByRole("link", { name: "Backfill history", hidden: true })).toHaveAttribute("href", "/tasks?type=backfill_channels");
+    expect(await screen.findByRole("heading", { level: 2, name: "Backfill history" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading run" })).toBeNull();
+  });
+
   it("opens a run with its header and the Summary, Steps and Report sections, no log", async () => {
     serve([run({ id: "12", number: 12 })]);
     renderAt("/tasks/runs/12");

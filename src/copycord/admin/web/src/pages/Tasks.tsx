@@ -27,6 +27,7 @@ import {
   readAutoRefresh,
 } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
+import { rememberRunTypes, rememberTypes, typeLabel } from "./tasks/typeLabels";
 import { useBotsRunning } from "./tasks/useBotsRunning";
 import { TaskTypeForm } from "./tasks/types";
 
@@ -71,10 +72,14 @@ export function Tasks() {
   const { data, loading: typesLoading } = useApi<TaskTypesResponse>("/api/tasks/types");
   const types = useMemo(() => data?.types ?? [], [data]);
   const selected = types.find((t) => t.key === typeKey);
-  // A type page before the types land: bars in the header rather than All tasks, as in the skeleton.
-  const typePending = Boolean(typeKey) && !data && typesLoading;
+  // A type page names its type from the first paint, as the skeleton does: the remembered title, or the
+  // id in words on a first visit. A type the loaded list does not have falls back to All tasks.
+  const label = !typeKey ? null : (selected ?? (data ? null : typeLabel(typeKey)));
+  useEffect(() => {
+    if (data?.types) rememberTypes(data.types);
+  }, [data]);
   const typeOf = useCallback((key: string) => types.find((t) => t.key === key), [types]);
-  const typeTitle = useCallback((key: string) => typeOf(key)?.title ?? key, [typeOf]);
+  const typeTitle = useCallback((key: string) => typeOf(key)?.title ?? typeLabel(key).title, [typeOf]);
   const toast = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -128,10 +133,9 @@ export function Tasks() {
           ) : (
             <>
               <TasksHeader
-                title={typePending ? null : (selected?.title ?? "All tasks")}
-                description={typePending ? null : (selected?.description ?? ALL_TASKS_DESCRIPTION)}
+                title={label?.title ?? "All tasks"}
+                description={label ? label.description : ALL_TASKS_DESCRIPTION}
                 action={runAction}
-                fade={Boolean(typeKey)}
               />
               <RunsView types={types} typeTitle={typeTitle} />
             </>
@@ -157,6 +161,8 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   const onSearch = useCallback((q: string) => set("q", q), [set]);
   useLastCount(RUNS_COUNT_KEY, settled ? runs.length : undefined);
+  // So a run opened from this list names its type before it loads.
+  useEffect(() => rememberRunTypes(runs), [runs]);
 
   useEffect(() => {
     const secs = Number(autoRefresh) || (connected ? 0 : SOCKET_DOWN_POLL_S);
