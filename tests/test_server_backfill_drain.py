@@ -352,6 +352,43 @@ def test_a_send_that_never_returns_ends_the_job_at_the_cap(ServerReceiver, monke
     assert rx._bf_jobs == {} and not rx.backfill._attached.get(CID)
 
 
+def test_slow_sends_that_keep_completing_are_not_cut_off(ServerReceiver, monkeypatch):
+    """Live run, #12367686: Discord limits shared by six channels slowed its sends below the 2 s per
+    message the cap allowed, and the 120 s floor cancelled 12 sends that were still going out. Scaled
+    down: each send takes longer than its share of the cap, yet one finishes well inside the stall
+    window, so the drain waits for all of them."""
+    monkeypatch.delenv("BACKFILL_DRAIN_HARD_CAP_SECS", raising=False)
+    monkeypatch.setenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "0.3")
+
+    async def go():
+        rx = _rx(ServerReceiver, asyncio.Event())
+        rx.backfill.DRAIN_CAP_FLOOR_SECS = 0.2
+        rx.backfill.DRAIN_CAP_PER_MESSAGE_SECS = 0.01
+        pace = asyncio.Lock()
+
+        async def _bf_message(data):
+            async with pace:
+                await asyncio.sleep(0.05)
+                rx.backfill.note_sent(int(data["channel_id"]), int(data["message_id"]))
+
+        rx._handle_backfill_message = _bf_message
+        rx.backfill.update_expected_total(CID, 8)
+        await rx._on_ws({"type": "backfill_job", "data": {"job_id": JOB, "original_channel_id": str(CID), "state": "running", "queue_position": None}})
+        for i in range(8):
+            await rx._on_ws(_message_frame(1521898853337409001 + i))
+        stream_end = asyncio.create_task(rx._on_ws({"type": "backfill_stream_end", "data": {"channel_id": str(CID)}}))
+        job_end = asyncio.create_task(rx._on_ws({"type": "backfill_job_end", "data": {"job_id": JOB, "ok": True, "error": None, "last_orig_message_id": None}}))
+        await asyncio.wait_for(asyncio.gather(stream_end, job_end), 3.0)
+        return rx
+
+    rx = asyncio.run(go())
+
+    end = rx.bus.sent[-1]["payload"]
+    assert end["type"] == "backfill_job_end"
+    assert end["data"]["error"] is None and end["data"]["ok"] is True
+    assert end["data"]["delivered"] == 8
+
+
 def test_cancel_after_every_send_went_out_ends_ok(ServerReceiver):
     """The cancel arrives once the server sent all it was given: nothing was cut, the job is ok."""
 
