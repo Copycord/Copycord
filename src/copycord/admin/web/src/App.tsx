@@ -66,8 +66,8 @@ const Kit = lazyPage(() => import("./pages/Kit").then((m) => m.Kit));
 export const PAGES = [
   { path: "/", title: "Configuration" },
   { path: "/channels", title: "Channels" },
-  { path: "/tasks", title: "Tasks" },
   { path: "/guilds", title: "Guilds" },
+  { path: "/tasks", title: "Tasks" },
   { path: "/forwarding", title: "Forwarding" },
   { path: "/scraper", title: "Scraper" },
   { path: "/system", title: "System" },
@@ -90,8 +90,8 @@ function PageSkeleton() {
 const PAGE_ELEMENTS: Record<(typeof PAGES)[number]["path"], ReactNode> = {
   "/": <Dashboard />,
   "/channels": <Channels />,
-  "/tasks": <Tasks />,
   "/guilds": <Guilds />,
+  "/tasks": <Tasks />,
   "/forwarding": <Forwarding />,
   "/scraper": <Scraper />,
   "/system": <System />,

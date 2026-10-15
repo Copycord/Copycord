@@ -13,8 +13,8 @@ export type MenuItem = Omit<SidebarItem, "key"> & { key: SidebarItem["key"] | "t
 export const SIDEBAR_ITEMS: MenuItem[] = [
   { key: "config", label: "Configuration", to: "/" },
   { key: "channels", label: "Channels", to: "/channels" },
-  { key: "tasks", label: "Tasks", to: "/tasks" },
   { key: "guilds", label: "Guilds", to: "/guilds" },
+  { key: "tasks", label: "Tasks", to: "/tasks" },
   { key: "forwarding", label: "Forwarding", to: "/forwarding" },
   { key: "scraper", label: "Scraper", to: "/scraper" },
   { key: "system", label: "System", to: "/system" },
