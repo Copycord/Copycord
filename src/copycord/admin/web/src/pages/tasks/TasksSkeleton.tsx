@@ -6,12 +6,14 @@
 
 import type { ReactNode } from "react";
 import { Link, useMatch, useSearchParams } from "react-router";
+import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { Input } from "../../components/ui/Field";
 import { readLastCount, readLastLabels } from "../../components/ui/lastCount";
 import { Skeleton, useReveal } from "../../components/ui/Skeleton";
+import { RowMenu } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { runTypeOf, typeLabel } from "./typeLabels";
 
@@ -51,25 +53,101 @@ export const SEARCH_BUTTON = "rounded-l-none border-l-0";
 export const RUN_HEADER = "mb-4";
 export const RUN_BREADCRUMB = "mb-2 text-sm text-muted";
 export const RUN_CRUMB = "text-accent no-underline hover:underline";
-/** The header's main block on the left, the run's actions on the right. */
-export const RUN_HEAD_ROW = "flex flex-wrap items-start justify-between gap-3";
-/** The header's glyph beside its two lines (the title row, the meta line), as in a run list row. */
+/** The glyph, title and status pill on the left, the run's actions menu on the right. */
+export const RUN_HEAD_ROW = "flex items-center justify-between gap-3";
+/** The header's glyph beside its title row, as in a run list row. */
 export const RUN_HEAD_MAIN = "flex min-w-0 items-center gap-3";
-export const RUN_TITLE_ROW = "flex items-center gap-2";
-export const RUN_TITLE = "m-0 text-[22px] font-bold text-text";
-export const RUN_NUMBER = "text-[22px] text-muted";
+/** The type's title, the run's number, its status pill and a failed run's error, on one line. */
+export const RUN_TITLE_ROW = "flex min-w-0 items-center gap-2";
+export const RUN_TITLE = "m-0 shrink-0 text-[22px] font-bold text-text";
+export const RUN_NUMBER = "shrink-0 text-[22px] text-muted";
+/** The status pill beside the number: the app's Badge, a small glyph and the status word. */
+export const RUN_PILL = "ml-1 shrink-0";
 
 /** A type's page, where the run page's breadcrumb leads. */
 export function typeUrl(key: string): string {
   return `/tasks?type=${encodeURIComponent(key)}`;
 }
-/** The meta line holds the mapping badge (24 px), so it is that tall with or without one. */
-export const RUN_META = "mt-1 flex min-h-6 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted";
-/** The run's status word in the meta line, in its status colour; the run's error follows it, quiet. */
-export const RUN_STATUS = "font-semibold";
-export const RUN_ERROR = "max-w-[48ch] truncate text-muted";
-/** The header's Delete and Cancel run: the height of the Steps filter (ToolbarSelect, 34 px). */
-export const RUN_ACTION = "min-h-[34px] px-3 text-[13px]";
+/** The meta chips under the title, on the cards' left edge: each a 24 px Badge, so the row is that tall. */
+export const RUN_META = "mt-3 flex min-h-6 flex-wrap items-center gap-2 text-xs text-muted";
+/** A failed run's error after the status pill: quiet text, cut to one line, the whole of it in the title. */
+export const RUN_ERROR = "min-w-0 max-w-[48ch] truncate text-sm text-muted";
+/** A display chip of the meta row: the neutral Badge in normal weight. Not a button. */
+export const RUN_CHIP = "font-normal";
+/** The mapping chip: the run list's branch-like pill (ContextBadge). */
+export const CONTEXT_CHIP = "border-transparent bg-brand-ghost font-mono font-normal text-accent";
+/** The run ID chip's copy button, a 16 px glyph inside the chip's line. */
+export const RUN_ID_COPY =
+  "-mr-1 inline-flex size-4 cursor-pointer items-center justify-center rounded border-0 bg-transparent p-0 text-muted " +
+  "hover:text-text focus-visible:outline-2 focus-visible:outline-accent/70 disabled:cursor-default";
+/** How many of a run's channels its Inputs show as chips before "+N more". */
+export const INPUT_CHIPS_MAX = 4;
+/** The chips of one Inputs value: one 20 px line that never wraps, so the row keeps its text height. */
+export const INPUT_CHIPS = "flex min-w-0 items-center gap-1 overflow-hidden";
+
+const CHIP_GLYPHS = {
+  trigger: <path d="M5.5 3.5v9l7-4.5z" fill="currentColor" />,
+  actor: (
+    <>
+      <circle cx="8" cy="5.5" r="2.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2.75 14c.7-2.75 2.8-4.25 5.25-4.25s4.55 1.5 5.25 4.25" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </>
+  ),
+  started: (
+    <>
+      <rect x="2.25" y="3.25" width="11.5" height="10.5" rx="1.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2.25 6.75h11.5M5.5 1.75v3M10.5 1.75v3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </>
+  ),
+  duration: (
+    <>
+      <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 4.75V8l2.25 1.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="5.25" y="5.25" width="8.5" height="8.5" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10.75 5.25V3.75a1.5 1.5 0 0 0-1.5-1.5h-5.5a1.5 1.5 0 0 0-1.5 1.5v5.5a1.5 1.5 0 0 0 1.5 1.5h1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </>
+  ),
+} as const;
+
+/** A 12 px glyph in a chip: a label, never data, so the skeleton draws it too. */
+export function ChipGlyph({ name }: { name: keyof typeof CHIP_GLYPHS }) {
+  return (
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false" className="shrink-0 text-muted">
+      {CHIP_GLYPHS[name]}
+    </svg>
+  );
+}
+
+/** One display chip of the run's meta row; the skeleton passes a bar as the value. */
+export function MetaChip({ glyph, title, testId, children }: { glyph: keyof typeof CHIP_GLYPHS; title?: string; testId?: string; children: ReactNode }) {
+  return (
+    <span data-testid={testId} className="inline-flex">
+      <Badge className={RUN_CHIP} title={title}>
+        <ChipGlyph name={glyph} />
+        {children}
+      </Badge>
+    </span>
+  );
+}
+
+/** "ID 4f2a9c1e" and its copy button; the full id is in the title. id null: a bar and the button inert. */
+export function RunIdChip({ id, onCopy }: { id: string | null; onCopy?: () => void }) {
+  return (
+    <span data-testid="run-id" className="inline-flex">
+      <Badge className={RUN_CHIP} title={id ? `Run ID ${id}` : undefined}>
+        <span className="text-muted">ID</span>
+        {id ? <span className="font-mono">{id.slice(0, 8)}</span> : <Skeleton.Text className="font-mono">00000000</Skeleton.Text>}
+        <button type="button" aria-label="Copy run ID" title="Copy run ID" disabled={!id} onClick={onCopy} className={RUN_ID_COPY}>
+          <ChipGlyph name="copy" />
+        </button>
+      </Badge>
+    </span>
+  );
+}
 export const RUN_BODY = "flex flex-col gap-4";
 /** The cards of the run page: FRAME without the clip, so the Steps filter's list can open over the next card. */
 export const RUN_CARD = "rounded-card border border-border bg-card";
@@ -407,7 +485,8 @@ export interface RunDetailSkeletonProps {
 /**
  * The run page until the run answers, also the page's own loading state: the header with the type's
  * title as text when the run's type is known (bars in its place only when it cannot be), bars for the
- * glyph, number and meta line (the actions depend on the status, so they wait), the summary card with
+ * glyph and number, the status pill's box with bars inside, the "Run actions" button as itself and
+ * inert, the meta chips as themselves with bars where their values go, the summary card with
  * the tile and Inputs labels the last run page showed and bars for their values (a backfill run's five
  * tiles and six rows, all bars, on a first visit), the Steps card with its real head (bars for the counts
  * and the overall bar, the real filter) and as many bar rows as the last run showed, and the collapsed
@@ -445,19 +524,41 @@ export function RunDetailSkeleton({
               <span className={STATUS_BOX}>
                 <Skeleton width={20} height={20} rounded="rounded-full" />
               </span>
-              <div className="min-w-0">
-                <div className={RUN_TITLE_ROW}>
-                  <h2 className={RUN_TITLE}>{title ?? <TextBar width={180} />}</h2>
-                  <Skeleton.Text className="text-[22px]">#00</Skeleton.Text>
-                </div>
-                <div className={RUN_META}>
-                  <TextBar width={130} />
-                  <TextBar width={90} />
-                  <TextBar width={110} />
-                  <TextBar width={60} />
-                </div>
+              <div className={RUN_TITLE_ROW}>
+                <h2 className={RUN_TITLE}>{title ?? <TextBar width={180} />}</h2>
+                <Skeleton.Text className="shrink-0 text-[22px]">#00</Skeleton.Text>
+                {/* The pill's box as itself; its glyph and word are the run's status, so they shimmer. */}
+                <span data-testid="run-status" className={cx("inline-flex", RUN_PILL)}>
+                  <Badge>
+                    <Skeleton width={12} height={12} rounded="rounded-full" />
+                    <Skeleton.Text>Running</Skeleton.Text>
+                  </Badge>
+                </span>
               </div>
             </div>
+            <div className="shrink-0">
+              <RowMenu kind="channel" label="Run actions" items={[]} disabled />
+            </div>
+          </div>
+          <div className={RUN_META}>
+            <span className="inline-flex">
+              <Badge className={CONTEXT_CHIP}>
+                <Skeleton.Text>Main mapping</Skeleton.Text>
+              </Badge>
+            </span>
+            <MetaChip glyph="trigger">
+              <Skeleton.Text>Manual run</Skeleton.Text>
+            </MetaChip>
+            <MetaChip glyph="actor">
+              <Skeleton.Text>admin</Skeleton.Text>
+            </MetaChip>
+            <MetaChip glyph="started">
+              <Skeleton.Text>12m ago</Skeleton.Text>
+            </MetaChip>
+            <MetaChip glyph="duration">
+              <Skeleton.Text>1m 29s</Skeleton.Text>
+            </MetaChip>
+            <RunIdChip id={null} />
           </div>
         </header>
         <div className={RUN_BODY}>

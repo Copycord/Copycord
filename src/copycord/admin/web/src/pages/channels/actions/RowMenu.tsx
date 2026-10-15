@@ -14,17 +14,23 @@ export interface MenuItem {
   label: string;
   onSelect: () => void;
   danger?: boolean;
+  /** A hairline above the item, setting it apart from the ones before. */
+  separator?: boolean;
 }
 
 export interface RowMenuProps {
   kind: "channel" | "category";
   items: MenuItem[];
+  /** The button's accessible name; "Channel menu" or "Category menu" by default. */
+  label?: string;
+  /** Inert, as in a loading skeleton. */
+  disabled?: boolean;
 }
 
 const GAP = 6;
 const PAD = 12;
 
-export function RowMenu({ kind, items }: RowMenuProps) {
+export function RowMenu({ kind, items, label, disabled = false }: RowMenuProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
@@ -81,7 +87,8 @@ export function RowMenu({ kind, items }: RowMenuProps) {
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={kind === "channel" ? "Channel menu" : "Category menu"}
+        aria-label={label ?? (kind === "channel" ? "Channel menu" : "Category menu")}
+        disabled={disabled}
         onClick={toggle}
         className={cx(
           "cursor-pointer outline-none",
@@ -104,7 +111,8 @@ export function RowMenu({ kind, items }: RowMenuProps) {
               style={{ position: "fixed", top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
               className="z-50 max-h-[calc(100vh-24px)] min-w-[200px] overflow-y-auto rounded-control border border-border bg-control p-1.5 text-text shadow-[0_20px_56px_rgba(0,0,0,0.5)] outline-none"
             >
-              {items.map((it) => (
+              {items.map((it) => [
+                it.separator ? <div key={`${it.act}:sep`} role="separator" className="my-1 h-px bg-border" /> : null,
                 <button
                   key={it.act}
                   id={it.id}
@@ -122,8 +130,8 @@ export function RowMenu({ kind, items }: RowMenuProps) {
                   )}
                 >
                   {it.label}
-                </button>
-              ))}
+                </button>,
+              ])}
             </div>,
             document.body,
           )

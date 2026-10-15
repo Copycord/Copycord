@@ -20,7 +20,12 @@ export type { TaskFormProps } from "./start";
 export interface InputRow {
   label: string;
   value: string;
+  /** A list input shown as display chips ("#general", "#news"); value stays its count in words. */
+  chips?: string[];
 }
+
+/** The run fields a formatter reads: the context names the mapping, the steps name the channels. */
+export type InputsRun = Pick<TaskRun, "context"> & { steps?: TaskStep[] };
 
 /** One stat tile of the run detail's summary strip. */
 export interface SummaryStat {
@@ -33,7 +38,7 @@ export interface TaskTypeEntry {
   icon: ReactNode;
   Form: ComponentType<TaskFormProps>;
   /** The run's inputs as rows; the run's context names the mapping, the schema titles the fields. */
-  describeInputs: (inputs: Record<string, unknown>, run?: Pick<TaskRun, "context">, schema?: Record<string, unknown>) => InputRow[];
+  describeInputs: (inputs: Record<string, unknown>, run?: InputsRun, schema?: Record<string, unknown>) => InputRow[];
   /** Words for the summary keys the type reports; a key without one is shown in words from its name. */
   summaryLabels?: Record<string, string>;
   /** A finished step's note in the words its running label uses; null keeps the server's note. */
@@ -71,9 +76,20 @@ function counted(v: unknown, one: string, many: string): string {
   return `${formatCount(v.length)} ${v.length === 1 ? one : many}`;
 }
 
-const BACKFILL_MODE: Record<string, string> = { resume: "Resume previous", new: "Start new" };
+/**
+ * The backfill's channels by name: each channel is a step keyed by its id and titled "#name". Undefined
+ * while no step names any of them (the count in words stands alone); an unnamed one shows its id.
+ */
+export function channelNames(ids: unknown, steps?: TaskStep[]): string[] | undefined {
+  if (!Array.isArray(ids) || !ids.length || !steps?.length) return undefined;
+  const titles = new Map(steps.map((s) => [s.key, s.title]));
+  if (!ids.some((id) => titles.has(String(id)))) return undefined;
+  return ids.map((id) => titles.get(String(id)) ?? String(id));
+}
 
-function describeBackfill(inputs: Record<string, unknown>, run?: Pick<TaskRun, "context">): InputRow[] {
+const BACKFILL_MODE: Record<string, string> ={ resume: "Resume previous", new: "Start new" };
+
+function describeBackfill(inputs: Record<string, unknown>, run?: InputsRun): InputRow[] {
   const rows: InputRow[] = [];
   for (const [k, v] of Object.entries(inputs)) {
     switch (k) {
@@ -81,7 +97,7 @@ function describeBackfill(inputs: Record<string, unknown>, run?: Pick<TaskRun, "
         rows.push({ label: "Mapping", value: run?.context?.label || formatValue(v) });
         break;
       case "channel_ids":
-        rows.push({ label: "Channels", value: counted(v, "channel", "channels") });
+        rows.push({ label: "Channels", value: counted(v, "channel", "channels"), chips: channelNames(v, run?.steps) });
         break;
       case "category_ids":
         rows.push({ label: "Categories", value: counted(v, "category", "categories") });
@@ -160,14 +176,14 @@ const humanize = (key: string) => key.replace(/_/g, " ").replace(/^./, (c) => c.
  * The Inputs rows of a type without its own formatter: the schema's fields in schema order, labelled by
  * their titles, then any input the schema does not name.
  */
-export function describeGeneric(inputs: Record<string, unknown>, _run?: Pick<TaskRun, "context">, schema?: Record<string, unknown>): InputRow[] {
+export function describeGeneric(inputs: Record<string, unknown>, _run?: InputsRun, schema?: Record<string, unknown>): InputRow[] {
   const props = (schema?.properties ?? {}) as Record<string, SchemaProp>;
   const keys = [...Object.keys(props).filter((k) => k in inputs), ...Object.keys(inputs).filter((k) => !(k in props))];
   return keys.map((k) => ({ label: props[k]?.title ?? humanize(k), value: formatValue(inputs[k]) }));
 }
 
 /** The run's inputs as rows, by its type's formatter. */
-export function describeRunInputs(run: Pick<TaskRun, "type" | "inputs" | "context">, schema?: Record<string, unknown>): InputRow[] {
+export function describeRunInputs(run: Pick<TaskRun, "type" | "inputs"> & InputsRun, schema?: Record<string, unknown>): InputRow[] {
   return entryFor(run.type).describeInputs(run.inputs ?? {}, run, schema);
 }
 

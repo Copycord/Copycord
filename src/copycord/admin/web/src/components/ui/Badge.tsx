@@ -14,11 +14,28 @@ const TONE: Record<BadgeTone, string> = {
   accent: "border-accent/35 bg-brand-ghost text-accent",
 };
 
-export function Badge({ tone = "neutral", className, children }: { tone?: BadgeTone; className?: string; children: ReactNode }) {
+/** md: 24 px tall; sm: 20 px, to sit in a 20 px line of text without growing it. */
+const SIZE = { md: "px-2 py-0.5 leading-normal", sm: "px-1.5 py-px leading-4" } as const;
+
+export function Badge({
+  tone = "neutral",
+  size = "md",
+  className,
+  title,
+  children,
+}: {
+  tone?: BadgeTone;
+  size?: keyof typeof SIZE;
+  className?: string;
+  title?: string;
+  children: ReactNode;
+}) {
   return (
     <span
+      title={title}
       className={cx(
-        "inline-flex items-center gap-[0.5ch] rounded-full border px-2 py-0.5 text-xs font-semibold leading-normal",
+        "inline-flex items-center gap-[0.5ch] rounded-full border text-xs font-semibold",
+        SIZE[size],
         TONE[tone],
         className,
       )}

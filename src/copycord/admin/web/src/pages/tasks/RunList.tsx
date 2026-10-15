@@ -14,6 +14,7 @@ import { StatusIcon } from "./StatusIcon";
 import {
   AUTO_REFRESH_OPTIONS,
   BUSY,
+  CONTEXT_CHIP,
   FADE_IN,
   FRAME,
   FRAME_HEAD,
@@ -31,8 +32,13 @@ export { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS } from "./TasksSkeleton";
 // rerun: runs stored before Re-run was removed still say how they started; nothing starts one now.
 const TRIGGER: Record<string, string> = { manual: "Manual run", rerun: "Re-run", api: "API run" };
 
+/** How the run started, in words: "Manual run". */
+export function triggerLabel(run: Pick<TaskRun, "trigger">): string {
+  return TRIGGER[run.trigger] ?? "Run";
+}
+
 export function triggerText(run: Pick<TaskRun, "trigger" | "actor">): string {
-  return `${TRIGGER[run.trigger] ?? "Run"} by ${run.actor}`;
+  return `${triggerLabel(run)} by ${run.actor}`;
 }
 
 const WHEN = new Intl.DateTimeFormat(undefined, {
@@ -47,6 +53,19 @@ export function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : WHEN.format(d);
+}
+
+/** "just now", "5m ago", "3h ago", "2d ago"; past a week the date itself. */
+export function formatAgo(iso: string | null | undefined, now: number): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const m = Math.floor(Math.max(0, now - t) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  if (m < 1440) return `${Math.floor(m / 60)}h ago`;
+  if (m < 10080) return `${Math.floor(m / 1440)}d ago`;
+  return formatWhen(iso);
 }
 
 /** "48s", "1m 29s", "2h 5m". */
@@ -78,10 +97,10 @@ export function runDuration(run: TaskRun, now: number): string | null {
 }
 
 /** The branch-like pill: the mapping the run works on. */
-export function ContextBadge({ run }: { run: TaskRun }) {
+export function ContextBadge({ run, title }: { run: TaskRun; title?: string }) {
   if (!run.context?.label) return null;
   return (
-    <Badge tone="neutral" className="border-transparent bg-brand-ghost font-mono font-normal text-accent">
+    <Badge tone="neutral" className={CONTEXT_CHIP} title={title}>
       {run.context.label}
     </Badge>
   );
