@@ -329,6 +329,9 @@ class TaskService:
                       note: Optional[str] = None) -> None:
         run = ctx.run
         if run.status in FINAL:
+            # Ended early (stop_all): what the runner wrote since, its report, still lands.
+            if ctx._write_pending:
+                await ctx.flush()
             return
         if outcome != "success":
             ctx._settle_steps(outcome, note)
