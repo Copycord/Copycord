@@ -4,7 +4,7 @@
 // status pushes on /ws/ui in between.
 
 import { useCallback, useEffect, useState } from "react";
-import { Spinner, cx } from "../../components/ui";
+import { Spinner, cx, useReveal } from "../../components/ui";
 import { useWsMessages } from "../../hooks/useWsMessages";
 import type { UseWsOptions } from "../../hooks/useWsMessages";
 import { api, errorText } from "../../lib/api";
@@ -46,6 +46,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
   const [statuses, setStatuses] = useState<BotStatuses>(EMPTY_STATUSES);
   // The state badges are bars, like the page skeleton's, until the first status answer or push.
   const [loaded, setLoaded] = useState(false);
+  const reveal = useReveal(loaded);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Record<BotRole, boolean>>({ server: false, client: false });
   // When each row's uptime was reported, so it counts up between reports like the old page.
@@ -150,7 +151,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                     {loaded ? (
                       <span
                         id={`${role}-state`}
-                        className={cx(STATE, s.running ? "bg-[#183a2e] text-[#baf7d0]" : "bg-[#3a1c20] text-[#ffc5cf]")}
+                        className={cx(STATE, s.running ? "bg-[#183a2e] text-[#baf7d0]" : "bg-[#3a1c20] text-[#ffc5cf]", reveal)}
                       >
                         {s.running ? "running" : "stopped"}
                       </span>

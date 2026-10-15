@@ -27,9 +27,7 @@ export const ROW_BUTTON = "max-md:min-h-[34px] max-md:px-3";
 /** The last backup time until the backup info answers: a bar about as wide as a date. */
 export function LastBackupPending() {
   return (
-    <span data-skeleton="" className="cc-skeleton inline-block rounded-md text-transparent">
-      Oct 9 2026 10:00
-    </span>
+    <Skeleton.Text>Oct 9 2026 10:00</Skeleton.Text>
   );
 }
 

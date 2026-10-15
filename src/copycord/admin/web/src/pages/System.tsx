@@ -5,7 +5,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";
-import { Card } from "../components/ui";
+import { Card, useReveal } from "../components/ui";
 import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
 import { errorText } from "../lib/api";
@@ -70,6 +70,7 @@ export function System() {
   const openBeforePointer = useRef(false);
 
   const archives = data?.ok ? data.archives : undefined;
+  const reveal = useReveal(data !== undefined || error !== undefined);
   const latest = archives?.[0];
   const lastBackup = archives ? (latest ? fmtBackupWhen(latest.mtime) : SHRUG) : NO_VALUE;
   useLastCount(ARCHIVES_COUNT_KEY, archives?.length);
@@ -204,7 +205,7 @@ export function System() {
           <div className="flex flex-col gap-1 leading-[normal]">
             <h2 className={DB_TITLE}>Database</h2>
             <div id="adv-last-wrap" className="opacity-85">
-              Last backup: <span id="adv-last-backup">{data === undefined && !error ? <LastBackupPending /> : lastBackup}</span>
+              Last backup: <span id="adv-last-backup" className={reveal}>{data === undefined && !error ? <LastBackupPending /> : lastBackup}</span>
             </div>
           </div>
           <button
@@ -264,7 +265,7 @@ export function System() {
               className={ARCHIVES_TABLE}
             >
               <ArchivesHead hidden={!open} />
-              <tbody hidden={!open}>
+              <tbody hidden={!open} className={reveal}>
                 {data === undefined && !error ? <ArchiveRowsLoading /> : null}
                 {archives?.map((a) => {
                   const busy = rowBusy?.name === a.name ? rowBusy.action : null;

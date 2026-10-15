@@ -3,7 +3,7 @@
 // so the app shell can show it without the page chunk; the page and GuildCard take their shared classes
 // and the loading tiles from here.
 
-import { Card, Skeleton, cx } from "../../components/ui";
+import { Card, Skeleton } from "../../components/ui";
 import { readLastCount } from "../../components/ui/lastCount";
 import { StatusGate } from "../../components/ui/StatusGate";
 import { useStatusGate } from "../../hooks/useStatusGate";
@@ -49,7 +49,7 @@ export function GuildTileSkeletons({ rows = readLastCount(GUILDS_COUNT_KEY, 8, 2
       {Array.from({ length: rows }, (_, i) => (
         <article key={i} aria-hidden="true" data-skeleton-row="" className={GUILD_CARD}>
           <span className={GUILD_BODY}>
-            <span data-skeleton="" className={cx(ICON_FRAME, "cc-skeleton border-transparent")} />
+            <Skeleton.Box className={ICON_FRAME} />
             <span className={GUILD_NAME}>
               <Skeleton.Text width={NAME_WIDTHS[i % NAME_WIDTHS.length]!} />
             </span>

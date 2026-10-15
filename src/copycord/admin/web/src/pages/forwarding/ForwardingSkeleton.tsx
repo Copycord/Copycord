@@ -72,7 +72,6 @@ export function FooterButton({
 export const RULES_COUNT_KEY = "forwarding.rules";
 const MAX_TILES = 12;
 const TITLE_WIDTHS = [150, 118, 176, 132];
-const BAR = "cc-skeleton border-transparent text-transparent";
 
 /** A rule tile while the list loads: RuleCard's boxes, the buttons as chrome, bars on the rule's values. */
 export function RuleTileSkeleton({ index = 0 }: { index?: number }) {
@@ -85,13 +84,11 @@ export function RuleTileSkeleton({ index = 0 }: { index?: number }) {
           </h3>
         </div>
         <div className={RULE_BADGES}>
-          <span data-skeleton="" className={cx(PROVIDER_BADGE, BAR)}>
+          <Skeleton.Box className={PROVIDER_BADGE}>
             <span className={PROVIDER_ICON} />
             <span>Discord</span>
-          </span>
-          <span data-skeleton="" className={cx(STATUS_PILL, BAR)}>
-            Enabled
-          </span>
+          </Skeleton.Box>
+          <Skeleton.Box className={STATUS_PILL}>Enabled</Skeleton.Box>
         </div>
       </header>
       <footer className={RULE_FOOTER}>
@@ -139,9 +136,7 @@ export function RuleSkeletons({ rows = readLastCount(RULES_COUNT_KEY, 1, MAX_TIL
           </div>
           <div className="mt-2 mb-3">
             <span className="opacity-60">Total Forwarded:</span>{" "}
-            <span data-skeleton="" className="cc-skeleton inline-block rounded-md align-middle text-transparent">
-              0000
-            </span>
+            <Skeleton.Text className="align-middle">0000</Skeleton.Text>
           </div>
         </div>
         <div className="flex items-center">

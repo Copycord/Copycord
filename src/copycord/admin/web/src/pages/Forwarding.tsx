@@ -6,7 +6,7 @@
 // Element ids match the old page for the e2e specs.
 
 import { useState } from "react";
-import { Button, Card } from "../components/ui";
+import { Button, Card, cx, useReveal } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
@@ -87,6 +87,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
   const openRuleEditor: OpenRuleEditor = openOverride ?? setEditor;
 
   const loaded = rules.data !== undefined || rules.error !== undefined;
+  const reveal = useReveal(loaded);
   const items: ForwardingRule[] = Array.isArray(rules.data?.items) ? rules.data.items : [];
   const shown = filterRules(items, query);
   const totalLabel = total.data?.ok ? toCount(total.data.count).toLocaleString() : NO_VALUE;
@@ -156,7 +157,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
             <div
               id="forwarding-empty"
               hidden={!empty}
-              className={FWD_EMPTY}
+              className={cx(FWD_EMPTY, reveal)}
             >
               <svg
                 className="size-12 text-accent"
@@ -224,6 +225,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
                       rule={rule}
                       count={toCount(counts[rule.rule_id])}
                       busy={rowBusy?.id === rule.rule_id ? rowBusy.action : null}
+                      className={reveal}
                       onEdit={() => openRuleEditor({ mode: "edit", rule })}
                       onToggle={() => void onToggle(rule)}
                       onDuplicate={() => openRuleEditor({ mode: "duplicate", rule })}

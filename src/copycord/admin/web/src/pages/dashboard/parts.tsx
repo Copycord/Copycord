@@ -3,7 +3,7 @@
 // chevron), the label.toggle switch and the small settings row controls.
 
 import type { ReactNode } from "react";
-import { cx } from "../../components/ui";
+import { cx, Skeleton } from "../../components/ui";
 import {
   GHOST_GREEN_HOVER,
   GHOST_RED_HOVER,
@@ -42,23 +42,14 @@ export const BOTS_CELL = "border-b border-b-border px-3 py-2 align-middle text-[
 export const BOTS_STATE =
   "inline-block rounded-[12px] border border-border px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
 
-/** A shimmer bar standing in for a value until the API answers. */
-export function Bar({ className }: { className: string }) {
-  return <span aria-hidden="true" data-skeleton="" className={cx("cc-skeleton block shrink-0", className)} />;
-}
-
 /** The Bots state badge until the first status lands: the badge box with a bar over it. */
 export function BotStatePending() {
-  return (
-    <span data-skeleton="" className={cx(BOTS_STATE, "cc-skeleton border-transparent text-transparent")}>
-      stopped
-    </span>
-  );
+  return <Skeleton.Box className={BOTS_STATE}>stopped</Skeleton.Box>;
 }
 
 /** The label.toggle switch until its value lands: a bar the size of the 38x22 track. */
 export function SwitchPending({ className }: { className?: string }) {
-  return <Bar className={cx("h-[22px] w-[38px] rounded-[999px]", className)} />;
+  return <Skeleton.Box className={cx("block h-[22px] w-[38px] shrink-0 rounded-[999px]", className)} />;
 }
 
 /** details.card.srv-proxy-card; the summary chevron turns with group-open. */

@@ -35,6 +35,8 @@ export const FRAME_HEAD_LEFT = "flex items-center gap-4";
 /** Right of the frame head: the filter dropdowns. */
 export const FRAME_HEAD_FILTERS = "flex flex-wrap items-center gap-3";
 export const RUN_COUNT = "font-semibold text-text";
+/** The pager under the runs (RunPager). */
+export const PAGER = "flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted";
 /** The box of a run row; ROW adds the hover tint. The skeleton row uses the box alone so both stand equally tall. */
 export const ROW_BOX = "flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0";
 export const ROW = `${ROW_BOX} hover:bg-rail-hover`;
@@ -113,11 +115,11 @@ export function TasksHeading() {
 
 const TITLE_WIDTHS = ["58%", "44%", "66%", "50%", "38%", "62%"];
 
-/** A bar centred in one line box of the text it stands in for, so it is exactly that line's height. */
-function TextBar({ width, height = 10, className }: { width: number | string; height?: number; className?: string }) {
+/** A Skeleton.Text on a line of its own; the wrapper carries the layout and font classes, so it is that line's height. */
+function TextBar({ width, className }: { width: number | string; className?: string }) {
   return (
-    <span className={cx("flex h-[1lh] items-center", className)}>
-      <Skeleton width={width} height={height} rounded="rounded-full" />
+    <span className={cx("block", className)}>
+      <Skeleton.Text block width={width} />
     </span>
   );
 }
@@ -136,7 +138,7 @@ export function TasksHeader({ title, description, action, fade = false }: TasksH
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <h2 className="m-0 text-[22px] font-bold text-text">{title != null ? text(title) : <TextBar width={180} height={16} />}</h2>
+        <h2 className="m-0 text-[22px] font-bold text-text">{title != null ? text(title) : <TextBar width={180} />}</h2>
         <p className="mt-1 mb-0 text-sm text-muted">{description != null ? text(description) : <TextBar width={260} />}</p>
       </div>
       {action}
@@ -153,13 +155,27 @@ export function SearchGlyph() {
   );
 }
 
+/**
+ * Previous, the page label and Next under the runs. Always there, one page included, so the frame keeps
+ * its height; pages is null until the first page lands (a bar on the label, both buttons disabled).
+ */
+export function RunPager({ page, pages, onPage = noop }: { page: number; pages: number | null; onPage?: (p: number) => void }) {
+  return (
+    <nav aria-label="Pagination" className={PAGER}>
+      <Button variant="ghost" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+        Previous
+      </Button>
+      {pages === null ? <Skeleton.Text>Page 1 of 1</Skeleton.Text> : <span>{`Page ${page} of ${pages}`}</span>}
+      <Button variant="ghost" size="sm" disabled={pages === null || page >= pages} onClick={() => onPage(page + 1)}>
+        Next
+      </Button>
+    </nav>
+  );
+}
+
 /** The run count while the first page loads: a bar the size of the count text. */
 export function RunCountLoading() {
-  return (
-    <span data-skeleton="" className={cx(RUN_COUNT, "cc-skeleton inline-block rounded-md align-middle text-transparent")}>
-      {runCountText(0)}
-    </span>
-  );
+  return <Skeleton.Text className={cx(RUN_COUNT, "align-middle")}>{runCountText(0)}</Skeleton.Text>;
 }
 
 /** One rail entry while the task types load. */
@@ -182,17 +198,17 @@ function RunRowLoading({ titleWidth }: { titleWidth: string }) {
   return (
     <li className={ROW_BOX}>
       <span className="mt-0.5 inline-flex shrink-0">
-        <Skeleton width={16} height={16} rounded="rounded-full" />
+        <Skeleton width={16} rounded="rounded-full" />
       </span>
       <div className="min-w-0 flex-1">
-        <TextBar width={titleWidth} height={12} className="font-semibold" />
+        <TextBar width={titleWidth} className="font-semibold" />
         <TextBar width="34%" className="mt-0.5 text-xs" />
       </div>
       <div className="w-[180px] shrink-0 max-md:hidden">
         {/* The Badge box: text-xs normal line height, py-0.5 and a border. */}
-        <span className="cc-skeleton inline-flex rounded-full border border-transparent px-2 py-0.5 text-xs leading-normal font-semibold text-transparent">
+        <Skeleton.Box className="inline-flex rounded-full border px-2 py-0.5 text-xs leading-normal font-semibold">
           Mapping name
-        </span>
+        </Skeleton.Box>
       </div>
       <div className="flex w-[170px] shrink-0 flex-col gap-0.5 text-xs max-md:w-auto">
         <TextBar width={128} />
@@ -200,7 +216,7 @@ function RunRowLoading({ titleWidth }: { titleWidth: string }) {
       </div>
       <div className="shrink-0 self-start">
         {/* The row menu button box with its glyph hidden. */}
-        <span className="cc-skeleton inline-block rounded-btn border border-transparent px-2 py-0.5 text-transparent">⋯</span>
+        <Skeleton.Box className="inline-block rounded-btn border px-2 py-0.5">⋯</Skeleton.Box>
       </div>
     </li>
   );
@@ -362,6 +378,7 @@ export function TasksSkeleton() {
                   </div>
                 </div>
                 <RunRowsLoading />
+                <RunPager page={Number(params.get("page")) || 1} pages={null} />
               </div>
             </>
           )}

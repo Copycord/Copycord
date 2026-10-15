@@ -8,6 +8,7 @@ import { useToast } from "../components/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import type { ConfirmOptions } from "../components/ui/ConfirmDialog";
 import { cx } from "../components/ui/cx";
+import { useReveal } from "../components/ui/Skeleton";
 import { useApi } from "../hooks/useApi";
 import { api, errorText } from "../lib/api";
 import type {
@@ -142,6 +143,9 @@ export function Logs() {
   }, [type, list.data, list.loading]);
 
   const filtersActive = Boolean(type || search);
+  // The empty state speaks for the answer on screen: while a new query loads it keeps that answer's wording.
+  const answered = useRef({ data: list.data, filtered: filtersActive });
+  if (answered.current.data !== list.data) answered.current = { data: list.data, filtered: filtersActive };
 
   const goPage = (p: number) => {
     if (p < 1 || p > pages || p === page) return;
@@ -214,6 +218,7 @@ export function Logs() {
   };
 
   const firstLoad = list.loading && !list.data;
+  const reveal = useReveal(!firstLoad);
   const empty = !firstLoad && !list.error && logs.length === 0;
 
   return (
@@ -255,7 +260,7 @@ export function Logs() {
         </div>
 
         <div className={TOOLBAR_RIGHT}>
-          <span id="logs-count" className={COUNT} aria-live="polite">
+          <span id="logs-count" className={cx(COUNT, reveal)} aria-live="polite">
             {list.data ? countText(page, logs.length, total) : firstLoad ? <CountBar /> : ""}
           </span>
           {filtersActive ? (
@@ -342,7 +347,7 @@ export function Logs() {
               </th>
             </tr>
           </thead>
-          <tbody id="logs-tbody">
+          <tbody id="logs-tbody" className={reveal}>
             {firstLoad ? (
               <LogsLoadingRows />
             ) : (
@@ -360,9 +365,9 @@ export function Logs() {
           </tbody>
         </table>
         {empty ? (
-          <div id="logs-empty" className="flex flex-col items-center justify-center gap-1.5 px-5 py-[50px] text-center text-muted">
+          <div id="logs-empty" className={cx("flex flex-col items-center justify-center gap-1.5 px-5 py-[50px] text-center text-muted", reveal)}>
             <LogsIcon name="clock" size={40} strokeWidth={1} className="opacity-25" />
-            {filtersActive ? (
+            {answered.current.filtered ? (
               <>
                 <p className="m-0">No logs match these filters</p>
                 <p className="m-0 text-muted/70">Try another search or clear the filters</p>

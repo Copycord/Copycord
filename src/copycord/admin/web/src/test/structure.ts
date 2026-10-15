@@ -2,6 +2,8 @@
 // (inputs, selects, buttons, links, by their accessible label), the column count of each table and the
 // pager. Rows are left out here and compared cell by cell in each page's skeleton test.
 
+import { REVEAL } from "../components/ui/Skeleton";
+
 export const DATA = "<data>";
 
 /** The visible text of el: a shimmer counts as DATA, aria-hidden glyphs (carets, icons) are skipped. */
@@ -51,11 +53,11 @@ export function structure(root: Element, rows?: string, data: string[] = []): St
   };
 }
 
-/** The classes of el without the old hook classes (ch-card, sc-token-item, ...) that only real rows carry. */
+/** The classes of el without the old hook classes (ch-card, sc-token-item, ...) that only real rows carry, nor the fade in. */
 export function shared(el: Element, hooks: string[] = []): string {
   return (el.getAttribute("class") ?? "")
     .split(/\s+/)
-    .filter((c) => c && !hooks.includes(c))
+    .filter((c) => c && c !== REVEAL && !hooks.includes(c))
     .join(" ");
 }
 

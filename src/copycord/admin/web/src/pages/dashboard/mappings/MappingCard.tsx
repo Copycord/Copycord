@@ -34,9 +34,11 @@ export interface MappingCardProps {
   onToggle: (m: DashboardMapping) => void;
   onClone: (m: DashboardMapping) => void;
   onDelete: (m: DashboardMapping) => void;
+  /** The fade in as the card replaces a loading tile (useReveal). */
+  className?: string;
 }
 
-export function MappingCard({ mapping: m, locked, busy, onEdit, onFilters, onToggle, onClone, onDelete }: MappingCardProps) {
+export function MappingCard({ mapping: m, locked, busy, onEdit, onFilters, onToggle, onClone, onDelete, className }: MappingCardProps) {
   const paused = isPaused(m);
   const label = statusLabel(paused);
   return (
@@ -48,6 +50,7 @@ export function MappingCard({ mapping: m, locked, busy, onEdit, onFilters, onTog
           ? "is-paused border-transparent bg-slate-400/24 hover:bg-slate-400/30"
           : "is-active border-border bg-card hover:-translate-y-0.5 hover:border-accent hover:bg-[rgba(27,16,48,0.6)] hover:[box-shadow:0_8px_20px_rgba(0,0,0,0.6)]",
         locked && "locked cursor-not-allowed opacity-50 grayscale-[0.4]",
+        className,
       )}
       data-id={m.mapping_id}
       data-status={(m.status || "active").toLowerCase()}

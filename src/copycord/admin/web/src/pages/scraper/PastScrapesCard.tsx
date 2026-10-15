@@ -3,7 +3,7 @@
 // scraper.js. The page owns the list request so a finished run can reload it.
 
 import { useState } from "react";
-import { Button, Card, cx } from "../../components/ui";
+import { Button, Card, cx, useReveal } from "../../components/ui";
 import { useLastCount } from "../../components/ui/lastCount";
 import type { ScraperScrape, ScraperScrapesResponse } from "../../types/scraper";
 import type { Confirm, Notify } from "../system/providers";
@@ -55,6 +55,7 @@ export function PastScrapesCard({ data, reload, notify, confirm, loading = false
   const all = data?.ok ? (data.scrapes ?? []) : [];
   const list = all.filter((s) => !s.error);
   useLastCount(SCRAPES_COUNT_KEY, data ? list.length : undefined);
+  const reveal = useReveal(!loading);
 
   async function onDelete(s: ScraperScrape) {
     const path = s.path || s.filename;
@@ -88,11 +89,11 @@ export function PastScrapesCard({ data, reload, notify, confirm, loading = false
       </div>
       <div id="sc-scrapes-body" className="mt-3">
         {loading ? <ScrapesPlaceholder /> : null}
-        <div id="sc-scrapes-empty" hidden={loading || all.length > 0} className="px-4 py-6 text-center text-muted">
+        <div id="sc-scrapes-empty" hidden={loading || all.length > 0} className={cx("px-4 py-6 text-center text-muted", reveal)}>
           <p className="m-0 mb-1 text-sm font-semibold">No saved scrapes yet</p>
           <small className="text-xs">Completed scrapes are automatically saved here</small>
         </div>
-        <div id="sc-scrapes-list" className={SCRAPE_LIST}>
+        <div id="sc-scrapes-list" className={cx(SCRAPE_LIST, reveal)}>
           {list.map((s) => {
             const path = s.path || s.filename;
             const name = s.guild_name || (s.guild_id != null ? String(s.guild_id) : "") || "Unknown";

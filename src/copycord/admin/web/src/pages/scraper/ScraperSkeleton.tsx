@@ -39,10 +39,10 @@ export const IDLE_PILL = { box: "border-border bg-[rgba(255,255,255,0.04)] text-
 /** The status pill until the first status answer: the pill's box with a bar over it. */
 export function PillPending() {
   return (
-    <span data-skeleton="" className={cx(PILL_BOX, "cc-skeleton border-transparent text-transparent")}>
+    <Skeleton.Box className={PILL_BOX}>
       <span aria-hidden="true" className="size-2 rounded-full" />
       <span>Idle</span>
-    </span>
+    </Skeleton.Box>
   );
 }
 
@@ -67,9 +67,6 @@ export function ScraperTitle() {
     </div>
   );
 }
-
-// Text kept in place but drawn as a bar, so the placeholder takes the empty state's exact line boxes.
-const TEXT_BAR = "cc-skeleton rounded-md text-transparent motion-reduce:animate-none";
 
 // .btn.btn-ghost.btn-xs holding a 14px icon.
 export const ICON_BUTTON =
@@ -105,7 +102,7 @@ export function TokenListPlaceholder({ rows = readLastCount(TOKENS_COUNT_KEY, 0,
         {Array.from({ length: rows }, (_, i) => (
           <div key={i} aria-hidden="true" data-skeleton-row="" className={TOKEN_ROW}>
             <div className={TOKEN_MAIN}>
-              <span data-skeleton="" className={cx(TOKEN_BADGE, "cc-skeleton border-transparent")} />
+              <Skeleton.Box className={TOKEN_BADGE} />
               <div className={TOKEN_TEXT}>
                 <Skeleton.Text className={TOKEN_NAME} width={NAME_WIDTHS[i % NAME_WIDTHS.length]!} />
                 <Skeleton.Text className={TOKEN_MASK} width={170} />
@@ -127,10 +124,10 @@ export function TokenListPlaceholder({ rows = readLastCount(TOKENS_COUNT_KEY, 0,
     <div role="status" aria-label="Loading tokens" aria-busy="true" className="flex flex-col items-center gap-1 px-4 py-8 text-center">
       <Skeleton.Block width={32} height={32} className="mb-1.5" />
       <p aria-hidden="true" className="m-0 text-sm">
-        <span data-skeleton="" className={TEXT_BAR}>No tokens configured</span>
+        <Skeleton.Text>No tokens configured</Skeleton.Text>
       </p>
       <small aria-hidden="true" className="text-xs">
-        <span data-skeleton="" className={TEXT_BAR}>Add Discord tokens to start scraping members</span>
+        <Skeleton.Text>Add Discord tokens to start scraping members</Skeleton.Text>
       </small>
     </div>
   );
@@ -181,10 +178,10 @@ export function ScrapesPlaceholder({ rows = readLastCount(SCRAPES_COUNT_KEY, 0, 
   return (
     <div role="status" aria-label="Loading saved scrapes" aria-busy="true" className="px-4 py-6 text-center">
       <p aria-hidden="true" className="m-0 mb-1 text-sm font-semibold">
-        <span data-skeleton="" className={TEXT_BAR}>No saved scrapes yet</span>
+        <Skeleton.Text>No saved scrapes yet</Skeleton.Text>
       </p>
       <small aria-hidden="true" className="text-xs">
-        <span data-skeleton="" className={TEXT_BAR}>Completed scrapes are automatically saved here</span>
+        <Skeleton.Text>Completed scrapes are automatically saved here</Skeleton.Text>
       </small>
     </div>
   );
@@ -213,13 +210,13 @@ export const INCLUDE_OPTS: Array<{ key: keyof IncludeOpts; id: string; label: st
 const COUNT_BOX = "rounded-xl border px-2.5 py-[3px] text-[11px] font-semibold whitespace-nowrap";
 
 /** The token count badge; a bar the badge's size until the token list answers. */
-export function TokenCount({ text }: { text: string | null }) {
+export function TokenCount({ text, className }: { text: string | null; className?: string }) {
   return text === null ? (
-    <span id="sc-token-count" data-skeleton="" className={cx(COUNT_BOX, "cc-skeleton border-transparent text-transparent")}>
+    <Skeleton.Box id="sc-token-count" className={COUNT_BOX}>
       0 tokens
-    </span>
+    </Skeleton.Box>
   ) : (
-    <span id="sc-token-count" className={cx(COUNT_BOX, "border-[rgba(139,92,246,0.25)] bg-[rgba(139,92,246,0.12)] text-primary")}>
+    <span id="sc-token-count" className={cx(COUNT_BOX, "border-[rgba(139,92,246,0.25)] bg-[rgba(139,92,246,0.12)] text-primary", className)}>
       {text}
     </span>
   );

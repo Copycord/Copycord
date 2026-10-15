@@ -12,7 +12,7 @@ export type { ConfirmOptions } from "./ConfirmDialog";
 export { EmptyState } from "./EmptyState";
 export { Field, FieldSelect, Input, Select, Textarea } from "./Field";
 export type { FieldSelectProps, SelectOption } from "./Field";
-export { Skeleton, SkeletonSection } from "./Skeleton";
+export { REVEAL, Skeleton, SkeletonSection, useReveal } from "./Skeleton";
 export type { SkeletonProps } from "./Skeleton";
 export { Spinner } from "./Spinner";
 export { Table } from "./Table";

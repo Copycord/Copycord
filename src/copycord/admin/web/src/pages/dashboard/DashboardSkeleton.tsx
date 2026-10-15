@@ -197,7 +197,7 @@ export function MappingTileSkeleton() {
     <div data-testid="mapping-skeleton" aria-hidden="true" data-skeleton-row="" className={cx(MAPPING_CARD, "border-border bg-card")}>
       <div className={MAPPING_INNER}>
         <div className={MAPPING_HEADER}>
-          <span data-skeleton="" className={cx(MAPPING_AVATAR, "cc-skeleton")} />
+          <Skeleton.Box className={MAPPING_AVATAR} />
           <div className={MAPPING_INFO}>
             <div className={MAPPING_NAME}>
               <Skeleton.Text width={110} />

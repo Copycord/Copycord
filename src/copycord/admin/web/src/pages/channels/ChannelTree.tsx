@@ -35,11 +35,13 @@ export interface ChannelTreeProps extends ChannelTreeSlots {
   hidden?: boolean;
   /** A refetch is running: the rows stay, marked busy. */
   busy?: boolean;
+  /** The fade in as the tree replaces the loading tree (useReveal). */
+  className?: string;
 }
 
-export function ChannelTree({ tree, hidden, busy, channelActions, categoryActions }: ChannelTreeProps) {
+export function ChannelTree({ tree, hidden, busy, className, channelActions, categoryActions }: ChannelTreeProps) {
   return (
-    <div id="channels-root" aria-live="polite" aria-busy={busy || undefined} hidden={hidden} className={TREE}>
+    <div id="channels-root" aria-live="polite" aria-busy={busy || undefined} hidden={hidden} className={cx(TREE, className)}>
       {tree.sections.map((s) => (
         <section key={s.key} className={cx("ch-section", SECTION)}>
           <div className={SECTION_HEAD}>

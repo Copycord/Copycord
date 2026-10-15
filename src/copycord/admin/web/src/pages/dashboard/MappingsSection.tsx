@@ -4,7 +4,7 @@
 // mappings/openers.ts, which the modal lanes fill in.
 
 import { useCallback, useEffect, useState } from "react";
-import { cx } from "../../components/ui";
+import { cx, useReveal } from "../../components/ui";
 import { writeLastCount } from "../../components/ui/lastCount";
 import {
   MAPPING_GRID,
@@ -47,6 +47,7 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const reveal = useReveal(loaded);
 
   const refresh = useCallback(async () => {
     try {
@@ -152,6 +153,7 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
             <MappingCard
               key={m.mapping_id}
               mapping={m}
+              className={reveal}
               locked={locked}
               busy={busyId === m.mapping_id}
               onEdit={openMappingModal}

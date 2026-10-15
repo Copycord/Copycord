@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { cx } from "../../components/ui/cx";
+import { Skeleton } from "../../components/ui/Skeleton";
 
 export interface ToolbarOption {
   value: string;
@@ -170,9 +171,7 @@ export function ToolbarSelect({
         )}
       >
         {pending ? (
-          <span data-skeleton="" className="cc-skeleton inline-block rounded-md align-middle text-transparent">
-            {pendingLabel}
-          </span>
+          <Skeleton.Text className="align-middle">{pendingLabel}</Skeleton.Text>
         ) : (
           <span className={cx(field && "block truncate")}>{options[selected]?.label || (field ? "\u00a0" : "")}</span>
         )}

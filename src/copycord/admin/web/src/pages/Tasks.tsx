@@ -14,7 +14,7 @@ import { RunDetail } from "./tasks/RunDetail";
 import { RunFilterSelects, RunSearch, useRunFilters } from "./tasks/RunFilters";
 import { RunList, RunMenu, type RunAction } from "./tasks/RunList";
 import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
-import { ALL_TASKS_DESCRIPTION, AUTO_REFRESH_KEY, MAIN, PAGE, TasksHeader, TasksHeading, readAutoRefresh } from "./tasks/TasksSkeleton";
+import { ALL_TASKS_DESCRIPTION, AUTO_REFRESH_KEY, MAIN, PAGE, RunPager, TasksHeader, TasksHeading, readAutoRefresh } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
 import { useBotsRunning } from "./tasks/useBotsRunning";
 import { TaskTypeForm } from "./tasks/types";
@@ -227,20 +227,7 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
     />
   );
 
-  const footer =
-    total > PER_PAGE || page > 1 ? (
-      <nav aria-label="Pages" className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted">
-        <Button variant="ghost" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-          Previous
-        </Button>
-        <span>
-          Page {page} of {pages}
-        </span>
-        <Button variant="ghost" size="sm" disabled={page >= pages} onClick={() => setPage(page + 1)}>
-          Next
-        </Button>
-      </nav>
-    ) : null;
+  const footer = <RunPager page={page} pages={loading ? null : pages} onPage={setPage} />;
 
   return (
     <>

@@ -2,6 +2,8 @@
 // Copycord name, the version and GitHub, Discord and donate links.
 
 import { PROMO_LINKS } from "../pages/dashboard/config/model";
+import { cx } from "./ui/cx";
+import { useReveal } from "./ui/Skeleton";
 import { DISCORD_PATH } from "./icons";
 
 // #fixed-footer .footer-link
@@ -23,6 +25,7 @@ const VERSION_CELL = "col-start-1 row-start-1";
 /** version: the release tag, null when there is none ("dev"), undefined while it loads. */
 export function Footer({ version }: { version: string | null | undefined }) {
   const label = version === undefined ? "Copycord" : `Copycord version ${version ?? "dev"}`;
+  const reveal = useReveal(version !== undefined);
   return (
     <footer id="fixed-footer" role="contentinfo" aria-label="Site footer" className="relative mt-auto w-full text-center">
       <div className="inline-flex items-center gap-4 rounded-full px-3.5 py-2 text-text">
@@ -33,7 +36,7 @@ export function Footer({ version }: { version: string | null | undefined }) {
               <span className={VERSION_BOX}>
                 <a
                   id="footer-version-link"
-                  className={`${VERSION_LINK} ${VERSION_CELL}`}
+                  className={cx(VERSION_LINK, VERSION_CELL, reveal)}
                   href={`${PROMO_LINKS.github}/releases/tag/${version}`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -43,7 +46,7 @@ export function Footer({ version }: { version: string | null | undefined }) {
               </span>
             ) : (
               <span id="footer-version-text" className={VERSION_BOX}>
-                {version === null ? <span className={VERSION_CELL}>dev</span> : null}
+                {version === null ? <span className={cx(VERSION_CELL, reveal)}>dev</span> : null}
               </span>
             )}
           </bdi>

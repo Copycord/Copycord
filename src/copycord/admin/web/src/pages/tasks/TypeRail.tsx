@@ -2,6 +2,7 @@
 
 import { Link } from "react-router";
 import { cx } from "../../components/ui/cx";
+import { useReveal } from "../../components/ui/Skeleton";
 import type { TaskType } from "../../types/tasks";
 import { FADE_IN, RAIL, RAIL_ACTIVE, RAIL_HEADING, RAIL_ITEM, RAIL_LIST, RailEntryLoading } from "./TasksSkeleton";
 
@@ -16,14 +17,16 @@ export interface TypeRailProps {
 const item = (active: boolean) => cx(RAIL_ITEM, active ? RAIL_ACTIVE : "hover:bg-rail-hover");
 
 export function TypeRail({ types, selected, loading = false }: TypeRailProps) {
+  const placeholder = loading && types.length === 0;
+  const reveal = useReveal(!placeholder);
   return (
     <nav aria-label="Task types" className={RAIL}>
       <Link to="/tasks" className={item(selected === "")} aria-current={selected === "" ? "page" : undefined}>
         All tasks
       </Link>
       <div className={RAIL_HEADING}>Task types</div>
-      <ul className={RAIL_LIST}>
-        {loading && types.length === 0 ? <RailEntryLoading /> : null}
+      <ul className={cx(RAIL_LIST, reveal)}>
+        {placeholder ? <RailEntryLoading /> : null}
         {types.map((t) => (
           <li key={t.key} className={FADE_IN}>
             <Link

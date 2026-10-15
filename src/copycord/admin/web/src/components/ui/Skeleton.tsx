@@ -1,9 +1,11 @@
 // Loading placeholders: a soft light sweep over a surface tinted block (cc-shimmer in styles/tokens.css),
 // a static block under prefers-reduced-motion. Size them like the content they stand in for so nothing
-// moves when the data lands.
+// moves when the data lands. These are the app's only placeholders: pages build their loading rows from
+// them and never style a cc-skeleton of their own (Skeleton.test.tsx scans the sources).
 //   <Skeleton.Line width="40%" />  <Skeleton.Text className="text-xs" width={80} />  <Skeleton.Block height={118} />
+//   <Skeleton.Box className={BADGE}>Mapping name</Skeleton.Box>   const reveal = useReveal(loaded);
 
-import type { CSSProperties, ReactNode } from "react";
+import { useRef, type CSSProperties, type ReactNode } from "react";
 import { cx } from "./cx";
 
 type Size = number | string;
@@ -37,17 +39,42 @@ function Line({ width = "100%", height = 12, className, ...rest }: SkeletonProps
 
 /**
  * A bar in the line box of the text it stands for: pass the text's own classes (font size, line height,
- * truncate) and a width, so the bar sits where the text will and the row keeps its height.
+ * truncate) and a width, or a sample of the text as children to size it, so the bar sits where the text
+ * will and the row keeps its height. block puts the bar on a line of its own.
  */
-function Text({ className, width, style }: { className?: string; width: Size; style?: CSSProperties }) {
+function Text({
+  className,
+  width,
+  style,
+  block = false,
+  children,
+}: {
+  className?: string;
+  width?: Size;
+  style?: CSSProperties;
+  block?: boolean;
+  children?: ReactNode;
+}) {
   return (
     <span
       aria-hidden="true"
       data-skeleton=""
-      className={cx(className, "cc-skeleton inline-block rounded-md text-transparent")}
+      className={cx(className, block ? "block" : "inline-block", "cc-skeleton rounded-md text-transparent")}
       style={{ width: px(width), ...style }}
     >
-      {" "}
+      {children ?? "\u00a0"}
+    </span>
+  );
+}
+
+/**
+ * A placeholder in the box of the element it stands for (badge, pill, chip, count, icon, avatar): pass
+ * that element's own classes, and its usual text as children to size it. Text and border go transparent.
+ */
+function Box({ className, id, style, children }: { className: string; id?: string; style?: CSSProperties; children?: ReactNode }) {
+  return (
+    <span id={id} aria-hidden="true" data-skeleton="" className={cx(className, "cc-skeleton border-transparent text-transparent")} style={style}>
+      {children}
     </span>
   );
 }
@@ -100,7 +127,21 @@ function Row({ cols = 3, height = 40, className }: { cols?: number; height?: Siz
   );
 }
 
-export const Skeleton = Object.assign(Base, { Line, Text, Block, Card, Row });
+export const Skeleton = Object.assign(Base, { Line, Text, Box, Block, Card, Row });
+
+/** Fades content in where a placeholder stood (cc-reveal in styles/tokens.css). */
+export const REVEAL = "cc-reveal";
+
+/**
+ * The REVEAL class once `ready` turns true after a placeholder showed in this mount; nothing when the
+ * content was there from the start. Put it on the element that holds the loaded content: the fade runs
+ * once, when the class lands, and later refetches swap the content without fading again.
+ */
+export function useReveal(ready: boolean): string | undefined {
+  const waited = useRef(!ready);
+  if (!ready) waited.current = true;
+  return ready && waited.current ? REVEAL : undefined;
+}
 
 /** Card body while it loads: an optional header line, then `rows` rows. Announced once as busy. */
 export function SkeletonSection({

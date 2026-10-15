@@ -82,7 +82,8 @@ const TYPES = {
 
 /** The page chrome a skeleton has to match: title, subtitle, search, rail entries and the frame head controls. */
 function chrome(root: HTMLElement) {
-  const byClass = (cls: string) => root.querySelector(`[class="${cls}"]`) as HTMLElement;
+  // The loaded parts may carry the fade in (useReveal) after their own classes.
+  const byClass = (cls: string) => root.querySelector(`[class="${cls}"], [class^="${cls} "]`) as HTMLElement;
   const head = byClass(FRAME_HEAD);
   // The chosen label, without the caret.
   const label = (b: Element) => b.firstElementChild?.textContent;
@@ -97,6 +98,7 @@ function chrome(root: HTMLElement) {
     headLeft: byClass(FRAME_HEAD_LEFT).children.length,
     dropdowns: Array.from(byClass(FRAME_HEAD_FILTERS).querySelectorAll("button[aria-haspopup=listbox]")).map(label),
     autoRefresh: label(byClass(FRAME_HEAD_LEFT).querySelector("button[aria-haspopup=listbox]")!),
+    pager: Array.from(root.querySelectorAll("nav[aria-label=Pagination] button")).map((b) => `${b.textContent} ${(b as HTMLButtonElement).disabled}`),
   };
 }
 
@@ -116,7 +118,7 @@ describe("page skeleton", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("has the loaded page's structure with zero runs: header text, search, one rail entry, the toolbar controls", async () => {
+  it("has the loaded page's structure with zero runs: header text, search, one rail entry, the toolbar controls, the pager", async () => {
     const skel = render(
       <MemoryRouter initialEntries={["/tasks"]}>
         <TasksSkeleton />
@@ -152,6 +154,7 @@ describe("page skeleton", () => {
       headLeft: 2,
       autoRefresh: "Auto-refresh: Off",
       dropdowns: ["Task type: All", "Status: All", "Mapping: All", "Actor: All"],
+      pager: ["Previous true", "Next true"],
     });
   });
 

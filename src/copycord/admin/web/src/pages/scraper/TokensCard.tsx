@@ -2,7 +2,7 @@
 // Only masked values are ever rendered; the value input clears after a save.
 
 import { useState } from "react";
-import { Button, Card, cx, Input } from "../../components/ui";
+import { Button, Card, cx, Input, useReveal } from "../../components/ui";
 import { useLastCount } from "../../components/ui/lastCount";
 import type { ScraperToken } from "../../types/scraper";
 import type { Confirm, Notify } from "../system/providers";
@@ -101,11 +101,14 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
     }
   }
 
+  const placeholder = loading && tokens.length === 0;
+  const reveal = useReveal(!placeholder);
+
   return (
     <Card id="sc-tokens-card" aria-label="Tokens" className={cx(SC_CARD, "min-w-0")}>
       <div className={TITLEBAR}>
         <h3 className={TITLE}>Tokens</h3>
-        <TokenCount text={loading && tokens.length === 0 ? null : plural(tokens.length, "token")} />
+        <TokenCount text={placeholder ? null : plural(tokens.length, "token")} className={reveal} />
       </div>
 
       <form
@@ -142,8 +145,8 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
         </div>
       </form>
 
-      <div id="sc-token-list" className="mt-3 max-h-[340px] overflow-y-auto">
-        {loading && tokens.length === 0 ? (
+      <div id="sc-token-list" className={cx("mt-3 max-h-[340px] overflow-y-auto", reveal)}>
+        {placeholder ? (
           <TokenListPlaceholder />
         ) : tokens.length === 0 ? (
           <div id="sc-token-empty" className="flex flex-col items-center gap-1 px-4 py-8 text-center text-muted">

@@ -4,7 +4,7 @@
 // Like the old page it waits until both Server and Client are connected.
 
 import { useCallback, useMemo, useState } from "react";
-import { Card } from "../components/ui";
+import { Card, cx, useReveal } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
@@ -60,6 +60,7 @@ export function Guilds() {
   };
 
   const loaded = data !== undefined;
+  const reveal = useReveal(loaded);
   useLastCount(GUILDS_COUNT_KEY, data ? (data.items ?? []).length : undefined);
 
   return (
@@ -97,7 +98,7 @@ export function Guilds() {
             aria-live="polite"
             hidden={!booted}
             aria-busy={(loading && loaded) || undefined}
-            className={GUILD_GRID}
+            className={cx(GUILD_GRID, reveal)}
           >
             {guilds.map((g) => (
               <GuildCard key={g.id} guild={g} menuOpen={menu?.guild.id === g.id} onOpenMenu={openMenu} />

@@ -169,6 +169,23 @@
   }
 }
 
+/* Content that replaces a placeholder fades in over 180 ms instead of popping (useReveal in
+   components/ui/Skeleton.tsx); opacity only, so nothing moves. No `to` keyframe: the fade ends on the
+   element's own opacity (a locked card stays at 50%). Reduced motion shows it at once. */
+@keyframes cc-reveal {
+  from {
+    opacity: 0;
+  }
+}
+.cc-reveal {
+  animation: cc-reveal 180ms ease-out backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-reveal {
+    animation: none;
+  }
+}
+
 /* Dashboard link cards (PromoCards.tsx): the old star wobble, its spin on
    hover and the donate heart beat, copied from main.css. */
 @keyframes cc-star-wobble {

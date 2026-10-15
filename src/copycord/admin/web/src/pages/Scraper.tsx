@@ -2,7 +2,7 @@
 // past scrapes cards from the old scraper.html and scraper.js. Element ids
 // match the old page for the e2e specs.
 
-import { cx } from "../components/ui";
+import { cx, useReveal } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import type { ScraperScrapesResponse, ScraperStatus, ScraperTokensResponse } from "../types/scraper";
 import { ConfigCard } from "./scraper/ConfigCard";
@@ -43,6 +43,7 @@ export function Scraper() {
   const pill = PILL[live.pill] ?? IDLE_PILL;
   // A bar, like the page skeleton's, until the first status answer unless a live event got there first.
   const pillPending = status.data === undefined && status.loading && live.pill === "idle";
+  const pillReveal = useReveal(!pillPending);
 
   // min-w-fit: like the old .scraper-wide column, the page is never narrower than its widest
   // unbreakable row (the log card toolbar), so on phones it keeps the old one-line title.
@@ -57,7 +58,7 @@ export function Scraper() {
           <span
             id="sc-status-pill"
             data-status={live.pill}
-            className={cx(PILL_BOX, pill.box)}
+            className={cx(PILL_BOX, pill.box, pillReveal)}
           >
             <span aria-hidden="true" className={cx("size-2 rounded-full transition-all duration-[250ms]", pill.dot, busy && "animate-pulse")} />
             <span id="sc-status-label">{live.pillLabel}</span>

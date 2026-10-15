@@ -2,7 +2,7 @@
 // (status chip, Settings, favorites help), the rotation and favorite re-check rows and their hints.
 
 import type { ReactNode } from "react";
-import { cx } from "../../../components/ui";
+import { cx, Skeleton } from "../../../components/ui";
 import type { IntervalUnit } from "../../../types/dashboard-proxy";
 import { ToolbarSelect } from "../../channels/ToolbarSelect";
 import { CHECK, CHECK_LABEL, PROXY_HINT } from "../parts";
@@ -143,9 +143,7 @@ export function SummaryTools({ chip, onSettings, onHelp }: SummaryToolsProps) {
           {chip.text}
         </span>
       ) : (
-        <span data-skeleton="" className={cx(CHIP, "cc-skeleton text-transparent")}>
-          Disabled
-        </span>
+        <Skeleton.Box className={CHIP}>Disabled</Skeleton.Box>
       )}
       <button
         type="button"

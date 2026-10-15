@@ -71,13 +71,15 @@ export interface RuleCardProps {
   onToggle: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  /** The fade in as the tile replaces a loading tile (useReveal). */
+  className?: string;
 }
 
-export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onDelete }: RuleCardProps) {
+export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onDelete, className }: RuleCardProps) {
   const enabled = Boolean(rule.enabled);
   const provider = (rule.provider || "").toLowerCase();
   return (
-    <article data-id={rule.rule_id} className={cx("fwd-card", RULE_CARD)}>
+    <article data-id={rule.rule_id} className={cx("fwd-card", RULE_CARD, className)}>
       <header className={RULE_HEADER}>
         <div className={RULE_TITLE_BOX}>
           <h3 className={cx("fwd-card-title", RULE_TITLE)}>{rule.label}</h3>

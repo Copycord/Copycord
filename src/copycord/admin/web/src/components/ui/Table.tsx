@@ -4,6 +4,7 @@
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 import { EmptyState } from "./EmptyState";
+import { Skeleton } from "./Skeleton";
 
 export interface Column<T> {
   key: string;
@@ -72,7 +73,7 @@ export function Table<T>({
                 <tr key={`skeleton-${i}`} data-testid="table-skeleton">
                   {columns.map((c) => (
                     <td key={c.key} className="border-b border-border px-2 py-2.5">
-                      <span className="block h-3.5 w-3/4 animate-pulse rounded bg-line-2" />
+                      <Skeleton.Block width="75%" height={14} rounded="rounded" />
                     </td>
                   ))}
                 </tr>

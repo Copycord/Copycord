@@ -5,7 +5,7 @@
 // Like the old page it waits until both Server and Client are connected.
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Card } from "../components/ui";
+import { Card, useReveal } from "../components/ui";
 import { useLastShape } from "../components/ui/lastCount";
 import {
   CHANNELS_CARD,
@@ -93,6 +93,7 @@ export function Channels() {
   };
 
   const loaded = channels.data !== undefined;
+  const reveal = useReveal(loaded);
   // The tree as a fresh visit shows it (no search, all channels, by name) sizes the next loading tree.
   const pristine = !deferredQuery && filter === "all" && sort.sort === "name" && sort.dir === "asc";
   useLastShape(TREE_SHAPE_KEY, loaded && pristine ? tree.sections.map((s) => s.channels.length) : undefined);
@@ -158,6 +159,7 @@ export function Channels() {
           tree={tree}
           hidden={!booted}
           busy={channels.loading && loaded}
+          className={reveal}
           channelActions={actions.channelActions}
           categoryActions={actions.categoryActions}
         />

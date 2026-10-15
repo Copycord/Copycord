@@ -58,7 +58,6 @@ export function ChannelsTitle() {
 export const TREE_SHAPE_KEY = "channels.tree";
 const DEFAULT_SHAPE = [4, 3];
 const NAME_WIDTHS = [118, 92, 140, 104, 80, 126];
-const BAR = "cc-skeleton border-transparent text-transparent";
 
 /** One channel card while the list loads: the card's boxes and menu button, bars on the name, badges and ids. */
 function ChannelCardSkeleton({ index }: { index: number }) {
@@ -94,10 +93,10 @@ export function ChannelRowsSkeleton({ shape = readLastShape(TREE_SHAPE_KEY, DEFA
         <section key={i} aria-hidden="true" className={SECTION}>
           <div className={SECTION_HEAD}>
             <h3 className={SECTION_TITLE}>
-              <span data-skeleton="" className={cx(CAT_CHIP, BAR)} style={{ width: 96 + (i % 3) * 18 }}>
+              <Skeleton.Box className={CAT_CHIP} style={{ width: 96 + (i % 3) * 18 }}>
                 {" "}
                 <span className={CATEGORY_MENU_BTN}>⋯</span>
-              </span>
+              </Skeleton.Box>
             </h3>
           </div>
           <div className={CARD_GRID}>
