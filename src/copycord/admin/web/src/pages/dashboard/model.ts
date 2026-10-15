@@ -32,13 +32,36 @@ export function statusesFrom(res: StatusResponse | undefined): BotStatuses {
   return { server: toBotStatus(res?.server), client: toBotStatus(res?.client) };
 }
 
+/** What one status push says about a role: only the fields the frame carries. */
+export type BotStatusPatch = Partial<BotStatus>;
+
+function patchFrom(raw: Record<string, unknown>, noteKey = "status"): BotStatusPatch {
+  const out: BotStatusPatch = {};
+  if (raw.running != null) out.running = !!raw.running;
+  if (typeof raw.uptime_sec === "number") out.uptime_sec = raw.uptime_sec;
+  if (typeof raw[noteKey] === "string") out.status = raw[noteKey] as string;
+  return out;
+}
+
+/**
+ * A role's status after an update: fields the update leaves out keep their last value, so a push with
+ * only the status note (the bots' AdminBus.status() never sends uptime_sec) does not blank the uptime
+ * or flip running. A stopped role has no uptime, and a note does not outlive a change of running.
+ */
+export function mergeStatus(prev: BotStatus, patch: BotStatusPatch): BotStatus {
+  const running = patch.running ?? prev.running;
+  const flipped = running !== prev.running;
+  const uptime_sec = running ? (patch.uptime_sec ?? (flipped ? null : (prev.uptime_sec ?? null))) : null;
+  return { running, uptime_sec, status: patch.status ?? (flipped ? "" : (prev.status ?? "")) };
+}
+
 /** A status push on /ws/ui, or null for any other message. */
-export function statusFromWs(frame: BusMessage): { role: BotRole; status: BotStatus } | null {
+export function statusFromWs(frame: BusMessage): { role: BotRole; status: BotStatusPatch } | null {
   const p = (frame.payload && typeof frame.payload === "object" ? frame.payload : {}) as Record<string, unknown>;
   // AdminBus.status() and the hub's replay on connect: {kind: "status", role, payload: {running, status}}.
   if (frame.kind === "status" && !p.type) {
     if (frame.role !== "server" && frame.role !== "client") return null;
-    return { role: frame.role, status: toBotStatus(p as Partial<BotStatus>) };
+    return { role: frame.role, status: patchFrom(p) };
   }
   // hub.broadcast() keeps kind and role and moves the rest into payload, so
   // {type: "status", source, data} and agent frames arrive with payload.type.
@@ -46,17 +69,10 @@ export function statusFromWs(frame: BusMessage): { role: BotRole; status: BotSta
   if (msg.type !== "status") return null;
   const data = (msg.data ?? {}) as Record<string, unknown>;
   if (msg.kind === "agent") {
-    return { role: msg.role === "server" ? "server" : "client", status: toBotStatus(data as Partial<BotStatus>) };
+    return { role: msg.role === "server" ? "server" : "client", status: patchFrom(data) };
   }
   if (msg.source !== "server" && msg.source !== "client") return null;
-  return {
-    role: msg.source,
-    status: toBotStatus({
-      running: !!data.running,
-      uptime_sec: typeof data.uptime_sec === "number" ? data.uptime_sec : null,
-      status: typeof data.note === "string" ? data.note : "",
-    }),
-  };
+  return { role: msg.source, status: patchFrom(data, "note") };
 }
 
 /** Whether both roles in /api/status report no error, as app.js checked before slowing its poll. */

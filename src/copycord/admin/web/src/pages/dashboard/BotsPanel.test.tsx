@@ -10,7 +10,13 @@ class FakeSocket {
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onmessage: ((ev: MessageEvent) => void) | null = null;
-  constructor(public url: string) {}
+  static last: FakeSocket | null = null;
+  constructor(public url: string) {
+    FakeSocket.last = this;
+  }
+  emit(data: unknown) {
+    this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+  }
   send() {}
   close() {
     this.readyState = 3;
@@ -183,5 +189,45 @@ describe("BotsPanel status poll", () => {
     expect(nextPollDelay(8000, "failed")).toBe(15000);
     expect(nextPollDelay(15000, "failed")).toBe(15000);
     expect(nextPollDelay(15000, "ok")).toBe(4000);
+  });
+});
+
+describe("BotsPanel uptime", () => {
+  const uptime = () => document.getElementById("server-uptime")!.textContent;
+
+  it("keeps counting when a status push or a poll answer leaves the uptime out", async () => {
+    vi.useFakeTimers();
+    let reply: StatusResponse = running("Starting");
+    stubServer(() => reply);
+    await mount();
+    expect(uptime()).toBe("1m 5s");
+    await advance(2000);
+    expect(uptime()).toBe("1m 7s");
+
+    // The bots' AdminBus.status() push: running and the note, no uptime_sec.
+    act(() => FakeSocket.last!.emit({ kind: "status", role: "server", payload: { running: true, status: "Logged in as cc", discord: { ready: true } } }));
+    expect(document.getElementById("server-status")).toHaveTextContent("Logged in as cc");
+    expect(document.getElementById("server-state")).toHaveTextContent("running");
+    expect(uptime()).toBe("1m 7s");
+    await advance(1000);
+    expect(uptime()).toBe("1m 8s");
+
+    // The hub's {type: "status", source, data: {running}} frame changes nothing either.
+    act(() => FakeSocket.last!.emit({ kind: "status", role: "unknown", payload: { type: "status", source: "server", data: { running: true } } }));
+    expect(uptime()).toBe("1m 8s");
+    expect(document.getElementById("server-status")).toHaveTextContent("Logged in as cc");
+
+    // A poll answer without uptime_sec (the control socket timed out) keeps the last uptime and its stamp.
+    reply = { server: { running: true, status: "Logged in as cc" }, client: { running: true, uptime_sec: 3700, status: "Syncing" } };
+    await advance(1000);
+    expect(uptime()).toBe("1m 9s");
+    await advance(1000);
+    expect(uptime()).toBe("1m 10s");
+
+    // A real stop still clears it.
+    act(() => FakeSocket.last!.emit({ kind: "status", role: "server", payload: { running: false, status: "Stopped" } }));
+    expect(document.getElementById("server-state")).toHaveTextContent("stopped");
+    expect(uptime()).toBe("");
+    vi.useRealTimers();
   });
 });

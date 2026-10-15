@@ -8,7 +8,7 @@ import type { StatusResponse, VersionInfo } from "../types/dashboard";
 import { holdFetch } from "../test/holdFetch";
 import { Dashboard, DashboardSkeleton } from "./Dashboard";
 import { MAPPING_SKELETONS } from "./dashboard/DashboardSkeleton";
-import { appendCapped, formatUptime, parseLogData, statusFromWs } from "./dashboard/model";
+import { appendCapped, formatUptime, mergeStatus, parseLogData, statusFromWs } from "./dashboard/model";
 
 class FakeSocket {
   static OPEN = 1;
@@ -365,15 +365,27 @@ describe("dashboard model", () => {
     // AdminBus.status() from the bots and the hub's replay on connect.
     expect(
       statusFromWs({ kind: "status", role: "client", payload: { running: true, status: "Logged in as cc", discord: { ready: true } } }),
-    ).toEqual({ role: "client", status: { running: true, uptime_sec: null, status: "Logged in as cc" } });
+    ).toEqual({ role: "client", status: { running: true, status: "Logged in as cc" } });
     // hub.broadcast({type: "status", source, data}) after _normalize.
     expect(
       statusFromWs({ kind: "status", role: "unknown", payload: { type: "status", source: "server", data: { running: true } } }),
-    ).toEqual({ role: "server", status: { running: true, uptime_sec: null, status: "" } });
+    ).toEqual({ role: "server", status: { running: true } });
     // An agent frame from /bus after _normalize.
     expect(
       statusFromWs({ kind: "agent", role: "server", payload: { type: "status", ts: 1, data: { running: false, status: "Stopped" } } }),
-    ).toEqual({ role: "server", status: { running: false, uptime_sec: null, status: "Stopped" } });
+    ).toEqual({ role: "server", status: { running: false, status: "Stopped" } });
+  });
+
+  it("merges a partial status into the last one", () => {
+    const up = { running: true, uptime_sec: 65, status: "Starting" };
+    // A note only push keeps running and the uptime.
+    expect(mergeStatus(up, { running: true, status: "Logged in as cc" })).toEqual({ running: true, uptime_sec: 65, status: "Logged in as cc" });
+    expect(mergeStatus(up, {})).toEqual(up);
+    expect(mergeStatus(up, { uptime_sec: 70 })).toEqual({ ...up, uptime_sec: 70 });
+    // A stop drops the uptime and the old note.
+    expect(mergeStatus(up, { running: false })).toEqual({ running: false, uptime_sec: null, status: "" });
+    // A start without an uptime has none yet, not the one from before the stop.
+    expect(mergeStatus({ running: false, uptime_sec: 30, status: "" }, { running: true })).toEqual({ running: true, uptime_sec: null, status: "" });
   });
 });
 

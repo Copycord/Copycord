@@ -17,6 +17,7 @@ import {
   displayStatus,
   EMPTY_STATUSES,
   formatUptime,
+  mergeStatus,
   startBots,
   STATUS_URL,
   statusesFrom,
@@ -24,6 +25,7 @@ import {
   statusHealthy,
   stopBots,
 } from "./model";
+import type { BotStatusPatch } from "./model";
 import type { PollResult } from "./useStatusPoll";
 import { useStatusPoll } from "./useStatusPoll";
 
@@ -53,9 +55,20 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
   const refresh = useCallback(async (): Promise<PollResult> => {
     try {
       const res = await api.get<StatusResponse>(STATUS_URL);
-      setStatuses(statusesFrom(res));
-      setStamps({ server: Date.now(), client: Date.now() });
-      setNow(Date.now());
+      const fresh = statusesFrom(res);
+      // The answer is the truth for running and the note; an uptime it leaves out (the control
+      // socket timed out and the hub filled in running) keeps the last one and its stamp.
+      const patch = (role: BotRole): BotStatusPatch => {
+        const r = fresh[role];
+        return r.uptime_sec == null ? { running: r.running, status: r.status } : r;
+      };
+      setStatuses((s) => ({ server: mergeStatus(s.server, patch("server")), client: mergeStatus(s.client, patch("client")) }));
+      const t = Date.now();
+      setStamps((old) => ({
+        server: fresh.server.uptime_sec != null ? t : old.server,
+        client: fresh.client.uptime_sec != null ? t : old.client,
+      }));
+      setNow(t);
       return statusHealthy(res) ? "ok" : "degraded";
     } catch {
       // The table keeps its last state; the websocket fills it in.
@@ -76,9 +89,10 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
     (msg) => {
       const update = statusFromWs(msg);
       if (!update) return;
-      setStatuses((s) => ({ ...s, [update.role]: update.status }));
+      // Pushes carry only some fields (the bots' status note has no uptime): merge, never replace.
+      setStatuses((s) => ({ ...s, [update.role]: mergeStatus(s[update.role], update.status) }));
       setLoaded(true);
-      setStamps((t) => ({ ...t, [update.role]: Date.now() }));
+      if (update.status.uptime_sec != null) setStamps((t) => ({ ...t, [update.role]: Date.now() }));
       setNow(Date.now());
     },
     { WebSocketImpl },
