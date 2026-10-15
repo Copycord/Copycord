@@ -9,6 +9,8 @@ export interface TaskType {
   title: string;
   description: string;
   inputs_schema: Record<string, unknown>;
+  /** The type runs only while the server and client bots are both running. */
+  requires_bots?: boolean;
   /** Queued plus running runs of this type. */
   active: number;
   total: number;

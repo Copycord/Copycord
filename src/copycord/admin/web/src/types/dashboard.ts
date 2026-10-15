@@ -17,10 +17,12 @@ export interface BotStatus {
   status?: string;
 }
 
-/** GET /api/status, only the fields the Bots panel reads. */
+/** GET /api/status, only the fields the Bots panel and the Tasks Run task button read. */
 export interface StatusResponse {
   server?: Partial<BotStatus> & Record<string, unknown>;
   client?: Partial<BotStatus> & Record<string, unknown>;
+  /** Both bots in the running state, as the server derives it. */
+  both_running?: boolean;
 }
 
 export type BotStatuses = Record<BotRole, BotStatus>;

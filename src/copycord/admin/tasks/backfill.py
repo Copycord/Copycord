@@ -514,4 +514,5 @@ BACKFILL = register(TaskType(
     inputs=BackfillInputs,
     describe=describe,
     options=options,
+    requires_bots=True,
 ))

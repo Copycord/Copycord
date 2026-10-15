@@ -2783,6 +2783,14 @@ async def api_status_alias():
     return await _collect_status()
 
 
+async def _bots_running() -> bool:
+    """Both bots running, as /api/status reports it; task types with requires_bots wait for it."""
+    return bool((await _collect_status()).get("both_running"))
+
+
+task_routes.set_bots_check(_bots_running)
+
+
 @app.get("/filters/{mapping_id}")
 async def api_get_filters(mapping_id: str):
     filters = db.get_filters_for_mapping(mapping_id)

@@ -26,7 +26,8 @@ Options = Callable[[dict], Awaitable[Any]]
 class TaskType:
     """One kind of job. run(ctx, inputs) does the work; describe(inputs,
     lookups) returns the (title, context) stored on the run row; options(params)
-    returns data the start form needs; concurrency caps active runs (None = no cap)."""
+    returns data the start form needs; concurrency caps active runs (None = no cap);
+    requires_bots refuses a start while the server and client bots are not both running."""
 
     key: str
     title: str
@@ -36,6 +37,7 @@ class TaskType:
     describe: Optional[Describe] = None
     options: Optional[Options] = None
     concurrency: Optional[int] = None
+    requires_bots: bool = False
 
     def describe_run(self, inputs: BaseModel, lookups: Any) -> tuple[str, dict]:
         if self.describe is None:

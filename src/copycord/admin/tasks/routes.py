@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import functools
 import json
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
@@ -21,12 +21,21 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 TRIGGERS = ("manual", "rerun", "api")
 MAX_PER_PAGE = 200
 
+BOTS_DOWN = "Start the bots first"
+
 _service: Optional[TaskService] = None
+# Answers whether the server and client bots are both running; app.py wires it to /api/status.
+_bots_running: Optional[Callable[[], Awaitable[bool]]] = None
 
 
 def set_service(service: Optional[TaskService]) -> None:
     global _service
     _service = service
+
+
+def set_bots_check(check: Optional[Callable[[], Awaitable[bool]]]) -> None:
+    global _bots_running
+    _bots_running = check
 
 
 def get_service() -> Optional[TaskService]:
@@ -116,6 +125,7 @@ async def list_types():
             "title": t.title,
             "description": t.description,
             "inputs_schema": t.inputs_schema(),
+            "requires_bots": t.requires_bots,
             "active": len(svc.active_runs(t.key)),
             "total": total,
         })
@@ -164,8 +174,11 @@ async def start_run(request: Request):
     if not isinstance(body, dict):
         return JSONResponse({"errors": {"body": "Expected an object"}}, status_code=422)
     type_key = str(body.get("type") or "")
-    if registry.get(type_key) is None:
+    task_type = registry.get(type_key)
+    if task_type is None:
         return _error(404, f"Unknown task type {type_key!r}")
+    if task_type.requires_bots and _bots_running is not None and not await _bots_running():
+        return _error(409, BOTS_DOWN)
     inputs = body.get("inputs")
     if inputs is None:
         inputs = {}

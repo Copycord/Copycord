@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import type { TaskRun } from "../types/tasks";
@@ -207,6 +207,49 @@ describe("Tasks page", () => {
     expect(last.get("type")).toBe("backfill_channels");
     expect(last.get("actor")).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
+  });
+
+  describe("a type that needs the bots", () => {
+    const NEEDS_BOTS = { types: [{ ...TYPES.types[0]!, requires_bots: true }] };
+
+    function serveBots(up: { value: boolean }) {
+      return serve([], {
+        handle: (url) => {
+          if (url === "/api/tasks/types") return Response.json(NEEDS_BOTS);
+          if (url === "/api/status") return Response.json({ both_running: up.value, server: { running: up.value }, client: { running: up.value } });
+          return undefined;
+        },
+      });
+    }
+
+    afterEach(() => vi.useRealTimers());
+
+    it("keeps Run task off with Start the bots first beside it while the bots are down", async () => {
+      serveBots({ value: false });
+      renderAt("/tasks?type=backfill_channels");
+      expect(await screen.findAllByText("Start the bots first")).toHaveLength(2);
+      for (const b of screen.getAllByRole("button", { name: "Run task" })) expect(b).toBeDisabled();
+    });
+
+    it("turns Run task on once the status says both bots run", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const up = { value: false };
+      serveBots(up);
+      renderAt("/tasks?type=backfill_channels");
+      expect(await screen.findAllByText("Start the bots first")).toHaveLength(2);
+      up.value = true;
+      await act(() => vi.advanceTimersByTimeAsync(4000));
+      await waitFor(() => expect(screen.queryByText("Start the bots first")).toBeNull());
+      for (const b of screen.getAllByRole("button", { name: "Run task" })) expect(b).toBeEnabled();
+    });
+
+    it("does not ask for the status on a type that does not need the bots", async () => {
+      const fn = serve([]);
+      renderAt("/tasks?type=backfill_channels");
+      expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(2);
+      for (const b of screen.getAllByRole("button", { name: "Run task" })) expect(b).toBeEnabled();
+      expect(fn.mock.calls.some((c) => String(c[0]) === "/api/status")).toBe(false);
+    });
   });
 
   it("cancels an active run after confirming and patches the row from the response", async () => {

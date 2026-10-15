@@ -17,6 +17,7 @@ import { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS, RunList, RunMenu, type RunActio
 import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
 import { MAIN, PAGE, TasksHeading } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
+import { useBotsRunning } from "./tasks/useBotsRunning";
 import { TaskTypeForm } from "./tasks/types";
 
 function readAutoRefresh(): string {
@@ -32,14 +33,26 @@ function readAutoRefresh(): string {
 export interface RunTaskButtonProps {
   type: TaskType;
   onRun: (type: TaskType) => void;
+  /** For a requires_bots type: whether both bots run (null while the first status check is out). */
+  botsUp?: boolean | null;
 }
 
-/** "Run task" on a type page opens that type's form. All tasks has none: the rail picks the type first. */
-export function RunTaskButton({ type, onRun }: RunTaskButtonProps) {
+export const BOTS_DOWN = "Start the bots first";
+
+/**
+ * "Run task" on a type page opens that type's form. All tasks has none: the rail picks the type first.
+ * A type that needs the bots keeps the button off, with the reason beside it, until both bots run.
+ */
+export function RunTaskButton({ type, onRun, botsUp = null }: RunTaskButtonProps) {
+  const blocked = Boolean(type.requires_bots) && botsUp !== true;
+  const down = blocked && botsUp === false;
   return (
-    <Button variant="primary" onClick={() => onRun(type)}>
-      Run task
-    </Button>
+    <div className="flex shrink-0 items-center gap-2.5">
+      {down ? <span className="text-sm text-muted">{BOTS_DOWN}</span> : null}
+      <Button variant="primary" disabled={blocked} title={down ? BOTS_DOWN : undefined} onClick={() => onRun(type)}>
+        Run task
+      </Button>
+    </div>
   );
 }
 
@@ -116,7 +129,8 @@ export function Tasks() {
     };
   }, [rerun, types, openForm, setParams]);
 
-  const runAction = selected ? <RunTaskButton type={selected} onRun={(t) => openForm(t)} /> : null;
+  const botsUp = useBotsRunning(Boolean(selected?.requires_bots));
+  const runAction = selected ? <RunTaskButton type={selected} botsUp={botsUp} onRun={(t) => openForm(t)} /> : null;
 
   return (
     <section className="w-full">
