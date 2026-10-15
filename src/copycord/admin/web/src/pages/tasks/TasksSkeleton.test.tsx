@@ -3,11 +3,17 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
 import { ConfirmProvider } from "../../components/ui/ConfirmDialog";
-import type { TaskRun } from "../../types/tasks";
+import type { TaskRun, TaskStep } from "../../types/tasks";
 import { Tasks } from "../Tasks";
 import { RunList, RunRow } from "./RunList";
+import { StepList } from "./StepList";
 import {
   ALL_TASKS_DESCRIPTION,
+  RunDetailSkeleton,
+  STEPS_BAR,
+  STEPS_COUNT_KEY,
+  STEPS_HEAD,
+  STEP_LIST,
   BUSY,
   FADE_IN,
   FRAME,
@@ -191,9 +197,54 @@ describe("page skeleton", () => {
     expect(within(run).getByRole("heading", { name: "Inputs", hidden: true })).toBeInTheDocument();
     expect(within(run).getByRole("heading", { name: "Steps", hidden: true })).toBeInTheDocument();
     expect(run.querySelector("summary")).toHaveTextContent("Report (JSON)");
-    // No buttons: the actions depend on the run's status.
-    expect(within(run).queryAllByRole("button", { hidden: true })).toHaveLength(0);
+    // The only control is the Steps filter, real and inert; the header actions depend on the run's status.
+    expect(within(run).queryAllByRole("button", { hidden: true }).map((b) => b.firstElementChild?.textContent)).toEqual(["Status: All"]);
     expect(within(container).queryAllByRole("searchbox", { hidden: true })).toHaveLength(0);
+  });
+
+  it("draws the Steps card with the loaded card's head and rows, bars only for the counts, the bar and the rows", () => {
+    localStorage.setItem(`skel:${STEPS_COUNT_KEY}`, "3");
+    const steps: TaskStep[] = [
+      { key: "a", title: "#a", state: "running", done: 1, total: 4 },
+      { key: "b", title: "#b", state: "success", note: "3 messages" },
+      { key: "c", title: "#c", state: "queued", queue_position: 1 },
+    ];
+    const { container } = render(
+      <MemoryRouter>
+        <RunDetailSkeleton />
+        <StepList run={{ ...RUN, steps }} />
+      </MemoryRouter>,
+    );
+    const [skel, real] = Array.from(container.querySelectorAll("section[aria-label=Steps]"));
+    const head = (s: Element) => {
+      const h = s.querySelector(`[class="${STEPS_HEAD}"]`)!;
+      return {
+        parts: Array.from(h.children).map((c) => `${c.tagName} ${c.getAttribute("class")}`),
+        title: h.querySelector("h3")?.textContent,
+        filter: h.querySelector("button[aria-haspopup=listbox]")?.firstElementChild?.textContent,
+      };
+    };
+    const skelHead = head(skel!);
+    const realHead = head(real!);
+    // Title, counts line and filter in the same boxes; the third part is the overall bar.
+    expect(skelHead.parts).toHaveLength(4);
+    expect(skelHead.parts.filter((_, i) => i !== 2)).toEqual(realHead.parts.filter((_, i) => i !== 2));
+    // The skeleton's bar takes the track's size (w-28 h-1, 112 by 4 px) and hides with it on small screens.
+    const skelBar = skel!.querySelector(`[class="${STEPS_HEAD}"]`)!.children[2] as HTMLElement;
+    expect(skelBar.style.width).toBe("112px");
+    expect(skelBar.style.height).toBe("4px");
+    expect(STEPS_BAR.split(" ")).toEqual(expect.arrayContaining(["w-28", "h-1", "shrink-0", "max-sm:hidden"]));
+    expect(skelBar.className).toContain("shrink-0 max-sm:hidden");
+    expect(real!.querySelector(`[class="${STEPS_HEAD}"]`)!.children[2]!.className.startsWith(STEPS_BAR)).toBe(true);
+    expect(skelHead).toMatchObject({ title: "Steps", filter: "Status: All" });
+    expect(realHead).toMatchObject({ title: "Steps", filter: "Status: All" });
+    // Bars only where the run's data lands: the counts line and the overall bar, not the title or the filter.
+    expect(skel!.querySelector("h3 [data-skeleton]")).toBeNull();
+    expect(skel!.querySelector(`[data-testid=steps-summary] [data-skeleton]`)).not.toBeNull();
+    const rows = (s: Element) => Array.from(s.querySelectorAll("li")).map((li) => li.className);
+    expect(rows(skel!)).toEqual(rows(real!));
+    expect(skel!.querySelector("ul")!.className).toBe(STEP_LIST);
+    expect(real!.querySelector("ul")!.className.startsWith(STEP_LIST)).toBe(true);
   });
 
   it("leaves Task type out and bars the header on a type page, as the page does", () => {

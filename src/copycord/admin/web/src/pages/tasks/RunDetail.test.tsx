@@ -3,11 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
-import type { TaskRun, TaskType } from "../../types/tasks";
+import type { TaskRun, TaskStep, TaskType } from "../../types/tasks";
 import { ReportPanel } from "./ReportPanel";
 import { RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
-import { StepList, stepLabel } from "./StepList";
-import { BUSY, FADE_IN } from "./TasksSkeleton";
+import { StepList, orderSteps, overallProgress, stepLabel, stepSummary } from "./StepList";
+import { BUSY, FADE_IN, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
 import { describeRunInputs, rangeWords } from "./types";
 
 const BACKFILL: TaskType = { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -96,6 +96,8 @@ function outline(root: HTMLElement) {
         return {
           name,
           title: text(s.querySelector("h3")),
+          summary: text(within(s).getByTestId("steps-summary")),
+          filter: text(s.querySelector("button[aria-haspopup=listbox]")?.firstElementChild),
           rows: Array.from(s.querySelectorAll("li")).map((li) => [
             li.querySelector("[role=img]")?.getAttribute("aria-label"),
             text(li.querySelector(".font-semibold")),
@@ -219,6 +221,8 @@ describe("Run page structure", () => {
         {
           name: "Steps",
           title: "Steps",
+          summary: "1 running, 1 queued",
+          filter: "Status: All",
           rows: [
             ["Running", "#general", "1,234 / 5,000", "bar"],
             ["Queued", "#news", "Queued #3", ""],
@@ -245,6 +249,8 @@ describe("Run page structure", () => {
     expect(fades(container.querySelector("dl[aria-label=Counts]"))).toBe(true);
     expect(fades(container.querySelector("dl[aria-label=Inputs]"))).toBe(true);
     expect(fades(within(screen.getByRole("region", { name: "Steps" })).getByRole("list"))).toBe(true);
+    expect(fades(screen.getByTestId("steps-summary").firstElementChild)).toBe(true);
+    expect(fades(screen.getByRole("progressbar", { name: "Overall progress" }))).toBe(true);
     // The static text the skeleton already showed does not blink.
     expect(fades(screen.getByRole("link", { name: "All tasks" }))).toBe(false);
     expect(fades(screen.getByRole("heading", { name: "Steps" }))).toBe(false);
@@ -261,7 +267,7 @@ describe("Run page structure", () => {
 });
 
 describe("StepList", () => {
-  it("one row per step with its note, a bar only under a running step, nothing clickable", () => {
+  it("one line per step with its note, a thin bar only on a running step, nothing clickable but the filter", () => {
     const run = makeRun({
       steps: [
         { key: "c1", title: "#general", state: "running", done: 1234, total: 5000 },
@@ -270,13 +276,92 @@ describe("StepList", () => {
       ],
     });
     render(<StepList run={run} />);
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    const rows = screen.getAllByRole("listitem");
+    expect(rows).toHaveLength(3);
+    for (const li of rows) expect(li.className).toBe(STEP_ROW);
     expect(screen.getByText("1,234 / 5,000")).toBeInTheDocument();
     expect(screen.getByText("40 messages")).toBeInTheDocument();
     expect(screen.getByText("Missing access")).toHaveClass("text-danger");
-    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+    expect(screen.getAllByRole("progressbar").map((b) => b.getAttribute("aria-label"))).toEqual(["Overall progress", "#general progress"]);
     expect(screen.getByRole("progressbar", { name: "#general progress" })).toHaveAttribute("aria-valuenow", "1234");
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    // The row bar sits on the step's own line, not under it.
+    expect(screen.getByRole("progressbar", { name: "#general progress" }).parentElement).toBe(rows[0]);
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Status: All▾"]);
+  });
+
+  it("counts the steps by state in the head, and fills the overall bar by the share done", () => {
+    const steps: TaskStep[] = [
+      ...Array.from({ length: 94 }, (_, i): TaskStep => ({ key: `d${i}`, title: `#done-${i}`, state: "success", note: "3 messages" })),
+      { key: "r1", title: "#r1", state: "running", done: 25, total: 100 },
+      { key: "r2", title: "#r2", state: "running", done: 0, total: 10 },
+      { key: "r3", title: "#r3", state: "running" },
+      { key: "q1", title: "#q1", state: "queued", queue_position: 1 },
+      { key: "q2", title: "#q2", state: "queued", queue_position: 2 },
+      { key: "f1", title: "#f1", state: "failed", note: "delivery timed out" },
+    ];
+    expect(stepSummary(steps)).toBe("3 running, 2 queued, 94 done, 1 failed");
+    expect(stepSummary([{ key: "s", title: "#s", state: "skipped" }, { key: "c", title: "#c", state: "cancelled" }])).toBe("1 skipped, 1 cancelled");
+    expect(stepSummary([])).toBe("");
+    // 95 finished whole, a quarter of #r1, nothing for the rest: 95.25 of 100.
+    expect(overallProgress(steps)).toBeCloseTo(0.9525);
+    expect(overallProgress([])).toBeNull();
+    render(<StepList run={makeRun({ steps })} />);
+    expect(screen.getByTestId("steps-summary")).toHaveTextContent("3 running, 2 queued, 94 done, 1 failed");
+    expect(screen.getByRole("progressbar", { name: "Overall progress" })).toHaveAttribute("aria-valuenow", "95");
+  });
+
+  it("puts running and failed steps first, then queued in queue order, then the finished ones in run order", () => {
+    const steps: TaskStep[] = [
+      { key: "a", title: "#a", state: "success" },
+      { key: "b", title: "#b", state: "queued", queue_position: 3 },
+      { key: "c", title: "#c", state: "failed" },
+      { key: "d", title: "#d", state: "queued", queue_position: 2 },
+      { key: "e", title: "#e", state: "running", done: 1, total: 2 },
+      { key: "f", title: "#f", state: "skipped" },
+      { key: "g", title: "#g", state: "running" },
+    ];
+    expect(orderSteps(steps).map((s) => s.key)).toEqual(["e", "g", "c", "d", "b", "a", "f"]);
+    render(<StepList run={makeRun({ steps })} />);
+    expect(screen.getAllByRole("listitem").map((li) => li.querySelector(".font-semibold")?.textContent)).toEqual(["#e", "#g", "#c", "#d", "#b", "#a", "#f"]);
+  });
+
+  it("filters by state from the head, All by default, and says when a state has none", async () => {
+    const user = userEvent.setup();
+    const steps: TaskStep[] = [
+      { key: "a", title: "#a", state: "success" },
+      { key: "b", title: "#b", state: "failed", note: "delivery timed out" },
+      { key: "c", title: "#c", state: "success" },
+    ];
+    render(<StepList run={makeRun({ steps })} />);
+    const titles = () => screen.queryAllByRole("listitem").map((li) => li.querySelector(".font-semibold")?.textContent);
+    expect(titles()).toEqual(["#b", "#a", "#c"]);
+    const pick = async (label: string) => {
+      await user.click(screen.getByRole("button", { name: /^Status: / }));
+      await user.click(screen.getByRole("option", { name: label }));
+    };
+    await pick("Status: Done");
+    expect(titles()).toEqual(["#a", "#c"]);
+    await pick("Status: Failed");
+    expect(titles()).toEqual(["#b"]);
+    await pick("Status: Running");
+    expect(titles()).toEqual([]);
+    expect(screen.getByText("No running steps")).toBeInTheDocument();
+    // The head still counts every step.
+    expect(screen.getByTestId("steps-summary")).toHaveTextContent("2 done, 1 failed");
+    await pick("Status: All");
+    expect(titles()).toEqual(["#b", "#a", "#c"]);
+  });
+
+  it("caps the list at twelve rows and scrolls past them", () => {
+    const steps = Array.from({ length: 100 }, (_, i): TaskStep => ({ key: `s${i}`, title: `#s${i}`, state: "success" }));
+    render(<StepList run={makeRun({ steps })} />);
+    const list = within(screen.getByRole("region", { name: "Steps" })).getByRole("list");
+    expect(list.className).toContain(STEP_LIST);
+    expect(STEP_LIST).toContain("overflow-y-auto");
+    // Rows are 32 px (h-8), so the cap is twelve of them.
+    expect(STEP_ROW).toContain("h-8");
+    expect(STEP_LIST).toContain(`max-h-[${STEP_ROWS_MAX * 32}px]`);
+    expect(screen.getAllByRole("listitem")).toHaveLength(100);
   });
 
   it("says when there are no steps yet", () => {
@@ -457,7 +542,8 @@ describe("RunDetail live", () => {
     );
     expect(screen.getByTestId("run-status")).toHaveTextContent("Success");
     expect(screen.getByText("36 messages")).toBeInTheDocument();
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar", { name: "#general progress" })).not.toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Overall progress" })).toHaveAttribute("aria-valuenow", "100");
     const counts = screen.getByRole("region", { name: "Summary" }).querySelector("dl[aria-label=Counts]");
     expect(pairs(counts)).toEqual([
       ["Succeeded", "1"],

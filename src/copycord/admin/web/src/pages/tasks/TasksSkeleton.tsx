@@ -54,7 +54,6 @@ export const RUN_TITLE_ROW = "flex items-center gap-2";
 export const RUN_TITLE = "m-0 text-[22px] font-bold text-text";
 export const RUN_META = "mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted";
 export const RUN_BODY = "flex flex-col gap-4";
-export const CARD_TITLE = "m-0 border-b border-border px-4 py-2.5 text-sm font-semibold text-text";
 /** The Inputs list under the stat tiles, and its small heading. */
 export const INPUTS_BOX = "px-4 py-3";
 export const INPUTS_TITLE = "m-0 mb-2 text-xs font-semibold text-muted";
@@ -62,9 +61,53 @@ export const INPUTS_LIST = "m-0 grid grid-cols-[minmax(110px,max-content)_1fr] g
 /** The status glyph's box (StatusIcon): one line of the row's text tall with the glyph centred, so the
  * glyph centres on the first text line in the run list, the step list and the run header alike. */
 export const STATUS_BOX = "inline-flex h-[1lh] shrink-0 items-center";
-/** One step row: glyph, title and note on one line, the progress bar under it while running. */
-export const STEP_ROW = "border-b border-border px-4 py-2.5 text-sm last:border-b-0";
-export const STEP_LINE = "flex items-center gap-2.5";
+/** The Steps card head: the title, the counts line, the overall bar and the status filter on one line. */
+export const STEPS_HEAD = "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border px-4 py-1.5 text-sm";
+export const STEPS_TITLE = "m-0 text-sm font-semibold text-text";
+export const STEPS_SUMMARY = "min-w-0 flex-1 truncate text-xs text-muted";
+/** The overall bar's track in the head, and a running step's thin bar in its row. */
+export const STEPS_BAR = "h-1 w-28 shrink-0 overflow-hidden rounded-full bg-line-1 max-sm:hidden";
+export const STEP_BAR = "h-1 w-24 shrink-0 overflow-hidden rounded-full bg-line-1 max-sm:w-12";
+/** Rows are one fixed line each, so the list stops at STEP_ROWS_MAX rows and scrolls past that. */
+export const STEP_ROWS_MAX = 12;
+export const STEP_LIST = "m-0 max-h-[384px] list-none overflow-y-auto p-0";
+/** One step row, 32 px: glyph, title, the thin bar while running, the note on the right. */
+export const STEP_ROW = "flex h-8 items-center gap-2.5 border-b border-border px-4 text-sm last:border-b-0";
+export const STEP_EMPTY = "m-0 px-4 py-1.5 text-sm text-muted";
+/** The steps the run page showed last time (lastCount.ts), so the loading card stands as tall. */
+export const STEPS_COUNT_KEY = "tasks.steps";
+export const STEP_FILTER_OPTIONS = [
+  { value: "", label: "Status: All" },
+  { value: "running", label: "Status: Running" },
+  { value: "queued", label: "Status: Queued" },
+  { value: "failed", label: "Status: Failed" },
+  { value: "success", label: "Status: Done" },
+] as const;
+export type StepFilter = (typeof STEP_FILTER_OPTIONS)[number]["value"];
+
+export interface StepsHeadProps {
+  /** The counts line, or its bar while the run loads. */
+  summary: ReactNode;
+  /** The overall bar, or its placeholder. */
+  progress: ReactNode;
+  filter: StepFilter;
+  onFilter: (value: StepFilter) => void;
+  id: string;
+}
+
+/** The Steps card head; the loaded card and the run skeleton both draw it, so they cannot drift. */
+export function StepsHead({ summary, progress, filter, onFilter, id }: StepsHeadProps) {
+  return (
+    <div className={STEPS_HEAD}>
+      <h3 className={STEPS_TITLE}>Steps</h3>
+      <span data-testid="steps-summary" className={STEPS_SUMMARY}>
+        {summary}
+      </span>
+      {progress}
+      <ToolbarSelect id={id} label="Step status" value={filter} options={STEP_FILTER_OPTIONS} onChange={(v) => onFilter(v as StepFilter)} />
+    </div>
+  );
+}
 export const REPORT_SUMMARY =
   "cursor-pointer list-none px-4 py-2.5 text-sm font-semibold text-text marker:hidden [&::-webkit-details-marker]:hidden";
 
@@ -274,14 +317,15 @@ function InlineBar({ width }: { width: number }) {
   );
 }
 
-const STEP_WIDTHS = [["34%", 72], ["26%", 96]] as const;
+const STEP_WIDTHS = [["34%", 72], ["26%", 96], ["30%", 84]] as const;
 
 /**
  * The run page until the run answers, also the page's own loading state: the header with bars for the
  * type, glyph, title and meta line (the actions depend on the status, so they wait), the summary card
- * with its Inputs heading and bar rows, the Steps card with bar rows and the collapsed Report line.
+ * with its Inputs heading and bar rows, the Steps card with its real head (bars for the counts and the
+ * overall bar, the real filter) and as many bar rows as the last run showed, and the collapsed Report line.
  */
-export function RunDetailSkeleton() {
+export function RunDetailSkeleton({ steps = readLastCount(STEPS_COUNT_KEY, 2, STEP_ROWS_MAX) }: { steps?: number }) {
   return (
     <div role="status" aria-busy="true" aria-label="Loading run" className="flex flex-col">
       <div inert>
@@ -322,20 +366,33 @@ export function RunDetailSkeleton() {
             </div>
           </section>
           <section aria-label="Steps" className={FRAME}>
-            <h3 className={CARD_TITLE}>Steps</h3>
-            <ul className="m-0 list-none p-0">
-              {STEP_WIDTHS.map(([title, note], i) => (
-                <li key={i} className={STEP_ROW}>
-                  <div className={STEP_LINE}>
-                    <span className={STATUS_BOX}>
-                      <Skeleton width={14} height={14} rounded="rounded-full" />
-                    </span>
-                    <TextBar width={title} className="min-w-0 flex-1" />
-                    <TextBar width={note} className="text-xs" />
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <StepsHead
+              id="steps-filter-skeleton"
+              summary={<Skeleton.Text width={180} />}
+              progress={<Skeleton width={112} height={4} rounded="rounded-full" className="shrink-0 max-sm:hidden" />}
+              filter=""
+              onFilter={noop}
+            />
+            {steps === 0 ? (
+              <p className={STEP_EMPTY}>
+                <Skeleton.Text>No steps yet</Skeleton.Text>
+              </p>
+            ) : (
+              <ul className={STEP_LIST}>
+                {Array.from({ length: steps }, (_, i) => {
+                  const [title, note] = STEP_WIDTHS[i % STEP_WIDTHS.length]!;
+                  return (
+                    <li key={i} className={STEP_ROW}>
+                      <span className={STATUS_BOX}>
+                        <Skeleton width={14} height={14} rounded="rounded-full" />
+                      </span>
+                      <TextBar width={title} className="min-w-0 flex-1" />
+                      <TextBar width={note} className="text-xs" />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
           <section aria-label="Report">
             <details className={cx(FRAME, "group")}>
