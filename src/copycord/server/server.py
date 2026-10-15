@@ -1400,12 +1400,13 @@ class ServerReceiver:
         try:
             if job is not None:
                 if not await self.backfill.wait_delivered(orig):
+                    job["error"] = self.backfill.delivery_timeout_note(orig)
                     logger.warning(
-                        "[bf] Backfill of #%s (job %s) gave up on sends still running",
+                        "[bf] Backfill of #%s (job %s) gave up on sends still running: %s",
                         orig,
                         job_id,
+                        job["error"],
                     )
-                    job["error"] = "delivery timed out"
                 await self._bf_publish_delivered(job_id)
                 with contextlib.suppress(Exception):
                     await self.bus.publish(

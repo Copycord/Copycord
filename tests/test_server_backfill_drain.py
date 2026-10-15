@@ -9,6 +9,7 @@ import asyncio
 import importlib
 import json
 import logging
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -309,35 +310,62 @@ def test_cancel_for_an_unknown_job_is_harmless(ServerReceiver):
     assert rx.bus.sent == []
 
 
-def test_delivery_cap_follows_what_is_left_within_floor_and_ceiling(ServerReceiver, monkeypatch):
-    monkeypatch.delenv("BACKFILL_DRAIN_HARD_CAP_SECS", raising=False)
-
-    async def go():
-        bf = _rx(ServerReceiver, asyncio.Event()).backfill
-        caps = []
-        for total in (0, 1000, 10**6):
-            bf.update_expected_total(CID, total)
-            caps.append(bf.delivery_cap(CID))
-        monkeypatch.setenv("BACKFILL_DRAIN_HARD_CAP_SECS", "30")
-        caps.append(bf.delivery_cap(CID))
-        return bf, caps
-
-    bf, caps = asyncio.run(go())
-    assert caps == [bf.DRAIN_CAP_FLOOR_SECS, 1000 * bf.DRAIN_CAP_PER_MESSAGE_SECS, bf.DRAIN_CAP_CEILING_SECS, 30.0]
-
-
-def test_a_send_that_never_returns_ends_the_job_at_the_cap(ServerReceiver, monkeypatch):
-    """No hard cap configured and a forward hangs: cleaning up still ends, with what was delivered."""
-    monkeypatch.delenv("BACKFILL_DRAIN_HARD_CAP_SECS", raising=False)
+def test_an_explicit_hard_cap_still_cuts_the_wait_by_the_clock(ServerReceiver, monkeypatch):
+    """BACKFILL_DRAIN_HARD_CAP_SECS overrides the stall window: sends still going out are cancelled
+    when it runs out, and the end says how many of the job's messages went out."""
+    monkeypatch.setenv("BACKFILL_DRAIN_HARD_CAP_SECS", "0.2")
+    monkeypatch.setenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "5")
 
     async def go():
         rx = _rx(ServerReceiver, asyncio.Event())
-        rx.backfill.DRAIN_CAP_FLOOR_SECS = 0.2
-        rx.backfill.DRAIN_CAP_PER_MESSAGE_SECS = 0.01
+        pace = asyncio.Lock()
+
+        async def _bf_message(data):
+            async with pace:
+                await asyncio.sleep(0.05)
+                rx.backfill.note_sent(int(data["channel_id"]), int(data["message_id"]))
+
+        rx._handle_backfill_message = _bf_message
+        rx.backfill.update_expected_total(CID, 8)
         await rx._on_ws({"type": "backfill_job", "data": {"job_id": JOB, "original_channel_id": str(CID), "state": "running", "queue_position": None}})
-        rx.backfill.note_sent(CID, 1521898853337409001)
-        rx.backfill.note_sent(CID, 1521898853337409002)
-        await rx._on_ws(_message_frame(1521898853337409003))
+        for i in range(8):
+            await rx._on_ws(_message_frame(1521898853337409001 + i))
+        stream_end = asyncio.create_task(rx._on_ws({"type": "backfill_stream_end", "data": {"channel_id": str(CID)}}))
+        job_end = asyncio.create_task(rx._on_ws({"type": "backfill_job_end", "data": {"job_id": JOB, "ok": True, "error": None, "last_orig_message_id": None}}))
+        await asyncio.wait_for(asyncio.gather(stream_end, job_end), 3.0)
+        return rx
+
+    rx = asyncio.run(go())
+
+    end = rx.bus.sent[-1]["payload"]["data"]
+    assert rx._bf_jobs == {} and not rx.backfill._attached.get(CID)
+    m = re.fullmatch(r"delivery timed out after 0 s, (\d) of 8 delivered", end["error"])
+    assert m, end["error"]
+    assert end["ok"] is False and 0 < end["delivered"] == int(m.group(1)) < 8
+
+
+def test_sends_stuck_for_the_stall_window_are_cancelled_with_the_counts(ServerReceiver, monkeypatch):
+    """No hard cap: two sends go out, then the next two hang. Once no send finished for the stall
+    window the hung ones are cancelled and the job ends with what was delivered of what was expected."""
+    monkeypatch.delenv("BACKFILL_DRAIN_HARD_CAP_SECS", raising=False)
+    monkeypatch.setenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "0.2")
+    hung = []
+
+    async def go():
+        rx = _rx(ServerReceiver, asyncio.Event())
+
+        async def _bf_message(data):
+            mid = int(data["message_id"])
+            if mid >= 1521898853337409003:
+                hung.append(asyncio.current_task())
+                await asyncio.Event().wait()
+            rx.backfill.note_sent(int(data["channel_id"]), mid)
+
+        rx._handle_backfill_message = _bf_message
+        rx.backfill.update_expected_total(CID, 6)
+        await rx._on_ws({"type": "backfill_job", "data": {"job_id": JOB, "original_channel_id": str(CID), "state": "running", "queue_position": None}})
+        for i in range(4):
+            await rx._on_ws(_message_frame(1521898853337409001 + i))
         stream_end = asyncio.create_task(rx._on_ws({"type": "backfill_stream_end", "data": {"channel_id": str(CID)}}))
         job_end = asyncio.create_task(rx._on_ws({"type": "backfill_job_end", "data": {"job_id": JOB, "ok": True, "error": None, "last_orig_message_id": None}}))
         await asyncio.wait_for(asyncio.gather(stream_end, job_end), 3.0)
@@ -347,9 +375,12 @@ def test_a_send_that_never_returns_ends_the_job_at_the_cap(ServerReceiver, monke
 
     end = rx.bus.sent[-1]["payload"]
     assert end["type"] == "backfill_job_end"
-    assert end["data"]["ok"] is False and end["data"]["error"] == "delivery timed out"
+    assert end["data"]["ok"] is False
+    assert end["data"]["error"] == "delivery timed out after 0 s, 2 of 6 delivered"
     assert end["data"]["delivered"] == 2
+    assert len(hung) == 2 and all(t.cancelled() for t in hung)
     assert rx._bf_jobs == {} and not rx.backfill._attached.get(CID)
+    assert CID not in rx.backfill._drain_cut
 
 
 def test_slow_sends_that_keep_completing_are_not_cut_off(ServerReceiver, monkeypatch):
@@ -362,6 +393,8 @@ def test_slow_sends_that_keep_completing_are_not_cut_off(ServerReceiver, monkeyp
 
     async def go():
         rx = _rx(ServerReceiver, asyncio.Event())
+        # The removed per-message cap, scaled down: the 0.2 s floor that made this test fail before
+        # the fix. The drain no longer reads these.
         rx.backfill.DRAIN_CAP_FLOOR_SECS = 0.2
         rx.backfill.DRAIN_CAP_PER_MESSAGE_SECS = 0.01
         pace = asyncio.Lock()

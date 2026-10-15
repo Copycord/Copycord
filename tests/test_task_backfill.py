@@ -283,6 +283,23 @@ async def test_one_failed_channel_fails_the_run(svc, sent, mapping):
 
 
 @pytest.mark.asyncio
+async def test_delivery_timeout_notes_the_counts_on_the_step_and_report(svc, sent, mapping):
+    run = await svc.start("backfill_channels", {"mapping_id": mapping, "channel_ids": [str(CH[0])]})
+    await _until(lambda: len(_of(sent, "backfill_run")) == 1)
+    job_id = f"{run.id}:{CH[0]}"
+    await _frame("backfill_job", job_id=job_id, state="running")
+    await _frame("backfill_job_delivered", job_id=job_id, delivered=24, total=36)
+    note = "delivery timed out after 610 s, 24 of 36 delivered"
+    await _frame("backfill_job_end", job_id=job_id, ok=False, error=note, delivered=24)
+    done = await _settled(svc, run.id)
+    step = _steps(svc, run.id)[str(CH[0])]
+    assert step["state"] == "failed" and step["note"] == note and step["done"] == 24
+    channel = done.report["channels"][0]
+    assert channel["outcome"] == "failed" and channel["error"] == note and channel["note"] == note
+    assert channel["delivered"] == 24
+
+
+@pytest.mark.asyncio
 async def test_unknown_job_id_is_ignored(sent):
     assert await _frame("backfill_job", job_id="999:1", state="running") is False
     assert await backfill.dispatch({"type": "backfill_ack", "data": {}}) is False
