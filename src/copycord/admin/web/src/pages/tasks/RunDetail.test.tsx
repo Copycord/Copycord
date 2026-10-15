@@ -7,7 +7,7 @@ import type { TaskRun, TaskStep, TaskType } from "../../types/tasks";
 import { ReportPanel } from "./ReportPanel";
 import { RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
 import { StepList, orderSteps, overallProgress, stepLabel, stepSummary } from "./StepList";
-import { BUSY, FADE_IN, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
+import { BUSY, FADE_IN, RUN_HEAD_MAIN, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
 import { describeRunInputs, rangeWords } from "./types";
 
 const BACKFILL: TaskType = { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -96,7 +96,7 @@ function outline(root: HTMLElement) {
         return {
           name,
           title: text(s.querySelector("h3")),
-          summary: text(within(s).getByTestId("steps-summary")),
+          summary: text(s.querySelector("[data-testid=steps-summary]")),
           filter: text(s.querySelector("button[aria-haspopup=listbox]")?.firstElementChild),
           rows: Array.from(s.querySelectorAll("li")).map((li) => [
             li.querySelector("[role=img]")?.getAttribute("aria-label"),
@@ -245,7 +245,7 @@ describe("Run page structure", () => {
     const { container, rerender } = renderView(run);
     const fades = (el: Element | null) => (el?.getAttribute("class") ?? "").includes(FADE_IN);
     expect(fades(screen.getByRole("link", { name: "Backfill channels" }))).toBe(true);
-    expect(fades(screen.getByRole("heading", { level: 2 }).closest(".min-w-0"))).toBe(true);
+    expect(fades(container.querySelector(`[class^="${RUN_HEAD_MAIN} "]`))).toBe(true);
     expect(fades(container.querySelector("dl[aria-label=Counts]"))).toBe(true);
     expect(fades(container.querySelector("dl[aria-label=Inputs]"))).toBe(true);
     expect(fades(within(screen.getByRole("region", { name: "Steps" })).getByRole("list"))).toBe(true);

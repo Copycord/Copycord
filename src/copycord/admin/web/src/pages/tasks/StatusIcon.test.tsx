@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import type { TaskRun } from "../../types/tasks";
@@ -6,7 +6,7 @@ import { RunHeader } from "./RunDetail";
 import { RunRow } from "./RunList";
 import { StatusIcon } from "./StatusIcon";
 import { StepList } from "./StepList";
-import { RunDetailSkeleton, RunRowsLoading, STATUS_BOX } from "./TasksSkeleton";
+import { ROW_BOX, RUN_HEAD_MAIN, RUN_META, RunDetailSkeleton, RunRowsLoading, STATUS_BOX, STEP_ROW } from "./TasksSkeleton";
 
 const RUN: TaskRun = {
   id: "1",
@@ -31,18 +31,19 @@ const RUN: TaskRun = {
 
 const classes = (el: Element) => (el.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
 const BOX = STATUS_BOX.split(" ");
-// Nothing may nudge the glyph off the line's centre.
-const NUDGE = /^-?(m[tby]?|self|align|translate-y|top|relative)(-|$)/;
+// Nothing but self-center may move the glyph: no margins, offsets or fixed line box.
+const NUDGE = /^-?(m[tby]?|self|align|translate-y|top|relative|h)(-|$)/;
 
 describe("status glyph alignment", () => {
-  it("is one text line tall with the glyph centred, and nothing nudges it", () => {
+  it("centres itself on its row with the glyph centred in the box, and nothing else nudges it", () => {
     const { container } = render(<StatusIcon status="success" />);
     const glyph = container.querySelector("[data-status]")!;
     expect(classes(glyph)).toEqual(expect.arrayContaining(BOX));
-    expect(classes(glyph).filter((c) => NUDGE.test(c))).toEqual([]);
+    expect(BOX).toEqual(expect.arrayContaining(["self-center", "items-center"]));
+    expect(classes(glyph).filter((c) => c !== "self-center" && NUDGE.test(c))).toEqual([]);
   });
 
-  it("sits the same way in the run list, the step list and the run header", () => {
+  it("sits mid-row the same way in the run list, the step list and the run header", () => {
     const { container } = render(
       <MemoryRouter>
         <ul>
@@ -53,26 +54,38 @@ describe("status glyph alignment", () => {
       </MemoryRouter>,
     );
     const glyphs = Array.from(container.querySelectorAll("[data-status]"));
-    expect(glyphs.map((g) => g.getAttribute("data-status"))).toEqual(["success", "success", "running", "success"]);
+    // Running steps sort first in the step list.
+    expect(glyphs.map((g) => g.getAttribute("data-status"))).toEqual(["success", "running", "success", "success"]);
     const boxes = glyphs.map((g) => classes(g).filter((c) => !c.startsWith("text-")).sort().join(" "));
     expect(new Set(boxes)).toEqual(new Set([[...BOX].sort().join(" ")]));
-    // The run row lines the glyph up with its first line: the row aligns to the top, the glyph box is that line.
-    expect(glyphs[0]!.parentElement!.className).toContain("items-start");
-    // Steps and the header centre the glyph box on their single line.
-    expect(glyphs[1]!.parentElement!.className).toContain("items-center");
-    expect(glyphs[3]!.parentElement!.className).toContain("items-center");
+    const [row, , , header] = glyphs.map((g) => g.parentElement!);
+    // The run row keeps its other columns at the top; the glyph, a direct child, centres on the title and meta lines.
+    expect(row!.tagName).toBe("LI");
+    expect(row!.className).toContain("items-start");
+    expect(row!.children[1]!.textContent).toContain("Backfill #general");
+    expect(row!.children[1]!.textContent).toContain("Manual run by admin");
+    // A step row is the glyph's parent.
+    expect(glyphs[1]!.parentElement!.className).toBe(STEP_ROW);
+    // The header centres the glyph beside both of its lines, like a run row.
+    expect(header!.className.startsWith(`${RUN_HEAD_MAIN} `)).toBe(true);
+    expect(header!.children[1]!.querySelector("h2")).not.toBeNull();
+    expect(within(header!.children[1] as HTMLElement).getByTestId("run-status")).toBeInTheDocument();
   });
 
-  it("keeps the same box in the loading rows", () => {
+  it("keeps the same box, in the same place, in the loading rows", () => {
     const { container } = render(
       <MemoryRouter>
         <RunRowsLoading rows={1} />
-        <RunDetailSkeleton />
+        <RunDetailSkeleton steps={2} />
       </MemoryRouter>,
     );
-    const boxes = container.querySelectorAll(`span[class="${STATUS_BOX}"]`);
+    const boxes = Array.from(container.querySelectorAll(`span[class="${STATUS_BOX}"]`));
     // The run row, the run header and the two step rows.
     expect(boxes).toHaveLength(4);
-    for (const box of Array.from(boxes)) expect(box.querySelector("[data-skeleton]")).not.toBeNull();
+    for (const box of boxes) expect(box.querySelector("[data-skeleton]")).not.toBeNull();
+    expect(boxes.map((b) => b.parentElement!.className)).toEqual([ROW_BOX, RUN_HEAD_MAIN, STEP_ROW, STEP_ROW]);
+    // The header's glyph sits beside the title and meta lines there too.
+    expect(boxes[1]!.nextElementSibling!.querySelector("h2")).not.toBeNull();
+    expect(boxes[1]!.nextElementSibling!.querySelector(`[class="${RUN_META}"]`)).not.toBeNull();
   });
 });

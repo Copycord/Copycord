@@ -1,8 +1,7 @@
 // Run and step status glyphs in the theme colours: success check-circle, failed x-circle, cancelled
 // slashed circle, running a spinning ring, queued a hollow dot. Each is an img with a label and a title.
-// The glyph sits centred in a box one line of the surrounding text tall (1lh), so it lines up with the
-// row's first text line whatever the font's normal line height: the run list's title, a step's title
-// and the run header all place it the same way.
+// The glyph's box centres itself on the row that holds it (STATUS_BOX), so a run list row, a step row
+// and the run header all show it mid-row, beside both lines where the row has a title and a meta line.
 
 import { cx } from "../../components/ui/cx";
 import type { RunStatus, StepState } from "../../types/tasks";

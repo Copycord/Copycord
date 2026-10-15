@@ -50,6 +50,8 @@ export const SEARCH_BUTTON = "rounded-l-none border-l-0";
 export const RUN_HEADER = "mb-4";
 export const RUN_BREADCRUMB = "mb-2 text-sm text-muted";
 export const RUN_CRUMB = "text-accent no-underline hover:underline";
+/** The header's glyph beside its two lines (the title row, the meta line), as in a run list row. */
+export const RUN_HEAD_MAIN = "flex min-w-0 items-center gap-3";
 export const RUN_TITLE_ROW = "flex items-center gap-2";
 export const RUN_TITLE = "m-0 text-[22px] font-bold text-text";
 export const RUN_META = "mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted";
@@ -58,9 +60,10 @@ export const RUN_BODY = "flex flex-col gap-4";
 export const INPUTS_BOX = "px-4 py-3";
 export const INPUTS_TITLE = "m-0 mb-2 text-xs font-semibold text-muted";
 export const INPUTS_LIST = "m-0 grid grid-cols-[minmax(110px,max-content)_1fr] gap-x-6 gap-y-1 text-sm";
-/** The status glyph's box (StatusIcon): one line of the row's text tall with the glyph centred, so the
- * glyph centres on the first text line in the run list, the step list and the run header alike. */
-export const STATUS_BOX = "inline-flex h-[1lh] shrink-0 items-center";
+/** The status glyph's box (StatusIcon): it centres itself on the whole row it sits in, whatever the row
+ * aligns its other columns to. A run list row (title and meta line), a step row and the run header (title
+ * and meta line, RUN_HEAD_MAIN) all hold it as a direct flex child, so it sits mid-row in each. */
+export const STATUS_BOX = "inline-flex shrink-0 items-center self-center";
 /** The Steps card head: the title, the counts line, the overall bar and the status filter on one line. */
 export const STEPS_HEAD = "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border px-4 py-1.5 text-sm";
 export const STEPS_TITLE = "m-0 text-sm font-semibold text-text";
@@ -337,18 +340,22 @@ export function RunDetailSkeleton({ steps = readLastCount(STEPS_COUNT_KEY, 2, ST
             {" / "}
             <InlineBar width={110} />
           </nav>
-          <div className={RUN_TITLE_ROW}>
+          <div className={RUN_HEAD_MAIN}>
             <span className={STATUS_BOX}>
               <Skeleton width={20} height={20} rounded="rounded-full" />
             </span>
-            <h2 className={RUN_TITLE}>
-              <TextBar width={240} />
-            </h2>
-          </div>
-          <div className={RUN_META}>
-            <TextBar width={130} />
-            <TextBar width={90} />
-            <TextBar width={110} />
+            <div className="min-w-0">
+              <div className={RUN_TITLE_ROW}>
+                <h2 className={RUN_TITLE}>
+                  <TextBar width={240} />
+                </h2>
+              </div>
+              <div className={RUN_META}>
+                <TextBar width={130} />
+                <TextBar width={90} />
+                <TextBar width={110} />
+              </div>
+            </div>
           </div>
         </header>
         <div className={RUN_BODY}>

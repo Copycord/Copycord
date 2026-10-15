@@ -28,6 +28,7 @@ import {
   RUN_BREADCRUMB,
   RUN_CRUMB,
   RUN_HEADER,
+  RUN_HEAD_MAIN,
   RUN_META,
   RUN_TITLE,
   RUN_TITLE_ROW,
@@ -115,20 +116,22 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
         </Link>
       </nav>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className={cx("min-w-0", FADE_IN)}>
-          <div className={RUN_TITLE_ROW}>
-            <StatusIcon status={run.status} size={20} />
-            <h2 className={RUN_TITLE} title={run.title}>
-              {typeTitle}
-            </h2>
-            <span className="text-[22px] text-muted">#{run.number}</span>
-          </div>
-          <div className={RUN_META}>
-            <span>{triggerText(run)}</span>
-            <ContextBadge run={run} />
-            <span title="Started">{formatWhen(run.started_at ?? run.created_at)}</span>
-            {duration ? <span title="Duration">{duration}</span> : null}
-            <span data-testid="run-status">{STATUS_LABEL[run.status]}</span>
+        <div className={cx(RUN_HEAD_MAIN, FADE_IN)}>
+          <StatusIcon status={run.status} size={20} />
+          <div className="min-w-0">
+            <div className={RUN_TITLE_ROW}>
+              <h2 className={RUN_TITLE} title={run.title}>
+                {typeTitle}
+              </h2>
+              <span className="text-[22px] text-muted">#{run.number}</span>
+            </div>
+            <div className={RUN_META}>
+              <span>{triggerText(run)}</span>
+              <ContextBadge run={run} />
+              <span title="Started">{formatWhen(run.started_at ?? run.created_at)}</span>
+              {duration ? <span title="Duration">{duration}</span> : null}
+              <span data-testid="run-status">{STATUS_LABEL[run.status]}</span>
+            </div>
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
