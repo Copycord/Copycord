@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from typing import Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -41,6 +42,9 @@ _CACHE: Dict[Optional[str], Tuple[Optional[str], float]] = {}
 _LOCKS: Dict[Optional[str], asyncio.Lock] = {}
 _WARNED: set = set()
 _TOKEN_EXIT: Dict[str, Optional[str]] = {}
+# exit key -> why its last lookup failed
+_LAST_ERROR: Dict[Optional[str], str] = {}
+_CREDENTIALS = re.compile(r"://[^/@\s]+@")
 
 
 def _valid_zone(name) -> Optional[str]:
@@ -72,15 +76,36 @@ async def _fetch_json(proxy: Optional[str], timeout: float) -> dict:
         return await r.json(content_type=None)
 
 
+def _describe(exc: BaseException, proxy: Optional[str], timeout: float) -> str:
+    """Why a lookup failed, for the warning; never carries proxy credentials."""
+    if isinstance(exc, asyncio.TimeoutError):
+        text = f"no answer within {timeout:g}s"
+    elif isinstance(exc, aiohttp.ClientResponseError):
+        text = f"HTTP {exc.status} from {LOOKUP_URL}"
+    else:
+        text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+    if proxy:
+        text = text.replace(proxy, _mask_proxy_url(proxy))
+    return _CREDENTIALS.sub("://***@", text)
+
+
 async def resolve_timezone(
     proxy: Optional[str] = None, timeout: float = LOOKUP_TIMEOUT
 ) -> Optional[str]:
-    """Timezone of the exit IP for proxy (or direct); None on any failure."""
+    """Timezone of the exit IP for proxy (or direct); None on any failure, with
+    the reason kept in _LAST_ERROR for the warning."""
+    key = proxy or None
     try:
         data = await _fetch_json(proxy, timeout)
-        return _valid_zone(data.get("timezone"))
-    except Exception:
+        zone = _valid_zone(data.get("timezone"))
+    except Exception as exc:
+        _LAST_ERROR[key] = _describe(exc, proxy, timeout)
         return None
+    if zone is None:
+        _LAST_ERROR[key] = f"no valid timezone in the answer ({str(data.get('timezone'))[:40]!r})"
+    else:
+        _LAST_ERROR.pop(key, None)
+    return zone
 
 
 async def ensure_timezone(proxy: Optional[str] = None) -> str:
@@ -106,7 +131,10 @@ async def ensure_timezone(proxy: Optional[str] = None) -> str:
         elif key not in _WARNED:
             _WARNED.add(key)
             logger.warning(
-                "Timezone lookup failed for %s, using %s", label, FALLBACK_TIMEZONE
+                "Timezone lookup failed for %s (%s), using %s",
+                label,
+                _LAST_ERROR.get(key, "unknown error"),
+                FALLBACK_TIMEZONE,
             )
         return zone or FALLBACK_TIMEZONE
 
@@ -133,3 +161,4 @@ def clear_cache() -> None:
     _LOCKS.clear()
     _WARNED.clear()
     _TOKEN_EXIT.clear()
+    _LAST_ERROR.clear()

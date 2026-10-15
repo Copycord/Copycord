@@ -90,6 +90,27 @@ class TestCache:
         assert "secret" not in caplog.text
         assert "10.0.0.1" in caplog.text
 
+    @pytest.mark.parametrize(
+        "exc, reason",
+        [
+            (asyncio.TimeoutError(), "no answer within 6s"),
+            (OSError("connection refused"), "OSError: connection refused"),
+            (OSError(f"cannot connect via {PROXY_A}"), "OSError: cannot connect via http://"),
+        ],
+    )
+    def test_warning_names_the_reason_without_credentials(self, monkeypatch, caplog, exc, reason):
+        _fake(monkeypatch, {PROXY_A: exc})
+        with caplog.at_level("WARNING", logger="common.exit_timezone"):
+            run(et.ensure_timezone(PROXY_A))
+        assert reason in caplog.text
+        assert "secret" not in caplog.text and "user:" not in caplog.text
+
+    def test_warning_names_an_invalid_zone_answer(self, monkeypatch, caplog):
+        _fake(monkeypatch, {None: {"timezone": "Not/AReal_Zone"}})
+        with caplog.at_level("WARNING", logger="common.exit_timezone"):
+            run(et.ensure_timezone(None))
+        assert "no valid timezone in the answer ('Not/AReal_Zone')" in caplog.text
+
 
 class TestHeaders:
     def test_unresolved_token_uses_the_fallback(self):
