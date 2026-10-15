@@ -106,7 +106,7 @@ def test_start_get_list_cancel_and_detail(client, events):
     resp = _start(client, {"n": 3})
     assert resp.status_code == 201
     run = resp.json()["run"]
-    assert run["id"] == str(int(run["id"])) and run["number"] == 1
+    assert len(run["id"]) == 32 and int(run["id"], 16) >= 0 and run["number"] == 1
     assert run["title"] == "Noop x3" and run["trigger"] == "manual" and run["actor"] == "admin"
 
     done = _finished(client, run["id"])

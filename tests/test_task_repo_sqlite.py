@@ -50,7 +50,7 @@ async def test_start_to_success_persists_progress_and_log(db, noop_type):
     repo = SqliteTaskRepo(db)
     svc = TaskService(repo)
     run = await svc.start(KEY, {"n": 3})
-    assert run.number == 1 and isinstance(run.id, int)
+    assert run.number == 1 and isinstance(run.id, str) and len(run.id) == 32
     await _settled(svc, run.id)
 
     stored = repo.get_run(run.id)
