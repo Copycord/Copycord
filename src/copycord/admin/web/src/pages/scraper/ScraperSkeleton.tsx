@@ -4,7 +4,8 @@
 // show it without pulling the page chunk in; the cards take their shared classes and pieces from here.
 
 import { Button, Card, Input, Skeleton, cx } from "../../components/ui";
-import { PlayIcon, QueueIcon, RefreshIcon } from "./icons";
+import { readLastCount } from "../../components/ui/lastCount";
+import { DownloadIcon, PlayIcon, QueueIcon, RefreshIcon, TrashIcon, UsersIcon } from "./icons";
 
 // .scraper-card .card-titlebar h3 and the .card-titlebar row; every scraper card sits 18px below the last.
 export const TITLE = "m-0 text-[15px] font-bold whitespace-nowrap text-accent";
@@ -70,8 +71,58 @@ export function ScraperTitle() {
 // Text kept in place but drawn as a bar, so the placeholder takes the empty state's exact line boxes.
 const TEXT_BAR = "cc-skeleton rounded-md text-transparent motion-reduce:animate-none";
 
-/** The token list while it loads: a bar for each line of the empty state, in its place. */
-export function TokenListPlaceholder() {
+// .btn.btn-ghost.btn-xs holding a 14px icon.
+export const ICON_BUTTON =
+  "inline-flex min-h-7 cursor-pointer items-center justify-center rounded-btn border border-border bg-[rgba(255,255,255,0.04)] " +
+  "px-2.5 py-1.5 leading-none " +
+  "text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60 " +
+  "enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-55";
+export const DELETE_BUTTON = cx(ICON_BUTTON, "enabled:hover:border-danger enabled:hover:text-danger");
+
+// One token row (.sc-token-item): the validity badge, name and masked value, then Re-validate and Delete.
+// TokensCard and the loading rows build from these, so both have the same boxes.
+export const TOKEN_ROW =
+  "mb-1.5 flex items-center justify-between gap-2.5 rounded-btn border border-border bg-[rgba(20,11,38,0.4)] px-3 py-2.5 " +
+  "transition-colors duration-200 last:mb-0 hover:border-[rgba(139,92,246,0.25)] hover:bg-[rgba(20,11,38,0.7)]";
+export const TOKEN_MAIN = "flex min-w-0 items-center gap-2.5";
+export const TOKEN_BADGE = "inline-flex size-7 shrink-0 items-center justify-center rounded-lg border";
+export const TOKEN_TEXT = "flex min-w-0 flex-col gap-0.5";
+export const TOKEN_NAME = "truncate text-[13px] font-semibold text-text";
+export const TOKEN_MASK = "truncate font-mono text-[11px] text-muted";
+export const TOKEN_ACTIONS = "flex shrink-0 gap-1";
+
+// The token and scrape lists draw as many loading rows as they had last time (none on a first visit).
+export const TOKENS_COUNT_KEY = "scraper.tokens";
+export const SCRAPES_COUNT_KEY = "scraper.scrapes";
+const MAX_ROWS = 6;
+const NAME_WIDTHS = [96, 128, 84, 112];
+
+/** The token list while it loads: as many token rows as last time, or a bar for each line of the empty state. */
+export function TokenListPlaceholder({ rows = readLastCount(TOKENS_COUNT_KEY, 0, MAX_ROWS) }: { rows?: number }) {
+  if (rows > 0)
+    return (
+      <div role="status" aria-label="Loading tokens" aria-busy="true">
+        {Array.from({ length: rows }, (_, i) => (
+          <div key={i} aria-hidden="true" data-skeleton-row="" className={TOKEN_ROW}>
+            <div className={TOKEN_MAIN}>
+              <span data-skeleton="" className={cx(TOKEN_BADGE, "cc-skeleton border-transparent")} />
+              <div className={TOKEN_TEXT}>
+                <Skeleton.Text className={TOKEN_NAME} width={NAME_WIDTHS[i % NAME_WIDTHS.length]!} />
+                <Skeleton.Text className={TOKEN_MASK} width={170} />
+              </div>
+            </div>
+            <div className={TOKEN_ACTIONS}>
+              <button type="button" tabIndex={-1} className={ICON_BUTTON}>
+                <RefreshIcon />
+              </button>
+              <button type="button" tabIndex={-1} className={DELETE_BUTTON}>
+                <TrashIcon />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   return (
     <div role="status" aria-label="Loading tokens" aria-busy="true" className="flex flex-col items-center gap-1 px-4 py-8 text-center">
       <Skeleton.Block width={32} height={32} className="mb-1.5" />
@@ -85,8 +136,48 @@ export function TokenListPlaceholder() {
   );
 }
 
+// One saved scrape row (.sc-scrape-item): guild, member count line and date, then Download and Delete.
+export const SCRAPE_LIST = "flex flex-col gap-1.5";
+export const SCRAPE_ROW =
+  "flex items-center justify-between gap-3 rounded-btn border border-border bg-[rgba(20,11,38,0.4)] px-3 py-2.5 " +
+  "transition-colors duration-150 hover:border-[rgba(139,92,246,0.35)]";
+export const SCRAPE_TEXT = "flex min-w-0 flex-col gap-0.5";
+export const SCRAPE_GUILD = "flex min-w-0 items-center gap-1.5 font-mono text-[13px] font-semibold text-text";
+export const SCRAPE_META = "text-xs text-muted";
+export const SCRAPE_DATE = "text-[11px] text-muted opacity-70";
+export const SCRAPE_ACTIONS = "flex shrink-0 items-center gap-1.5";
+export const DOWNLOAD_LINK = cx(
+  "inline-flex min-h-7 items-center justify-center rounded-btn border border-border px-2.5 py-1.5",
+  "bg-linear-to-b from-primary to-primary-700 text-white transition duration-200 hover:-translate-y-0.5",
+);
+
 /** The saved scrapes list while it loads, the same way. */
-export function ScrapesPlaceholder() {
+export function ScrapesPlaceholder({ rows = readLastCount(SCRAPES_COUNT_KEY, 0, MAX_ROWS) }: { rows?: number }) {
+  if (rows > 0)
+    return (
+      <div role="status" aria-label="Loading saved scrapes" aria-busy="true" className={SCRAPE_LIST}>
+        {Array.from({ length: rows }, (_, i) => (
+          <div key={i} aria-hidden="true" data-skeleton-row="" className={SCRAPE_ROW}>
+            <div className={SCRAPE_TEXT}>
+              <span className={SCRAPE_GUILD}>
+                <UsersIcon className="shrink-0 text-accent" />
+                <Skeleton.Text className="truncate" width={NAME_WIDTHS[i % NAME_WIDTHS.length]!} />
+              </span>
+              <Skeleton.Text className={SCRAPE_META} width={190} />
+              <Skeleton.Text className={SCRAPE_DATE} width={110} />
+            </div>
+            <div className={SCRAPE_ACTIONS}>
+              <span className={DOWNLOAD_LINK}>
+                <DownloadIcon />
+              </span>
+              <button type="button" tabIndex={-1} className={DELETE_BUTTON}>
+                <TrashIcon />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   return (
     <div role="status" aria-label="Loading saved scrapes" aria-busy="true" className="px-4 py-6 text-center">
       <p aria-hidden="true" className="m-0 mb-1 text-sm font-semibold">

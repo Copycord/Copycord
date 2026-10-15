@@ -3,21 +3,31 @@
 
 import { useState } from "react";
 import { Button, Card, cx, Input } from "../../components/ui";
+import { useLastCount } from "../../components/ui/lastCount";
 import type { ScraperToken } from "../../types/scraper";
 import type { Confirm, Notify } from "../system/providers";
 import { CheckIcon, KeyIcon, RefreshIcon, TrashIcon, XIcon } from "./icons";
 import { displayMask } from "./mask";
 import { addToken, deleteToken, plural, reason, validateToken } from "./scraperApi";
-import { SC_CARD, TITLE, TITLEBAR, TokenCount, TokenListPlaceholder } from "./ScraperSkeleton";
+import {
+  DELETE_BUTTON,
+  ICON_BUTTON,
+  SC_CARD,
+  TITLE,
+  TITLEBAR,
+  TOKEN_ACTIONS,
+  TOKEN_BADGE,
+  TOKEN_MAIN,
+  TOKEN_MASK,
+  TOKEN_NAME,
+  TOKEN_ROW,
+  TOKEN_TEXT,
+  TokenCount,
+  TOKENS_COUNT_KEY,
+  TokenListPlaceholder,
+} from "./ScraperSkeleton";
 
-export { SC_CARD, TITLE, TITLEBAR };
-
-// .btn.btn-ghost.btn-xs holding a 14px icon.
-export const ICON_BUTTON =
-  "inline-flex min-h-7 cursor-pointer items-center justify-center rounded-btn border border-border bg-[rgba(255,255,255,0.04)] " +
-  "px-2.5 py-1.5 leading-none " +
-  "text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60 " +
-  "enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-55";
+export { ICON_BUTTON, SC_CARD, TITLE, TITLEBAR };
 
 export interface TokensCardProps {
   tokens: ScraperToken[];
@@ -33,6 +43,7 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
   const [label, setLabel] = useState("");
   const [adding, setAdding] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  useLastCount(TOKENS_COUNT_KEY, loading ? undefined : tokens.length);
 
   async function onAdd() {
     const val = value.trim();
@@ -144,16 +155,12 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
           tokens.map((t) => {
             const busy = busyId === t.token_id;
             return (
-              <div
-                key={t.token_id}
-                data-id={t.token_id}
-                className="sc-token-item mb-1.5 flex items-center justify-between gap-2.5 rounded-btn border border-border bg-[rgba(20,11,38,0.4)] px-3 py-2.5 transition-colors duration-200 last:mb-0 hover:border-[rgba(139,92,246,0.25)] hover:bg-[rgba(20,11,38,0.7)]"
-              >
-                <div className="flex min-w-0 items-center gap-2.5">
+              <div key={t.token_id} data-id={t.token_id} className={cx("sc-token-item", TOKEN_ROW)}>
+                <div className={TOKEN_MAIN}>
                   <span
                     title={t.is_valid ? "Valid" : "Invalid"}
                     className={cx(
-                      "inline-flex size-7 shrink-0 items-center justify-center rounded-lg border",
+                      TOKEN_BADGE,
                       t.is_valid
                         ? "border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.15)] text-[#34d399]"
                         : "border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.15)] text-[#f87171]",
@@ -161,12 +168,12 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
                   >
                     {t.is_valid ? <CheckIcon /> : <XIcon />}
                   </span>
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span className="sc-token-name truncate text-[13px] font-semibold text-text">{t.username || t.label || "Unlabeled"}</span>
-                    <span className="sc-token-masked truncate font-mono text-[11px] text-muted">{displayMask(t.masked)}</span>
+                  <div className={TOKEN_TEXT}>
+                    <span className={cx("sc-token-name", TOKEN_NAME)}>{t.username || t.label || "Unlabeled"}</span>
+                    <span className={cx("sc-token-masked", TOKEN_MASK)}>{displayMask(t.masked)}</span>
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-1">
+                <div className={TOKEN_ACTIONS}>
                   <button
                     type="button"
                     className={cx("sc-token-revalidate", ICON_BUTTON)}
@@ -180,7 +187,7 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
                   </button>
                   <button
                     type="button"
-                    className={cx("sc-token-delete", ICON_BUTTON, "enabled:hover:border-danger enabled:hover:text-danger")}
+                    className={cx("sc-token-delete", DELETE_BUTTON)}
                     data-id={t.token_id}
                     title="Delete"
                     aria-label="Delete"

@@ -3,6 +3,7 @@
 // page and LogRow take their shared classes and loading rows from here.
 
 import { cx } from "../../components/ui/cx";
+import { Skeleton } from "../../components/ui/Skeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { LogsIcon } from "./icons";
 import type { SortColumn } from "./model";
@@ -71,15 +72,6 @@ export const DELETE_BTN = cx(
   "hover:bg-[rgba(239,68,68,0.1)] hover:text-[#f87171] disabled:cursor-wait",
 );
 
-/** A shimmer in the line box of the text it stands for: the text's own classes, a fixed width, no text. */
-function Bar({ className, width }: { className: string; width: number }) {
-  return (
-    <span aria-hidden="true" data-skeleton="" className={cx(className, "cc-skeleton inline-block rounded-md")} style={{ width }}>
-      {" "}
-    </span>
-  );
-}
-
 // A timestamp is 19 monospace characters; the type, guild and details widths vary like real rows do.
 const ROW_WIDTHS: Array<[number, number, number]> = [
   [104, 72, 260],
@@ -102,16 +94,16 @@ export function LogsLoadingRows({ rows = LOADING_ROWS }: { rows?: number }) {
           <tr key={i} data-skeleton-row="" className={ROW}>
             <td className={cells.td}>
               {i === 0 ? <span role="status" aria-label="Loading event logs" className="sr-only" /> : null}
-              <Bar className={TIMESTAMP_TEXT} width={137} />
+              <Skeleton.Text className={TIMESTAMP_TEXT} width={137} />
             </td>
             <td className={cells.td}>
-              <Bar className={cx(BADGE, "border-transparent")} width={type} />
+              <Skeleton.Text className={cx(BADGE, "border-transparent")} width={type} />
             </td>
             <td className={cells.guild}>
-              <Bar className={GUILD_TEXT} width={guild} />
+              <Skeleton.Text className={GUILD_TEXT} width={guild} />
             </td>
             <td className={cells.td}>
-              <Bar className={DETAILS_TEXT} width={details} />
+              <Skeleton.Text className={DETAILS_TEXT} width={details} />
             </td>
             <td className={cells.actions}>
               <button type="button" aria-hidden="true" tabIndex={-1} className={DELETE_BTN}>
@@ -127,7 +119,7 @@ export function LogsLoadingRows({ rows = LOADING_ROWS }: { rows?: number }) {
 
 /** The count while the first page loads, in the line box of "Showing 1-50 of 120". */
 export function CountBar() {
-  return <Bar className={COUNT} width={112} />;
+  return <Skeleton.Text className={COUNT} width={112} />;
 }
 
 export function LogsHeader() {

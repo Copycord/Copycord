@@ -2,10 +2,22 @@
 // status pill, the Edit, Enable/Disable, Duplicate and Delete buttons and the
 // per rule forwarded count. Old class names stay as hooks for the e2e specs.
 
-import type { ButtonHTMLAttributes } from "react";
 import { cx } from "../../components/ui";
 import type { ForwardingRule } from "../../types/forwarding";
 import { describeProvider } from "./forwardingApi";
+import {
+  FooterButton,
+  PROVIDER_BADGE,
+  PROVIDER_ICON,
+  RULE_BADGES,
+  RULE_CARD,
+  RULE_FOOTER,
+  RULE_HEADER,
+  RULE_STAT,
+  RULE_TITLE,
+  RULE_TITLE_BOX,
+  STATUS_PILL,
+} from "./ForwardingSkeleton";
 
 const BADGE_TONE: Record<string, string> = {
   pushover: "border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.12)] text-[#f87171]",
@@ -13,7 +25,7 @@ const BADGE_TONE: Record<string, string> = {
   telegram: "border-[rgba(59,130,246,0.35)] bg-[rgba(59,130,246,0.12)] text-[#60a5fa]",
 };
 
-const ICON = "block size-3.5 shrink-0";
+const ICON = PROVIDER_ICON;
 
 export function ProviderIcon({ provider }: { provider: string }) {
   switch (provider) {
@@ -51,35 +63,6 @@ export function ProviderIcon({ provider }: { provider: string }) {
   }
 }
 
-// The old .fwd-card-footer .btn: a 32px ghost button with a 12px label; it grows to fill the
-// wrapped row under 640px and takes the full width under 480px.
-const FOOTER_BUTTON =
-  "inline-flex min-h-8 cursor-pointer items-center justify-center rounded-control border border-border bg-[rgba(255,255,255,0.04)] " +
-  "px-3 py-1.5 text-xs font-semibold leading-none select-none outline-none transition duration-200 " +
-  "focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-55 " +
-  "max-[640px]:flex-auto max-[480px]:w-full";
-
-function FooterButton({
-  danger = false,
-  className,
-  type = "button",
-  ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean }) {
-  return (
-    <button
-      type={type}
-      className={cx(
-        FOOTER_BUTTON,
-        danger
-          ? "text-accent enabled:hover:border-danger enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:hover:text-danger"
-          : "text-accent enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:hover:shadow-soft",
-        className,
-      )}
-      {...rest}
-    />
-  );
-}
-
 export interface RuleCardProps {
   rule: ForwardingRule;
   count: number;
@@ -94,32 +77,19 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
   const enabled = Boolean(rule.enabled);
   const provider = (rule.provider || "").toLowerCase();
   return (
-    <article
-      data-id={rule.rule_id}
-      className={cx(
-        "fwd-card w-full self-start rounded-[14px] border border-border bg-[linear-gradient(180deg,#1f1237,#160b2a)]",
-        "px-[18px] pt-4 pb-3.5 [box-shadow:0_2px_8px_rgba(0,0,0,0.2)] transition duration-200 max-[480px]:p-3.5",
-      )}
-    >
-      <header className="flex items-start justify-between gap-3 max-[640px]:flex-col max-[640px]:gap-2.5">
-        <div className="flex min-h-7 min-w-0 flex-1 items-center">
-          <h3 className="fwd-card-title m-0 line-clamp-1 text-[15px] leading-[1.3] font-semibold text-text">
-            {rule.label}
-          </h3>
+    <article data-id={rule.rule_id} className={cx("fwd-card", RULE_CARD)}>
+      <header className={RULE_HEADER}>
+        <div className={RULE_TITLE_BOX}>
+          <h3 className={cx("fwd-card-title", RULE_TITLE)}>{rule.label}</h3>
         </div>
-        <div className="flex shrink-0 items-center gap-2 max-[640px]:w-full max-[640px]:justify-start">
-          <span
-            className={cx(
-              "inline-flex items-center gap-[5px] rounded-[999px] border px-2.5 py-[3px] text-[11px] font-medium tracking-[0.03em] uppercase",
-              BADGE_TONE[provider] ?? "border-border bg-white/4 text-text-2",
-            )}
-          >
+        <div className={RULE_BADGES}>
+          <span className={cx(PROVIDER_BADGE, BADGE_TONE[provider] ?? "border-border bg-white/4 text-text-2")}>
             <ProviderIcon provider={provider} />
             <span>{describeProvider(provider)}</span>
           </span>
           <span
             className={cx(
-              "inline-flex items-center rounded-[999px] border px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] uppercase",
+              STATUS_PILL,
               enabled
                 ? "border-[rgba(16,185,129,0.4)] bg-[rgba(16,185,129,0.12)] text-good"
                 : "border-[rgba(148,163,184,0.3)] bg-[rgba(148,163,184,0.1)] text-muted",
@@ -130,7 +100,7 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
         </div>
       </header>
 
-      <footer className="mt-3 flex items-center gap-2 pt-3 max-[640px]:flex-wrap max-[480px]:flex-col">
+      <footer className={RULE_FOOTER}>
         <FooterButton className="fwd-edit-btn" onClick={onEdit}>
           Edit
         </FooterButton>
@@ -143,7 +113,7 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
         <FooterButton danger className="fwd-delete-btn" disabled={busy !== null} onClick={onDelete}>
           {busy === "delete" ? "Deleting…" : "Delete"}
         </FooterButton>
-        <div className="ml-auto flex items-center gap-2 text-xs leading-[1.2] opacity-60">
+        <div className={RULE_STAT}>
           <span aria-hidden="true">Forwarded:</span>
           <span
             className="fwd-card-stat-value"

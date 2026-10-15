@@ -7,4 +7,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  // Skeletons size themselves from counts a page stored (components/ui/lastCount.ts): every test starts fresh.
+  localStorage.clear();
 });

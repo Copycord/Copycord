@@ -1,7 +1,7 @@
 // Loading placeholders: a soft light sweep over a surface tinted block (cc-shimmer in styles/tokens.css),
 // a static block under prefers-reduced-motion. Size them like the content they stand in for so nothing
 // moves when the data lands.
-//   <Skeleton.Line width="40%" />  <Skeleton.Block height={118} />  <SkeletonSection rows={3} />
+//   <Skeleton.Line width="40%" />  <Skeleton.Text className="text-xs" width={80} />  <Skeleton.Block height={118} />
 
 import type { CSSProperties, ReactNode } from "react";
 import { cx } from "./cx";
@@ -33,6 +33,23 @@ function Base({ width, height, rounded = "rounded-md", className, style }: Skele
 /** One line of text; the height is the line box of a 14 px text by default. */
 function Line({ width = "100%", height = 12, className, ...rest }: SkeletonProps) {
   return <Base width={width} height={height} rounded="rounded-full" className={cx("my-1", className)} {...rest} />;
+}
+
+/**
+ * A bar in the line box of the text it stands for: pass the text's own classes (font size, line height,
+ * truncate) and a width, so the bar sits where the text will and the row keeps its height.
+ */
+function Text({ className, width, style }: { className?: string; width: Size; style?: CSSProperties }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-skeleton=""
+      className={cx(className, "cc-skeleton inline-block rounded-md text-transparent")}
+      style={{ width: px(width), ...style }}
+    >
+      {" "}
+    </span>
+  );
 }
 
 /** A filled block (thumbnail, button, chart). */
@@ -83,7 +100,7 @@ function Row({ cols = 3, height = 40, className }: { cols?: number; height?: Siz
   );
 }
 
-export const Skeleton = Object.assign(Base, { Line, Block, Card, Row });
+export const Skeleton = Object.assign(Base, { Line, Text, Block, Card, Row });
 
 /** Card body while it loads: an optional header line, then `rows` rows. Announced once as busy. */
 export function SkeletonSection({

@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { Button, Card } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
+import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
 import type { StatusGateState } from "../hooks/useStatusGate";
 import { ApiError, errorText } from "../lib/api";
@@ -29,7 +30,7 @@ import {
   toCount,
 } from "./forwarding/forwardingApi";
 import { RuleCard } from "./forwarding/RuleCard";
-import { FWD_LIST, FWD_SEARCH, FWD_TOOLBAR, RuleSkeletons } from "./forwarding/ForwardingSkeleton";
+import { FWD_EMPTY, FWD_LIST, FWD_SEARCH, FWD_TOOLBAR, RULES_COUNT_KEY, RuleSkeletons } from "./forwarding/ForwardingSkeleton";
 import { RuleModal } from "./forwarding/RuleModal";
 
 export { ForwardingSkeleton } from "./forwarding/ForwardingSkeleton";
@@ -141,6 +142,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
   }
 
   const empty = loaded && items.length === 0;
+  useLastCount(RULES_COUNT_KEY, rules.data ? items.length : undefined);
 
   return (
     <div id="fwd-root" className="forwarding-page w-full">
@@ -154,7 +156,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
             <div
               id="forwarding-empty"
               hidden={!empty}
-              className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center"
+              className={FWD_EMPTY}
             >
               <svg
                 className="size-12 text-accent"
