@@ -5,7 +5,8 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";
-import { Card, cx, SkeletonSection } from "../components/ui";
+import { Card } from "../components/ui";
+import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
 import { errorText } from "../lib/api";
 import type { BackupInfo } from "../types/system";
@@ -19,16 +20,28 @@ import {
 } from "./system/backupApi";
 import { CHEV, CHEV_BUTTON, GhostButton, LinkButton } from "./system/buttons";
 import { archiveLabel, fmtBackupWhen, fmtBytes, NO_VALUE, SHRUG } from "./system/format";
-import { ARCHIVES_TABLE, ARCHIVES_WRAP, DB_CARD, DB_HEADER, DB_TITLE, LastBackupPending } from "./system/SystemSkeleton";
+import {
+  ACTIONS_CELL,
+  ARCHIVES_COUNT_KEY,
+  ARCHIVES_TABLE,
+  ARCHIVES_WRAP,
+  ArchiveRowsLoading,
+  ArchivesHead,
+  CELL,
+  DB_CARD,
+  DB_HEADER,
+  DB_TITLE,
+  LastBackupPending,
+  NAME_CODE,
+  NOWRAP_CELL,
+  PANEL_ACTIONS,
+  ROW_ACTIONS,
+  ROW_BUTTON,
+} from "./system/SystemSkeleton";
 import { useNotify, useSafeConfirm } from "./system/providers";
 
 /** The archive list scrolls once it has more rows than this. */
 export const VISIBLE_ROWS = 5;
-
-// Narrow screens let the columns size to their content and stack the row buttons.
-const HEAD = "px-1.5 py-2.5 font-semibold text-accent md:px-2";
-const CELL = "border-b border-border px-1.5 py-2.5 md:px-2";
-const ROW_BUTTON = "max-md:min-h-[34px] max-md:px-3";
 
 const INTERACTIVE = 'a,button,input,select,textarea,label,[role="button"],[contenteditable]';
 
@@ -59,6 +72,7 @@ export function System() {
   const archives = data?.ok ? data.archives : undefined;
   const latest = archives?.[0];
   const lastBackup = archives ? (latest ? fmtBackupWhen(latest.mtime) : SHRUG) : NO_VALUE;
+  useLastCount(ARCHIVES_COUNT_KEY, archives?.length);
 
   // Show at most VISIBLE_ROWS rows and scroll the rest, measured like the old page.
   useLayoutEffect(() => {
@@ -212,7 +226,7 @@ export function System() {
         </div>
 
         <div id="adv-collapse-panel" className="mt-1.5">
-          <div className="flex flex-wrap gap-2" hidden={!open}>
+          <div className={PANEL_ACTIONS} hidden={!open}>
             <GhostButton id="adv-backup-now" loading={backingUp} onClick={() => void onBackupNow()}>
               Backup now
             </GhostButton>
@@ -249,39 +263,22 @@ export function System() {
               id="adv-archives"
               className={ARCHIVES_TABLE}
             >
-              <thead hidden={!open}>
-                <tr>
-                  <th scope="col" className={HEAD}>Name</th>
-                  <th scope="col" className={HEAD}>Size</th>
-                  <th scope="col" className={HEAD}>Time</th>
-                  <th scope="col" className={cx(HEAD, "pr-4 text-right md:w-[330px]")}>
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
+              <ArchivesHead hidden={!open} />
               <tbody hidden={!open}>
-                {data === undefined && !error
-                  ? [0, 1, 2].map((i) => (
-                      <tr key={i} data-testid="adv-archive-skeleton">
-                        <td colSpan={4} className={CELL}>
-                          <SkeletonSection rows={1} rowHeight={20} label="Loading backups" />
-                        </td>
-                      </tr>
-                    ))
-                  : null}
+                {data === undefined && !error ? <ArchiveRowsLoading /> : null}
                 {archives?.map((a) => {
                   const busy = rowBusy?.name === a.name ? rowBusy.action : null;
                   return (
                     <tr key={a.name} data-archive={a.name}>
                       <td className={CELL}>
-                        <code title={a.name} className="font-mono text-[13px] break-all">
+                        <code title={a.name} className={NAME_CODE}>
                           {archiveLabel(a.name)}
                         </code>
                       </td>
-                      <td className={cx(CELL, "whitespace-nowrap")}>{fmtBytes(a.size)}</td>
-                      <td className={cx(CELL, "whitespace-nowrap")}>{fmtBackupWhen(a.mtime)}</td>
-                      <td className={cx(CELL, "pr-4 text-right")}>
-                        <span className="inline-flex flex-col items-end gap-2 md:flex-row md:whitespace-nowrap">
+                      <td className={NOWRAP_CELL}>{fmtBytes(a.size)}</td>
+                      <td className={NOWRAP_CELL}>{fmtBackupWhen(a.mtime)}</td>
+                      <td className={ACTIONS_CELL}>
+                        <span className={ROW_ACTIONS}>
                           <LinkButton href={downloadUrl(a.name)} download className={ROW_BUTTON}>
                             Download
                           </LinkButton>

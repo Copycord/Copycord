@@ -6,11 +6,12 @@
 
 import type { ReactNode } from "react";
 import { Skeleton, cx } from "../../components/ui";
+import { readLastCount } from "../../components/ui/lastCount";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { FIELD_TIPS } from "./config/model";
 import { PromoCards } from "./config/PromoCards";
 import { EyeIcon, FIELD_INPUT, FIELD_REVEAL } from "./config/TokenInput";
-import { NewMappingIcon } from "./mappings/icons";
+import { CloneIcon, FiltersIcon, NewMappingIcon, PauseIcon, SettingsIcon, TrashIcon } from "./mappings/icons";
 import { NotifFields } from "./notify/NotifFields";
 import { SyncFields } from "./notify/SyncFields";
 import {
@@ -58,9 +59,6 @@ import {
 } from "./proxy/chrome";
 import { ProxyChips } from "./proxy/ProxyChips";
 import { PROXY_CARD_OPEN_KEY } from "./proxy/model";
-
-/** One placeholder tile while the list loads; the count is unknown until it lands. */
-export const MAPPING_SKELETONS = 1;
 
 const noop = () => undefined;
 
@@ -173,9 +171,56 @@ export function GlobalConfigLoading() {
   );
 }
 
-/** One mapping tile while the list loads. */
+// One mapping tile (.guild-card): avatar, name and host line, then the Settings, Filters, status, Clone and
+// Delete buttons. MappingCard and the loading tile share these, so both have the same boxes.
+export const MAPPING_CARD =
+  "relative flex min-w-0 flex-col items-stretch overflow-hidden rounded-xl border p-3 text-left text-text [box-shadow:0_4px_12px_rgba(0,0,0,0.4)] transition max-[600px]:min-h-[110px]";
+export const MAPPING_INNER = "flex h-full w-full flex-col items-stretch gap-0.5";
+export const MAPPING_HEADER = "flex items-center gap-2.5";
+export const MAPPING_AVATAR = "size-9 min-w-9 shrink-0 rounded-[50%] object-cover";
+export const MAPPING_INFO = "min-w-0 flex-1";
+export const MAPPING_NAME =
+  "line-clamp-2 w-full min-w-0 flex-auto text-[13px] leading-[1.3] font-semibold wrap-break-word whitespace-normal";
+export const MAPPING_ROUTE = "mt-px truncate text-[11px] text-muted opacity-70";
+export const MAPPING_ACTIONS = "mt-auto flex gap-1.5 border-t border-t-border pt-2";
+export const MAPPING_ICON_BTN =
+  "inline-flex size-7 min-h-7 cursor-pointer items-center justify-center rounded-md border-0 bg-[rgba(255,255,255,0.04)] p-0 text-xs leading-none " +
+  "text-muted transition hover:bg-[rgba(167,139,250,0.12)] hover:text-accent active:translate-y-px disabled:cursor-default disabled:opacity-50 [&_svg]:block";
+
+/** As many tiles as the list had last time; one on a first visit, the common case. */
+export const MAPPINGS_COUNT_KEY = "dashboard.mappings";
+export const mappingSkeletons = () => readLastCount(MAPPINGS_COUNT_KEY, 1, 12);
+
+/** One mapping tile while the list loads: MappingCard's boxes and buttons, bars on the name and host line. */
 export function MappingTileSkeleton() {
-  return <Skeleton.Card height="auto" testId="mapping-skeleton" className="min-h-[150px]" />;
+  return (
+    <div data-testid="mapping-skeleton" aria-hidden="true" data-skeleton-row="" className={cx(MAPPING_CARD, "border-border bg-card")}>
+      <div className={MAPPING_INNER}>
+        <div className={MAPPING_HEADER}>
+          <span data-skeleton="" className={cx(MAPPING_AVATAR, "cc-skeleton")} />
+          <div className={MAPPING_INFO}>
+            <div className={MAPPING_NAME}>
+              <Skeleton.Text width={110} />
+            </div>
+            <div className={MAPPING_ROUTE}>
+              <Skeleton.Text width={130} />
+            </div>
+          </div>
+        </div>
+        <div className={MAPPING_ACTIONS}>
+          {[SettingsIcon, FiltersIcon, PauseIcon, CloneIcon].map((Icon, i) => (
+            <button key={i} type="button" tabIndex={-1} className={MAPPING_ICON_BTN}>
+              <Icon />
+            </button>
+          ))}
+          <span className="flex-1" />
+          <button type="button" tabIndex={-1} className={MAPPING_ICON_BTN}>
+            <TrashIcon />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** The Cloning Configuration hint, search box, tile grid and Add tile, shared with the loaded card. */
@@ -275,7 +320,7 @@ export function DashboardSkeleton() {
             <span inert className={NEW_MAPPING_TILE}>
               <NewMappingPlus />
             </span>
-            {Array.from({ length: MAPPING_SKELETONS }, (_, i) => (
+            {Array.from({ length: mappingSkeletons() }, (_, i) => (
               <MappingTileSkeleton key={i} />
             ))}
           </div>

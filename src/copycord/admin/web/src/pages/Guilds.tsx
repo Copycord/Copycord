@@ -6,6 +6,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Card } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
+import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
 import { useStatusGate } from "../hooks/useStatusGate";
 import type { GuildListResponse, GuildSummary } from "../types/guilds";
@@ -15,7 +16,15 @@ import { GuildCard } from "./guilds/GuildCard";
 import { GuildDetailsDialog } from "./guilds/GuildDetailsDialog";
 import { sortLabel, visibleGuilds } from "./guilds/model";
 import type { Point, SortDir } from "./guilds/model";
-import { CONTROLS, GuildTileSkeletons, GuildsTitle, SEARCH_INPUT, SORT_BTN } from "./guilds/GuildsSkeleton";
+import {
+  CONTROLS,
+  GUILD_GRID,
+  GUILDS_COUNT_KEY,
+  GuildTileSkeletons,
+  GuildsTitle,
+  SEARCH_INPUT,
+  SORT_BTN,
+} from "./guilds/GuildsSkeleton";
 
 export { GuildsSkeleton } from "./guilds/GuildsSkeleton";
 
@@ -51,6 +60,7 @@ export function Guilds() {
   };
 
   const loaded = data !== undefined;
+  useLastCount(GUILDS_COUNT_KEY, data ? (data.items ?? []).length : undefined);
 
   return (
     <>
@@ -66,7 +76,6 @@ export function Guilds() {
                 placeholder="Search guilds…"
                 aria-label="Search guilds"
                 value={query}
-                hidden={!booted}
                 onChange={(e) => setQuery(e.target.value)}
                 className={SEARCH_INPUT}
               />
@@ -75,7 +84,6 @@ export function Guilds() {
                 type="button"
                 aria-label="Toggle sort direction"
                 aria-pressed={dir === "desc"}
-                hidden={!booted}
                 onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))}
                 className={SORT_BTN}
               >
@@ -88,14 +96,15 @@ export function Guilds() {
             id="guilds-root"
             aria-live="polite"
             hidden={!booted}
-            className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4"
+            aria-busy={(loading && loaded) || undefined}
+            className={GUILD_GRID}
           >
             {guilds.map((g) => (
               <GuildCard key={g.id} guild={g} menuOpen={menu?.guild.id === g.id} onOpenMenu={openMenu} />
             ))}
           </div>
 
-          {loading && !loaded ? <GuildTileSkeletons /> : null}
+          {!loaded && !error ? <GuildTileSkeletons /> : null}
 
           {error && !loaded ? (
             <div role="alert" className="flex flex-wrap items-center gap-3 px-2.5 py-2 text-sm text-muted">

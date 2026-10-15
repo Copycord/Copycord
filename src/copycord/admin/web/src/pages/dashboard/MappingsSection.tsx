@@ -5,9 +5,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { cx } from "../../components/ui";
+import { writeLastCount } from "../../components/ui/lastCount";
 import {
   MAPPING_GRID,
-  MAPPING_SKELETONS,
+  MAPPINGS_COUNT_KEY,
+  mappingSkeletons,
   MAPPINGS_HINT,
   MAPPINGS_HINT_TEXT,
   MAPPINGS_SEARCH,
@@ -48,7 +50,9 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
 
   const refresh = useCallback(async () => {
     try {
-      setMappings(await fetchMappings());
+      const list = await fetchMappings();
+      setMappings(list);
+      writeLastCount(MAPPINGS_COUNT_KEY, list.length);
     } catch {
       // The list keeps its last state.
     } finally {
@@ -142,7 +146,7 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
             <NewMappingPlus />
           </button>
           {!loaded
-            ? Array.from({ length: MAPPING_SKELETONS }, (_, i) => <MappingTileSkeleton key={i} />)
+            ? Array.from({ length: mappingSkeletons() }, (_, i) => <MappingTileSkeleton key={i} />)
             : null}
           {shown.map((m) => (
             <MappingCard

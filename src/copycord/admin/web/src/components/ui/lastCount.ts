@@ -49,3 +49,12 @@ function useLastStored(key: string, value: string | undefined): void {
     }
   }, [key, value]);
 }
+
+/** Stores a count outside render, for lists that load in a callback. */
+export function writeLastCount(key: string, count: number): void {
+  try {
+    localStorage.setItem(PREFIX + key, String(count));
+  } catch {
+    // As above.
+  }
+}

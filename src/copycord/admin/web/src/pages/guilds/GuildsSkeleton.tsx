@@ -1,9 +1,10 @@
-// The Guilds page while its chunk downloads: the same card, title and control row as the page at first
-// paint (the search and the sort button wait for the gate), as inert chrome, and the guild tiles it shows
-// while the list loads. Kept out of Guilds.tsx so the app shell can show it without the page chunk; the
-// page takes its shared classes and the loading tiles from here.
+// The Guilds page while its chunk downloads: the same card, title and control row (search and sort) as
+// the page, as inert chrome, and the guild tiles it shows while the list loads. Kept out of Guilds.tsx
+// so the app shell can show it without the page chunk; the page and GuildCard take their shared classes
+// and the loading tiles from here.
 
-import { Card, Skeleton } from "../../components/ui";
+import { Card, Skeleton, cx } from "../../components/ui";
+import { readLastCount } from "../../components/ui/lastCount";
 import { StatusGate } from "../../components/ui/StatusGate";
 import { useStatusGate } from "../../hooks/useStatusGate";
 import { CONTROLS, SEARCH_INPUT } from "../channels/ChannelsSkeleton";
@@ -17,6 +18,17 @@ export const SORT_BTN =
   "text-[13px] leading-none font-semibold text-text outline-none hover:border-[#7c5cff] hover:shadow-[0_0_0_0.25px_#7c5cff] " +
   "focus-visible:border-accent focus-visible:shadow-[0_0_0_4px_rgba(167,139,250,0.18)]";
 
+export const GUILD_GRID = "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4";
+
+// One tile (.guild-card): the 96 px icon frame, then the name line. GuildCard and the loading tiles share these.
+export const GUILD_CARD =
+  "relative flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-border bg-card p-3 text-left text-text " +
+  "[box-shadow:0_4px_12px_rgba(0,0,0,0.4)]";
+export const GUILD_BODY = "block w-full min-w-0 border-0 bg-transparent p-0 text-left font-sans text-base text-text";
+export const ICON_FRAME =
+  "mx-auto mt-1.5 mb-2.5 grid size-24 place-items-center rounded-[20px] border border-[rgba(255,255,255,0.06)]";
+export const GUILD_NAME = "mb-2.5 flow-root max-w-full truncate font-semibold";
+
 /** The old visible h2, still the page's top heading. */
 export function GuildsTitle() {
   return (
@@ -26,16 +38,23 @@ export function GuildsTitle() {
   );
 }
 
-/** Guild tiles while the list loads, shared with the page. */
-export function GuildTileSkeletons() {
+// As many tiles as the grid had last time, eight on a first visit.
+export const GUILDS_COUNT_KEY = "guilds.list";
+const NAME_WIDTHS = [96, 120, 76, 108];
+
+/** Guild tiles while the list loads, shared with the page: the tile's boxes, a block on the icon, a bar on the name. */
+export function GuildTileSkeletons({ rows = readLastCount(GUILDS_COUNT_KEY, 8, 24) }: { rows?: number }) {
   return (
-    <div role="status" aria-label="Loading guilds" aria-busy="true" className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
-      {Array.from({ length: 8 }, (_, i) => (
-        // The .guild-card box: 96 px icon tile, then the name line.
-        <div key={i} aria-hidden="true" className="flex flex-col items-center rounded-[12px] border border-border bg-card p-3">
-          <Skeleton.Block width={96} height={96} rounded="rounded-[20px]" className="mt-1.5 mb-2.5" />
-          <Skeleton.Line width="60%" height={14} className="mt-[3px] mb-[12px]" />
-        </div>
+    <div role="status" aria-label="Loading guilds" aria-busy="true" className={GUILD_GRID}>
+      {Array.from({ length: rows }, (_, i) => (
+        <article key={i} aria-hidden="true" data-skeleton-row="" className={GUILD_CARD}>
+          <span className={GUILD_BODY}>
+            <span data-skeleton="" className={cx(ICON_FRAME, "cc-skeleton border-transparent")} />
+            <span className={GUILD_NAME}>
+              <Skeleton.Text width={NAME_WIDTHS[i % NAME_WIDTHS.length]!} />
+            </span>
+          </span>
+        </article>
       ))}
     </div>
   );
@@ -50,12 +69,13 @@ export function GuildsSkeleton() {
         <header className="mb-1.5 block gap-3">
           <GuildsTitle />
           <span inert className={CONTROLS}>
-            <input type="text" placeholder="Search guilds…" aria-label="Search guilds" hidden className={SEARCH_INPUT} />
-            <button type="button" hidden className={SORT_BTN}>
+            <input type="text" placeholder="Search guilds…" aria-label="Search guilds" readOnly className={SEARCH_INPUT} />
+            <button type="button" className={SORT_BTN}>
               {sortLabel("asc")}
             </button>
           </span>
         </header>
+        <GuildTileSkeletons />
       </Card>
     </StatusGate>
   );

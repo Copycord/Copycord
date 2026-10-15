@@ -7,8 +7,8 @@ import { CSRF_HEADER, resetLoginRedirect } from "../lib/api";
 import type { StatusResponse, VersionInfo } from "../types/dashboard";
 import { holdFetch } from "../test/holdFetch";
 import { Dashboard, DashboardSkeleton } from "./Dashboard";
-import { MAPPING_SKELETONS } from "./dashboard/DashboardSkeleton";
 import { appendCapped, formatUptime, mergeStatus, parseLogData, statusFromWs } from "./dashboard/model";
+import { mappingSkeletons } from "./dashboard/DashboardSkeleton";
 
 class FakeSocket {
   static OPEN = 1;
@@ -394,7 +394,7 @@ describe("Dashboard loading", () => {
     server({ "/api/guild-mappings": () => json({ mappings: [] }) });
     const release = holdFetch("/api/guild-mappings");
     renderPage();
-    expect(await screen.findAllByTestId("mapping-skeleton")).toHaveLength(MAPPING_SKELETONS);
+    expect(await screen.findAllByTestId("mapping-skeleton")).toHaveLength(mappingSkeletons());
     expect(document.getElementById("new-mapping-card")).not.toBeNull();
     release();
     await waitFor(() => expect(screen.queryByTestId("mapping-skeleton")).toBeNull());
@@ -407,7 +407,7 @@ describe("Dashboard loading", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Configuration" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Bots" })).toBeInTheDocument();
     expect(screen.getAllByTestId("card-skeleton")).toHaveLength(6);
-    expect(screen.getAllByTestId("mapping-skeleton")).toHaveLength(MAPPING_SKELETONS);
+    expect(screen.getAllByTestId("mapping-skeleton")).toHaveLength(mappingSkeletons());
     const skelShape = shape(screen.getByRole("heading", { level: 1, name: "Configuration" }).parentElement!);
     skel.unmount();
     server({});
