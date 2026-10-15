@@ -100,6 +100,8 @@ class RunContext:
         self._publish = publish
         self._clock = clock
         self.cancelled = asyncio.Event()
+        # Why the service cancelled the run itself ("Bots stopped"); None for a user cancel.
+        self.cancel_note: Optional[str] = None
         self.failure: Optional[str] = None
         self._steps: dict[str, Step] = {}
         self._dirty_steps: set[str] = set()
@@ -184,12 +186,14 @@ class RunContext:
         self._write(now)
         await self._emit(now)
 
-    def _settle_steps(self, state: str) -> None:
-        """Steps still queued or running when the run ends take the run's outcome."""
+    def _settle_steps(self, state: str, note: Optional[str] = None) -> None:
+        """Steps still queued or running when the run ends take the run's outcome (and note)."""
         stamp = iso(self._clock())
         for step in self._steps.values():
             if step.data["state"] in ("queued", "running"):
                 step.data.update(state=state, label=None, queue_position=None, finished_at=stamp)
+                if note is not None:
+                    step.data["note"] = note
                 self._dirty_steps.add(step.key)
 
     def close(self) -> None:

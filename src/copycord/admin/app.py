@@ -565,6 +565,9 @@ class BusHub:
             asyncio.ensure_future(
                 self._check_notifications(kind, role, payload or {}, prev)
             )
+            # Sent by the role's _shutdown, whatever tore it down (stop, crash, signal).
+            if (payload or {}).get("status") == "Stopped" and not payload.get("running"):
+                asyncio.ensure_future(_stop_task_runs())
 
         elif kind in ("proxies_dead", "token_dead"):
             asyncio.ensure_future(
@@ -1803,6 +1806,7 @@ async def start_all(request: Request):
 @app.post("/stop")
 async def stop_all(request: Request):
     LOGGER.info("POST /stop requested")
+    await _stop_task_runs()
     await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
     await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
 
@@ -1921,6 +1925,21 @@ async def _startup_tasks():
             LOGGER.info("Tasks: %d interrupted runs marked failed", recovered)
     except Exception:
         LOGGER.exception("Tasks: recover failed")
+
+
+async def _stop_task_runs() -> None:
+    """The bots are going down: active task runs end cancelled ("Bots stopped") now. Their jobs
+    die with the client and server, so no frame would ever end them."""
+    service = task_routes.get_service()
+    if service is None:
+        return
+    try:
+        stopped = await service.stop_all()
+    except Exception:
+        LOGGER.exception("Tasks: cancelling runs for the bot stop failed")
+        return
+    if stopped:
+        LOGGER.info("Tasks: bots stopped, %d run(s) cancelled", len(stopped))
 
 
 @_on_shutdown
@@ -2431,6 +2450,7 @@ async def backup_restore(
             f.write(await file.read())
 
     try:
+        await _stop_task_runs()
         await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
         await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
     except Exception as e:

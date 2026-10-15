@@ -503,7 +503,8 @@ async def run(ctx: Any, inputs: BackfillInputs) -> None:
             cid = job.channel_id
             if ctx.cancelled.is_set():
                 # Cancelled while the jobs were being handed out: the rest never reach the client.
-                await job.step.finish("cancelled", "Cancelled")
+                if not job.terminal:
+                    await job.step.finish("cancelled", ctx.cancel_note or "Cancelled")
                 job.result["finished_at"] = job.step.data["finished_at"]
                 job.done.set()
                 continue
@@ -596,15 +597,18 @@ async def _wait_jobs(ctx: Any, jobs: list[_Job]) -> None:
         if all_done.done():
             return
         live = [j for j in jobs if not j.terminal]
-        await ctx.log(f"Cancelling {len(live)} job{'s' if len(live) != 1 else ''}", level="warning")
-        # The client stops pulling (or drops a queued job) and tells the server, which stops
-        # forwarding; each job then ends with backfill_job_end and what it delivered.
-        for job in live:
-            await _send({"type": "backfill_cancel", "data": {"job_id": job.job_id}})
-        try:
-            await asyncio.wait_for(asyncio.shield(all_done), timeout=CANCEL_WAIT)
-        except asyncio.TimeoutError:
-            pass
+        # Bots stopped (ctx.cancel_note): the service already ended the steps and no client is
+        # left to tell or to send an end, so nothing is sent and nothing waited for.
+        if live and ctx.cancel_note is None:
+            await ctx.log(f"Cancelling {len(live)} job{'s' if len(live) != 1 else ''}", level="warning")
+            # The client stops pulling (or drops a queued job) and tells the server, which stops
+            # forwarding; each job then ends with backfill_job_end and what it delivered.
+            for job in live:
+                await _send({"type": "backfill_cancel", "data": {"job_id": job.job_id}})
+            try:
+                await asyncio.wait_for(asyncio.shield(all_done), timeout=CANCEL_WAIT)
+            except asyncio.TimeoutError:
+                pass
         for job in jobs:
             if not job.terminal:
                 job.result["delivered"] = job.delivered

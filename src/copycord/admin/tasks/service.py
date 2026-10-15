@@ -36,6 +36,9 @@ ACTIVE = ("queued", "running")
 FINAL = ("success", "failed", "cancelled")
 CANCEL_GRACE = 30.0
 INTERRUPTED = "Interrupted by restart"
+BOTS_STOPPED = "Bots stopped"
+# App shutdown: how long stopped runners get to write their report before they are cancelled.
+SHUTDOWN_WAIT = 1.0
 
 
 def _ids_to_str(value: Any, key: str = "") -> Any:
@@ -322,12 +325,13 @@ class TaskService:
             self._active.pop(run.id, None)
             ctx.close()
 
-    async def _finish(self, ctx: RunContext, outcome: str, error: Optional[str]) -> None:
+    async def _finish(self, ctx: RunContext, outcome: str, error: Optional[str],
+                      note: Optional[str] = None) -> None:
         run = ctx.run
         if run.status in FINAL:
             return
         if outcome != "success":
-            ctx._settle_steps(outcome)
+            ctx._settle_steps(outcome, note)
         run.status = outcome
         run.error = error
         run.finished_at = iso(self._clock())
@@ -366,6 +370,24 @@ class TaskService:
                 await self._finish(ctx, "cancelled", None)
         finally:
             self._watchdogs.pop(ctx.run.id, None)
+
+    async def stop_all(self, note: str = BOTS_STOPPED) -> list[TaskRun]:
+        """The bots went down: every queued and running run ends cancelled now, its open steps
+        noted, instead of waiting on frames that will never come. Each runner still sees the
+        cancel and unwinds (a report it writes lands on the ended run); one still going after
+        the grace period is cancelled by force."""
+        stopped: list[TaskRun] = []
+        for run_id, (ctx, task) in list(self._active.items()):
+            if ctx.run.status in FINAL:
+                continue
+            ctx.cancel_note = note
+            ctx.cancelled.set()
+            await ctx.log(note, level="warning")
+            await self._finish(ctx, "cancelled", None, note)
+            if run_id not in self._watchdogs and not task.done():
+                self._watchdogs[run_id] = asyncio.ensure_future(self._grace_period(ctx, task))
+            stopped.append(ctx.run)
+        return stopped
 
     # reading
 
@@ -410,7 +432,12 @@ class TaskService:
                 fixed += 1
 
     async def shutdown(self) -> None:
-        """Stop every active run (app shutdown); recover() marks them on next boot otherwise."""
+        """App shutdown: the bots go with it, so every active run ends cancelled (stop_all), its
+        runner gets SHUTDOWN_WAIT to finish and is then cancelled."""
+        await self.stop_all()
+        runners = [task for _, task in self._active.values()]
+        if runners:
+            await asyncio.wait(runners, timeout=SHUTDOWN_WAIT)
         tasks = [task for _, task in self._active.values()] + list(self._watchdogs.values())
         for task in tasks:
             task.cancel()
@@ -420,5 +447,5 @@ class TaskService:
 
 __all__ = (
     "TaskRun", "RunRepo", "RunFinished", "MemoryRunRepo",
-    "TaskService", "TaskCancelled", "INTERRUPTED", "CANCEL_GRACE", "LOG_KEEP",
+    "TaskService", "TaskCancelled", "INTERRUPTED", "BOTS_STOPPED", "CANCEL_GRACE", "LOG_KEEP",
 )
