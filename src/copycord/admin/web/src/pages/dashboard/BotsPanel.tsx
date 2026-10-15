@@ -1,7 +1,8 @@
 // The Bots card from index.html: server and client state, uptime and status
 // note, Start/Stop, and the per bot log buttons. State comes from /api/status
 // on load, on the useStatusPoll schedule and after Start/Stop, and from the
-// status pushes on /ws/ui in between.
+// status pushes on /ws/ui in between. Uptime counts from each bot's start time,
+// which a report only moves when it is more than 2 s off.
 
 import { useCallback, useEffect, useState } from "react";
 import { Spinner, cx, useReveal } from "../../components/ui";
@@ -31,6 +32,31 @@ import { useStatusPoll } from "./useStatusPoll";
 
 const ROLES: Array<{ role: BotRole; label: string }> = BOT_ROLES;
 
+/** A report moves the held start only when it is further off than this (a restart, real drift). */
+export const UPTIME_DRIFT_MS = 2000;
+
+/**
+ * When a bot started (ms, wall clock), from the uptime_sec it reported at `at`. Polls and pushes
+ * each read the uptime at a slightly different moment, so the held start stays unless the report
+ * puts it more than UPTIME_DRIFT_MS away; the counter then never jumps on a report.
+ */
+export function uptimeStart(held: number | null, uptimeSec: number, at: number): number {
+  const start = at - uptimeSec * 1000;
+  return held != null && Math.abs(start - held) <= UPTIME_DRIFT_MS ? held : start;
+}
+
+/** The whole seconds since `start`, drawn again right as each one passes: one step a second. */
+function Uptime({ start }: { start: number }) {
+  const [, redraw] = useState(0);
+  const elapsed = Date.now() - start;
+  useEffect(() => {
+    const into = (((Date.now() - start) % 1000) + 1000) % 1000;
+    const id = setTimeout(() => redraw((n) => n + 1), 1000 - into);
+    return () => clearTimeout(id);
+  });
+  return <>{formatUptime(Math.max(0, Math.floor(elapsed / 1000)))}</>;
+}
+
 export interface BotsPanelProps {
   onViewLogs: (which: LogStream) => void;
   /** Fires with whether any bot is running, so the mapping cards can lock. */
@@ -49,9 +75,8 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
   const reveal = useReveal(loaded);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Record<BotRole, boolean>>({ server: false, client: false });
-  // When each row's uptime was reported, so it counts up between reports like the old page.
-  const [stamps, setStamps] = useState<Record<BotRole, number>>({ server: 0, client: 0 });
-  const [now, setNow] = useState(() => Date.now());
+  // When each bot started, from its reported uptime, so the row counts up between reports.
+  const [starts, setStarts] = useState<Record<BotRole, number | null>>({ server: null, client: null });
 
   const refresh = useCallback(async (): Promise<PollResult> => {
     try {
@@ -65,11 +90,11 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
       };
       setStatuses((s) => ({ server: mergeStatus(s.server, patch("server")), client: mergeStatus(s.client, patch("client")) }));
       const t = Date.now();
-      setStamps((old) => ({
-        server: fresh.server.uptime_sec != null ? t : old.server,
-        client: fresh.client.uptime_sec != null ? t : old.client,
-      }));
-      setNow(t);
+      const start = (role: BotRole, held: number | null) => {
+        const up = fresh[role].uptime_sec;
+        return up == null ? held : uptimeStart(held, up, t);
+      };
+      setStarts((old) => ({ server: start("server", old.server), client: start("client", old.client) }));
       return statusHealthy(res) ? "ok" : "degraded";
     } catch {
       // The table keeps its last state; the websocket fills it in.
@@ -93,8 +118,8 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
       // Pushes carry only some fields (the bots' status note has no uptime): merge, never replace.
       setStatuses((s) => ({ ...s, [update.role]: mergeStatus(s[update.role], update.status) }));
       setLoaded(true);
-      if (update.status.uptime_sec != null) setStamps((t) => ({ ...t, [update.role]: Date.now() }));
-      setNow(Date.now());
+      const up = update.status.uptime_sec;
+      if (up != null) setStarts((t) => ({ ...t, [update.role]: uptimeStart(t[update.role], up, Date.now()) }));
     },
     { WebSocketImpl },
   );
@@ -104,12 +129,6 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
   useEffect(() => {
     onRunningChange?.(running);
   }, [running, onRunningChange]);
-
-  useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [running]);
 
   const toggle = async () => {
     setBusy(true);
@@ -143,6 +162,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
           <tbody id="runtime-body">
             {ROLES.map(({ role, label }) => {
               const s = statuses[role];
+              const start = starts[role];
               const note = displayStatus(s.status);
               return (
                 <tr key={role}>
@@ -160,9 +180,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                     )}
                   </td>
                   <td id={`${role}-uptime`} className={cx(CELL, "text-center")}>
-                    {s.running && s.uptime_sec != null
-                      ? formatUptime(s.uptime_sec + Math.max(0, Math.floor((now - stamps[role]) / 1000)))
-                      : ""}
+                    {s.running && s.uptime_sec != null && start != null ? <Uptime start={start} /> : ""}
                   </td>
                   <td className={cx(CELL, "text-center")}>
                     <span
