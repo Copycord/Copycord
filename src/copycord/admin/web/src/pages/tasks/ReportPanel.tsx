@@ -8,7 +8,7 @@ import { cx } from "../../components/ui/cx";
 import { ACTIVE_STATUSES } from "../../types/tasks";
 import type { TaskRun } from "../../types/tasks";
 import { runUrl } from "./runStore";
-import { FRAME } from "./TasksSkeleton";
+import { FRAME, REPORT_SUMMARY, ReportSummaryText } from "./TasksSkeleton";
 
 export function reportUrl(id: string): string {
   return `${runUrl(id)}/report.json`;
@@ -47,11 +47,8 @@ export function ReportPanel({ run }: { run: TaskRun }) {
   return (
     <section aria-label="Report">
       <details className={cx(FRAME, "group")}>
-        <summary className="cursor-pointer list-none px-4 py-2.5 text-sm font-semibold text-text marker:hidden [&::-webkit-details-marker]:hidden">
-          <span aria-hidden="true" className="mr-2 inline-block text-muted transition-transform group-open:rotate-90">
-            ›
-          </span>
-          Report (JSON)
+        <summary className={REPORT_SUMMARY}>
+          <ReportSummaryText />
         </summary>
         <div className="border-t border-border px-4 py-3">
           {text == null ? (

@@ -1,6 +1,7 @@
-// SPA task type registry: key -> {icon, Form, describeInputs}. A type the SPA has no entry for
-// still runs: SchemaForm renders its inputs_schema (string, number, boolean, enum, date) and
-// describeGeneric lists its inputs as key/value rows.
+// SPA task type registry: key -> {icon, Form, describeInputs, summaryLabels}. A type the SPA has no
+// entry for still runs: SchemaForm renders its inputs_schema (string, number, boolean, enum, date),
+// describeGeneric lists its inputs as rows labelled by the schema titles, and its summary keys are
+// shown in words. The run detail page reads only this registry, so it has no per type code.
 
 import { useState } from "react";
 import type { ComponentType, FormEvent, ReactNode } from "react";
@@ -8,46 +9,104 @@ import { Modal } from "../../../components/Modal";
 import { Button } from "../../../components/ui/Button";
 import { Checkbox } from "../../../components/ui/Checkbox";
 import { Field, FieldSelect, Input } from "../../../components/ui/Field";
+import type { TaskRun } from "../../../types/tasks";
+import { formatCount } from "../StepList";
 import { BackfillForm } from "./backfill/BackfillForm";
 import { useStartRun, type TaskFormProps } from "./start";
 
 export type { TaskFormProps } from "./start";
 
-/** One row of the run detail's Inputs card. */
+/** One row of the run detail's Inputs list. */
 export interface InputRow {
   label: string;
   value: string;
 }
 
+/** One stat tile of the run detail's summary strip. */
+export interface SummaryStat {
+  key: string;
+  label: string;
+  value: number;
+}
+
 export interface TaskTypeEntry {
   icon: ReactNode;
   Form: ComponentType<TaskFormProps>;
-  describeInputs: (inputs: Record<string, unknown>) => InputRow[];
+  /** The run's inputs as rows; the run's context names the mapping, the schema titles the fields. */
+  describeInputs: (inputs: Record<string, unknown>, run?: Pick<TaskRun, "context">, schema?: Record<string, unknown>) => InputRow[];
+  /** Words for the summary keys the type reports; a key without one is shown in words from its name. */
+  summaryLabels?: Record<string, string>;
 }
 
-const RANGE_WORDS: Record<string, string> = {
-  all: "All history",
-  since: "Since",
-  between: "Between",
-  last_n: "Last",
+const DAY = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+function day(v: unknown): string {
+  if (typeof v !== "string" || !v) return "?";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? v : DAY.format(d);
+}
+
+/** A backfill range in words: "All history", "Since Oct 3, 2026", "Oct 1, 2026 to Oct 3, 2026", "Last 500 messages". */
+export function rangeWords(range: unknown): string {
+  if (!range || typeof range !== "object") return String(range ?? "");
+  const r = range as { mode?: string; since?: unknown; until?: unknown; last_n?: unknown };
+  switch (r.mode) {
+    case "all":
+      return "All history";
+    case "since":
+      return `Since ${day(r.since)}`;
+    case "between":
+      return `${day(r.since)} to ${day(r.until)}`;
+    case "last_n":
+      return `Last ${typeof r.last_n === "number" ? formatCount(r.last_n) : String(r.last_n)} messages`;
+    default:
+      return JSON.stringify(range);
+  }
+}
+
+function counted(v: unknown, one: string, many: string): string {
+  if (!Array.isArray(v)) return formatValue(v);
+  return `${formatCount(v.length)} ${v.length === 1 ? one : many}`;
+}
+
+const BACKFILL_MODE: Record<string, string> = { resume: "Resume previous", new: "Start new" };
+
+function describeBackfill(inputs: Record<string, unknown>, run?: Pick<TaskRun, "context">): InputRow[] {
+  const rows: InputRow[] = [];
+  for (const [k, v] of Object.entries(inputs)) {
+    switch (k) {
+      case "mapping_id":
+        rows.push({ label: "Mapping", value: run?.context?.label || formatValue(v) });
+        break;
+      case "channel_ids":
+        rows.push({ label: "Channels", value: counted(v, "channel", "channels") });
+        break;
+      case "category_ids":
+        rows.push({ label: "Categories", value: counted(v, "category", "categories") });
+        break;
+      case "range":
+        rows.push({ label: "Range", value: rangeWords(v) });
+        break;
+      case "ignore_cloned":
+        rows.push({ label: "Ignore cloned", value: formatValue(v) });
+        break;
+      case "mode":
+        rows.push({ label: "Mode", value: (typeof v === "string" && BACKFILL_MODE[v]) || formatValue(v) });
+        break;
+      default:
+        rows.push({ label: humanize(k), value: formatValue(v) });
+    }
+  }
+  return rows;
+}
+
+const BACKFILL_SUMMARY: Record<string, string> = {
+  success: "Succeeded",
+  failed: "Failed",
+  skipped: "Skipped",
+  cancelled: "Cancelled",
+  delivered: "Messages",
 };
-
-function describeBackfill(inputs: Record<string, unknown>): InputRow[] {
-  const r = (inputs.range ?? {}) as Record<string, unknown>;
-  const mode = String(r.mode ?? "all");
-  let range = RANGE_WORDS[mode] ?? mode;
-  if (mode === "since") range = `Since ${String(r.since ?? "")}`;
-  else if (mode === "between") range = `Between ${String(r.since ?? "")} and ${String(r.until ?? "")}`;
-  else if (mode === "last_n") range = `Last ${String(r.last_n ?? "")} messages`;
-  const n = (k: string) => (Array.isArray(inputs[k]) ? (inputs[k] as unknown[]).length : 0);
-  return [
-    { label: "Mapping", value: String(inputs.mapping_id ?? "") },
-    { label: "Range", value: range },
-    { label: "Ignore cloned", value: inputs.ignore_cloned ? "Yes" : "No" },
-    { label: "Mode", value: inputs.mode === "new" ? "Start new" : "Resume previous" },
-    { label: "Channels", value: `${n("channel_ids")} channels, ${n("category_ids")} categories` },
-  ];
-}
 
 const BackfillIcon = (
   <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -64,22 +123,42 @@ const GenericIcon = (
 );
 
 export const TASK_TYPES: Record<string, TaskTypeEntry> = {
-  backfill_channels: { icon: BackfillIcon, Form: BackfillForm, describeInputs: describeBackfill },
+  backfill_channels: { icon: BackfillIcon, Form: BackfillForm, describeInputs: describeBackfill, summaryLabels: BACKFILL_SUMMARY },
 };
 
-const formatValue = (v: unknown): string => {
+function formatValue(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "boolean") return v ? "Yes" : "No";
   if (Array.isArray(v)) return v.map(formatValue).join(", ");
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
-};
+}
 
 const humanize = (key: string) => key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
-/** The key/value Inputs card of a type without its own formatter. */
-export function describeGeneric(inputs: Record<string, unknown>): InputRow[] {
-  return Object.entries(inputs).map(([k, v]) => ({ label: humanize(k), value: formatValue(v) }));
+/**
+ * The Inputs rows of a type without its own formatter: the schema's fields in schema order, labelled by
+ * their titles, then any input the schema does not name.
+ */
+export function describeGeneric(inputs: Record<string, unknown>, _run?: Pick<TaskRun, "context">, schema?: Record<string, unknown>): InputRow[] {
+  const props = (schema?.properties ?? {}) as Record<string, SchemaProp>;
+  const keys = [...Object.keys(props).filter((k) => k in inputs), ...Object.keys(inputs).filter((k) => !(k in props))];
+  return keys.map((k) => ({ label: props[k]?.title ?? humanize(k), value: formatValue(inputs[k]) }));
+}
+
+/** The run's inputs as rows, by its type's formatter. */
+export function describeRunInputs(run: Pick<TaskRun, "type" | "inputs" | "context">, schema?: Record<string, unknown>): InputRow[] {
+  return entryFor(run.type).describeInputs(run.inputs ?? {}, run, schema);
+}
+
+/** The numeric keys of the run's summary (else its report's summary) as stat tiles, in the order reported. */
+export function summaryStats(run: Pick<TaskRun, "type" | "summary" | "report">): SummaryStat[] {
+  const report = run.report && typeof run.report === "object" ? (run.report as { summary?: unknown }).summary : undefined;
+  const summary = run.summary ?? (report && typeof report === "object" ? (report as Record<string, unknown>) : {});
+  const labels = entryFor(run.type).summaryLabels ?? {};
+  return Object.entries(summary)
+    .filter((e): e is [string, number] => typeof e[1] === "number")
+    .map(([key, value]) => ({ key, label: labels[key] ?? humanize(key), value }));
 }
 
 // JSON schema subset the generic form understands.

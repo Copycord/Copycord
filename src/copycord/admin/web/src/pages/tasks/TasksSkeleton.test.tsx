@@ -139,6 +139,23 @@ describe("page skeleton", () => {
     });
   });
 
+  it("on a run url shows the run page's header and cards, not the list", () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+        <TasksSkeleton />
+      </MemoryRouter>,
+    );
+    const run = within(container).getByRole("status", { name: "Loading run", hidden: true });
+    expect(within(run).getByRole("link", { name: "All tasks", hidden: true })).toHaveAttribute("href", "/tasks");
+    expect(Array.from(run.querySelectorAll("section[aria-label]")).map((s) => s.getAttribute("aria-label"))).toEqual(["Summary", "Steps", "Report"]);
+    expect(within(run).getByRole("heading", { name: "Inputs", hidden: true })).toBeInTheDocument();
+    expect(within(run).getByRole("heading", { name: "Steps", hidden: true })).toBeInTheDocument();
+    expect(run.querySelector("summary")).toHaveTextContent("Report (JSON)");
+    // No buttons: the actions depend on the run's status.
+    expect(within(run).queryAllByRole("button", { hidden: true })).toHaveLength(0);
+    expect(within(container).queryAllByRole("searchbox", { hidden: true })).toHaveLength(0);
+  });
+
   it("leaves Task type out and bars the header on a type page, as the page does", () => {
     const { container } = render(
       <MemoryRouter initialEntries={["/tasks?type=backfill_channels"]}>

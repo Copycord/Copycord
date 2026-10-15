@@ -63,7 +63,8 @@ export function Tasks() {
   const selected = types.find((t) => t.key === typeKey);
   // A type page before the types land: bars in the header rather than All tasks, as in the skeleton.
   const typePending = Boolean(typeKey) && !data && typesLoading;
-  const typeTitle = useCallback((key: string) => types.find((t) => t.key === key)?.title ?? key, [types]);
+  const typeOf = useCallback((key: string) => types.find((t) => t.key === key), [types]);
+  const typeTitle = useCallback((key: string) => typeOf(key)?.title ?? key, [typeOf]);
   const toast = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -113,7 +114,7 @@ export function Tasks() {
         <TypeRail types={types} selected={id ? "" : typeKey} loading={!data && typesLoading} />
         <div className={MAIN}>
           {id ? (
-            <RunDetail id={id} typeTitle={typeTitle} />
+            <RunDetail id={id} typeOf={typeOf} />
           ) : (
             <>
               <TasksHeader

@@ -1,14 +1,15 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
-import type { TaskRun } from "../../types/tasks";
-import { LogView } from "./LogView";
+import type { TaskRun, TaskType } from "../../types/tasks";
 import { ReportPanel } from "./ReportPanel";
-import { RunHeader, inputRows, rangeWords } from "./RunDetail";
+import { RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
 import { StepList, stepLabel } from "./StepList";
+import { describeRunInputs, rangeWords } from "./types";
+
+const BACKFILL: TaskType = { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 };
 
 function makeRun(over: Partial<TaskRun> = {}): TaskRun {
   return {
@@ -20,6 +21,14 @@ function makeRun(over: Partial<TaskRun> = {}): TaskRun {
     status: "success",
     trigger: "manual",
     actor: "admin",
+    inputs: {
+      mapping_id: "m1",
+      channel_ids: ["1521898853337403511", "1521898853337403512"],
+      category_ids: [],
+      range: { mode: "last_n", last_n: 500 },
+      ignore_cloned: false,
+      mode: "resume",
+    },
     created_at: "2026-10-14T18:00:00Z",
     started_at: "2026-10-14T18:00:01Z",
     finished_at: "2026-10-14T18:00:49Z",
@@ -30,11 +39,7 @@ function makeRun(over: Partial<TaskRun> = {}): TaskRun {
       { key: "c1", title: "#general", state: "running", done: 1234, total: 5000 },
       { key: "c2", title: "#news", state: "queued", queue_position: 3 },
     ],
-    log_lines: [
-      { seq: 1, ts: "2026-10-14T18:00:01Z", level: "info", step: null, msg: "Starting" },
-      { seq: 2, ts: "2026-10-14T18:00:02Z", level: "warn", step: "c1", msg: "General slow" },
-      { seq: 3, ts: "2026-10-14T18:00:03Z", level: "error", step: "c2", msg: "News failed" },
-    ],
+    log_lines: [{ seq: 1, ts: "2026-10-14T18:00:01Z", level: "info", step: null, msg: "Starting" }],
     report: null,
     ...over,
   };
@@ -57,6 +62,53 @@ function renderHeader(run: TaskRun) {
   );
 }
 
+function renderView(run: TaskRun, type: TaskType | undefined = BACKFILL) {
+  return render(
+    <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+      <RunView run={run} type={type} />
+    </MemoryRouter>,
+  );
+}
+
+const text = (el: Element | null | undefined) => (el?.textContent ?? "").trim();
+const pairs = (dl: Element | null) =>
+  dl ? Array.from(dl.querySelectorAll("dt")).map((dt) => [text(dt), text(dt.nextElementSibling)]) : [];
+
+/** The page as a reader sees it: the header, then each card in order with what it holds. */
+function outline(root: HTMLElement) {
+  const header = root.querySelector("header")!;
+  return {
+    header: {
+      crumbs: Array.from(header.querySelectorAll("nav a")).map(text),
+      glyph: header.querySelector("[role=img]")?.getAttribute("aria-label"),
+      title: text(header.querySelector("h2")),
+      number: text(header.querySelector("h2 + span")),
+      status: text(within(header).getByTestId("run-status")),
+      actions: within(header).getAllByRole("button").map(text),
+    },
+    cards: Array.from(root.querySelectorAll("section[aria-label]")).map((s) => {
+      const name = s.getAttribute("aria-label");
+      if (name === "Summary") {
+        return { name, counts: pairs(s.querySelector("dl[aria-label=Counts]")), inputs: pairs(s.querySelector("dl[aria-label=Inputs]")) };
+      }
+      if (name === "Steps") {
+        return {
+          name,
+          title: text(s.querySelector("h3")),
+          rows: Array.from(s.querySelectorAll("li")).map((li) => [
+            li.querySelector("[role=img]")?.getAttribute("aria-label"),
+            text(li.querySelector(".font-semibold")),
+            text(li.querySelector("[title]:not([role])")),
+            li.querySelector("[role=progressbar]") ? "bar" : "",
+          ]),
+        };
+      }
+      const details = s.querySelector("details");
+      return { name, summary: text(s.querySelector("summary")), open: details?.open };
+    }),
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -67,7 +119,7 @@ describe("RunHeader", () => {
     renderHeader(makeRun());
     expect(screen.getByRole("link", { name: "All tasks" })).toHaveAttribute("href", "/tasks");
     expect(screen.getByRole("link", { name: "Backfill channels" })).toHaveAttribute("href", "/tasks?type=backfill_channels");
-    expect(screen.getByRole("heading", { level: 2, name: "Backfill #general" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
     expect(screen.getByText("#12")).toBeInTheDocument();
     expect(screen.getByText("Manual run by admin")).toBeInTheDocument();
     expect(screen.getByText("Main mapping")).toBeInTheDocument();
@@ -134,59 +186,154 @@ describe("RunHeader", () => {
   });
 });
 
-describe("StepList and LogView", () => {
-  function Detail({ run }: { run: TaskRun }) {
-    const [step, setStep] = useState<string | null>(null);
-    return (
-      <>
-        <StepList run={run} selected={step} onSelect={setStep} />
-        <LogView run={run} step={step} />
-      </>
-    );
-  }
+describe("Run page structure", () => {
+  it("a two step run: header, then Summary, Steps and a collapsed Report in one column, no log", () => {
+    const { container } = renderView(makeRun({ status: "running", finished_at: null }));
+    expect(outline(container)).toEqual({
+      header: {
+        crumbs: ["All tasks", "Backfill channels"],
+        glyph: "Running",
+        title: "Backfill channels",
+        number: "#12",
+        status: "Running",
+        actions: ["Cancel run"],
+      },
+      cards: [
+        {
+          name: "Summary",
+          counts: [
+            ["Succeeded", "2"],
+            ["Failed", "0"],
+            ["Messages", "1,234"],
+          ],
+          inputs: [
+            ["Mapping", "Main mapping"],
+            ["Channels", "2 channels"],
+            ["Categories", "0 categories"],
+            ["Range", "Last 500 messages"],
+            ["Ignore cloned", "No"],
+            ["Mode", "Resume previous"],
+          ],
+        },
+        {
+          name: "Steps",
+          title: "Steps",
+          rows: [
+            ["Running", "#general", "1,234 / 5,000", "bar"],
+            ["Queued", "#news", "Queued #3", ""],
+          ],
+        },
+        { name: "Report", summary: "›Report (JSON)", open: false },
+      ],
+    });
+    // No log anywhere, and the cards stack in one column with no sidebar.
+    expect(screen.queryByRole("log")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Log" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Starting")).not.toBeInTheDocument();
+    const body = screen.getByRole("region", { name: "Summary" }).parentElement!;
+    expect(body.className).not.toMatch(/grid/);
+    expect(Array.from(body.children).map((c) => c.getAttribute("aria-label"))).toEqual(["Summary", "Steps", "Report"]);
+  });
+});
 
-  it("labels steps and draws a bar when done and total are known", () => {
-    render(<Detail run={makeRun()} />);
-    expect(screen.getByText("Cloning 1,234 / 5,000")).toBeInTheDocument();
-    expect(screen.getByText("Queued #3")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "#general progress" })).toHaveAttribute("aria-valuenow", "1234");
+describe("StepList", () => {
+  it("one row per step with its note, a bar only under a running step, nothing clickable", () => {
+    const run = makeRun({
+      steps: [
+        { key: "c1", title: "#general", state: "running", done: 1234, total: 5000 },
+        { key: "c2", title: "#news", state: "success", done: 40, total: 40, note: "40 messages" },
+        { key: "c3", title: "#old", state: "failed", note: "Missing access" },
+      ],
+    });
+    render(<StepList run={run} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByText("1,234 / 5,000")).toBeInTheDocument();
+    expect(screen.getByText("40 messages")).toBeInTheDocument();
+    expect(screen.getByText("Missing access")).toHaveClass("text-danger");
     expect(screen.getAllByRole("progressbar")).toHaveLength(1);
-    const summary = screen.getByRole("region", { name: "Summary" });
-    expect(within(summary).getByText("Delivered")).toBeInTheDocument();
-    expect(within(summary).getByText("1,234")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "#general progress" })).toHaveAttribute("aria-valuenow", "1234");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("says when there are no steps yet", () => {
+    render(<StepList run={makeRun({ steps: [] })} />);
+    expect(screen.getByText("No steps yet")).toBeInTheDocument();
   });
 
   it("prefers the server label and the note", () => {
     expect(stepLabel({ key: "a", title: "#a", state: "running", label: "Cleaning up", done: 1, total: 2 })).toBe("Cleaning up");
     expect(stepLabel({ key: "a", title: "#a", state: "skipped", note: "Already running in #12" })).toBe("Already running in #12");
+    expect(stepLabel({ key: "a", title: "#a", state: "queued", queue_position: 2 })).toBe("Queued #2");
+    expect(stepLabel({ key: "a", title: "#a", state: "cancelled" })).toBe("Cancelled");
+  });
+});
+
+describe("RunSummary", () => {
+  const summaryOf = (run: TaskRun, schema?: Record<string, unknown>) => {
+    const { container } = render(<RunSummary run={run} schema={schema} />);
+    return {
+      counts: pairs(container.querySelector("dl[aria-label=Counts]")),
+      inputs: pairs(container.querySelector("dl[aria-label=Inputs]")),
+    };
+  };
+
+  it("has no tiles until the run reports counts", () => {
+    expect(summaryOf(makeRun({ status: "running", summary: null })).counts).toEqual([]);
+    expect(screen.getByRole("heading", { name: "Inputs" })).toBeInTheDocument();
   });
 
-  it("a step click narrows the log and All steps resets it", async () => {
-    const user = userEvent.setup();
-    render(<Detail run={makeRun()} />);
-    const log = screen.getByRole("log", { name: "Run log" });
-    expect(within(log).getByText("Starting")).toBeInTheDocument();
-    expect(within(log).getByText("General slow").closest("[data-level]")).toHaveAttribute("data-level", "warn");
-    await user.click(screen.getByRole("button", { name: /#general/ }));
-    expect(within(log).queryByText("Starting")).not.toBeInTheDocument();
-    expect(within(log).queryByText("News failed")).not.toBeInTheDocument();
-    expect(within(log).getByText("General slow")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "All steps" }));
-    expect(within(log).getByText("News failed")).toBeInTheDocument();
+  it("falls back to the report's summary", () => {
+    expect(summaryOf(makeRun({ summary: null, report: { summary: { delivered: 7, note: "x" } } })).counts).toEqual([["Messages", "7"]]);
   });
 
-  it("shows Jump to latest when scrolled up and follows again on click", async () => {
-    const user = userEvent.setup();
-    render(<LogView run={makeRun()} step={null} />);
-    const log = screen.getByRole("log", { name: "Run log" });
-    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
-    Object.defineProperty(log, "clientHeight", { configurable: true, value: 200 });
-    expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
-    log.scrollTop = 100;
-    fireEvent.scroll(log);
-    await user.click(await screen.findByRole("button", { name: "Jump to latest" }));
-    expect(log.scrollTop).toBe(1000);
-    expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
+  it("a type without a registry entry: counts in words, inputs by schema title in schema order", () => {
+    const run = makeRun({ type: "prune", summary: { pruned: 3, kept_rows: 1200 }, inputs: { extra: "x", dry_run: true, limit: 5 } });
+    const schema = { properties: { limit: { type: "integer", title: "Row limit" }, dry_run: { type: "boolean" } } };
+    expect(summaryOf(run, schema)).toEqual({
+      counts: [
+        ["Pruned", "3"],
+        ["Kept rows", "1,200"],
+      ],
+      inputs: [
+        ["Row limit", "5"],
+        ["Dry run", "Yes"],
+        ["Extra", "x"],
+      ],
+    });
+  });
+
+  it("says when a run has no inputs", () => {
+    render(<RunSummary run={makeRun({ inputs: {} })} />);
+    expect(screen.getByText("No inputs")).toBeInTheDocument();
+  });
+});
+
+describe("Inputs formatter", () => {
+  it("formats backfill keys in words and falls back to the key in words", () => {
+    const rows = describeRunInputs({
+      type: "backfill_channels",
+      context: { label: "Main mapping" },
+      inputs: {
+        mapping_id: "m1",
+        channel_ids: ["a"],
+        category_ids: ["k"],
+        range: { mode: "last_n", last_n: 500 },
+        ignore_cloned: true,
+        mode: "new",
+        extra: { a: 1 },
+      },
+    });
+    expect(rows.map((r) => [r.label, r.value])).toEqual([
+      ["Mapping", "Main mapping"],
+      ["Channels", "1 channel"],
+      ["Categories", "1 category"],
+      ["Range", "Last 500 messages"],
+      ["Ignore cloned", "Yes"],
+      ["Mode", "Start new"],
+      ["Extra", '{"a":1}'],
+    ]);
+    expect(rangeWords({ mode: "all" })).toBe("All history");
+    expect(describeRunInputs({ type: "backfill_channels", context: null, inputs: { mapping_id: "m1" } })).toEqual([{ label: "Mapping", value: "m1" }]);
   });
 });
 
@@ -205,12 +352,12 @@ describe("ReportPanel", () => {
     expect(details.open).toBe(false);
     await user.click(screen.getByText("Report (JSON)"));
     expect(details.open).toBe(true);
-    const text = JSON.stringify(report, null, 2);
-    expect(screen.getByLabelText("Report JSON").textContent).toBe(text);
+    const json = JSON.stringify(report, null, 2);
+    expect(screen.getByLabelText("Report JSON").textContent).toBe(json);
     expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute("href", "/api/tasks/runs/12/report.json");
     expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute("download");
     await user.click(screen.getByRole("button", { name: "Copy" }));
-    expect(writeText).toHaveBeenCalledWith(text);
+    expect(writeText).toHaveBeenCalledWith(json);
     expect(await screen.findByText("Report copied")).toBeInTheDocument();
   });
 
@@ -221,29 +368,80 @@ describe("ReportPanel", () => {
   });
 });
 
-describe("Inputs", () => {
-  it("formats known keys in words and falls back to the raw key and value", () => {
-    const rows = inputRows({
-      context: { label: "Main mapping" },
-      inputs: {
-        mapping_id: "m1",
-        channel_ids: ["a", "b"],
-        category_ids: ["k"],
-        range: { mode: "last_n", last_n: 500 },
-        ignore_cloned: true,
-        mode: "resume",
-        extra: { a: 1 },
-      },
-    });
-    expect(rows).toEqual([
-      ["Mapping", "Main mapping"],
-      ["Channels", "2 channels"],
-      ["Categories", "1 category"],
-      ["Range", "Last 500 messages"],
-      ["Ignore cloned", "Yes"],
-      ["Mode", "Resume previous"],
-      ["extra", '{"a":1}'],
+class FakeWs {
+  static all: FakeWs[] = [];
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onmessage: ((ev: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  constructor(public url: string) {
+    FakeWs.all.push(this);
+  }
+  open() {
+    this.readyState = 1;
+    this.onopen?.();
+  }
+  emit(data: unknown) {
+    this.onmessage?.({ data: JSON.stringify(data) });
+  }
+  close() {
+    this.readyState = 3;
+  }
+  send() {}
+}
+
+describe("RunDetail live", () => {
+  beforeEach(() => {
+    FakeWs.all = [];
+    vi.stubGlobal("WebSocket", FakeWs);
+  });
+
+  it("shows the run skeleton first, then follows task.run.updated frames without going back to it", async () => {
+    const first = makeRun({ status: "running", finished_at: null, summary: null, seq: 1 });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ run: first })));
+    render(
+      <MemoryRouter initialEntries={["/tasks/runs/12"]}>
+        <RunDetail id="12" typeOf={(k) => (k === BACKFILL.key ? BACKFILL : undefined)} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status", { name: "Loading run" })).toBeInTheDocument();
+    await screen.findByText("1,234 / 5,000");
+    expect(screen.queryByRole("status", { name: "Loading run" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Summary" }).querySelector("dl[aria-label=Counts]")).toBeNull();
+
+    const ws = FakeWs.all[0]!;
+    act(() => ws.open());
+    const { inputs: _inputs, steps: _steps, ...bare } = first;
+    act(() =>
+      ws.emit({ kind: "task.run.updated", role: "admin", payload: { run: { ...bare, seq: 2 }, steps: [{ key: "c1", title: "#general", state: "running", done: 4000, total: 5000 }] } }),
+    );
+    expect(screen.getByText("4,000 / 5,000")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "#general progress" })).toHaveAttribute("aria-valuenow", "4000");
+
+    act(() =>
+      ws.emit({
+        kind: "task.run.updated",
+        role: "admin",
+        payload: {
+          run: { ...bare, seq: 3, status: "success", finished_at: "2026-10-14T18:00:49Z", summary: { success: 1, failed: 0, delivered: 36 } },
+          steps: [
+            { key: "c1", title: "#general", state: "success", done: 36, total: 5000, note: "36 messages" },
+            { key: "c2", title: "#news", state: "skipped", note: "Already running in #11" },
+          ],
+        },
+      }),
+    );
+    expect(screen.getByTestId("run-status")).toHaveTextContent("Success");
+    expect(screen.getByText("36 messages")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    const counts = screen.getByRole("region", { name: "Summary" }).querySelector("dl[aria-label=Counts]");
+    expect(pairs(counts)).toEqual([
+      ["Succeeded", "1"],
+      ["Failed", "0"],
+      ["Messages", "36"],
     ]);
-    expect(rangeWords({ mode: "all" })).toBe("All history");
+    // The inputs are not in frames; the held ones stay.
+    expect(screen.getByText("Last 500 messages")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading run" })).not.toBeInTheDocument();
   });
 });

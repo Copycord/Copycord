@@ -1,10 +1,11 @@
 // The Tasks page while its chunk downloads: the page's own rail, header, search box and list frame with its
-// toolbar, in the same boxes and with the same static text, bars only where data goes. Kept out of Tasks.tsx
-// so the app shell can show it without pulling the page chunk in; the page takes its shared classes, the
-// header, the search chrome, the toolbar labels and the loading pieces from here, so the two cannot drift.
+// toolbar, in the same boxes and with the same static text, bars only where data goes; on a run url the run
+// page's header and cards instead. Kept out of Tasks.tsx so the app shell can show it without pulling the
+// page chunk in; the page takes its shared classes, the header, the search chrome, the toolbar labels and
+// the loading pieces from here, so the two cannot drift.
 
 import type { ReactNode } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useMatch, useSearchParams } from "react-router";
 import { Button } from "../../components/ui/Button";
 import { cx } from "../../components/ui/cx";
 import { Input } from "../../components/ui/Field";
@@ -36,6 +37,37 @@ export const ROW = `${ROW_BOX} hover:bg-rail-hover`;
 export const SEARCH_FORM = "mb-4 flex";
 export const SEARCH_INPUT = "min-w-0 flex-1 rounded-r-none";
 export const SEARCH_BUTTON = "rounded-l-none border-l-0";
+
+// The run page (RunDetail.tsx): header, then one column of cards.
+export const RUN_HEADER = "mb-4";
+export const RUN_BREADCRUMB = "mb-2 text-sm text-muted";
+export const RUN_CRUMB = "text-accent no-underline hover:underline";
+export const RUN_TITLE_ROW = "flex items-center gap-2";
+export const RUN_TITLE = "m-0 text-[22px] font-bold text-text";
+export const RUN_META = "mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted";
+export const RUN_BODY = "flex flex-col gap-4";
+export const CARD_TITLE = "m-0 border-b border-border px-4 py-2.5 text-sm font-semibold text-text";
+/** The Inputs list under the stat tiles, and its small heading. */
+export const INPUTS_BOX = "px-4 py-3";
+export const INPUTS_TITLE = "m-0 mb-2 text-xs font-semibold text-muted";
+export const INPUTS_LIST = "m-0 grid grid-cols-[minmax(110px,max-content)_1fr] gap-x-6 gap-y-1 text-sm";
+/** One step row: glyph, title and note on one line, the progress bar under it while running. */
+export const STEP_ROW = "border-b border-border px-4 py-2.5 text-sm last:border-b-0";
+export const STEP_LINE = "flex items-center gap-2.5";
+export const REPORT_SUMMARY =
+  "cursor-pointer list-none px-4 py-2.5 text-sm font-semibold text-text marker:hidden [&::-webkit-details-marker]:hidden";
+
+/** The Report panel's summary line, collapsed: the chevron and "Report (JSON)". */
+export function ReportSummaryText() {
+  return (
+    <>
+      <span aria-hidden="true" className="mr-2 inline-block text-muted transition-transform group-open:rotate-90">
+        ›
+      </span>
+      Report (JSON)
+    </>
+  );
+}
 
 export const ALL_TASKS_DESCRIPTION = "Showing runs from all task types";
 
@@ -180,11 +212,93 @@ export function RunRowsLoading({ rows = 3 }: { rows?: number }) {
   );
 }
 
+/** A bar inside a line of text, as wide as the words it stands in for. */
+function InlineBar({ width }: { width: number }) {
+  return (
+    <span className="inline-flex h-[1lh] items-center align-top">
+      <Skeleton width={width} height={10} rounded="rounded-full" />
+    </span>
+  );
+}
+
+const STEP_WIDTHS = [["34%", 72], ["26%", 96]] as const;
+
+/**
+ * The run page until the run answers, also the page's own loading state: the header with bars for the
+ * type, glyph, title and meta line (the actions depend on the status, so they wait), the summary card
+ * with its Inputs heading and bar rows, the Steps card with bar rows and the collapsed Report line.
+ */
+export function RunDetailSkeleton() {
+  return (
+    <div role="status" aria-busy="true" aria-label="Loading run" className="flex flex-col">
+      <div inert>
+        <header className={RUN_HEADER}>
+          <nav aria-label="Breadcrumb" className={RUN_BREADCRUMB}>
+            <Link to="/tasks" className={RUN_CRUMB}>
+              All tasks
+            </Link>
+            {" / "}
+            <InlineBar width={110} />
+          </nav>
+          <div className={RUN_TITLE_ROW}>
+            <Skeleton width={20} height={20} rounded="rounded-full" />
+            <h2 className={RUN_TITLE}>
+              <TextBar width={240} height={16} />
+            </h2>
+          </div>
+          <div className={RUN_META}>
+            <TextBar width={130} />
+            <TextBar width={90} />
+            <TextBar width={110} />
+          </div>
+        </header>
+        <div className={RUN_BODY}>
+          <section aria-label="Summary" className={FRAME}>
+            <div className={INPUTS_BOX}>
+              <h3 className={INPUTS_TITLE}>Inputs</h3>
+              <div className={INPUTS_LIST}>
+                {[60, 90, 70, 80].map((w, i) => (
+                  <div key={i} className="contents">
+                    <TextBar width={w} />
+                    <TextBar width={w + 40} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+          <section aria-label="Steps" className={FRAME}>
+            <h3 className={CARD_TITLE}>Steps</h3>
+            <ul className="m-0 list-none p-0">
+              {STEP_WIDTHS.map(([title, note], i) => (
+                <li key={i} className={STEP_ROW}>
+                  <div className={STEP_LINE}>
+                    <Skeleton width={14} height={14} rounded="rounded-full" />
+                    <TextBar width={title} className="min-w-0 flex-1" />
+                    <TextBar width={note} className="text-xs" />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section aria-label="Report">
+            <details className={cx(FRAME, "group")}>
+              <summary className={REPORT_SUMMARY}>
+                <ReportSummaryText />
+              </summary>
+            </details>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const noop = () => {};
 
 /** The page as Tasks first paints it, the controls inert under the section: the same rail, header, search and toolbar. */
 export function TasksSkeleton() {
   const [params] = useSearchParams();
+  const runPage = useMatch("/tasks/runs/:id") !== null;
   const typeKey = params.get("type") ?? "";
   const filters: FilterKey[] = typeKey ? ["status", "context", "actor"] : ["type", "status", "context", "actor"];
   return (
@@ -192,51 +306,58 @@ export function TasksSkeleton() {
       <TasksHeading />
       <div inert className={PAGE}>
         <nav className={RAIL}>
-          <div className={cx(RAIL_ITEM, typeKey ? null : RAIL_ACTIVE)}>All tasks</div>
+          {/* A run page lights All tasks, as the page's rail does. */}
+          <div className={cx(RAIL_ITEM, typeKey && !runPage ? null : RAIL_ACTIVE)}>All tasks</div>
           <div className={RAIL_HEADING}>Task types</div>
           <ul className={RAIL_LIST}>
             <RailEntryLoading />
           </ul>
         </nav>
         <div className={MAIN}>
-          {typeKey ? (
-            <TasksHeader title={null} description={null} action={null} />
+          {runPage ? (
+            <RunDetailSkeleton />
           ) : (
-            <TasksHeader title="All tasks" description={ALL_TASKS_DESCRIPTION} action={null} />
-          )}
-          <form role="search" className={SEARCH_FORM} onSubmit={(e) => e.preventDefault()}>
-            <Input
-              type="search"
-              aria-label="Search runs"
-              placeholder="Search runs"
-              value={params.get("q") ?? ""}
-              readOnly
-              className={SEARCH_INPUT}
-            />
-            <Button type="button" variant="ghost" attached aria-label="Search" className={SEARCH_BUTTON}>
-              <SearchGlyph />
-            </Button>
-          </form>
-          <div className={FRAME}>
-            <div className={FRAME_HEAD}>
-              <div className={FRAME_HEAD_LEFT}>
-                <RunCountLoading />
-                <ToolbarSelect
-                  id="tasks-autorefresh-skeleton"
-                  label="Auto-refresh"
-                  value={readAutoRefresh()}
-                  options={AUTO_REFRESH_OPTIONS}
-                  onChange={noop}
+            <>
+              {typeKey ? (
+                <TasksHeader title={null} description={null} action={null} />
+              ) : (
+                <TasksHeader title="All tasks" description={ALL_TASKS_DESCRIPTION} action={null} />
+              )}
+              <form role="search" className={SEARCH_FORM} onSubmit={(e) => e.preventDefault()}>
+                <Input
+                  type="search"
+                  aria-label="Search runs"
+                  placeholder="Search runs"
+                  value={params.get("q") ?? ""}
+                  readOnly
+                  className={SEARCH_INPUT}
                 />
+                <Button type="button" variant="ghost" attached aria-label="Search" className={SEARCH_BUTTON}>
+                  <SearchGlyph />
+                </Button>
+              </form>
+              <div className={FRAME}>
+                <div className={FRAME_HEAD}>
+                  <div className={FRAME_HEAD_LEFT}>
+                    <RunCountLoading />
+                    <ToolbarSelect
+                      id="tasks-autorefresh-skeleton"
+                      label="Auto-refresh"
+                      value={readAutoRefresh()}
+                      options={AUTO_REFRESH_OPTIONS}
+                      onChange={noop}
+                    />
+                  </div>
+                  <div className={FRAME_HEAD_FILTERS}>
+                    {filters.map((k) => (
+                      <ToolbarSelect key={k} id={`tasks-filter-${k}-skeleton`} label={FILTER_LABELS[k]} value="" options={[allOption(k)]} onChange={noop} />
+                    ))}
+                  </div>
+                </div>
+                <RunRowsLoading />
               </div>
-              <div className={FRAME_HEAD_FILTERS}>
-                {filters.map((k) => (
-                  <ToolbarSelect key={k} id={`tasks-filter-${k}-skeleton`} label={FILTER_LABELS[k]} value="" options={[allOption(k)]} onChange={noop} />
-                ))}
-              </div>
-            </div>
-            <RunRowsLoading />
-          </div>
+            </>
+          )}
         </div>
       </div>
     </section>

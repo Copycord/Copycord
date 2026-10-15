@@ -1,120 +1,68 @@
-// One run at /tasks/runs/:id: the header with its status, number, meta line and actions (Cancel while
-// active, Re-run and Delete when finished), the Summary and step list on the left, and the Inputs
-// card, the log and the "Report (JSON)" panel in the main column. Clicking a step filters the log.
+// One run at /tasks/runs/:id, the same page for every task type: the header with its status, number,
+// meta line and actions (Cancel while active, Re-run and Delete when finished), then one column: the
+// summary card (the counts the type reports as stat tiles, then its Inputs), the Steps card and the
+// collapsed "Report (JSON)" panel. Everything type specific comes from the registry in ./types.
 
 import { useState } from "react";
-import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { EmptyState } from "../../components/ui/EmptyState";
-import { Skeleton } from "../../components/ui/Skeleton";
 import { api, errorText } from "../../lib/api";
 import { ACTIVE_STATUSES } from "../../types/tasks";
-import type { TaskRun } from "../../types/tasks";
-import { LogView } from "./LogView";
+import type { TaskRun, TaskType } from "../../types/tasks";
 import { ReportPanel, useRunToast } from "./ReportPanel";
 import { ContextBadge, formatWhen, runDuration, triggerText, useNow } from "./RunList";
 import { runUrl, useTaskRun } from "./runStore";
 import { STATUS_LABEL, StatusIcon } from "./StatusIcon";
 import { StepList, formatCount } from "./StepList";
-import { FRAME } from "./TasksSkeleton";
+import {
+  FRAME,
+  INPUTS_BOX,
+  INPUTS_LIST,
+  INPUTS_TITLE,
+  RUN_BODY,
+  RUN_BREADCRUMB,
+  RUN_CRUMB,
+  RUN_HEADER,
+  RUN_META,
+  RUN_TITLE,
+  RUN_TITLE_ROW,
+  RunDetailSkeleton,
+} from "./TasksSkeleton";
+import { describeRunInputs, summaryStats } from "./types";
 
-export function RunSection({ title, children }: { title: string; children: ReactNode }) {
+/** The counts as stat tiles over the run's Inputs; the tiles show once the run reports counts. */
+export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<string, unknown> }) {
+  const stats = summaryStats(run);
+  const rows = describeRunInputs(run, schema);
   return (
-    <section aria-label={title} className={FRAME}>
-      <h3 className="m-0 border-b border-border px-4 py-2.5 text-sm font-semibold text-text">{title}</h3>
-      <div className="px-4 py-3 text-sm text-text-2">{children}</div>
-    </section>
-  );
-}
-
-const DAY = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
-
-function day(v: unknown): string {
-  if (typeof v !== "string" || !v) return "?";
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? v : DAY.format(d);
-}
-
-/** A backfill range in words: "All history", "Since Oct 3, 2026", "Oct 1, 2026 to Oct 3, 2026", "Last 500 messages". */
-export function rangeWords(range: unknown): string {
-  if (!range || typeof range !== "object") return String(range ?? "");
-  const r = range as { mode?: string; since?: unknown; until?: unknown; last_n?: unknown };
-  switch (r.mode) {
-    case "all":
-      return "All history";
-    case "since":
-      return `Since ${day(r.since)}`;
-    case "between":
-      return `${day(r.since)} to ${day(r.until)}`;
-    case "last_n":
-      return `Last ${typeof r.last_n === "number" ? formatCount(r.last_n) : String(r.last_n)} messages`;
-    default:
-      return JSON.stringify(range);
-  }
-}
-
-function plural(n: number, one: string): string {
-  return `${formatCount(n)} ${one}${n === 1 ? "" : "s"}`;
-}
-
-function rawValue(v: unknown): string {
-  if (typeof v === "boolean") return v ? "Yes" : "No";
-  if (typeof v === "string" || typeof v === "number") return String(v);
-  if (v == null) return "";
-  return JSON.stringify(v);
-}
-
-const MODE: Record<string, string> = { resume: "Resume previous", new: "Start new" };
-
-/** The run's inputs as label and value rows; keys this does not know fall back to the raw key and value. */
-export function inputRows(run: Pick<TaskRun, "inputs" | "context">): [string, string][] {
-  const rows: [string, string][] = [];
-  for (const [k, v] of Object.entries(run.inputs ?? {})) {
-    switch (k) {
-      case "mapping_id":
-        rows.push(["Mapping", run.context?.label || rawValue(v)]);
-        break;
-      case "channel_ids":
-        rows.push(["Channels", Array.isArray(v) ? plural(v.length, "channel") : rawValue(v)]);
-        break;
-      case "category_ids":
-        rows.push(["Categories", Array.isArray(v) ? `${formatCount(v.length)} ${v.length === 1 ? "category" : "categories"}` : rawValue(v)]);
-        break;
-      case "range":
-        rows.push(["Range", rangeWords(v)]);
-        break;
-      case "ignore_cloned":
-        rows.push(["Ignore cloned", rawValue(v)]);
-        break;
-      case "mode":
-        rows.push(["Mode", (typeof v === "string" && MODE[v]) || rawValue(v)]);
-        break;
-      default:
-        rows.push([k, rawValue(v)]);
-    }
-  }
-  return rows;
-}
-
-export function InputsCard({ run }: { run: TaskRun }) {
-  const rows = inputRows(run);
-  return (
-    <section aria-label="Inputs" className={FRAME}>
-      <h3 className="m-0 border-b border-border px-4 py-2.5 text-sm font-semibold text-text">Inputs</h3>
-      {rows.length ? (
-        <dl className="m-0 grid grid-cols-[minmax(110px,auto)_1fr] gap-x-4 gap-y-1 px-4 py-3 text-sm">
-          {rows.map(([k, v]) => (
-            <div key={k} className="contents">
-              <dt className="text-muted">{k}</dt>
-              <dd className="m-0 break-words text-text">{v}</dd>
+    <section aria-label="Summary" className={FRAME}>
+      {stats.length ? (
+        <dl aria-label="Counts" className="m-0 flex flex-wrap gap-x-8 gap-y-3 border-b border-border px-4 py-3">
+          {stats.map((s) => (
+            <div key={s.key} className="min-w-0">
+              <dt className="text-xs text-muted">{s.label}</dt>
+              <dd className="m-0 text-lg font-semibold tabular-nums text-text">{formatCount(s.value)}</dd>
             </div>
           ))}
         </dl>
-      ) : (
-        <p className="m-0 px-4 py-3 text-sm text-muted">No inputs</p>
-      )}
+      ) : null}
+      <div className={INPUTS_BOX}>
+        <h3 className={INPUTS_TITLE}>Inputs</h3>
+        {rows.length ? (
+          <dl aria-label="Inputs" className={INPUTS_LIST}>
+            {rows.map((r, i) => (
+              <div key={`${i}:${r.label}`} className="contents">
+                <dt className="text-muted">{r.label}</dt>
+                <dd className="m-0 break-words text-text">{r.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="m-0 text-sm text-muted">No inputs</p>
+        )}
+      </div>
     </section>
   );
 }
@@ -153,24 +101,26 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
   };
 
   return (
-    <header className="mb-4">
-      <nav aria-label="Breadcrumb" className="mb-2 text-sm text-muted">
-        <Link to="/tasks" className="text-accent no-underline hover:underline">
+    <header className={RUN_HEADER}>
+      <nav aria-label="Breadcrumb" className={RUN_BREADCRUMB}>
+        <Link to="/tasks" className={RUN_CRUMB}>
           All tasks
         </Link>
         {" / "}
-        <Link to={`/tasks?type=${encodeURIComponent(run.type)}`} className="text-accent no-underline hover:underline">
+        <Link to={`/tasks?type=${encodeURIComponent(run.type)}`} className={RUN_CRUMB}>
           {typeTitle}
         </Link>
       </nav>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className={RUN_TITLE_ROW}>
             <StatusIcon status={run.status} size={20} />
-            <h2 className="m-0 text-[22px] font-bold text-text">{run.title}</h2>
+            <h2 className={RUN_TITLE} title={run.title}>
+              {typeTitle}
+            </h2>
             <span className="text-[22px] text-muted">#{run.number}</span>
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+          <div className={RUN_META}>
             <span>{triggerText(run)}</span>
             <ContextBadge run={run} />
             <span title="Started">{formatWhen(run.started_at ?? run.created_at)}</span>
@@ -213,24 +163,26 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
   );
 }
 
-export function RunDetail({ id, typeTitle }: { id: string; typeTitle: (key: string) => string }) {
-  const { run, loading, error } = useTaskRun(id);
-  const [step, setStep] = useState<string | null>(null);
-  if (!run) {
-    if (loading) return <Skeleton.Block height={120} />;
-    return <EmptyState title="Run not found" description={error ? errorText(error, "Could not load the run.") : undefined} />;
-  }
+/** The run page body for a held run: header, summary and inputs, steps, report. */
+export function RunView({ run, type, refreshing = false }: { run: TaskRun; type?: TaskType; refreshing?: boolean }) {
   return (
-    <div className="flex flex-col">
-      <RunHeader run={run} typeTitle={typeTitle(run.type)} />
-      <div className="grid grid-cols-[260px_minmax(0,1fr)] gap-4 max-md:grid-cols-1">
-        <StepList run={run} selected={step} onSelect={setStep} />
-        <div className="flex min-w-0 flex-col gap-4">
-          <InputsCard run={run} />
-          <LogView run={run} step={step} onClearStep={() => setStep(null)} />
-          <ReportPanel run={run} />
-        </div>
+    <div className="flex flex-col" aria-busy={refreshing || undefined}>
+      <RunHeader run={run} typeTitle={type?.title ?? run.type} />
+      <div className={RUN_BODY}>
+        <RunSummary run={run} schema={type?.inputs_schema} />
+        <StepList run={run} />
+        <ReportPanel run={run} />
       </div>
     </div>
   );
+}
+
+export function RunDetail({ id, typeOf }: { id: string; typeOf: (key: string) => TaskType | undefined }) {
+  // Live over task.run.updated; a refetch keeps the held run on screen (no shimmer after the first load).
+  const { run, loading, refreshing, error } = useTaskRun(id);
+  if (!run) {
+    if (loading) return <RunDetailSkeleton />;
+    return <EmptyState title="Run not found" description={error ? errorText(error, "Could not load the run.") : undefined} />;
+  }
+  return <RunView run={run} type={typeOf(run.type)} refreshing={refreshing} />;
 }
