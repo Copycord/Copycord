@@ -59,6 +59,9 @@ export const CARD_TITLE = "m-0 border-b border-border px-4 py-2.5 text-sm font-s
 export const INPUTS_BOX = "px-4 py-3";
 export const INPUTS_TITLE = "m-0 mb-2 text-xs font-semibold text-muted";
 export const INPUTS_LIST = "m-0 grid grid-cols-[minmax(110px,max-content)_1fr] gap-x-6 gap-y-1 text-sm";
+/** The status glyph's box (StatusIcon): one line of the row's text tall with the glyph centred, so the
+ * glyph centres on the first text line in the run list, the step list and the run header alike. */
+export const STATUS_BOX = "inline-flex h-[1lh] shrink-0 items-center";
 /** One step row: glyph, title and note on one line, the progress bar under it while running. */
 export const STEP_ROW = "border-b border-border px-4 py-2.5 text-sm last:border-b-0";
 export const STEP_LINE = "flex items-center gap-2.5";
@@ -204,8 +207,8 @@ export function RailEntryLoading() {
 function RunRowLoading({ titleWidth }: { titleWidth: string }) {
   return (
     <li className={ROW_BOX}>
-      <span className="mt-0.5 inline-flex shrink-0">
-        <Skeleton width={16} rounded="rounded-full" />
+      <span className={STATUS_BOX}>
+        <Skeleton width={16} height={16} rounded="rounded-full" />
       </span>
       <div className="min-w-0 flex-1">
         <TextBar width={titleWidth} className="font-semibold" />
@@ -291,7 +294,9 @@ export function RunDetailSkeleton() {
             <InlineBar width={110} />
           </nav>
           <div className={RUN_TITLE_ROW}>
-            <Skeleton width={20} height={20} rounded="rounded-full" />
+            <span className={STATUS_BOX}>
+              <Skeleton width={20} height={20} rounded="rounded-full" />
+            </span>
             <h2 className={RUN_TITLE}>
               <TextBar width={240} />
             </h2>
@@ -322,7 +327,9 @@ export function RunDetailSkeleton() {
               {STEP_WIDTHS.map(([title, note], i) => (
                 <li key={i} className={STEP_ROW}>
                   <div className={STEP_LINE}>
-                    <Skeleton width={14} height={14} rounded="rounded-full" />
+                    <span className={STATUS_BOX}>
+                      <Skeleton width={14} height={14} rounded="rounded-full" />
+                    </span>
                     <TextBar width={title} className="min-w-0 flex-1" />
                     <TextBar width={note} className="text-xs" />
                   </div>

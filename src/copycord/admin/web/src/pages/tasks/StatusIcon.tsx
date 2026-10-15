@@ -1,8 +1,12 @@
 // Run and step status glyphs in the theme colours: success check-circle, failed x-circle, cancelled
 // slashed circle, running a spinning ring, queued a hollow dot. Each is an img with a label and a title.
+// The glyph sits centred in a box one line of the surrounding text tall (1lh), so it lines up with the
+// row's first text line whatever the font's normal line height: the run list's title, a step's title
+// and the run header all place it the same way.
 
 import { cx } from "../../components/ui/cx";
 import type { RunStatus, StepState } from "../../types/tasks";
+import { STATUS_BOX } from "./TasksSkeleton";
 
 export const STATUS_LABEL: Record<RunStatus | StepState, string> = {
   queued: "Queued",
@@ -25,7 +29,7 @@ const COLOUR: Record<RunStatus | StepState, string> = {
 export function StatusIcon({ status, size = 16, className }: { status: RunStatus | StepState; size?: number; className?: string }) {
   const label = STATUS_LABEL[status] ?? status;
   return (
-    <span role="img" aria-label={label} title={label} data-status={status} className={cx("inline-flex shrink-0", COLOUR[status], className)}>
+    <span role="img" aria-label={label} title={label} data-status={status} className={cx(STATUS_BOX, COLOUR[status], className)}>
       <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false" className={status === "running" ? "animate-spin" : undefined}>
         <Glyph status={status} />
       </svg>

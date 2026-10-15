@@ -106,7 +106,7 @@ export interface RunRowProps {
 export function RunRow({ run, typeTitle, actions }: RunRowProps) {
   return (
     <li className={ROW} data-run-id={run.id}>
-      <StatusIcon status={run.status} className="mt-0.5" />
+      <StatusIcon status={run.status} />
       <div className="min-w-0 flex-1">
         <Link to={`/tasks/runs/${encodeURIComponent(run.id)}`} className="font-semibold text-text no-underline hover:underline">
           {run.title}
