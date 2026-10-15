@@ -122,7 +122,8 @@ describe("Bots card uptime", () => {
   it("keeps the held start within the drift window and takes the report outside it", () => {
     expect(uptimeStart(null, 65, 100_000)).toBe(35_000);
     expect(uptimeStart(35_000, 66.5, 101_000)).toBe(35_000);
-    expect(uptimeStart(35_000, 63, 100_000)).toBe(37_000);
+    // Exactly 2 s off still keeps it; past that the report wins.
+    expect(uptimeStart(35_000, 63, 100_000)).toBe(35_000);
     expect(uptimeStart(35_000, 62.9, 100_000)).toBe(37_100);
   });
 });
