@@ -1,12 +1,16 @@
 // Channel picker of the Backfill form: categories as tri-state checkboxes over their channels,
 // a search box, Select listed and Clear. Ctrl/Cmd+A selects the listed channels and Escape clears
-// the selection before it reaches the modal. Rendered flat; not virtualised.
+// the selection before it reaches the modal. Rendered flat; not virtualised. While the channels
+// load, the search row and the count stand as themselves (off) and the list box, at its fixed
+// height, holds shimmer rows built from the loaded rows' classes; the rows fade in when they land.
 
 import { useMemo, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { Button } from "../../../../components/ui/Button";
 import { Checkbox } from "../../../../components/ui/Checkbox";
+import { cx } from "../../../../components/ui/cx";
 import { Input } from "../../../../components/ui/Field";
+import { Skeleton, useReveal } from "../../../../components/ui/Skeleton";
 import type { BackfillOptionCategory, BackfillOptionChannel } from "../../../../types/tasks";
 import { shortDate } from "./logic";
 
@@ -15,6 +19,10 @@ export interface ChannelPickerProps {
   selected: ReadonlySet<string>;
   onChange: (next: Set<string>) => void;
   error?: string;
+  /** The channels are still loading: shimmer rows in the list, the controls off. */
+  loading?: boolean;
+  /** The options answered with an error: shown inside the list box. */
+  failed?: string;
 }
 
 interface ListedCategory {
@@ -39,11 +47,44 @@ export function listCategories(categories: BackfillOptionCategory[], query: stri
 const selectable = (c: BackfillOptionChannel) => !c.busy;
 
 // The list is the form's only scroller: its height leaves room in the 80vh modal for the other
-// fields, so the modal body does not scroll as well.
-const LIST_SCROLL =
-  "max-h-[clamp(9rem,calc(80vh_-_34rem),40vh)] overflow-x-hidden overflow-y-auto overscroll-contain";
+// fields, so the modal body does not scroll as well. A fixed height, not a max, so the modal is as
+// tall while the channels load as once they have.
+export const LIST_SCROLL =
+  "h-[clamp(9rem,calc(80vh_-_34rem),40vh)] overflow-x-hidden overflow-y-auto overscroll-contain";
 
-export function ChannelPicker({ categories, selected, onChange, error }: ChannelPickerProps) {
+const CATEGORY_ROW =
+  "flex items-center gap-2 border-b border-border bg-rail-hover/40 px-3 py-1.5 text-xs font-semibold tracking-wide text-muted uppercase";
+const CHANNEL_ROW = "flex items-center gap-2 px-3 py-1.5 pl-8 text-sm";
+
+/** Name widths of the shimmer rows: two categories of channels, more than the box shows at its tallest. */
+const SHIMMER_ROWS: { cat: string; channels: string[] }[] = [
+  { cat: "5rem", channels: ["7rem", "5.5rem", "9rem", "6rem"] },
+  { cat: "6.5rem", channels: ["8rem", "5rem", "6.5rem", "7.5rem", "5.5rem", "8.5rem"] },
+];
+
+function ShimmerRows() {
+  return (
+    <div className="h-full overflow-hidden">
+      {SHIMMER_ROWS.map((cat, i) => (
+        <div key={i}>
+          <div className={CATEGORY_ROW}>
+            <Skeleton.Block width={18} height={18} className="shrink-0" />
+            <Skeleton.Text width={cat.cat} />
+          </div>
+          {cat.channels.map((w, j) => (
+            <div key={j} className={CHANNEL_ROW}>
+              <Skeleton.Block width={18} height={18} className="shrink-0" />
+              <Skeleton.Text width={w} />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ChannelPicker({ categories, selected, onChange, error, loading = false, failed }: ChannelPickerProps) {
+  const reveal = useReveal(!loading);
   const [query, setQuery] = useState("");
   const listed = useMemo(() => listCategories(categories, query), [categories, query]);
   const listedIds = useMemo(
@@ -84,6 +125,7 @@ export function ChannelPicker({ categories, selected, onChange, error }: Channel
           placeholder="Search channels"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          disabled={loading}
           className="min-w-0 flex-1"
         />
         <Button variant="ghost" size="sm" onClick={selectListed} disabled={listedIds.length === 0}>
@@ -97,19 +139,26 @@ export function ChannelPicker({ categories, selected, onChange, error }: Channel
       <div
         role="group"
         aria-label="Channels"
+        aria-busy={loading || undefined}
         aria-invalid={error ? true : undefined}
         className={`${LIST_SCROLL} rounded-control border ${error ? "border-danger" : "border-border"} bg-card`}
       >
-        {listed.length === 0 ? (
-          <p className="m-0 px-3 py-3 text-sm text-muted">{query ? "No channels match" : "No channels in this mapping"}</p>
+        {loading ? (
+          <ShimmerRows />
+        ) : failed ? (
+          <p role="alert" className={cx("m-0 px-3 py-3 text-sm text-danger", reveal)}>
+            {failed}
+          </p>
+        ) : listed.length === 0 ? (
+          <p className={cx("m-0 px-3 py-3 text-sm text-muted", reveal)}>{query ? "No channels match" : "No channels in this mapping"}</p>
         ) : (
           listed.map(({ key, cat, channels }) => {
             const ids = channels.filter(selectable).map((c) => c.id);
             const on = ids.filter((id) => selected.has(id)).length;
             const all = ids.length > 0 && on === ids.length;
             return (
-              <div key={key}>
-                <label className="flex cursor-pointer items-center gap-2 border-b border-border bg-rail-hover/40 px-3 py-1.5 text-xs font-semibold tracking-wide text-muted uppercase">
+              <div key={key} className={reveal}>
+                <label className={cx(CATEGORY_ROW, "cursor-pointer")}>
                   <Checkbox
                     aria-label={`Category ${cat.name}`}
                     checked={all}
@@ -122,7 +171,7 @@ export function ChannelPicker({ categories, selected, onChange, error }: Channel
                 {channels.map((c) => (
                   <label
                     key={c.id}
-                    className={`flex items-center gap-2 px-3 py-1.5 pl-8 text-sm ${c.busy ? "cursor-not-allowed text-muted" : "cursor-pointer text-text hover:bg-rail-hover"}`}
+                    className={cx(CHANNEL_ROW, c.busy ? "cursor-not-allowed text-muted" : "cursor-pointer text-text hover:bg-rail-hover")}
                   >
                     <Checkbox
                       aria-label={`#${c.name}`}

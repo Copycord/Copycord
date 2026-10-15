@@ -51,6 +51,10 @@ export function BackfillForm({ type, open, onClose }: TaskFormProps) {
     open && mappingId ? `/api/tasks/types/${type.key}/options?mapping_id=${encodeURIComponent(mappingId)}` : null,
   );
   const categories = useMemo(() => options.data?.categories ?? [], [options.data]);
+  // First load only: the mapping list, then the first mapping's channels. A later mapping switch keeps
+  // the held rows until the new answer lands.
+  const mappingsPending = open && !mappings.data && !mappings.error;
+  const channelsPending = mappingsPending || (Boolean(mappingId) && !options.data && !options.error);
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [range, setRange] = useState<RangeForm>(EMPTY_RANGE);
@@ -131,6 +135,8 @@ export function BackfillForm({ type, open, onClose }: TaskFormProps) {
             value={mappingId}
             onChange={onMapping}
             disabled={list.length === 0}
+            pending={mappingsPending}
+            pendingLabel="Mapping name"
             options={list.map((m) => ({
               value: m.mapping_id,
               label: m.mapping_name || `${m.original_guild_name ?? m.original_guild_id} to ${m.cloned_guild_name ?? m.cloned_guild_id}`,
@@ -140,15 +146,14 @@ export function BackfillForm({ type, open, onClose }: TaskFormProps) {
 
         <div className="flex flex-col gap-1.5">
           <span className="ml-0.5 text-xs text-muted">Channels</span>
-          {options.loading && !options.data ? (
-            <p className="m-0 text-sm text-muted">Loading channels...</p>
-          ) : options.data?.error ? (
-            <p role="alert" className="m-0 text-sm text-danger">
-              {options.data.error}
-            </p>
-          ) : (
-            <ChannelPicker categories={categories} selected={selected} onChange={setSelected} error={errors.channels} />
-          )}
+          <ChannelPicker
+            categories={categories}
+            selected={selected}
+            onChange={setSelected}
+            error={errors.channels}
+            loading={channelsPending}
+            failed={options.data?.error}
+          />
         </div>
 
         <fieldset className={FIELDSET}>

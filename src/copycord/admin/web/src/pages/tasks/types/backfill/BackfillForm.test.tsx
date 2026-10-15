@@ -2,8 +2,10 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
+import { REVEAL } from "../../../../components/ui/Skeleton";
 import type { BackfillOptionsResponse, TaskType } from "../../../../types/tasks";
 import { BackfillForm } from "./BackfillForm";
+import { LIST_SCROLL } from "./ChannelPicker";
 
 const TYPE: TaskType = {
   key: "backfill_channels",
@@ -235,6 +237,57 @@ describe("BackfillForm", () => {
     expect(await screen.findByText("Pick a start date")).toBeInTheDocument();
     expect(screen.getByText("Unknown channel 11")).toBeInTheDocument();
     expect(screen.queryByText(/Run page/)).toBeNull();
+  });
+
+  it("loads in its loaded shape: the same blocks, the controls as themselves and the list box at the same fixed height", async () => {
+    // Hold every answer until the loading DOM has been read.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const { fn } = serve();
+    const answer = fn.getMockImplementation()!;
+    fn.mockImplementation(async (url: string, init?: RequestInit) => {
+      await held;
+      return answer(url, init);
+    });
+    renderForm();
+
+    const shape = () => {
+      const picker = screen.getByTestId("channel-picker");
+      const list = within(picker).getByRole("group", { name: "Channels" });
+      return {
+        blocks: Array.from(document.getElementById("backfill-form")!.children).map((el) => `${el.tagName} ${el.className}`),
+        picker: Array.from(picker.children).map((el) => `${el.tagName} ${el.className}`),
+        mapping: screen.getByRole("combobox", { name: "Mapping" }).className,
+        search: within(picker).getByRole("searchbox", { name: "Search channels" }).className,
+        buttons: within(picker).getAllByRole("button").map((b) => b.textContent),
+        count: within(picker).getByText(/selected$/).textContent,
+        list: list.className,
+      };
+    };
+
+    const loading = shape();
+    const list = () => screen.getByRole("group", { name: "Channels" });
+    expect(screen.queryByText(/Loading channels/)).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Mapping" }).querySelector("[data-skeleton]")).not.toBeNull();
+    expect(screen.getByRole("searchbox", { name: "Search channels" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Select listed" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clear" })).toBeDisabled();
+    expect(list()).toHaveAttribute("aria-busy", "true");
+    expect(list().querySelectorAll("[data-skeleton]").length).toBeGreaterThan(4);
+    expect(within(list()).queryAllByRole("checkbox")).toHaveLength(0);
+
+    release();
+    expect(await screen.findByRole("checkbox", { name: "#news" })).toBeInTheDocument();
+    expect(shape()).toEqual(loading);
+    expect(loading.list).toContain(LIST_SCROLL);
+    expect(loading.list).toMatch(/(^| )h-\[clamp\(/);
+    expect(loading.list).not.toMatch(/max-h-/);
+    expect(loading.buttons).toEqual(["Select listed", "Clear"]);
+    expect(loading.count).toBe("0 selected");
+    expect(list()).not.toHaveAttribute("aria-busy");
+    expect(list().querySelector("[data-skeleton]")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Mapping" }).querySelector("[data-skeleton]")).toBeNull();
+    expect(list().firstElementChild).toHaveClass(REVEAL);
   });
 
   it("starts a plain run under the Run title with no trigger", async () => {

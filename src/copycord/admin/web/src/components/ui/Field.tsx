@@ -125,6 +125,10 @@ export interface FieldSelectProps {
   options: readonly SelectOption[];
   onChange: (value: string) => void;
   disabled?: boolean;
+  /** The options are still loading: a shimmer bar stands in the box where the chosen label goes. */
+  pending?: boolean;
+  /** Text that sizes the pending bar, about as wide as the label that replaces it. */
+  pendingLabel?: string;
   "aria-describedby"?: string;
   "aria-invalid"?: boolean;
   /** Replaces the Input look of the toggle, e.g. the 34px toolbar dropdown look; the caret room stays. */
@@ -132,7 +136,16 @@ export interface FieldSelectProps {
 }
 
 /** The app's dropdown (ToolbarSelect) as a form control: full width, the Input look, its own listbox. */
-export function FieldSelect({ value, options, onChange, disabled, toggleClassName = CONTROL_CLASS, ...rest }: FieldSelectProps) {
+export function FieldSelect({
+  value,
+  options,
+  onChange,
+  disabled,
+  pending,
+  pendingLabel,
+  toggleClassName = CONTROL_CLASS,
+  ...rest
+}: FieldSelectProps) {
   const auto = useId();
   const { id, ...aria } = useFieldControl(rest);
   return (
@@ -143,6 +156,8 @@ export function FieldSelect({ value, options, onChange, disabled, toggleClassNam
       options={options}
       onChange={onChange}
       disabled={disabled}
+      pending={pending}
+      pendingLabel={pendingLabel}
       toggleClassName={toggleClassName}
       {...aria}
     />
