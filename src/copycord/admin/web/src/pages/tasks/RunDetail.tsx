@@ -6,19 +6,19 @@
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { Badge, type BadgeTone } from "../../components/ui/Badge";
+import { Badge } from "../../components/ui/Badge";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { useLastLabels } from "../../components/ui/lastCount";
 import { api, errorText } from "../../lib/api";
 import { ACTIVE_STATUSES } from "../../types/tasks";
-import type { RunStatus, TaskRun, TaskType } from "../../types/tasks";
+import type { TaskRun, TaskType } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ReportPanel, reportUrl, useRunToast } from "./ReportPanel";
 import { ContextBadge, formatAgo, formatWhen, runConfirm, runDuration, triggerLabel, useNow } from "./RunList";
 import { runUrl, useTaskRun } from "./runStore";
-import { STATUS_LABEL, StatusIcon } from "./StatusIcon";
+import { RunStatusPill, StatusIcon } from "./StatusIcon";
 import { StepList, formatCount } from "./StepList";
 import {
   BUSY,
@@ -112,15 +112,6 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
 
 type Ask = "cancel" | "delete" | null;
 
-/** The status pill's tint: the status colour's Badge tone. */
-const PILL_TONE: Record<RunStatus, BadgeTone> = {
-  queued: "neutral",
-  running: "accent",
-  success: "good",
-  failed: "bad",
-  cancelled: "neutral",
-};
-
 /** The header's three-dot menu: Copy run ID, Download report, Cancel run while active, Delete once finished. */
 export function runMenuItems(run: TaskRun, on: { copyId: () => void; download: () => void; ask: (a: "cancel" | "delete") => void }): MenuItem[] {
   const items: MenuItem[] = [{ act: "copy-id", label: "Copy run ID", onSelect: on.copyId }];
@@ -198,14 +189,7 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
               {typeTitle}
             </h2>
             <span className={cx(RUN_NUMBER, FADE_IN)}>#{run.number}</span>
-            <span data-testid="run-status" className={cx("inline-flex", RUN_PILL, FADE_IN)}>
-              <Badge tone={PILL_TONE[run.status] ?? "neutral"}>
-                <span aria-hidden="true" className="inline-flex">
-                  <StatusIcon status={run.status} size={12} />
-                </span>
-                {STATUS_LABEL[run.status]}
-              </Badge>
-            </span>
+            <RunStatusPill status={run.status} testId="run-status" className={cx(RUN_PILL, FADE_IN)} />
             {/* On the title line, not a line of its own, so the page stands as tall as its skeleton. */}
             {run.status === "failed" && run.error ? (
               <span data-testid="run-error" title={run.error} className={cx(RUN_ERROR, FADE_IN)}>

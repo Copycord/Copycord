@@ -3,6 +3,7 @@
 // The glyph's box centres itself on the row that holds it (STATUS_BOX), so a run list row, a step row
 // and the run header all show it mid-row, beside both lines where the row has a title and a meta line.
 
+import { Badge, type BadgeTone } from "../../components/ui/Badge";
 import { cx } from "../../components/ui/cx";
 import type { RunStatus, StepState } from "../../types/tasks";
 import { STATUS_BOX } from "./TasksSkeleton";
@@ -32,6 +33,29 @@ export function StatusIcon({ status, size = 16, className }: { status: RunStatus
       <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false" className={status === "running" ? "animate-spin" : undefined}>
         <Glyph status={status} />
       </svg>
+    </span>
+  );
+}
+
+/** The status pill's tint: the status colour's Badge tone. */
+const PILL_TONE: Record<RunStatus, BadgeTone> = {
+  queued: "neutral",
+  running: "accent",
+  success: "good",
+  failed: "bad",
+  cancelled: "neutral",
+};
+
+/** A run's status as a pill: the app's Badge, a 12 px glyph and the status word. The run page header and the run list rows. */
+export function RunStatusPill({ status, testId, className }: { status: RunStatus; testId?: string; className?: string }) {
+  return (
+    <span data-testid={testId} className={cx("inline-flex", className)}>
+      <Badge tone={PILL_TONE[status] ?? "neutral"}>
+        <span aria-hidden="true" className="inline-flex">
+          <StatusIcon status={status} size={12} />
+        </span>
+        {STATUS_LABEL[status]}
+      </Badge>
     </span>
   );
 }

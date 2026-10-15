@@ -9,7 +9,7 @@ import { useSearchParams } from "react-router";
 import { Button, Input } from "../../components/ui";
 import type { RunFilters, RunStatus, TaskContext, TaskType } from "../../types/tasks";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
-import { FILTER_LABELS, SEARCH_BUTTON, SEARCH_FORM, SEARCH_INPUT, SearchGlyph, allOption } from "./TasksSkeleton";
+import { ALL_OPTION, FILTER_LABELS, SEARCH_BUTTON, SEARCH_FORM, SEARCH_INPUT, SearchGlyph } from "./TasksSkeleton";
 
 export const SEARCH_DEBOUNCE_MS = 300;
 /** The rail selection: the page scope, not a filter. */
@@ -181,30 +181,34 @@ export function RunFilterSelects({ filters, types, actors, contexts, onChange, a
         <ToolbarSelect
           id="tasks-filter-type"
           label={FILTER_LABELS.type}
+          prefix={FILTER_LABELS.type}
           value=""
-          options={[allOption("type"), ...types.map((t) => ({ value: t.key, label: t.title }))]}
+          options={[ALL_OPTION, ...types.map((t) => ({ value: t.key, label: t.title }))]}
           onChange={(v) => onChange(SCOPE_PARAM, v)}
         />
       )}
       <ToolbarSelect
         id="tasks-filter-status"
         label={FILTER_LABELS.status}
+        prefix={FILTER_LABELS.status}
         value={filters.status ?? ""}
-        options={[allOption("status"), ...STATUSES]}
+        options={[ALL_OPTION, ...STATUSES]}
         onChange={(v) => onChange("status", v)}
       />
       <ToolbarSelect
         id="tasks-filter-context"
         label={FILTER_LABELS.context}
+        prefix={FILTER_LABELS.context}
         value={filters.context ?? ""}
-        options={[allOption("context"), ...contextList.map((c) => ({ value: contextValue(c), label: c.label }))]}
+        options={[ALL_OPTION, ...contextList.map((c) => ({ value: contextValue(c), label: c.label }))]}
         onChange={(v) => onChange("context", v)}
       />
       <ToolbarSelect
         id="tasks-filter-actor"
         label={FILTER_LABELS.actor}
+        prefix={FILTER_LABELS.actor}
         value={filters.actor ?? ""}
-        options={[allOption("actor"), ...actorList.map((a) => ({ value: a, label: a }))]}
+        options={[ALL_OPTION, ...actorList.map((a) => ({ value: a, label: a }))]}
         onChange={(v) => onChange("actor", v)}
       />
       {active ? (

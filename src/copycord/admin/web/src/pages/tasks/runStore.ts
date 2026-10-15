@@ -54,7 +54,7 @@ export function matchesFilters(run: TaskRun, f: RunFilters): boolean {
   if (f.context && run.context?.mapping_id !== f.context && run.context?.label !== f.context) return false;
   if (f.q) {
     const q = f.q.trim().toLowerCase();
-    const hay = [run.title, run.context?.label ?? "", `#${run.number}`].join("\n").toLowerCase();
+    const hay = [run.title, run.context?.label ?? "", `#${run.number}`, run.id].join("\n").toLowerCase();
     if (q && !hay.includes(q)) return false;
   }
   return true;

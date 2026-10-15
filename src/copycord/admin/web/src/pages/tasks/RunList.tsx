@@ -10,17 +10,27 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
-import { StatusIcon } from "./StatusIcon";
+import { RunStatusPill, StatusIcon } from "./StatusIcon";
 import {
+  AUTO_REFRESH_LABEL,
   AUTO_REFRESH_OPTIONS,
   BUSY,
   CONTEXT_CHIP,
   FADE_IN,
-  FRAME,
   FRAME_HEAD,
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
+  LIST_BODY,
+  LIST_FRAME,
+  MetaChip,
   ROW,
+  ROW_CHIPS,
+  ROW_CHIPS_EXTRA,
+  ROW_ID,
+  ROW_MAIN,
+  ROW_MENU,
+  ROW_NAME,
+  ROW_TIMING,
   RUN_COUNT,
   RunCountLoading,
   RunRowsLoading,
@@ -30,15 +40,11 @@ import {
 export { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS } from "./TasksSkeleton";
 
 // rerun: runs stored before Re-run was removed still say how they started; nothing starts one now.
-const TRIGGER: Record<string, string> = { manual: "Manual run", rerun: "Re-run", api: "API run" };
+const TRIGGER: Record<string, string> = { manual: "Manual", rerun: "Re-run", api: "API" };
 
-/** How the run started, in words: "Manual run". */
+/** How the run started, for the trigger chip: "Manual". */
 export function triggerLabel(run: Pick<TaskRun, "trigger">): string {
-  return TRIGGER[run.trigger] ?? "Run";
-}
-
-export function triggerText(run: Pick<TaskRun, "trigger" | "actor">): string {
-  return `${triggerLabel(run)} by ${run.actor}`;
+  return TRIGGER[run.trigger] ?? "Other";
 }
 
 const WHEN = new Intl.DateTimeFormat(undefined, {
@@ -110,7 +116,7 @@ export function RunTiming({ run }: { run: TaskRun }) {
   const now = useNow(run.status === "running");
   const duration = runDuration(run, now);
   return (
-    <div className="flex w-[170px] shrink-0 flex-col gap-0.5 text-xs text-muted max-md:w-auto">
+    <div className={ROW_TIMING}>
       <span title="Started">{formatWhen(run.started_at ?? run.created_at)}</span>
       {duration ? <span title="Duration">{duration}</span> : null}
     </div>
@@ -124,20 +130,32 @@ export interface RunRowProps {
   actions?: ReactNode;
 }
 
+/** One run: the task name and number over the run ID, then the run page's status pill and chips, the timing and the menu. */
 export function RunRow({ run, typeTitle, actions }: RunRowProps) {
   return (
     <li className={ROW} data-run-id={run.id}>
       <StatusIcon status={run.status} />
-      <div className="min-w-0 flex-1">
-        <Link to={`/tasks/runs/${encodeURIComponent(run.id)}`} className="font-semibold text-text no-underline hover:underline">
-          {run.title}
-        </Link>
-        <div className="mt-0.5 text-xs text-muted">
-          {typeTitle} #{run.number}: {triggerText(run)}
+      <div className={ROW_MAIN}>
+        <div className={ROW_NAME}>
+          <Link to={`/tasks/runs/${encodeURIComponent(run.id)}`} title={run.title} className="text-text no-underline hover:underline">
+            {typeTitle} #{run.number}
+          </Link>
+        </div>
+        <div className={ROW_ID} title={`Run ID ${run.id}`}>
+          {run.id.slice(0, 8)}
         </div>
       </div>
-      <div className="w-[180px] shrink-0 max-md:hidden">
-        <ContextBadge run={run} />
+      <div className={ROW_CHIPS}>
+        <RunStatusPill status={run.status} />
+        <span className={ROW_CHIPS_EXTRA}>
+          <ContextBadge run={run} title="Mapping" />
+          <MetaChip glyph="trigger" title="Trigger">
+            {triggerLabel(run)}
+          </MetaChip>
+          <MetaChip glyph="actor" title="Started by">
+            {run.actor}
+          </MetaChip>
+        </span>
       </div>
       <RunTiming run={run} />
       {actions}
@@ -193,7 +211,7 @@ export function RunMenu({ run, onAction }: { run: TaskRun; onAction: (act: RunAc
   if (live) items.push({ act: "cancel", label: "Cancel run", onSelect: () => onAction("cancel", run) });
   else items.push({ act: "delete", label: "Delete", danger: true, onSelect: () => onAction("delete", run) });
   return (
-    <div className="shrink-0 self-start">
+    <div className={ROW_MENU}>
       <RowMenu kind="channel" items={items} />
     </div>
   );
@@ -213,27 +231,36 @@ export function RunList({
   rowActions,
 }: RunListProps) {
   return (
-    <div className={FRAME}>
+    <div className={LIST_FRAME}>
       <div className={FRAME_HEAD}>
         <div className={FRAME_HEAD_LEFT}>
           {loading ? <RunCountLoading /> : <span className={cx(RUN_COUNT, FADE_IN)}>{runCountText(total)}</span>}
-          <ToolbarSelect id="tasks-autorefresh" label="Auto-refresh" value={autoRefresh} options={AUTO_REFRESH_OPTIONS} onChange={onAutoRefresh} />
+          <ToolbarSelect
+            id="tasks-autorefresh"
+            label={AUTO_REFRESH_LABEL}
+            prefix={AUTO_REFRESH_LABEL}
+            value={autoRefresh}
+            options={AUTO_REFRESH_OPTIONS}
+            onChange={onAutoRefresh}
+          />
         </div>
         {filters ? <div className={FRAME_HEAD_FILTERS}>{filters}</div> : null}
       </div>
-      {loading ? (
-        <RunRowsLoading />
-      ) : runs.length === 0 ? (
-        <div aria-busy={refreshing || undefined} className={cx(FADE_IN, refreshing && BUSY)}>
-          {empty ?? <EmptyState plain title="No task runs yet" />}
-        </div>
-      ) : (
-        <ul aria-label="Task runs" aria-busy={refreshing || undefined} className={cx("m-0 list-none p-0", FADE_IN, refreshing && BUSY)}>
-          {runs.map((r) => (
-            <RunRow key={r.id} run={r} typeTitle={typeTitle(r.type)} actions={rowActions?.(r)} />
-          ))}
-        </ul>
-      )}
+      <div className={LIST_BODY}>
+        {loading ? (
+          <RunRowsLoading />
+        ) : runs.length === 0 ? (
+          <div aria-busy={refreshing || undefined} className={cx(FADE_IN, refreshing && BUSY)}>
+            {empty ?? <EmptyState plain title="No task runs yet" />}
+          </div>
+        ) : (
+          <ul aria-label="Task runs" aria-busy={refreshing || undefined} className={cx("m-0 list-none p-0", FADE_IN, refreshing && BUSY)}>
+            {runs.map((r) => (
+              <RunRow key={r.id} run={r} typeTitle={typeTitle(r.type)} actions={rowActions?.(r)} />
+            ))}
+          </ul>
+        )}
+      </div>
       {footer}
     </div>
   );

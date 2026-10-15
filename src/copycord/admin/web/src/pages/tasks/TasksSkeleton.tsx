@@ -34,6 +34,11 @@ export const FADE_IN = "transition-opacity duration-[180ms] ease-out starting:op
 /** Held content while a refetch is out: dimmed only once the fetch passes 300 ms, so a quick answer never flickers. */
 export const BUSY = "opacity-60 delay-300";
 export const FRAME = "overflow-hidden rounded-card border border-border bg-card";
+/** The runs card: FRAME without the clip, so an open filter list is never cut off by the card's edge. */
+export const LIST_FRAME = "rounded-card border border-border bg-card";
+/** The rows or the empty state under the frame head: never shorter than the tallest filter list (180 px and its
+ *  4 px gap), so with one run or none an open list still ends inside the card. */
+export const LIST_BODY = "min-h-[184px]";
 export const FRAME_HEAD = "flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5 text-sm";
 /** Left of the frame head: the run count and Auto-refresh. */
 export const FRAME_HEAD_LEFT = "flex items-center gap-4";
@@ -43,8 +48,18 @@ export const RUN_COUNT = "font-semibold text-text";
 /** The pager under the runs (RunPager). */
 export const PAGER = "flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted";
 /** The box of a run row; ROW adds the hover tint. The skeleton row uses the box alone so both stand equally tall. */
-export const ROW_BOX = "flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0";
+export const ROW_BOX = "flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0";
 export const ROW = `${ROW_BOX} hover:bg-rail-hover`;
+/** A run row's left column: the task name and number over the run ID, 38 px like the timing column. */
+export const ROW_MAIN = "min-w-0 flex-1";
+export const ROW_NAME = "truncate text-sm leading-5 font-medium";
+export const ROW_ID = "mt-0.5 truncate font-mono text-xs leading-4 text-muted";
+/** The row's chips, as on the run page: the status pill, then mapping, trigger and actor (hidden on narrow screens). */
+export const ROW_CHIPS = "flex shrink-0 items-center gap-2";
+export const ROW_CHIPS_EXTRA = "flex items-center gap-2 max-lg:hidden";
+/** Started over duration, 13 px muted with tabular numbers. */
+export const ROW_TIMING = "flex w-[170px] shrink-0 flex-col gap-0.5 text-[13px] leading-[18px] text-muted tabular-nums max-md:w-auto";
+export const ROW_MENU = "shrink-0";
 export const SEARCH_FORM = "mb-4 flex";
 export const SEARCH_INPUT = "min-w-0 flex-1 rounded-r-none";
 export const SEARCH_BUTTON = "rounded-l-none border-l-0";
@@ -148,6 +163,18 @@ export function RunIdChip({ id, onCopy }: { id: string | null; onCopy?: () => vo
     </span>
   );
 }
+/** The status pill's box as itself; its glyph and word are the run's status, so they shimmer. */
+export function StatusPillLoading({ testId, className }: { testId?: string; className?: string }) {
+  return (
+    <span data-testid={testId} className={cx("inline-flex", className)}>
+      <Badge>
+        <Skeleton width={12} height={12} rounded="rounded-full" />
+        <Skeleton.Text>Running</Skeleton.Text>
+      </Badge>
+    </span>
+  );
+}
+
 export const RUN_BODY = "flex flex-col gap-4";
 /** The cards of the run page: FRAME without the clip, so the Steps filter's list can open over the next card. */
 export const RUN_CARD = "rounded-card border border-border bg-card";
@@ -281,11 +308,13 @@ export const PER_PAGE = 25;
 export const RUNS_COUNT_KEY = "tasks.runs";
 
 export const AUTO_REFRESH_KEY = "tasks:autorefresh";
+/** The closed control reads "Auto-refresh: Off" (ToolbarSelect prefix); the options stay plain. */
+export const AUTO_REFRESH_LABEL = "Auto-refresh";
 export const AUTO_REFRESH_OPTIONS = [
-  { value: "0", label: "Auto-refresh: Off" },
-  { value: "10", label: "Auto-refresh: 10s" },
-  { value: "30", label: "Auto-refresh: 30s" },
-  { value: "60", label: "Auto-refresh: 60s" },
+  { value: "0", label: "Off" },
+  { value: "10", label: "10s" },
+  { value: "30", label: "30s" },
+  { value: "60", label: "60s" },
 ] as const;
 
 /** The stored auto-refresh interval, 30 s by default. */
@@ -303,10 +332,8 @@ export function readAutoRefresh(): string {
 export const FILTER_LABELS = { type: "Task type", status: "Status", context: "Mapping", actor: "Actor" } as const;
 export type FilterKey = keyof typeof FILTER_LABELS;
 
-/** The first option of a filter dropdown, "Status: All". */
-export function allOption(key: FilterKey) {
-  return { value: "", label: `${FILTER_LABELS[key]}: All` };
-}
+/** The first option of a filter dropdown; its label is the prefix on the closed control, "Status: All". */
+export const ALL_OPTION = { value: "", label: "All" } as const;
 
 export function runCountText(total: number): string {
   return total === 1 ? "1 task run" : `${total} task runs`;
@@ -316,7 +343,8 @@ export function TasksHeading() {
   return <h1 className="sr-only">Tasks</h1>;
 }
 
-const TITLE_WIDTHS = ["58%", "44%", "66%", "50%", "38%", "62%"];
+/** About the width of "Backfill channels #12" and its kin. */
+const NAME_WIDTHS = [150, 132, 164, 140, 124, 156];
 
 /** A Skeleton.Text on a line of its own; the wrapper carries the layout and font classes, so it is that line's height. */
 function TextBar({ width, className }: { width: number | string; className?: string }) {
@@ -393,31 +421,42 @@ export function RailEntryLoading() {
 }
 
 /**
- * One loading row in the shape of RunRow (RunList.tsx): the same box, the status glyph, the title and
- * type lines, the mapping badge column, the two timing lines and the row menu button, each in the same
- * type size and padding as the real element, so the first page lands without the list jumping.
+ * One loading row in the shape of RunRow (RunList.tsx): the same box, the status glyph, the name and run
+ * ID lines, the status pill and the mapping, trigger and actor chips as their own boxes with bars inside,
+ * the two timing lines and the row menu button, each in the same type size and padding as the real
+ * element, so the first page lands without the list jumping.
  */
-function RunRowLoading({ titleWidth }: { titleWidth: string }) {
+function RunRowLoading({ nameWidth }: { nameWidth: number }) {
   return (
     <li className={ROW_BOX}>
       <span className={STATUS_BOX}>
         <Skeleton width={16} height={16} rounded="rounded-full" />
       </span>
-      <div className="min-w-0 flex-1">
-        <TextBar width={titleWidth} className="font-semibold" />
-        <TextBar width="34%" className="mt-0.5 text-xs" />
+      <div className={ROW_MAIN}>
+        <TextBar width={nameWidth} className={ROW_NAME} />
+        <TextBar width={64} className={ROW_ID} />
       </div>
-      <div className="w-[180px] shrink-0 max-md:hidden">
-        {/* The Badge box: text-xs normal line height, py-0.5 and a border. */}
-        <Skeleton.Box className="inline-flex rounded-full border px-2 py-0.5 text-xs leading-normal font-semibold">
-          Mapping name
-        </Skeleton.Box>
+      <div className={ROW_CHIPS}>
+        <StatusPillLoading />
+        <span className={ROW_CHIPS_EXTRA}>
+          <span className="inline-flex">
+            <Badge className={CONTEXT_CHIP}>
+              <Skeleton.Text>Main mapping</Skeleton.Text>
+            </Badge>
+          </span>
+          <MetaChip glyph="trigger">
+            <Skeleton.Text>Manual</Skeleton.Text>
+          </MetaChip>
+          <MetaChip glyph="actor">
+            <Skeleton.Text>admin</Skeleton.Text>
+          </MetaChip>
+        </span>
       </div>
-      <div className="flex w-[170px] shrink-0 flex-col gap-0.5 text-xs max-md:w-auto">
+      <div className={ROW_TIMING}>
         <TextBar width={128} />
         <TextBar width={36} />
       </div>
-      <div className="shrink-0 self-start">
+      <div className={ROW_MENU}>
         {/* The row menu button box with its glyph hidden. */}
         <Skeleton.Box className="inline-block rounded-btn border px-2 py-0.5">⋯</Skeleton.Box>
       </div>
@@ -450,7 +489,7 @@ export function RunRowsLoading({ rows = readLastCount(RUNS_COUNT_KEY, 1, PER_PAG
       ) : (
         <ul aria-hidden="true" className="m-0 list-none p-0">
           {Array.from({ length: rows }, (_, i) => (
-            <RunRowLoading key={i} titleWidth={TITLE_WIDTHS[i % TITLE_WIDTHS.length]!} />
+            <RunRowLoading key={i} nameWidth={NAME_WIDTHS[i % NAME_WIDTHS.length]!} />
           ))}
         </ul>
       )}
@@ -527,13 +566,7 @@ export function RunDetailSkeleton({
               <div className={RUN_TITLE_ROW}>
                 <h2 className={RUN_TITLE}>{title ?? <TextBar width={180} />}</h2>
                 <Skeleton.Text className="shrink-0 text-[22px]">#00</Skeleton.Text>
-                {/* The pill's box as itself; its glyph and word are the run's status, so they shimmer. */}
-                <span data-testid="run-status" className={cx("inline-flex", RUN_PILL)}>
-                  <Badge>
-                    <Skeleton width={12} height={12} rounded="rounded-full" />
-                    <Skeleton.Text>Running</Skeleton.Text>
-                  </Badge>
-                </span>
+                <StatusPillLoading testId="run-status" className={RUN_PILL} />
               </div>
             </div>
             <div className="shrink-0">
@@ -547,7 +580,7 @@ export function RunDetailSkeleton({
               </Badge>
             </span>
             <MetaChip glyph="trigger">
-              <Skeleton.Text>Manual run</Skeleton.Text>
+              <Skeleton.Text>Manual</Skeleton.Text>
             </MetaChip>
             <MetaChip glyph="actor">
               <Skeleton.Text>admin</Skeleton.Text>
@@ -683,13 +716,14 @@ export function TasksSkeleton() {
                   <SearchGlyph />
                 </Button>
               </form>
-              <div className={FRAME}>
+              <div className={LIST_FRAME}>
                 <div className={FRAME_HEAD}>
                   <div className={FRAME_HEAD_LEFT}>
                     <RunCountLoading />
                     <ToolbarSelect
                       id="tasks-autorefresh-skeleton"
-                      label="Auto-refresh"
+                      label={AUTO_REFRESH_LABEL}
+                      prefix={AUTO_REFRESH_LABEL}
                       value={readAutoRefresh()}
                       options={AUTO_REFRESH_OPTIONS}
                       onChange={noop}
@@ -697,11 +731,21 @@ export function TasksSkeleton() {
                   </div>
                   <div className={FRAME_HEAD_FILTERS}>
                     {filters.map((k) => (
-                      <ToolbarSelect key={k} id={`tasks-filter-${k}-skeleton`} label={FILTER_LABELS[k]} value="" options={[allOption(k)]} onChange={noop} />
+                      <ToolbarSelect
+                        key={k}
+                        id={`tasks-filter-${k}-skeleton`}
+                        label={FILTER_LABELS[k]}
+                        prefix={FILTER_LABELS[k]}
+                        value=""
+                        options={[ALL_OPTION]}
+                        onChange={noop}
+                      />
                     ))}
                   </div>
                 </div>
-                <RunRowsLoading />
+                <div className={LIST_BODY}>
+                  <RunRowsLoading />
+                </div>
                 <RunPager page={Number(params.get("page")) || 1} pages={null} />
               </div>
             </>
