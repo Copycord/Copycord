@@ -165,19 +165,45 @@ export function Modal({
 }
 
 const BUBBLE_ALIGN = {
-  /** The old .tip-bubble: under the label's left edge, one line. */
-  start:
-    "left-0 max-w-[80vw] overflow-x-auto whitespace-nowrap after:left-3.5 " +
-    "-translate-y-1 data-[open=true]:translate-y-0",
+  /** The old .tip-bubble: at the label's left edge, one line. */
+  start: "left-0 max-w-[80vw] overflow-x-auto whitespace-nowrap after:left-3.5",
   /** #mapping-modal .tip-bubble: centered 60px right of the label, wraps at 240px. */
   center:
-    "left-1/2 max-w-[min(240px,calc(100vw-32px))] translate-x-[calc(-50%+60px)] -translate-y-1 overflow-x-hidden break-words whitespace-normal " +
-    "after:left-[calc(50%-60px)] after:-translate-x-1/2 data-[open=true]:translate-y-0",
-  /** #filters-modal .tip-bubble: under the label, 200 to 260px wide, wraps. */
-  wrap:
-    "left-0 max-w-[260px] min-w-[200px] overflow-x-auto break-words whitespace-normal after:left-3.5 " +
-    "-translate-y-1 data-[open=true]:translate-y-0",
+    "left-1/2 max-w-[min(240px,calc(100vw-32px))] translate-x-[calc(-50%+60px)] overflow-x-hidden break-words whitespace-normal " +
+    "after:left-[calc(50%-60px)] after:-translate-x-1/2",
+  /** #filters-modal .tip-bubble: at the label, 200 to 260px wide, wraps. */
+  wrap: "left-0 max-w-[260px] min-w-[200px] overflow-x-auto break-words whitespace-normal after:left-3.5",
 } as const;
+
+/** Below the label with the arrow on top (the old look), or above it with the arrow underneath. */
+const BUBBLE_PLACEMENT = {
+  below:
+    "top-[calc(100%+8px)] -translate-y-1 data-[open=true]:translate-y-0 " +
+    "after:-top-1.5 after:border-b-[#0f0820]",
+  above:
+    "bottom-[calc(100%+8px)] translate-y-1 data-[open=true]:translate-y-0 " +
+    "after:-bottom-1.5 after:border-t-[#0f0820]",
+} as const;
+
+export type TipPlacement = keyof typeof BUBBLE_PLACEMENT;
+
+/** The nearest ancestor that scrolls vertically, or null for the viewport. */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const { overflowY } = getComputedStyle(p);
+    if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") return p;
+  }
+  return null;
+}
+
+/** "above" when the label sits in the lower half of its scroll container (or the viewport). */
+export function tipPlacement(label: HTMLElement): TipPlacement {
+  const box = label.getBoundingClientRect();
+  const parent = scrollParent(label);
+  const area = parent ? parent.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const mid = (box.top + box.bottom) / 2;
+  return mid > (area.top + area.bottom) / 2 ? "above" : "below";
+}
 
 export interface TipLabelProps {
   htmlFor?: string;
@@ -193,13 +219,16 @@ export interface TipLabelProps {
 /**
  * The old label.has-tip: 12px muted label text, the round "i" .info-dot and its
  * .tip-bubble. Click the dot to show the tip; another click, a click elsewhere
- * or Escape hides it.
+ * or Escape hides it. The bubble opens below the label, or above it when the label
+ * sits in the lower half of its scroll container, so it does not lengthen the scroller.
  */
 export function TipLabel({ htmlFor, text, tip, tipLabel, tipId, align = "start", className }: TipLabelProps) {
   const auto = useId();
   const id = tipId ?? `tip${auto}`;
   const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState<TipPlacement>("below");
   const dotRef = useRef<HTMLButtonElement>(null);
+  const labelRef = useRef<HTMLLabelElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -221,6 +250,7 @@ export function TipLabel({ htmlFor, text, tip, tipLabel, tipId, align = "start",
 
   return (
     <label
+      ref={labelRef}
       htmlFor={htmlFor}
       className={`has-tip relative mt-0 mr-0 mb-1.5 ml-0.5 inline-flex items-center gap-1.5 text-xs text-muted ${className ?? ""}`}
     >
@@ -234,7 +264,8 @@ export function TipLabel({ htmlFor, text, tip, tipLabel, tipId, align = "start",
         aria-expanded={open}
         onClick={(e) => {
           e.preventDefault();
-          setOpen((o) => !o);
+          if (!open && labelRef.current) setPlacement(tipPlacement(labelRef.current));
+          setOpen(!open);
         }}
       />
       <span
@@ -242,7 +273,8 @@ export function TipLabel({ htmlFor, text, tip, tipLabel, tipId, align = "start",
         role="tooltip"
         aria-hidden={!open}
         data-open={open}
-        className={`tip-bubble pointer-events-none absolute top-[calc(100%+8px)] z-[60] w-max scale-[0.98] rounded-control border border-border bg-[#0f0820] px-3 py-2.5 text-[12.5px] leading-[1.45] text-text opacity-0 shadow-[0_12px_40px_rgba(0,0,0,0.45)] transition-[opacity,translate,scale] duration-150 after:absolute after:-top-1.5 after:border-[6px] after:border-solid after:border-transparent after:border-b-[#0f0820] after:content-[''] data-[open=true]:pointer-events-auto data-[open=true]:scale-100 data-[open=true]:opacity-100 ${BUBBLE_ALIGN[align]}`}
+        data-placement={placement}
+        className={`tip-bubble pointer-events-none absolute z-[60] w-max scale-[0.98] rounded-control border border-border bg-[#0f0820] px-3 py-2.5 text-[12.5px] leading-[1.45] text-text opacity-0 shadow-[0_12px_40px_rgba(0,0,0,0.45)] transition-[opacity,translate,scale] duration-150 after:absolute after:border-[6px] after:border-solid after:border-transparent after:content-[''] data-[open=true]:pointer-events-auto data-[open=true]:scale-100 data-[open=true]:opacity-100 ${BUBBLE_PLACEMENT[placement]} ${BUBBLE_ALIGN[align]}`}
       >
         {tip}
       </span>

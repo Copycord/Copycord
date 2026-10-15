@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { Modal } from "./Modal";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Modal, TipLabel } from "./Modal";
 
 function Harness({ onClose }: { onClose?: () => void }) {
   const [open, setOpen] = useState(false);
@@ -100,5 +100,50 @@ describe("Modal scroll lock", () => {
     view.rerender(<Pair a={false} b={false} />);
     expect(document.body.style.overflow).toBe("");
     view.unmount();
+  });
+});
+
+describe("TipLabel placement", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  // The scroller spans 0 to 400px; the label's own box sits at labelTop.
+  function mockRects(labelTop: number) {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const rect = (top: number, height: number) =>
+        ({ top, bottom: top + height, left: 0, right: 100, width: 100, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+      if (this.dataset.testid === "scroller") return rect(0, 400);
+      if (this.classList.contains("has-tip")) return rect(labelTop, 20);
+      return rect(0, 0);
+    });
+  }
+
+  function renderTip() {
+    render(
+      <div data-testid="scroller" style={{ overflowY: "auto" }}>
+        <TipLabel text="Ignore cloned" tip="Skips copies" tipLabel="What is it?" />
+      </div>,
+    );
+    return screen.getByRole("tooltip", { hidden: true });
+  }
+
+  it("opens below the label when it sits in the upper half of its scroller", async () => {
+    mockRects(40);
+    const bubble = renderTip();
+    await userEvent.setup().click(screen.getByRole("button", { name: "What is it?" }));
+    expect(bubble).toHaveAttribute("data-open", "true");
+    expect(bubble).toHaveAttribute("data-placement", "below");
+    expect(bubble.className).toContain("top-[calc(100%+8px)]");
+    expect(bubble.className).toContain("after:border-b-[#0f0820]");
+  });
+
+  it("flips above the label, arrow underneath, in the lower half", async () => {
+    mockRects(320);
+    const bubble = renderTip();
+    await userEvent.setup().click(screen.getByRole("button", { name: "What is it?" }));
+    expect(bubble).toHaveAttribute("data-open", "true");
+    expect(bubble).toHaveAttribute("data-placement", "above");
+    expect(bubble.className).toContain("bottom-[calc(100%+8px)]");
+    expect(bubble.className).toContain("after:border-t-[#0f0820]");
+    expect(bubble.className).not.toContain("after:border-b-[#0f0820]");
   });
 });
