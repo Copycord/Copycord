@@ -123,6 +123,8 @@ export const STEP_FILTER_OPTIONS = [
   { value: "queued", label: "Queued" },
   { value: "failed", label: "Failed" },
   { value: "success", label: "Done" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "skipped", label: "Skipped" },
 ] as const;
 export type StepFilter = (typeof STEP_FILTER_OPTIONS)[number]["value"];
 

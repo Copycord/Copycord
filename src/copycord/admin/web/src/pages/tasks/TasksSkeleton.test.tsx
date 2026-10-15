@@ -416,7 +416,7 @@ describe("run page skeleton structure", () => {
     const steps: TaskStep[] = Array.from({ length: 6 }, (_, i) => ({ key: `s${i}`, title: `#s${i}`, state: i === 4 ? "failed" : "success" }));
     render(<StepList run={{ ...RUN, steps }} />);
     await user.click(screen.getByRole("button", { name: /^Status: / }));
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["All", "Running", "Queued", "Failed", "Done"]);
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["All", "Running", "Queued", "Failed", "Done", "Cancelled", "Skipped"]);
     await user.click(screen.getByRole("option", { name: "Queued" }));
     expect(screen.getByRole("button", { name: /^Status: / })).toHaveTextContent("Status: Queued");
     const empty = screen.getByText("No queued steps");

@@ -96,6 +96,8 @@ const NONE: Record<Exclude<StepFilter, "">, string> = {
   queued: "No queued steps",
   failed: "No failed steps",
   success: "No steps done yet",
+  cancelled: "No cancelled steps",
+  skipped: "No skipped steps",
 };
 
 function OverallBar({ steps }: { steps: TaskStep[] }) {
