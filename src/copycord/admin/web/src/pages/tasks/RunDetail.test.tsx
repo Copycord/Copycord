@@ -6,10 +6,10 @@ import { ToastProvider } from "../../components/Toast";
 import type { TaskRun, TaskStep, TaskType } from "../../types/tasks";
 import { ReportPanel } from "./ReportPanel";
 import { RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
-import { runConfirm } from "./RunList";
+import { formatWhen, runConfirm } from "./RunList";
 import { StepList, orderSteps, overallProgress, stepLabel, stepSummary } from "./StepList";
 import { BUSY, FADE_IN, INPUTS_LIST, RUN_HEAD_MAIN, RUN_META, RunDetailSkeleton, STATS_LIST, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
-import { backfillStepNote, describeRunInputs, rangeWords } from "./types";
+import { backfillStepNote, channelNames, describeRunInputs, rangeWords } from "./types";
 
 const BACKFILL: TaskType = { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 };
 
@@ -25,7 +25,7 @@ function makeRun(over: Partial<TaskRun> = {}): TaskRun {
     actor: "admin",
     inputs: {
       mapping_id: "m1",
-      channel_ids: ["1521898853337403511", "1521898853337403512"],
+      channel_ids: ["c1", "c2"],
       category_ids: [],
       range: { mode: "last_n", last_n: 500 },
       ignore_cloned: false,
@@ -86,7 +86,8 @@ function outline(root: HTMLElement) {
       title: text(header.querySelector("h2")),
       number: text(header.querySelector("h2 + span")),
       status: text(within(header).getByTestId("run-status")),
-      actions: within(header).getAllByRole("button").map(text),
+      actions: within(header).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? text(b)),
+      chips: Array.from(header.querySelector(`[class^="${RUN_META} "]`)?.children ?? []).map(text),
     },
     cards: Array.from(root.querySelectorAll("section[aria-label]")).map((s) => {
       const name = s.getAttribute("aria-label");
@@ -119,18 +120,62 @@ afterEach(() => {
 });
 
 describe("RunHeader", () => {
-  it("shows the breadcrumb, title, number and meta, with only Delete when finished", () => {
+  const menuItems = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole("button", { name: "Run actions" }));
+    return within(screen.getByRole("menu")).getAllByRole("menuitem").map((b) => b.textContent);
+  };
+
+  it("shows the breadcrumb, title, number, status pill and meta chips, the actions in one menu", () => {
     renderHeader(makeRun());
     expect(screen.getByRole("link", { name: "All tasks" })).toHaveAttribute("href", "/tasks");
     expect(screen.getByRole("link", { name: "Backfill channels" })).toHaveAttribute("href", "/tasks?type=backfill_channels");
     expect(screen.getByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
     expect(screen.getByText("#12")).toBeInTheDocument();
-    expect(screen.getByText("Manual run by admin")).toBeInTheDocument();
+    expect(screen.getByText("Manual run")).toBeInTheDocument();
+    expect(screen.getByText("admin")).toBeInTheDocument();
     expect(screen.getByText("Main mapping")).toBeInTheDocument();
     expect(screen.getByTitle("Duration")).toHaveTextContent("48s");
+    expect(screen.getByTestId("run-started").firstElementChild).toHaveAttribute("title", `Started ${formatWhen("2026-10-14T18:00:01Z")}`);
     expect(screen.getByTestId("run-status")).toHaveTextContent("Success");
-    expect(screen.queryByRole("button", { name: "Cancel run" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Delete"]);
+    // The run ID chip: the first 8 characters in mono, the whole id in its title.
+    const id = screen.getByTestId("run-id");
+    expect(id).toHaveTextContent("ID4f2a9c1e");
+    expect(id.firstElementChild).toHaveAttribute("title", "Run ID 4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
+    expect(within(id).getByText("4f2a9c1e")).toHaveClass("font-mono");
+    // No standalone Cancel or Delete: the menu button and the chip's copy button are the only buttons.
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Run actions", "Copy run ID"]);
+  });
+
+  it("a finished run's menu: Copy run ID, Download report when there is one, then Delete apart, never Cancel run", async () => {
+    const user = userEvent.setup();
+    renderHeader(makeRun({ report: { summary: { delivered: 1 } } }));
+    expect(await menuItems(user)).toEqual(["Copy run ID", "Download report", "Delete"]);
+    const del = within(screen.getByRole("menu")).getByRole("menuitem", { name: "Delete" });
+    expect(del).toHaveClass("text-danger");
+    expect(del.previousElementSibling).toHaveAttribute("role", "separator");
+  });
+
+  it("an active run's menu has Cancel run and no Delete; no report, no Download report", async () => {
+    for (const status of ["running", "queued"] as const) {
+      const user = userEvent.setup();
+      const view = renderHeader(makeRun({ status, finished_at: null }));
+      expect(await menuItems(user)).toEqual(["Copy run ID", "Cancel run"]);
+      view.unmount();
+    }
+  });
+
+  it("copies the full run id from the menu and from the chip", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    renderHeader(makeRun());
+    await user.click(screen.getByRole("button", { name: "Run actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Copy run ID" }));
+    expect(writeText).toHaveBeenLastCalledWith("4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
+    expect(await screen.findByText("Run ID copied")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Copy run ID" }));
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText).toHaveBeenLastCalledWith("4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
   });
 
   it("shows the error text when failed", () => {
@@ -144,8 +189,8 @@ describe("RunHeader", () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
     renderHeader(makeRun({ status: "running", finished_at: null }));
-    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Cancel run" }));
+    await user.click(screen.getByRole("button", { name: "Run actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Cancel run" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Cancel Backfill channels #12?")).toBeInTheDocument();
     // The list's menu asks the same, word for word.
@@ -164,7 +209,8 @@ describe("RunHeader", () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
     renderHeader(makeRun({ status: "running", finished_at: null }));
-    await user.click(screen.getByRole("button", { name: "Cancel run" }));
+    await user.click(screen.getByRole("button", { name: "Run actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Cancel run" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Keep running" }));
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -174,8 +220,10 @@ describe("RunHeader", () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
     renderHeader(makeRun());
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Run actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
     const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Delete Backfill channels #12?")).toBeInTheDocument();
     expect(within(dialog).getByText(runConfirm("delete", "x").body as string)).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Keep" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
@@ -184,6 +232,18 @@ describe("RunHeader", () => {
     expect(url).toBe("/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     expect(init.method).toBe("DELETE");
     expect(await screen.findByText("Deleted Backfill channels #12")).toBeInTheDocument();
+  });
+
+  it("keeps Delete when the confirm is dismissed", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderHeader(makeRun());
+    await user.click(screen.getByRole("button", { name: "Run actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Keep" }));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("where")).toHaveTextContent("/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
   });
 });
 
@@ -197,7 +257,8 @@ describe("Run page structure", () => {
         title: "Backfill channels",
         number: "#12",
         status: "Running",
-        actions: ["Cancel run"],
+        actions: ["Run actions", "Copy run ID"],
+        chips: ["Main mapping", "Manual run", "admin", expect.any(String), expect.any(String), "ID4f2a9c1e"],
       },
       cards: [
         {
@@ -209,7 +270,7 @@ describe("Run page structure", () => {
           ],
           inputs: [
             ["Mapping", "Main mapping"],
-            ["Channels", "2 channels"],
+            ["Channels", "#general#news"],
             ["Categories", "0 categories"],
             ["Range", "Last 500 messages"],
             ["Ignore cloned", "No"],
@@ -422,6 +483,19 @@ describe("RunSummary", () => {
         ["Extra", "x"],
       ],
     });
+  });
+
+  it("shows the channels as chips by their step names, the first four and +N more, the count in the title", () => {
+    const steps: TaskStep[] = Array.from({ length: 7 }, (_, i) => ({ key: `c${i}`, title: `#ch${i}`, state: "success" }));
+    const run = makeRun({ steps, inputs: { channel_ids: steps.map((s) => s.key) } });
+    render(<RunSummary run={run} />);
+    const dd = screen.getByText("Channels").nextElementSibling!;
+    const chips = dd.firstElementChild!;
+    expect(chips).toHaveAttribute("title", "7 channels");
+    expect(Array.from(chips.children).map(text)).toEqual(["#ch0", "#ch1", "#ch2", "#ch3", "+3 more"]);
+    // A channel no step names shows its id; with no names at all the count stands alone.
+    expect(channelNames(["c0", "x9"], steps)).toEqual(["#ch0", "x9"]);
+    expect(channelNames(["x9"], steps)).toBeUndefined();
   });
 
   it("says when a run has no inputs", () => {

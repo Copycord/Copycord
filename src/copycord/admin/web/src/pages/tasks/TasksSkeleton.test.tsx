@@ -210,8 +210,14 @@ describe("page skeleton", () => {
     expect(within(run).getByRole("heading", { name: "Inputs", hidden: true })).toBeInTheDocument();
     expect(within(run).getByRole("heading", { name: "Steps", hidden: true })).toBeInTheDocument();
     expect(run.querySelector("summary")).toHaveTextContent("Report (JSON)");
-    // The only control is the Steps filter, real and inert; the header actions depend on the run's status.
-    expect(within(run).queryAllByRole("button", { hidden: true }).map((b) => b.firstElementChild?.textContent)).toEqual(["Status: All"]);
+    // The controls render as themselves, inert: the Run actions menu button, the run ID chip's copy button
+    // (both disabled until the run lands) and the Steps filter.
+    const buttons = within(run).queryAllByRole("button", { hidden: true });
+    expect(buttons.map((b) => b.getAttribute("aria-label") ?? "")).toEqual(["Run actions", "Copy run ID", expect.any(String)]);
+    expect(buttons[0]).toBeDisabled();
+    expect(buttons[0]).toHaveTextContent("⋯");
+    expect(buttons[1]).toBeDisabled();
+    expect(buttons[2]!.firstElementChild?.textContent).toBe("Status: All");
     expect(within(container).queryAllByRole("searchbox", { hidden: true })).toHaveLength(0);
   });
 
@@ -386,6 +392,10 @@ describe("run page skeleton structure", () => {
     };
     const blocks = (root: Element) => ({
       metaRows: root.querySelectorAll(`header [class^="${RUN_META}"]`).length,
+      // The chips of the meta row, each a Badge box; the pill beside the number; the actions button.
+      chips: root.querySelector(`header [class^="${RUN_META}"]`)?.children.length,
+      pill: root.querySelectorAll("header [data-testid=run-status] > span").length,
+      menu: root.querySelectorAll("header button[aria-label='Run actions']").length,
       headerLines: root.querySelectorAll("header p").length,
       cardHeads: root.querySelectorAll(`[class="${CARD_HEAD}"]`).length,
       tiles: root.querySelectorAll(`section[aria-label=Summary] dl > [class="${STAT_TILE}"]`).length,
@@ -405,9 +415,9 @@ describe("run page skeleton structure", () => {
       </MemoryRouter>,
     );
     const skel = blocks(container);
-    expect(real).toMatchObject({ metaRows: 1, cardHeads: 2, tiles: 3, steps: 6 });
+    expect(real).toMatchObject({ metaRows: 1, chips: 6, pill: 1, menu: 1, cardHeads: 2, tiles: 3, steps: 6 });
     expect(real.inputs).toBeGreaterThan(0);
-    // The error sits in the meta line, so the header has no line the skeleton lacks.
+    // The error sits on the title line, so the header has no line the skeleton lacks.
     expect(skel).toEqual(real);
   });
 
