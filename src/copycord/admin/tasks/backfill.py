@@ -42,6 +42,8 @@ log = logging.getLogger("copycord.tasks.backfill")
 
 TYPE_KEY = "backfill_channels"
 CANCEL_WAIT = 20.0
+# How long a job marked cancelled after CANCEL_WAIT still takes its late backfill_job_end.
+LATE_END_WAIT = 600.0
 JOB_FRAMES = ("backfill_job", "backfill_job_progress", "backfill_job_delivered",
               "backfill_job_cleanup", "backfill_job_end")
 
@@ -248,6 +250,8 @@ class _Job:
 
 
 _jobs: dict[str, _Job] = {}
+# Jobs that ended cancelled without their backfill_job_end; the late end still brings the count.
+_late: dict[str, _Job] = {}
 
 
 def job_id_for(run_id: Any, channel_id: Any) -> str:
@@ -303,7 +307,14 @@ async def dispatch(frame: dict) -> bool:
     data = frame.get("data") or {}
     if typ not in JOB_FRAMES:
         return False
-    job = _jobs.get(str(data.get("job_id") or ""))
+    job_id = str(data.get("job_id") or "")
+    if typ == "backfill_job_end" and job_id in _late:
+        try:
+            await _late_end(_late.pop(job_id), data)
+        except Exception:
+            log.exception("late backfill_job_end for job %s failed", job_id)
+        return True
+    job = _jobs.get(job_id)
     if job is None:
         log.debug("backfill frame %s for unknown job %r ignored", typ, data.get("job_id"))
         return False
@@ -350,9 +361,9 @@ async def dispatch(frame: dict) -> bool:
 
 async def _end_job(job: _Job, data: dict) -> None:
     step, ctx, name = job.step, job.ctx, job.name
-    # The server's count of what it wrote for the job; the last delivered frame if it sent none.
-    delivered = _int(data.get("delivered"))
-    delivered = job.delivered if delivered is None else delivered
+    # The server's count of what it wrote for the job. The count only grows, so an end that says
+    # less (or nothing) keeps what the delivered frames already showed.
+    delivered = max(job.delivered, _int(data.get("delivered")) or 0)
     job.delivered = delivered
     error = data.get("error")
     job.result.update(delivered=delivered, error=None if data.get("ok") else error,
@@ -370,6 +381,32 @@ async def _end_job(job: _Job, data: dict) -> None:
     job.result["finished_at"] = step.data["finished_at"]
     job.done.set()
     await _live_summary(ctx)
+
+
+async def _late_end(job: _Job, data: dict) -> None:
+    """backfill_job_end for a job already marked cancelled: the step stays cancelled, its count,
+    last message id and note take the real end, and so do the run's report and summary."""
+    step, ctx, name = job.step, job.ctx, job.name
+    delivered = max(job.delivered, _int(data.get("delivered")) or 0)
+    job.delivered = delivered
+    note = _cancelled_note(delivered)
+    job.result.update(delivered=delivered, note=note,
+                      last_orig_message_id=data.get("last_orig_message_id"))
+    step.data.update(done=delivered, note=note)
+    report = ctx.run.report or {}
+    channels = report.get("channels") or []
+    if channels:
+        total = sum(int(r.get("delivered") or 0) for r in channels)
+        if isinstance(report.get("summary"), dict):
+            report["summary"]["delivered"] = total
+        await ctx.summary(delivered=total)
+    await ctx.log(f"Cancelled #{name} after {_fmt(delivered)} messages (late end)", step=step.key)
+    await ctx.flush()
+
+
+def _forget_late(job_id: str, job: _Job) -> None:
+    if _late.get(job_id) is job:
+        del _late[job_id]
 
 
 def _cancelled_note(delivered: int) -> str:
@@ -574,6 +611,8 @@ async def _wait_jobs(ctx: Any, jobs: list[_Job]) -> None:
                 job.result["finished_at"] = job.step.data["finished_at"]
                 await ctx.log(f"Cancelled #{job.name} after {_fmt(job.delivered)} messages "
                               f"(no end from the client)", level="warning", step=job.step.key)
+                _late[job.job_id] = job
+                asyncio.get_running_loop().call_later(LATE_END_WAIT, _forget_late, job.job_id, job)
     finally:
         cancel_wait.cancel()
         if not all_done.done():

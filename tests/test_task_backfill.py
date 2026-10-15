@@ -328,3 +328,43 @@ async def test_options_flag_orphan_busy_and_resumable(svc, sent, mapping, db):
     assert chans[str(CH[1])]["busy"] is None and chans[str(CH[1])]["resumable"] is None
     await svc.cancel(run.id)
     await _settled(svc, run.id)
+
+
+@pytest.mark.asyncio
+async def test_end_keeps_the_larger_delivered_count(svc, sent, mapping):
+    """The count only grows: an end that says 0 keeps what the delivered frames showed."""
+    run = await svc.start("backfill_channels", {"mapping_id": mapping, "channel_ids": [str(CH[0])]})
+    await _until(lambda: len(_of(sent, "backfill_run")) == 1)
+    job_id = f"{run.id}:{CH[0]}"
+    await _frame("backfill_job", job_id=job_id, state="running")
+    await _frame("backfill_job_delivered", job_id=job_id, delivered=21, total=37)
+    await _frame("backfill_job_end", job_id=job_id, ok=True, error=None, delivered=0)
+    done = await _settled(svc, run.id)
+    step = _steps(svc, run.id)[str(CH[0])]
+    assert step["state"] == "success" and step["done"] == 21 and step["note"] == "21 messages"
+    assert done.report["channels"][0]["delivered"] == 21 and done.summary["delivered"] == 21
+
+
+@pytest.mark.asyncio
+async def test_late_end_after_the_cancel_wait_brings_the_real_count(svc, sent, mapping):
+    backfill._late.clear()
+    run = await svc.start("backfill_channels", {"mapping_id": mapping, "channel_ids": [str(CH[0])]})
+    await _until(lambda: len(_of(sent, "backfill_run")) == 1)
+    job_id = f"{run.id}:{CH[0]}"
+    await _frame("backfill_job", job_id=job_id, state="running")
+    await _frame("backfill_job_delivered", job_id=job_id, delivered=7, total=20)
+    await svc.cancel(run.id)
+    done = await _settled(svc, run.id)
+    assert _steps(svc, run.id)[str(CH[0])]["note"] == "Cancelled after 7 messages"
+
+    assert await _frame("backfill_job_end", job_id=job_id, ok=False, error="cancelled",
+                        delivered=15, last_orig_message_id=str(9 * 10 ** 18))
+    done = svc.get(run.id)
+    step = _steps(svc, run.id)[str(CH[0])]
+    assert step["state"] == "cancelled" and step["done"] == 15
+    assert step["note"] == "Cancelled after 15 messages"
+    channel = done.report["channels"][0]
+    assert channel["delivered"] == 15 and channel["outcome"] == "cancelled"
+    assert channel["last_orig_message_id"] == str(9 * 10 ** 18)
+    assert done.report["summary"]["delivered"] == 15 and done.summary["delivered"] == 15
+    assert backfill._late == {}
