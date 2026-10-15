@@ -1,5 +1,5 @@
 // One run at /tasks/runs/:id, the same page for every task type: the header with its status, number,
-// meta line and actions (Cancel while active, Re-run and Delete when finished), then one column: the
+// meta line and actions (Cancel while active, Delete when finished), then one column: the
 // summary card (the counts the type reports as stat tiles, then its Inputs), the Steps card and the
 // collapsed "Report (JSON)" panel. Everything type specific comes from the registry in ./types.
 
@@ -169,19 +169,9 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
               Cancel run
             </Button>
           ) : (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={RUN_ACTION}
-                onClick={() => navigate(`/tasks?type=${encodeURIComponent(run.type)}&rerun=${encodeURIComponent(run.id)}`)}
-              >
-                Re-run
-              </Button>
-              <Button variant="ghost-red" size="sm" className={RUN_ACTION} loading={busy} disabled={busy} onClick={() => setAsk("delete")}>
-                Delete
-              </Button>
-            </>
+            <Button variant="ghost-red" size="sm" className={RUN_ACTION} loading={busy} disabled={busy} onClick={() => setAsk("delete")}>
+              Delete
+            </Button>
           )}
         </div>
       </div>

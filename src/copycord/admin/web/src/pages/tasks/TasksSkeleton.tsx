@@ -68,7 +68,7 @@ export const RUN_META = "mt-1 flex min-h-6 flex-wrap items-center gap-x-3 gap-y-
 /** The run's status word in the meta line, in its status colour; the run's error follows it, quiet. */
 export const RUN_STATUS = "font-semibold";
 export const RUN_ERROR = "max-w-[48ch] truncate text-muted";
-/** The header's Re-run, Delete and Cancel run: the height of the Steps filter (ToolbarSelect, 34 px). */
+/** The header's Delete and Cancel run: the height of the Steps filter (ToolbarSelect, 34 px). */
 export const RUN_ACTION = "min-h-[34px] px-3 text-[13px]";
 export const RUN_BODY = "flex flex-col gap-4";
 /** The cards of the run page: FRAME without the clip, so the Steps filter's list can open over the next card. */

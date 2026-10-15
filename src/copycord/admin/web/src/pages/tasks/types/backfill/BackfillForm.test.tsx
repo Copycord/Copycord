@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
-import type { BackfillOptionsResponse, TaskRun, TaskType } from "../../../../types/tasks";
+import type { BackfillOptionsResponse, TaskType } from "../../../../types/tasks";
 import { BackfillForm } from "./BackfillForm";
 
 const TYPE: TaskType = {
@@ -72,12 +72,12 @@ function RunPage() {
   return <p>Run page {id}</p>;
 }
 
-function renderForm(prefill: TaskRun | null = null, onClose = vi.fn()) {
+function renderForm(onClose = vi.fn()) {
   render(
     <ToastProvider>
       <MemoryRouter initialEntries={["/tasks"]}>
         <Routes>
-          <Route path="/tasks" element={<BackfillForm type={TYPE} open onClose={onClose} prefill={prefill} />} />
+          <Route path="/tasks" element={<BackfillForm type={TYPE} open onClose={onClose} />} />
           <Route path="/tasks/runs/:id" element={<RunPage />} />
         </Routes>
       </MemoryRouter>
@@ -237,31 +237,14 @@ describe("BackfillForm", () => {
     expect(screen.queryByText(/Run page/)).toBeNull();
   });
 
-  it("prefills a Re-run with Resume after a failed run", async () => {
+  it("starts a plain run under the Run title with no trigger", async () => {
     const { posts } = serve();
-    const prefill = {
-      id: "r9",
-      type: "backfill_channels",
-      number: 9,
-      status: "failed",
-      inputs: {
-        mapping_id: "m1",
-        channel_ids: ["21"],
-        category_ids: ["c1"],
-        range: { mode: "since", since: "2026-10-01T08:30" },
-        ignore_cloned: false,
-        mode: "new",
-      },
-    } as unknown as TaskRun;
-    renderForm(prefill);
+    renderForm();
+    expect(screen.getByRole("dialog", { name: "Run Backfill channels" })).toBeInTheDocument();
     await screen.findByRole("checkbox", { name: "#news" });
-    await waitFor(() => expect(box("#updates").checked).toBe(true));
-    expect(box("#general").checked).toBe(true);
-    expect(screen.getByRole("radio", { name: "Since date/time" })).toBeChecked();
-    expect(screen.getByLabelText("Since date")).toHaveValue("2026-10-01");
-    expect(screen.getByRole("radio", { name: "Resume previous" })).toBeChecked();
+    fireEvent.click(box("#news"));
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await screen.findByText("Run page r13");
-    expect(posts[0]!.body.trigger).toBe("rerun");
+    expect(posts[0]!.body).not.toHaveProperty("trigger");
   });
 });

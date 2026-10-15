@@ -2,7 +2,7 @@
 // validation), Ignore cloned with the v3 tip, and Resume previous / Start new when a picked
 // channel has a checkpoint. Start posts the run and opens it.
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Modal, TipLabel } from "../../../../components/Modal";
 import { Button } from "../../../../components/ui/Button";
@@ -15,7 +15,6 @@ import { useStartRun, type TaskFormProps } from "../start";
 import { ChannelPicker, splitSelection } from "./ChannelPicker";
 import {
   EMPTY_RANGE,
-  rangeForm,
   rangeInputs,
   slotErrors,
   validateRange,
@@ -36,8 +35,6 @@ const RANGE_OPTIONS: { value: RangeMode; label: string }[] = [
   { value: "last_n", label: "Last N messages" },
 ];
 
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
-
 const FIELDSET = "m-0 flex min-w-0 flex-col gap-1 border-0 p-0";
 const CHOICE = "flex cursor-pointer items-center gap-2 text-sm text-text";
 
@@ -45,42 +42,23 @@ function Indent({ children }: { children: ReactNode }) {
   return <div className="mt-1 mb-2 ml-[26px] flex min-w-0 flex-wrap gap-2">{children}</div>;
 }
 
-export function BackfillForm({ type, open, onClose, prefill }: TaskFormProps) {
-  const inputs = (prefill?.inputs ?? {}) as Record<string, unknown>;
+export function BackfillForm({ type, open, onClose }: TaskFormProps) {
   const mappings = useApi<GuildMappingListResponse>(open ? "/api/guild-mappings" : null);
   const list = mappings.data?.mappings ?? [];
-  const [picked, setPicked] = useState<string | null>(typeof inputs.mapping_id === "string" ? inputs.mapping_id : null);
+  const [picked, setPicked] = useState<string | null>(null);
   const mappingId = picked ?? list[0]?.mapping_id ?? "";
   const options = useApi<BackfillOptionsResponse>(
     open && mappingId ? `/api/tasks/types/${type.key}/options?mapping_id=${encodeURIComponent(mappingId)}` : null,
   );
   const categories = useMemo(() => options.data?.categories ?? [], [options.data]);
 
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(strings(inputs.channel_ids)));
-  const [range, setRange] = useState<RangeForm>(() => (prefill ? rangeForm(inputs.range) : EMPTY_RANGE));
-  const [ignoreCloned, setIgnoreCloned] = useState(Boolean(inputs.ignore_cloned));
-  const [mode, setMode] = useState<RunMode>(
-    prefill && (prefill.status === "failed" || prefill.status === "cancelled") ? "resume" : inputs.mode === "new" ? "new" : "resume",
-  );
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [range, setRange] = useState<RangeForm>(EMPTY_RANGE);
+  const [ignoreCloned, setIgnoreCloned] = useState(false);
+  const [mode, setMode] = useState<RunMode>("resume");
   const [rangeErrors, setRangeErrors] = useState<RangeErrors>({});
   const [errors, setErrors] = useState<Partial<Record<FormSlot, string>>>({});
-  const { start, busy } = useStartRun(type, prefill);
-
-  // A Re-run's categories expand to their current channels once the options load.
-  const [prefillCats, setPrefillCats] = useState(() => strings(inputs.category_ids));
-  useEffect(() => {
-    if (prefillCats.length === 0 || categories.length === 0) return;
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const cat of categories) {
-        if (cat.id !== null && prefillCats.includes(cat.id)) {
-          cat.channels.filter((c) => !c.orphan && !c.busy).forEach((c) => next.add(c.id));
-        }
-      }
-      return next;
-    });
-    setPrefillCats([]);
-  }, [categories, prefillCats]);
+  const { start, busy } = useStartRun(type);
 
   const resumable = useMemo(
     () => categories.some((cat) => cat.channels.some((c) => c.resumable && selected.has(c.id))),
@@ -146,7 +124,7 @@ export function BackfillForm({ type, open, onClose, prefill }: TaskFormProps) {
     ) : null;
 
   return (
-    <Modal open={open} onClose={onClose} title={prefill ? `Re-run ${type.title}` : `Run ${type.title}`} className="w-[min(640px,92vw)]" footer={footer}>
+    <Modal open={open} onClose={onClose} title={`Run ${type.title}`} className="w-[min(640px,92vw)]" footer={footer}>
       <form id="backfill-form" noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <Field label="Mapping" error={errors.mapping} id="bf-mapping">
           <FieldSelect

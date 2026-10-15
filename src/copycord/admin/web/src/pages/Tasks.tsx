@@ -28,9 +28,7 @@ import {
 } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
 import { rememberRunTypes, rememberTypes, typeLabel } from "./tasks/typeLabels";
-import type { StatusResponse } from "../types/dashboard";
-import { STATUS_URL } from "./dashboard/model";
-import { bothRunning, useBotsRunning } from "./tasks/useBotsRunning";
+import { useBotsRunning } from "./tasks/useBotsRunning";
 import { TaskTypeForm } from "./tasks/types";
 
 export interface RunTaskButtonProps {
@@ -61,16 +59,14 @@ export function RunTaskButton({ type, onRun, botsUp = null }: RunTaskButtonProps
 
 interface OpenForm {
   type: TaskType;
-  prefill: TaskRun | null;
   /** Remounts the form so each open starts from a clean state. */
   nonce: number;
 }
 
 export function Tasks() {
   const { id } = useParams<{ id: string }>();
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const typeKey = params.get("type") ?? "";
-  const rerun = params.get("rerun") ?? "";
   const { data, loading: typesLoading } = useApi<TaskTypesResponse>("/api/tasks/types");
   const types = useMemo(() => data?.types ?? [], [data]);
   const selected = types.find((t) => t.key === typeKey);
@@ -82,57 +78,10 @@ export function Tasks() {
   }, [data]);
   const typeOf = useCallback((key: string) => types.find((t) => t.key === key), [types]);
   const typeTitle = useCallback((key: string) => typeOf(key)?.title ?? typeLabel(key).title, [typeOf]);
-  const toast = useToast();
-  const toastRef = useRef(toast);
-  toastRef.current = toast;
   const [form, setForm] = useState<OpenForm | null>(null);
-  const openForm = useCallback((type: TaskType, prefill: TaskRun | null = null) => {
-    setForm((f) => ({ type, prefill, nonce: (f?.nonce ?? 0) + 1 }));
+  const openForm = useCallback((type: TaskType) => {
+    setForm((f) => ({ type, nonce: (f?.nonce ?? 0) + 1 }));
   }, []);
-
-  // ?rerun=<id> opens the run's type form prefilled from the run, then leaves the URL. A type that needs
-  // the bots asks /api/status first: bots down toasts Start the bots first and opens nothing, the same
-  // gate as Run task. No status answer opens the form; the server's 409 still guards the start.
-  useEffect(() => {
-    if (!rerun || types.length === 0) return;
-    let live = true;
-    api
-      .get<TaskRunResponse>(runUrl(rerun))
-      .then(async (res) => {
-        if (!live) return;
-        const type = types.find((t) => t.key === res.run.type);
-        if (!type) {
-          toastRef.current.show(`Unknown task type ${res.run.type}`, { kind: "error" });
-          return;
-        }
-        if (type.requires_bots) {
-          const status = await api.get<StatusResponse>(STATUS_URL).catch(() => null);
-          if (!live) return;
-          if (status && !bothRunning(status)) {
-            toastRef.current.show(BOTS_DOWN, { kind: "error" });
-            return;
-          }
-        }
-        openForm(type, res.run);
-      })
-      .catch((e) => {
-        if (live) toastRef.current.show(errorText(e, "Could not load the run to re-run"), { kind: "error" });
-      })
-      .finally(() => {
-        if (!live) return;
-        setParams(
-          (p) => {
-            const next = new URLSearchParams(p);
-            next.delete("rerun");
-            return next;
-          },
-          { replace: true },
-        );
-      });
-    return () => {
-      live = false;
-    };
-  }, [rerun, types, openForm, setParams]);
 
   const botsUp = useBotsRunning(Boolean(selected?.requires_bots));
   const runAction = selected ? <RunTaskButton type={selected} botsUp={botsUp} onRun={(t) => openForm(t)} /> : null;
@@ -157,7 +106,7 @@ export function Tasks() {
           )}
         </div>
       </div>
-      {form ? <TaskTypeForm key={form.nonce} type={form.type} prefill={form.prefill} open onClose={() => setForm(null)} /> : null}
+      {form ? <TaskTypeForm key={form.nonce} type={form.type} open onClose={() => setForm(null)} /> : null}
     </section>
   );
 }
@@ -190,9 +139,6 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
     const name = `${typeTitle(run.type)} #${run.number}`;
     if (act === "view") {
       navigate(`/tasks/runs/${encodeURIComponent(run.id)}`);
-    } else if (act === "rerun") {
-      // Tasks reads ?rerun= and opens the type's form prefilled from this run.
-      navigate(`/tasks?type=${encodeURIComponent(run.type)}&rerun=${encodeURIComponent(run.id)}`);
     } else if (act === "cancel") {
       const ok = await confirm(runConfirm("cancel", name));
       if (!ok) return;

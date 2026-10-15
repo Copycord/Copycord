@@ -119,7 +119,7 @@ afterEach(() => {
 });
 
 describe("RunHeader", () => {
-  it("shows the breadcrumb, title, number and meta, with Re-run and Delete when finished", () => {
+  it("shows the breadcrumb, title, number and meta, with only Delete when finished", () => {
     renderHeader(makeRun());
     expect(screen.getByRole("link", { name: "All tasks" })).toHaveAttribute("href", "/tasks");
     expect(screen.getByRole("link", { name: "Backfill channels" })).toHaveAttribute("href", "/tasks?type=backfill_channels");
@@ -130,21 +130,13 @@ describe("RunHeader", () => {
     expect(screen.getByTitle("Duration")).toHaveTextContent("48s");
     expect(screen.getByTestId("run-status")).toHaveTextContent("Success");
     expect(screen.queryByRole("button", { name: "Cancel run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Re-run" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Delete"]);
   });
 
   it("shows the error text when failed", () => {
     renderHeader(makeRun({ status: "failed", error: "1 of 2 channels failed" }));
     expect(screen.getByText("1 of 2 channels failed")).toBeInTheDocument();
     expect(screen.getByTestId("run-status")).toHaveTextContent("Failed");
-  });
-
-  it("re-run navigates to the type form with the run id", async () => {
-    const user = userEvent.setup();
-    renderHeader(makeRun());
-    await user.click(screen.getByRole("button", { name: "Re-run" }));
-    expect(screen.getByTestId("where")).toHaveTextContent("/tasks?type=backfill_channels&rerun=4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
   });
 
   it("cancels an active run after the confirm", async () => {

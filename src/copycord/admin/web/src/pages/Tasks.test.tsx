@@ -313,35 +313,6 @@ describe("Tasks page", () => {
       for (const b of screen.getAllByRole("button", { name: "Run task" })) expect(b).toBeEnabled();
     });
 
-    it("Re-run with the bots down toasts Start the bots first and opens no form", async () => {
-      const done = run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 });
-      serve([done], {
-        handle: (url) => {
-          if (url === "/api/tasks/types") return Response.json(NEEDS_BOTS);
-          if (url === "/api/status") return Response.json({ both_running: false, server: { running: false }, client: { running: false } });
-          return undefined;
-        },
-      });
-      renderAt("/tasks?type=backfill_channels&rerun=4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
-      // The gate's toast, besides the hint next to Run task.
-      await waitFor(() => expect(screen.getAllByText("Start the bots first").length).toBeGreaterThanOrEqual(2));
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
-
-    it("Re-run with the bots up opens the form", async () => {
-      const done = run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 });
-      serve([done], {
-        handle: (url) => {
-          if (url === "/api/tasks/types") return Response.json(NEEDS_BOTS);
-          if (url === "/api/status") return Response.json({ both_running: true, server: { running: true }, client: { running: true } });
-          return undefined;
-        },
-      });
-      renderAt("/tasks?type=backfill_channels&rerun=4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
-      expect(await screen.findByRole("dialog")).toBeInTheDocument();
-      expect(screen.queryByText("Start the bots first")).toBeNull();
-    });
-
     it("does not ask for the status on a type that does not need the bots", async () => {
       const fn = serve([]);
       renderAt("/tasks?type=backfill_channels");
@@ -422,11 +393,10 @@ describe("Tasks page", () => {
     expect(screen.getByRole("link", { name: "Backfill #general" })).toBeInTheDocument();
   });
 
-  it("Re-run goes to the type with the run to copy in the URL", async () => {
+  it("a finished run's menu holds View and Delete only", async () => {
     serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
     renderAt("/tasks");
     await openMenu("Backfill #general");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Re-run" }));
-    expect(await screen.findByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["View", "Delete"]);
   });
 });

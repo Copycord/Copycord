@@ -28,6 +28,7 @@ import {
 
 export { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS } from "./TasksSkeleton";
 
+// rerun: runs stored before Re-run was removed still say how they started; nothing starts one now.
 const TRIGGER: Record<string, string> = { manual: "Manual run", rerun: "Re-run", api: "API run" };
 
 export function triggerText(run: Pick<TaskRun, "trigger" | "actor">): string {
@@ -145,7 +146,7 @@ export interface RunListProps {
   rowActions?: (run: TaskRun) => ReactNode;
 }
 
-export type RunAction = "view" | "cancel" | "rerun" | "delete";
+export type RunAction = "view" | "cancel" | "delete";
 
 /** The Cancel run and Delete confirms, word for word the same from the list's menu and the run page. */
 export function runConfirm(act: "cancel" | "delete", name: string): ConfirmOptions {
@@ -166,15 +167,12 @@ export function runConfirm(act: "cancel" | "delete", name: string): ConfirmOptio
       };
 }
 
-/** The row kebab: View always; Cancel run while queued or running; Re-run and Delete once finished, as on the run page. */
+/** The row kebab: View always; Cancel run while queued or running; Delete once finished, as on the run page. */
 export function RunMenu({ run, onAction }: { run: TaskRun; onAction: (act: RunAction, run: TaskRun) => void }) {
   const live = ACTIVE_STATUSES.includes(run.status);
   const items: MenuItem[] = [{ act: "view", label: "View", onSelect: () => onAction("view", run) }];
   if (live) items.push({ act: "cancel", label: "Cancel run", onSelect: () => onAction("cancel", run) });
-  else {
-    items.push({ act: "rerun", label: "Re-run", onSelect: () => onAction("rerun", run) });
-    items.push({ act: "delete", label: "Delete", danger: true, onSelect: () => onAction("delete", run) });
-  }
+  else items.push({ act: "delete", label: "Delete", danger: true, onSelect: () => onAction("delete", run) });
   return (
     <div className="shrink-0 self-start">
       <RowMenu kind="channel" items={items} />

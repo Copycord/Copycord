@@ -236,14 +236,11 @@ export function schemaFields(schema: Record<string, unknown>): SchemaField[] {
   });
 }
 
-export function SchemaForm({ type, open, onClose, prefill }: TaskFormProps) {
+export function SchemaForm({ type, open, onClose }: TaskFormProps) {
   const fields = schemaFields(type.inputs_schema ?? {});
-  const [values, setValues] = useState<Record<string, unknown>>(() => {
-    const from = (prefill?.inputs ?? {}) as Record<string, unknown>;
-    return Object.fromEntries(fields.map((f) => [f.key, from[f.key] ?? f.initial]));
-  });
+  const [values, setValues] = useState<Record<string, unknown>>(() => Object.fromEntries(fields.map((f) => [f.key, f.initial])));
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const { start, busy } = useStartRun(type, prefill);
+  const { start, busy } = useStartRun(type);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -269,7 +266,7 @@ export function SchemaForm({ type, open, onClose, prefill }: TaskFormProps) {
     <Modal
       open={open}
       onClose={onClose}
-      title={prefill ? `Re-run ${type.title}` : `Run ${type.title}`}
+      title={`Run ${type.title}`}
       className="w-[min(520px,92vw)]"
       footer={
         <>

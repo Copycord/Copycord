@@ -2,7 +2,7 @@
 
 export type RunStatus = "queued" | "running" | "success" | "failed" | "cancelled";
 export type StepState = "queued" | "running" | "success" | "failed" | "skipped" | "cancelled";
-export type RunTrigger = "manual" | "rerun" | "api";
+export type RunTrigger = "manual" | "api";
 
 export interface TaskType {
   key: string;

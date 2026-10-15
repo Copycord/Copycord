@@ -1,6 +1,5 @@
 // Pure helpers of the Backfill channels form: the range validation copied from
-// pages/channels/backfill/logic.ts (v3 rules), the POST /api/tasks/runs inputs and
-// the prefill of a Re-run from a finished run's inputs.
+// pages/channels/backfill/logic.ts (v3 rules) and the POST /api/tasks/runs inputs.
 
 export type RangeMode = "all" | "since" | "between" | "last_n";
 export type RunMode = "resume" | "new";
@@ -82,27 +81,6 @@ export function rangeInputs(f: RangeForm): RangeInputs {
     };
   }
   return { mode: "all" };
-}
-
-/** "2025-03-04T13:05:00" -> ["2025-03-04", "13:05"]; midnight leaves the time empty. */
-function splitIso(iso: unknown): [string, string] {
-  const s = typeof iso === "string" ? iso : "";
-  const m = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(s);
-  if (!m) return ["", ""];
-  const time = m[2] ?? "";
-  return [m[1]!, time === "00:00" ? "" : time];
-}
-
-/** The form state of a stored range, for Re-run. */
-export function rangeForm(raw: unknown): RangeForm {
-  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const mode = (["all", "since", "between", "last_n"] as const).find((m) => m === r.mode) ?? "all";
-  const [sinceDate, sinceTime] = splitIso(r.since);
-  const [toDate, toTime] = splitIso(r.until);
-  const lastN = typeof r.last_n === "number" ? String(r.last_n) : "";
-  if (mode === "between") return { ...EMPTY_RANGE, mode, fromDate: sinceDate, fromTime: sinceTime, toDate, toTime };
-  if (mode === "since") return { ...EMPTY_RANGE, mode, sinceDate, sinceTime };
-  return { ...EMPTY_RANGE, mode, lastN };
 }
 
 export interface BackfillInputs {

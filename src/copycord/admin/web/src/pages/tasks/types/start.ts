@@ -5,18 +5,16 @@ import { useCallback, useState } from "react";
 import { useNavigate } from "react-router";
 import { useToast } from "../../../components/Toast";
 import { ApiError, api, errorText } from "../../../lib/api";
-import type { TaskRun, TaskRunResponse, TaskType } from "../../../types/tasks";
+import type { TaskRunResponse, TaskType } from "../../../types/tasks";
 
 /** The props every start form gets from the Tasks page. */
 export interface TaskFormProps {
   type: TaskType;
   open: boolean;
   onClose: () => void;
-  /** The run a Re-run starts from: its inputs prefill the form. */
-  prefill?: TaskRun | null;
 }
 
-export function useStartRun(type: TaskType, prefill?: TaskRun | null) {
+export function useStartRun(type: TaskType) {
   const navigate = useNavigate();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -25,11 +23,7 @@ export function useStartRun(type: TaskType, prefill?: TaskRun | null) {
     async (inputs: Record<string, unknown>): Promise<Record<string, string> | null> => {
       setBusy(true);
       try {
-        const res = await api.post<TaskRunResponse>("/api/tasks/runs", {
-          type: type.key,
-          inputs,
-          ...(prefill ? { trigger: "rerun" } : {}),
-        });
+        const res = await api.post<TaskRunResponse>("/api/tasks/runs", { type: type.key, inputs });
         const run = res.run;
         toast.show(`Started ${type.title} #${run.number}`, { kind: "success" });
         navigate(`/tasks/runs/${encodeURIComponent(run.id)}`);
@@ -45,7 +39,7 @@ export function useStartRun(type: TaskType, prefill?: TaskRun | null) {
         setBusy(false);
       }
     },
-    [type, prefill, navigate, toast],
+    [type, navigate, toast],
   );
 
   return { start, busy };
