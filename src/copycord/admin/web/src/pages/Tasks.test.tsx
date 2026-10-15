@@ -164,6 +164,35 @@ describe("Tasks page", () => {
     expect(listCalls(fn).at(-1)).toContain("status=failed");
   });
 
+  it("typing a search keeps the rows, with no skeleton and no empty state until the search answers", async () => {
+    const held: { answer?: () => void } = {};
+    const fn = serve([run({ id: "12", number: 12 })]);
+    const inner = fn.getMockImplementation()!;
+    // A search waits until the test answers it, with no match.
+    fn.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (!url.startsWith("/api/tasks/runs?") || !url.includes("q=")) return inner(url, init);
+      await new Promise<void>((r) => (held.answer = r));
+      return Response.json({ runs: [], total: 0, page: 1, actors: [], contexts: [] });
+    });
+    renderAt("/tasks");
+    const list = await screen.findByRole("list", { name: "Task runs" });
+    const box = screen.getByRole("searchbox", { name: "Search runs" });
+    for (const ch of ["n", "no", "nop", "nope"]) fireEvent.change(box, { target: { value: ch } });
+    await waitFor(() => expect(held.answer).toBeDefined(), { timeout: 2000 });
+    // The search is out: the old row stays, marked busy, and nothing else appears.
+    expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull();
+    expect(screen.queryByText("No runs match")).toBeNull();
+    expect(screen.queryByText("No task runs yet")).toBeNull();
+    expect(within(list).getByRole("link", { name: "Backfill #general" })).toBeInTheDocument();
+    expect(list).toHaveAttribute("aria-busy", "true");
+    // Debounced: one search for the settled text, not one per keystroke.
+    expect(listCalls(fn).filter((u) => u.includes("q="))).toEqual([expect.stringContaining("q=nope")]);
+
+    await act(async () => held.answer!());
+    expect(await screen.findByText("No runs match")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull();
+  });
+
   it("pages with Previous and Next, 25 per page", async () => {
     const fn = serve([run({ id: "12", number: 12 })], { total: 60 });
     renderAt("/tasks");

@@ -166,14 +166,20 @@ describe("runStore refetch keeps what is on screen", () => {
     expect(result.current.runs[0]?.seq).toBe(2);
   });
 
-  it("a new filter set loads again until its first page lands", async () => {
+  it("a new filter set keeps the held rows, refreshing and not settled, until its page lands", async () => {
     const { result, rerender } = renderHook(({ f }) => useTaskRuns(f), { initialProps: { f: {} as { status?: "failed" } } });
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.settled).toBe(true);
     rerender({ f: { status: "failed" } });
-    expect(result.current.loading).toBe(true);
-    expect(result.current.refreshing).toBe(false);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.refreshing).toBe(true);
+    expect(result.current.settled).toBe(false);
+    expect(result.current.runs[0]?.seq).toBe(1);
     await act(async () => release?.());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(result.current.settled).toBe(true));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.refreshing).toBe(false);
+    expect(result.current.runs[0]?.seq).toBe(2);
   });
 
   it("useTaskRun keeps the run on a refetch and loading stays false", async () => {
@@ -191,5 +197,83 @@ describe("runStore refetch keeps what is on screen", () => {
     await act(async () => release?.());
     await waitFor(() => expect(result.current.run?.seq).toBe(2));
     expect(result.current.refreshing).toBe(false);
+  });
+});
+
+describe("runStore search: stale while revalidate", () => {
+  // Each fetch waits until the test answers it by url fragment.
+  let pending: { url: string; answer: (runs: TaskRun[]) => void }[];
+  beforeEach(() => {
+    FakeWs.all = [];
+    pending = [];
+    vi.stubGlobal("WebSocket", FakeWs);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (url: string) =>
+          new Promise<Response>((resolve) => {
+            pending.push({
+              url,
+              answer: (runs) =>
+                resolve(
+                  url.startsWith("/api/tasks/runs?")
+                    ? Response.json({ runs, total: runs.length, page: 1, actors: [], contexts: [] })
+                    : Response.json({ run: runs[0] }),
+                ),
+            });
+          }),
+      ),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const answer = async (part: string, runs: TaskRun[]) => {
+    const hit = pending.find((p) => p.url.includes(part));
+    if (!hit) throw new Error(`no fetch for ${part}`);
+    await act(async () => hit.answer(runs));
+  };
+
+  it("a query change after the first answer keeps the rows, refreshing until the new answer replaces them", async () => {
+    const { result, rerender } = renderHook(({ q }) => useTaskRuns(q ? { q } : {}), { initialProps: { q: "" } });
+    expect(result.current.loading).toBe(true);
+    await answer("page=1&per_page", [makeRun({ id: "1" }), makeRun({ id: "2", number: 2 })]);
+    await waitFor(() => expect(result.current.runs).toHaveLength(2));
+
+    rerender({ q: "gen" });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.refreshing).toBe(true);
+    expect(result.current.settled).toBe(false);
+    expect(result.current.runs.map((r) => r.id)).toEqual(["1", "2"]);
+
+    await answer("q=gen", [makeRun({ id: "7", number: 7 })]);
+    await waitFor(() => expect(result.current.runs.map((r) => r.id)).toEqual(["7"]));
+    expect(result.current.refreshing).toBe(false);
+    expect(result.current.settled).toBe(true);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("ignores a late answer from a superseded query", async () => {
+    const { result, rerender } = renderHook(({ q }) => useTaskRuns(q ? { q } : {}), { initialProps: { q: "" } });
+    await answer("page=1&per_page", [makeRun({ id: "1" })]);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    rerender({ q: "ge" });
+    rerender({ q: "general" });
+    await answer("q=general", [makeRun({ id: "9", number: 9 })]);
+    await waitFor(() => expect(result.current.runs.map((r) => r.id)).toEqual(["9"]));
+    // The answer for "ge" arrives last; it must not replace the rows for "general".
+    await answer("q=ge&", [makeRun({ id: "5", number: 5 })]);
+    expect(result.current.runs.map((r) => r.id)).toEqual(["9"]);
+    expect(result.current.settled).toBe(true);
+    expect(result.current.refreshing).toBe(false);
+  });
+
+  it("useTaskRun ignores a late answer for the run it left", async () => {
+    const { result, rerender } = renderHook(({ id }) => useTaskRun(id), { initialProps: { id: "1" } });
+    rerender({ id: "2" });
+    await answer("/runs/2", [makeRun({ id: "2", number: 2, steps: [] })]);
+    await waitFor(() => expect(result.current.run?.id).toBe("2"));
+    await answer("/runs/1", [makeRun({ id: "1", steps: [] })]);
+    expect(result.current.run?.id).toBe("2");
   });
 });

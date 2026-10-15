@@ -113,10 +113,12 @@ function useReconnectRefetch(connected: boolean, refetch: () => void) {
 }
 
 export interface TaskRunsState extends ListState {
-  /** No page has landed yet for the current filters: show the skeleton. */
+  /** No page has landed yet since the list mounted: show the skeleton. Never true again after that. */
   loading: boolean;
-  /** A fetch is out while the held rows stay on screen (auto-refresh, reconnect, reload). */
+  /** A fetch is out while the held rows stay on screen (search, filters, paging, auto-refresh, reconnect, reload). */
   refreshing: boolean;
+  /** The held page answers the current filters; until then an empty page is not news (no empty state). */
+  settled: boolean;
   error: Error | undefined;
   /** The /ws/out socket is open, so rows update live. */
   connected: boolean;
@@ -130,12 +132,16 @@ export interface TaskRunsState extends ListState {
   removeRun: (id: string) => void;
 }
 
-/** The list page for `filters`, live. Only the first fetch of a filter set loads; later ones keep the rows. */
+/**
+ * The list page for `filters`, live. Stale while revalidate: only the first fetch after mount loads (the
+ * skeleton); every later one, for new filters too, keeps the held rows with `refreshing` set until its
+ * answer replaces them. A fetch made stale by a newer one is aborted and its answer ignored.
+ */
 export function useTaskRuns(filters: RunFilters): TaskRunsState {
   const url = runsUrl(filters);
   const [state, setState] = useState<ListState>({ runs: [], total: 0 });
   const [choices, setChoices] = useState<{ actors: string[]; contexts: TaskContext[] }>({ actors: [], contexts: [] });
-  // The list URL the held page answers; anything else means the current filters have no data yet.
+  // The list URL the held page answers, null before the first answer.
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<Error | undefined>(undefined);
@@ -181,8 +187,9 @@ export function useTaskRuns(filters: RunFilters): TaskRunsState {
   }, []);
   const removeRun = useCallback((id: string) => setState((s) => removeFromList(s, id)), []);
 
-  const loading = loadedUrl !== url;
-  return { ...state, ...choices, loading, refreshing: refreshing && !loading, error, connected, reload, patchRun, removeRun };
+  const loading = loadedUrl === null;
+  const settled = loadedUrl === url;
+  return { ...state, ...choices, loading, refreshing: (refreshing || !settled) && !loading, settled, error, connected, reload, patchRun, removeRun };
 }
 
 export interface TaskRunState {

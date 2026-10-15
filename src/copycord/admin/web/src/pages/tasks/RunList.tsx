@@ -124,9 +124,9 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
 export interface RunListProps {
   runs: TaskRun[];
   total: number;
-  /** No page yet for these filters: the skeleton rows. */
+  /** No page yet since the list mounted: the skeleton rows. */
   loading: boolean;
-  /** A refetch is out; the rows stay and the list is only marked busy. */
+  /** A fetch is out (search, filters, paging, refresh): the rows or the empty state stay, only marked busy. */
   refreshing?: boolean;
   typeTitle: (key: string) => string;
   autoRefresh: string;
@@ -184,7 +184,7 @@ export function RunList({
       {loading ? (
         <RunRowsLoading />
       ) : runs.length === 0 ? (
-        (empty ?? <EmptyState plain title="No task runs yet" />)
+        <div aria-busy={refreshing || undefined}>{empty ?? <EmptyState plain title="No task runs yet" />}</div>
       ) : (
         <ul aria-label="Task runs" aria-busy={refreshing || undefined} className="m-0 list-none p-0">
           {runs.map((r) => (

@@ -126,4 +126,13 @@ describe("RunFilters", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(box).toHaveValue("");
   });
+
+  it("searches at once on Enter, without waiting for the debounce", () => {
+    vi.useFakeTimers();
+    renderAt("/tasks");
+    const box = screen.getByRole("searchbox", { name: "Search runs" });
+    fireEvent.change(box, { target: { value: "news" } });
+    fireEvent.submit(box.closest("form")!);
+    expect(where().get("q")).toBe("news");
+  });
 });

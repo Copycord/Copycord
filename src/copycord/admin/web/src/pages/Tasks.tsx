@@ -136,7 +136,7 @@ const SOCKET_DOWN_POLL_S = 30;
 
 function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: string) => string }) {
   const { filters, active, set, setPage, clear } = useRunFilters();
-  const { runs, total, loading, refreshing, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
+  const { runs, total, loading, refreshing, settled, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
   const navigate = useNavigate();
   const confirm = useConfirm();
@@ -204,8 +204,11 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
     }
   };
 
-  // Plain text inside the runs frame; the header's Run task is the only one on the page.
-  const empty = active ? (
+  // Plain text inside the runs frame; the header's Run task is the only one on the page. Which one
+  // shows follows the filters the held page answers, so it changes only when a fetch settles.
+  const emptyFor = useRef({ active, scoped: Boolean(filters.type) });
+  if (settled) emptyFor.current = { active, scoped: Boolean(filters.type) };
+  const empty = emptyFor.current.active ? (
     <EmptyState
       plain
       title="No runs match"
@@ -219,7 +222,7 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
     <EmptyState
       plain
       title="No task runs yet"
-      description={filters.type ? "Run task above to start one" : "Pick a task type on the left to run one"}
+      description={emptyFor.current.scoped ? "Run task above to start one" : "Pick a task type on the left to run one"}
     />
   );
 
