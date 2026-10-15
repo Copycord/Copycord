@@ -311,6 +311,35 @@ describe("Tasks page", () => {
       for (const b of screen.getAllByRole("button", { name: "Run task" })) expect(b).toBeEnabled();
     });
 
+    it("Re-run with the bots down toasts Start the bots first and opens no form", async () => {
+      const done = run({ id: "12", number: 12 });
+      serve([done], {
+        handle: (url) => {
+          if (url === "/api/tasks/types") return Response.json(NEEDS_BOTS);
+          if (url === "/api/status") return Response.json({ both_running: false, server: { running: false }, client: { running: false } });
+          return undefined;
+        },
+      });
+      renderAt("/tasks?type=backfill_channels&rerun=12");
+      // The gate's toast, besides the hint next to Run task.
+      await waitFor(() => expect(screen.getAllByText("Start the bots first").length).toBeGreaterThanOrEqual(2));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("Re-run with the bots up opens the form", async () => {
+      const done = run({ id: "12", number: 12 });
+      serve([done], {
+        handle: (url) => {
+          if (url === "/api/tasks/types") return Response.json(NEEDS_BOTS);
+          if (url === "/api/status") return Response.json({ both_running: true, server: { running: true }, client: { running: true } });
+          return undefined;
+        },
+      });
+      renderAt("/tasks?type=backfill_channels&rerun=12");
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      expect(screen.queryByText("Start the bots first")).toBeNull();
+    });
+
     it("does not ask for the status on a type that does not need the bots", async () => {
       const fn = serve([]);
       renderAt("/tasks?type=backfill_channels");

@@ -28,7 +28,9 @@ import {
 } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
 import { rememberRunTypes, rememberTypes, typeLabel } from "./tasks/typeLabels";
-import { useBotsRunning } from "./tasks/useBotsRunning";
+import type { StatusResponse } from "../types/dashboard";
+import { STATUS_URL } from "./dashboard/model";
+import { bothRunning, useBotsRunning } from "./tasks/useBotsRunning";
 import { TaskTypeForm } from "./tasks/types";
 
 export interface RunTaskButtonProps {
@@ -88,17 +90,30 @@ export function Tasks() {
     setForm((f) => ({ type, prefill, nonce: (f?.nonce ?? 0) + 1 }));
   }, []);
 
-  // ?rerun=<id> opens the run's type form prefilled from the run, then leaves the URL.
+  // ?rerun=<id> opens the run's type form prefilled from the run, then leaves the URL. A type that needs
+  // the bots asks /api/status first: bots down toasts Start the bots first and opens nothing, the same
+  // gate as Run task. No status answer opens the form; the server's 409 still guards the start.
   useEffect(() => {
     if (!rerun || types.length === 0) return;
     let live = true;
     api
       .get<TaskRunResponse>(runUrl(rerun))
-      .then((res) => {
+      .then(async (res) => {
         if (!live) return;
         const type = types.find((t) => t.key === res.run.type);
-        if (type) openForm(type, res.run);
-        else toastRef.current.show(`Unknown task type ${res.run.type}`, { kind: "error" });
+        if (!type) {
+          toastRef.current.show(`Unknown task type ${res.run.type}`, { kind: "error" });
+          return;
+        }
+        if (type.requires_bots) {
+          const status = await api.get<StatusResponse>(STATUS_URL).catch(() => null);
+          if (!live) return;
+          if (status && !bothRunning(status)) {
+            toastRef.current.show(BOTS_DOWN, { kind: "error" });
+            return;
+          }
+        }
+        openForm(type, res.run);
       })
       .catch((e) => {
         if (live) toastRef.current.show(errorText(e, "Could not load the run to re-run"), { kind: "error" });
