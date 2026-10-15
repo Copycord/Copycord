@@ -13,22 +13,12 @@ import { ApiError, api, errorText } from "../lib/api";
 import type { TaskRun, TaskRunResponse, TaskType, TaskTypesResponse } from "../types/tasks";
 import { RunDetail } from "./tasks/RunDetail";
 import { RunFilterSelects, RunSearch, useRunFilters } from "./tasks/RunFilters";
-import { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS, RunList, RunMenu, type RunAction } from "./tasks/RunList";
+import { RunList, RunMenu, type RunAction } from "./tasks/RunList";
 import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
-import { MAIN, PAGE, TasksHeading } from "./tasks/TasksSkeleton";
+import { ALL_TASKS_DESCRIPTION, AUTO_REFRESH_KEY, MAIN, PAGE, TasksHeader, TasksHeading, readAutoRefresh } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
 import { useBotsRunning } from "./tasks/useBotsRunning";
 import { TaskTypeForm } from "./tasks/types";
-
-function readAutoRefresh(): string {
-  try {
-    const v = localStorage.getItem(AUTO_REFRESH_KEY);
-    if (v && AUTO_REFRESH_OPTIONS.some((o) => o.value === v)) return v;
-  } catch {
-    // Storage blocked: use the default.
-  }
-  return "30";
-}
 
 export interface RunTaskButtonProps {
   type: TaskType;
@@ -56,24 +46,6 @@ export function RunTaskButton({ type, onRun, botsUp = null }: RunTaskButtonProps
   );
 }
 
-export interface TasksHeaderProps {
-  title: string;
-  description: string;
-  action: ReactNode;
-}
-
-export function TasksHeader({ title, description, action }: TasksHeaderProps) {
-  return (
-    <div className="mb-4 flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <h2 className="m-0 text-[22px] font-bold text-text">{title}</h2>
-        <p className="mt-1 mb-0 text-sm text-muted">{description}</p>
-      </div>
-      {action}
-    </div>
-  );
-}
-
 interface OpenForm {
   type: TaskType;
   prefill: TaskRun | null;
@@ -86,9 +58,11 @@ export function Tasks() {
   const [params, setParams] = useSearchParams();
   const typeKey = params.get("type") ?? "";
   const rerun = params.get("rerun") ?? "";
-  const { data } = useApi<TaskTypesResponse>("/api/tasks/types");
+  const { data, loading: typesLoading } = useApi<TaskTypesResponse>("/api/tasks/types");
   const types = useMemo(() => data?.types ?? [], [data]);
   const selected = types.find((t) => t.key === typeKey);
+  // A type page before the types land: bars in the header rather than All tasks, as in the skeleton.
+  const typePending = Boolean(typeKey) && !data && typesLoading;
   const typeTitle = useCallback((key: string) => types.find((t) => t.key === key)?.title ?? key, [types]);
   const toast = useToast();
   const toastRef = useRef(toast);
@@ -136,15 +110,15 @@ export function Tasks() {
     <section className="w-full">
       <TasksHeading />
       <div className={PAGE}>
-        <TypeRail types={types} selected={id ? "" : typeKey} />
+        <TypeRail types={types} selected={id ? "" : typeKey} loading={!data && typesLoading} />
         <div className={MAIN}>
           {id ? (
             <RunDetail id={id} typeTitle={typeTitle} />
           ) : (
             <>
               <TasksHeader
-                title={selected?.title ?? "All tasks"}
-                description={selected?.description ?? "Showing runs from all task types"}
+                title={typePending ? null : (selected?.title ?? "All tasks")}
+                description={typePending ? null : (selected?.description ?? ALL_TASKS_DESCRIPTION)}
                 action={runAction}
               />
               <RunsView types={types} typeTitle={typeTitle} runAction={runAction} />

@@ -3,24 +3,27 @@
 import { Link } from "react-router";
 import { cx } from "../../components/ui/cx";
 import type { TaskType } from "../../types/tasks";
-import { RAIL, RAIL_ACTIVE, RAIL_HEADING, RAIL_ITEM } from "./TasksSkeleton";
+import { RAIL, RAIL_ACTIVE, RAIL_HEADING, RAIL_ITEM, RAIL_LIST, RailEntryLoading } from "./TasksSkeleton";
 
 export interface TypeRailProps {
   types: TaskType[];
   /** The selected type key, or "" for All tasks. */
   selected: string;
+  /** The types are still loading: one placeholder entry, as in the page skeleton. */
+  loading?: boolean;
 }
 
 const item = (active: boolean) => cx(RAIL_ITEM, active ? RAIL_ACTIVE : "hover:bg-rail-hover");
 
-export function TypeRail({ types, selected }: TypeRailProps) {
+export function TypeRail({ types, selected, loading = false }: TypeRailProps) {
   return (
     <nav aria-label="Task types" className={RAIL}>
       <Link to="/tasks" className={item(selected === "")} aria-current={selected === "" ? "page" : undefined}>
         All tasks
       </Link>
       <div className={RAIL_HEADING}>Task types</div>
-      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+      <ul className={RAIL_LIST}>
+        {loading && types.length === 0 ? <RailEntryLoading /> : null}
         {types.map((t) => (
           <li key={t.key}>
             <Link

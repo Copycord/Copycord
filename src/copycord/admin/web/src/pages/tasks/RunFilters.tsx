@@ -9,6 +9,7 @@ import { useSearchParams } from "react-router";
 import { Button, Input } from "../../components/ui";
 import type { RunFilters, RunStatus, TaskContext, TaskType } from "../../types/tasks";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
+import { FILTER_LABELS, SEARCH_BUTTON, SEARCH_FORM, SEARCH_INPUT, SearchGlyph, allOption } from "./TasksSkeleton";
 
 export const SEARCH_DEBOUNCE_MS = 300;
 /** The rail selection: the page scope, not a filter. */
@@ -127,7 +128,7 @@ export function RunSearch({ value, onSearch }: { value: string; onSearch: (q: st
   return (
     <form
       role="search"
-      className="mb-4 flex"
+      className={SEARCH_FORM}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -139,13 +140,10 @@ export function RunSearch({ value, onSearch }: { value: string; onSearch: (q: st
         placeholder="Search runs"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        className="min-w-0 flex-1 rounded-r-none"
+        className={SEARCH_INPUT}
       />
-      <Button type="submit" variant="ghost" attached aria-label="Search" className="rounded-l-none border-l-0">
-        <svg aria-hidden viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6">
-          <circle cx="7" cy="7" r="4.5" />
-          <path d="M10.5 10.5 14 14" strokeLinecap="round" />
-        </svg>
+      <Button type="submit" variant="ghost" attached aria-label="Search" className={SEARCH_BUTTON}>
+        <SearchGlyph />
       </Button>
     </form>
   );
@@ -182,31 +180,31 @@ export function RunFilterSelects({ filters, types, actors, contexts, onChange, a
       {filters.type ? null : (
         <ToolbarSelect
           id="tasks-filter-type"
-          label="Task type"
+          label={FILTER_LABELS.type}
           value=""
-          options={[{ value: "", label: "Task type: All" }, ...types.map((t) => ({ value: t.key, label: t.title }))]}
+          options={[allOption("type"), ...types.map((t) => ({ value: t.key, label: t.title }))]}
           onChange={(v) => onChange(SCOPE_PARAM, v)}
         />
       )}
       <ToolbarSelect
         id="tasks-filter-status"
-        label="Status"
+        label={FILTER_LABELS.status}
         value={filters.status ?? ""}
-        options={[{ value: "", label: "Status: All" }, ...STATUSES]}
+        options={[allOption("status"), ...STATUSES]}
         onChange={(v) => onChange("status", v)}
       />
       <ToolbarSelect
         id="tasks-filter-context"
-        label="Mapping"
+        label={FILTER_LABELS.context}
         value={filters.context ?? ""}
-        options={[{ value: "", label: "Mapping: All" }, ...contextList.map((c) => ({ value: contextValue(c), label: c.label }))]}
+        options={[allOption("context"), ...contextList.map((c) => ({ value: contextValue(c), label: c.label }))]}
         onChange={(v) => onChange("context", v)}
       />
       <ToolbarSelect
         id="tasks-filter-actor"
-        label="Actor"
+        label={FILTER_LABELS.actor}
         value={filters.actor ?? ""}
-        options={[{ value: "", label: "Actor: All" }, ...actorList.map((a) => ({ value: a, label: a }))]}
+        options={[allOption("actor"), ...actorList.map((a) => ({ value: a, label: a }))]}
         onChange={(v) => onChange("actor", v)}
       />
       {active ? (

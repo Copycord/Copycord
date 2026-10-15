@@ -9,15 +9,20 @@ import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { StatusIcon } from "./StatusIcon";
-import { FRAME, FRAME_HEAD, ROW, RunRowsLoading } from "./TasksSkeleton";
+import {
+  AUTO_REFRESH_OPTIONS,
+  FRAME,
+  FRAME_HEAD,
+  FRAME_HEAD_FILTERS,
+  FRAME_HEAD_LEFT,
+  ROW,
+  RUN_COUNT,
+  RunCountLoading,
+  RunRowsLoading,
+  runCountText,
+} from "./TasksSkeleton";
 
-export const AUTO_REFRESH_KEY = "tasks:autorefresh";
-export const AUTO_REFRESH_OPTIONS = [
-  { value: "0", label: "Auto-refresh: Off" },
-  { value: "10", label: "Auto-refresh: 10s" },
-  { value: "30", label: "Auto-refresh: 30s" },
-  { value: "60", label: "Auto-refresh: 60s" },
-] as const;
+export { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS } from "./TasksSkeleton";
 
 const TRIGGER: Record<string, string> = { manual: "Manual run", rerun: "Re-run", api: "API run" };
 
@@ -170,11 +175,11 @@ export function RunList({
   return (
     <div className={FRAME}>
       <div className={FRAME_HEAD}>
-        <div className="flex items-center gap-4">
-          <span className="font-semibold text-text">{total === 1 ? "1 task run" : `${total} task runs`}</span>
+        <div className={FRAME_HEAD_LEFT}>
+          {loading ? <RunCountLoading /> : <span className={RUN_COUNT}>{runCountText(total)}</span>}
           <ToolbarSelect id="tasks-autorefresh" label="Auto-refresh" value={autoRefresh} options={AUTO_REFRESH_OPTIONS} onChange={onAutoRefresh} />
         </div>
-        {filters ? <div className="flex flex-wrap items-center gap-3">{filters}</div> : null}
+        {filters ? <div className={FRAME_HEAD_FILTERS}>{filters}</div> : null}
       </div>
       {loading ? (
         <RunRowsLoading />
