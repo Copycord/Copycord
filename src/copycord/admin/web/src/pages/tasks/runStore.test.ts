@@ -127,3 +127,69 @@ describe("runStore hooks", () => {
     expect(result.current.run?.steps).toHaveLength(1);
   });
 });
+
+describe("runStore refetch keeps what is on screen", () => {
+  let release: (() => void) | null;
+  let fetchMock: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    FakeWs.all = [];
+    release = null;
+    vi.stubGlobal("WebSocket", FakeWs);
+    let n = 0;
+    fetchMock = vi.fn(async (url: string) => {
+      n += 1;
+      // Every fetch after the first waits for release(), so the test sees the refetch in flight.
+      if (n > 1) await new Promise<void>((r) => (release = r));
+      if (url.startsWith("/api/tasks/runs?"))
+        return Response.json({ runs: [makeRun({ id: "1", seq: n })], total: 1, page: 1, actors: [], contexts: [] });
+      return Response.json({ run: makeRun({ id: "1", seq: n, steps: [] }) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("second fetch keeps rows and loading stays false", async () => {
+    const { result } = renderHook(() => useTaskRuns({}));
+    expect(result.current.loading).toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.runs).toHaveLength(1);
+
+    act(() => result.current.reload());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.refreshing).toBe(true);
+    expect(result.current.runs.map((r) => r.id)).toEqual(["1"]);
+
+    await act(async () => release?.());
+    await waitFor(() => expect(result.current.refreshing).toBe(false));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.runs[0]?.seq).toBe(2);
+  });
+
+  it("a new filter set loads again until its first page lands", async () => {
+    const { result, rerender } = renderHook(({ f }) => useTaskRuns(f), { initialProps: { f: {} as { status?: "failed" } } });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    rerender({ f: { status: "failed" } });
+    expect(result.current.loading).toBe(true);
+    expect(result.current.refreshing).toBe(false);
+    await act(async () => release?.());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it("useTaskRun keeps the run on a refetch and loading stays false", async () => {
+    const { result } = renderHook(() => useTaskRun("1"));
+    expect(result.current.loading).toBe(true);
+    await waitFor(() => expect(result.current.run?.id).toBe("1"));
+    expect(result.current.loading).toBe(false);
+
+    act(() => result.current.reload());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.refreshing).toBe(true);
+    expect(result.current.run?.id).toBe("1");
+
+    await act(async () => release?.());
+    await waitFor(() => expect(result.current.run?.seq).toBe(2));
+    expect(result.current.refreshing).toBe(false);
+  });
+});

@@ -119,7 +119,10 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
 export interface RunListProps {
   runs: TaskRun[];
   total: number;
+  /** No page yet for these filters: the skeleton rows. */
   loading: boolean;
+  /** A refetch is out; the rows stay and the list is only marked busy. */
+  refreshing?: boolean;
   typeTitle: (key: string) => string;
   autoRefresh: string;
   onAutoRefresh: (value: string) => void;
@@ -151,8 +154,19 @@ export function RunMenu({ run, onAction }: { run: TaskRun; onAction: (act: RunAc
   );
 }
 
-export function RunList({ runs, total, loading, typeTitle, autoRefresh, onAutoRefresh, filters, empty, footer, rowActions }: RunListProps) {
-  const first = loading && runs.length === 0;
+export function RunList({
+  runs,
+  total,
+  loading,
+  refreshing = false,
+  typeTitle,
+  autoRefresh,
+  onAutoRefresh,
+  filters,
+  empty,
+  footer,
+  rowActions,
+}: RunListProps) {
   return (
     <div className={FRAME}>
       <div className={FRAME_HEAD}>
@@ -162,12 +176,12 @@ export function RunList({ runs, total, loading, typeTitle, autoRefresh, onAutoRe
         </div>
         {filters ? <div className="flex flex-wrap items-center gap-3">{filters}</div> : null}
       </div>
-      {first ? (
+      {loading ? (
         <RunRowsLoading />
       ) : runs.length === 0 ? (
         (empty ?? <EmptyState title="No task runs yet" className="m-4" />)
       ) : (
-        <ul aria-label="Task runs" className="m-0 list-none p-0">
+        <ul aria-label="Task runs" aria-busy={refreshing || undefined} className="m-0 list-none p-0">
           {runs.map((r) => (
             <RunRow key={r.id} run={r} typeTitle={typeTitle(r.type)} actions={rowActions?.(r)} />
           ))}

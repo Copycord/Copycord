@@ -170,7 +170,7 @@ function RunsView({
   runAction: ReactNode;
 }) {
   const { filters, active, set, setPage, clear } = useRunFilters();
-  const { runs, total, loading, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
+  const { runs, total, loading, refreshing, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
   const navigate = useNavigate();
   const confirm = useConfirm();
@@ -279,6 +279,7 @@ function RunsView({
         runs={runs}
         total={total}
         loading={loading}
+        refreshing={refreshing}
         typeTitle={typeTitle}
         autoRefresh={autoRefresh}
         onAutoRefresh={onAutoRefresh}

@@ -113,7 +113,10 @@ function useReconnectRefetch(connected: boolean, refetch: () => void) {
 }
 
 export interface TaskRunsState extends ListState {
+  /** No page has landed yet for the current filters: show the skeleton. */
   loading: boolean;
+  /** A fetch is out while the held rows stay on screen (auto-refresh, reconnect, reload). */
+  refreshing: boolean;
   error: Error | undefined;
   /** The /ws/out socket is open, so rows update live. */
   connected: boolean;
@@ -127,12 +130,14 @@ export interface TaskRunsState extends ListState {
   removeRun: (id: string) => void;
 }
 
-/** The list page for `filters`, live. */
+/** The list page for `filters`, live. Only the first fetch of a filter set loads; later ones keep the rows. */
 export function useTaskRuns(filters: RunFilters): TaskRunsState {
   const url = runsUrl(filters);
   const [state, setState] = useState<ListState>({ runs: [], total: 0 });
   const [choices, setChoices] = useState<{ actors: string[]; contexts: TaskContext[] }>({ actors: [], contexts: [] });
-  const [loading, setLoading] = useState(true);
+  // The list URL the held page answers; anything else means the current filters have no data yet.
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<Error | undefined>(undefined);
   const [tick, setTick] = useState(0);
   const filtersRef = useRef(filters);
@@ -140,20 +145,22 @@ export function useTaskRuns(filters: RunFilters): TaskRunsState {
 
   useEffect(() => {
     const ctl = new AbortController();
-    setLoading(true);
-    setError(undefined);
+    setRefreshing(true);
     api
       .get<TaskRunsResponse>(url, { signal: ctl.signal })
       .then((d) => {
         if (ctl.signal.aborted) return;
         setState({ runs: (d.runs ?? []).map((r) => ({ ...r, id: String(r.id) })), total: d.total ?? 0 });
         setChoices({ actors: d.actors ?? [], contexts: d.contexts ?? [] });
+        setError(undefined);
       })
       .catch((e: unknown) => {
         if (!ctl.signal.aborted) setError(e instanceof Error ? e : new Error(String(e)));
       })
       .finally(() => {
-        if (!ctl.signal.aborted) setLoading(false);
+        if (ctl.signal.aborted) return;
+        setLoadedUrl(url);
+        setRefreshing(false);
       });
     return () => ctl.abort();
   }, [url, tick]);
@@ -174,42 +181,51 @@ export function useTaskRuns(filters: RunFilters): TaskRunsState {
   }, []);
   const removeRun = useCallback((id: string) => setState((s) => removeFromList(s, id)), []);
 
-  return { ...state, ...choices, loading, error, connected, reload, patchRun, removeRun };
+  const loading = loadedUrl !== url;
+  return { ...state, ...choices, loading, refreshing: refreshing && !loading, error, connected, reload, patchRun, removeRun };
 }
 
 export interface TaskRunState {
   run: TaskRun | undefined;
+  /** The run has not landed yet for this id: show the skeleton. */
   loading: boolean;
+  /** A refetch is out while the held run stays on screen. */
+  refreshing: boolean;
   error: Error | undefined;
   connected: boolean;
   reload: () => void;
 }
 
-/** One run with its steps, log lines and report, live. Pass null to skip. */
+/** One run with its steps, log lines and report, live. Pass null to skip. Refetches keep the held run. */
 export function useTaskRun(id: string | null): TaskRunState {
   const [run, setRun] = useState<TaskRun | undefined>(undefined);
-  const [loading, setLoading] = useState(id !== null);
+  // The id the held run (or error) answers.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<Error | undefined>(undefined);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (id === null) {
-      setLoading(false);
-      return;
-    }
+    if (id === null) return;
     const ctl = new AbortController();
-    setLoading(true);
-    setError(undefined);
+    setRefreshing(true);
     api
       .get<TaskRunResponse>(runUrl(id), { signal: ctl.signal })
       .then((d) => {
-        if (!ctl.signal.aborted) setRun({ ...d.run, id: String(d.run.id) });
+        if (ctl.signal.aborted) return;
+        setRun({ ...d.run, id: String(d.run.id) });
+        setError(undefined);
       })
       .catch((e: unknown) => {
-        if (!ctl.signal.aborted) setError(e instanceof Error ? e : new Error(String(e)));
+        if (ctl.signal.aborted) return;
+        setError(e instanceof Error ? e : new Error(String(e)));
+        // A run that failed to load is not shown under another id's data.
+        setRun((held) => (held?.id === id ? held : undefined));
       })
       .finally(() => {
-        if (!ctl.signal.aborted) setLoading(false);
+        if (ctl.signal.aborted) return;
+        setLoadedId(id);
+        setRefreshing(false);
       });
     return () => ctl.abort();
   }, [id, tick]);
@@ -226,5 +242,6 @@ export function useTaskRun(id: string | null): TaskRunState {
   );
   useReconnectRefetch(connected, reload);
 
-  return { run, loading, error, connected, reload };
+  const loading = id !== null && loadedId !== id;
+  return { run: loading ? undefined : run, loading, refreshing: refreshing && !loading, error, connected, reload };
 }
