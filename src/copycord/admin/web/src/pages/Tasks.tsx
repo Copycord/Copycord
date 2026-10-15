@@ -17,7 +17,7 @@ import { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS, RunList, RunMenu, type RunActio
 import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
 import { MAIN, PAGE, TasksHeading } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
-import { entryFor, TaskTypeForm } from "./tasks/types";
+import { TaskTypeForm } from "./tasks/types";
 
 function readAutoRefresh(): string {
   try {
@@ -30,66 +30,16 @@ function readAutoRefresh(): string {
 }
 
 export interface RunTaskButtonProps {
-  /** One type opens its form directly; several show a menu of types. */
-  runnable: TaskType[];
+  type: TaskType;
   onRun: (type: TaskType) => void;
 }
 
-/** "Run task": on a type page it opens that type's form, on All tasks a menu of types. */
-export function RunTaskButton({ runnable, onRun }: RunTaskButtonProps) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const none = runnable.length === 0;
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
+/** "Run task" on a type page opens that type's form. All tasks has none: the rail picks the type first. */
+export function RunTaskButton({ type, onRun }: RunTaskButtonProps) {
   return (
-    <div ref={ref} className="relative">
-      <Button
-        variant="primary"
-        disabled={none}
-        title={none ? "No task types yet" : undefined}
-        aria-haspopup={runnable.length > 1 || undefined}
-        aria-expanded={runnable.length > 1 ? open : undefined}
-        onClick={() => (runnable.length === 1 ? onRun(runnable[0]!) : setOpen((o) => !o))}
-      >
-        Run task
-      </Button>
-      {open ? (
-        <ul role="menu" aria-label="Task types" className="absolute right-0 z-30 mt-1 min-w-48 list-none rounded-control border border-border bg-card p-1 shadow-card">
-          {runnable.map((t) => (
-            <li key={t.key} role="none">
-              <button
-                type="button"
-                role="menuitem"
-                className="flex w-full cursor-pointer items-center gap-2 rounded-btn border-0 bg-transparent px-3 py-2 text-left text-sm text-text hover:bg-rail-hover"
-                onClick={() => {
-                  setOpen(false);
-                  onRun(t);
-                }}
-              >
-                {entryFor(t.key).icon}
-                {t.title}
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
+    <Button variant="primary" onClick={() => onRun(type)}>
+      Run task
+    </Button>
   );
 }
 
@@ -127,7 +77,6 @@ export function Tasks() {
   const types = useMemo(() => data?.types ?? [], [data]);
   const selected = types.find((t) => t.key === typeKey);
   const typeTitle = useCallback((key: string) => types.find((t) => t.key === key)?.title ?? key, [types]);
-  const runnable = selected ? [selected] : types;
   const toast = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -167,6 +116,8 @@ export function Tasks() {
     };
   }, [rerun, types, openForm, setParams]);
 
+  const runAction = selected ? <RunTaskButton type={selected} onRun={(t) => openForm(t)} /> : null;
+
   return (
     <section className="w-full">
       <TasksHeading />
@@ -180,9 +131,9 @@ export function Tasks() {
               <TasksHeader
                 title={selected?.title ?? "All tasks"}
                 description={selected?.description ?? "Showing runs from all task types"}
-                action={<RunTaskButton runnable={runnable} onRun={(t) => openForm(t)} />}
+                action={runAction}
               />
-              <RunsView types={types} typeTitle={typeTitle} runAction={<RunTaskButton runnable={runnable} onRun={(t) => openForm(t)} />} />
+              <RunsView types={types} typeTitle={typeTitle} runAction={runAction} />
             </>
           )}
         </div>
@@ -284,7 +235,12 @@ function RunsView({
       }
     />
   ) : (
-    <EmptyState title="No task runs yet" className="m-4" action={runAction} />
+    <EmptyState
+      title="No task runs yet"
+      className="m-4"
+      description={runAction ? undefined : "Pick a task type on the left to run one"}
+      action={runAction}
+    />
   );
 
   const footer =

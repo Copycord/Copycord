@@ -118,7 +118,8 @@ describe("Tasks page", () => {
     expect(within(rail).getByRole("link", { name: /All tasks/ })).toHaveAttribute("aria-current", "page");
     expect(within(rail).getByRole("link", { name: /Backfill channels/ })).toHaveAttribute("href", "/tasks?type=backfill_channels");
     expect(within(rail).getByLabelText("1 active")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run task" })).toBeEnabled();
+    // All tasks has no Run task: the rail picks a type first.
+    expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
   });
 
   it("shows the empty state when there are no runs", async () => {
@@ -126,6 +127,8 @@ describe("Tasks page", () => {
     renderAt("/tasks");
     expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
     expect(screen.getByText("0 task runs")).toBeInTheDocument();
+    expect(screen.getByText("Pick a task type on the left to run one")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
   });
 
   it("shows the type title and description when a type is picked", async () => {
@@ -133,6 +136,7 @@ describe("Tasks page", () => {
     renderAt("/tasks?type=backfill_channels");
     expect(await screen.findByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
     expect(screen.getByText("Clone message history")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Run task" }).length).toBeGreaterThan(0);
   });
 
   it("opens a run with its header and the Steps, Log and Report sections", async () => {
@@ -180,7 +184,7 @@ describe("Tasks page", () => {
     fireEvent.click(clears[clears.length - 1]!);
     expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
     expect(listCalls(fn).at(-1)).not.toContain("status=");
-    expect(screen.getAllByRole("button", { name: "Run task" }).every((b) => !(b as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getByText("Pick a task type on the left to run one")).toBeInTheDocument();
   });
 
   it("cancels an active run after confirming and patches the row from the response", async () => {
