@@ -266,7 +266,7 @@ export function RunDetailSkeleton() {
           <div className={RUN_TITLE_ROW}>
             <Skeleton width={20} height={20} rounded="rounded-full" />
             <h2 className={RUN_TITLE}>
-              <TextBar width={240} height={16} />
+              <TextBar width={240} />
             </h2>
           </div>
           <div className={RUN_META}>
