@@ -28,6 +28,8 @@ export interface ToolbarSelectProps {
   nativeHidden?: boolean;
   /** The options are still loading: a bar stands where the chosen label goes. */
   pending?: boolean;
+  /** Text that sizes the pending bar, about as wide as the label that replaces it. */
+  pendingLabel?: string;
   /** "field": block, full width, the toggle is a role combobox with the id and toggleClassName for its look. */
   variant?: "toolbar" | "field";
   /** Extra classes for the wrapper. */
@@ -52,6 +54,7 @@ export function ToolbarSelect({
   disabled,
   nativeHidden,
   pending,
+  pendingLabel = "Guild mapping",
   variant = "toolbar",
   className,
   toggleClassName,
@@ -168,7 +171,7 @@ export function ToolbarSelect({
       >
         {pending ? (
           <span data-skeleton="" className="cc-skeleton inline-block rounded-md align-middle text-transparent">
-            Guild mapping
+            {pendingLabel}
           </span>
         ) : (
           <span className={cx(field && "block truncate")}>{options[selected]?.label || (field ? "\u00a0" : "")}</span>

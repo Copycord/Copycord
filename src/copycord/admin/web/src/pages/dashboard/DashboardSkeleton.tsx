@@ -1,98 +1,173 @@
 // The Configuration page while its chunk downloads: the same cards in the same order with their real
-// titles, buttons and table heads, shimmer only where a value goes. Kept out of Dashboard.tsx so the app
-// shell can show it without pulling the page chunk in. The sections share the loading bodies below so the
-// page's own loading state and this one are the same boxes.
+// titles, docs links, buttons, inputs, hints and table heads as inert chrome, shimmer only where a value
+// from the API goes. Kept out of Dashboard.tsx so the app shell can show it without pulling the page
+// chunk in. The cards share the classes, bodies and loading pieces below so the page's own loading
+// state and this one are the same boxes.
 
+import type { ReactNode } from "react";
 import { Skeleton, cx } from "../../components/ui";
+import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { FIELD_TIPS } from "./config/model";
 import { PromoCards } from "./config/PromoCards";
-import { FIELD_INPUT } from "./config/TokenInput";
-import { NOTIF_HINT, NOTIF_ROWS } from "./notify/model";
+import { EyeIcon, FIELD_INPUT, FIELD_REVEAL } from "./config/TokenInput";
+import { NewMappingIcon } from "./mappings/icons";
+import { NotifFields } from "./notify/NotifFields";
+import { SyncFields } from "./notify/SyncFields";
 import {
   BOT_ROLES,
+  BotStatePending,
+  BOTS_CARD,
   BOTS_CELL,
   BOTS_HEAD,
-  BOTS_STATE,
+  BOTS_TABLE,
+  BOTS_TITLE,
   CARD,
-  CHECK,
-  CHECK_LABEL,
+  CARD_DOCS,
+  CARD_OPEN_KEYS,
   Chevron,
-  EVENT_ROW,
+  DocLink,
   GC_FIELD,
   GC_HINT,
   GC_LABEL,
   GHOST,
   GHOST_XS_GREEN,
   GHOST_XS_RED,
-  PROXY_CHIPS,
-  PROXY_HINT,
+  PS_INPUT,
   PS_UNIT,
-  SECTION_HINT,
+  readCardOpen,
   SETTING_LABEL,
   SETTING_ROW,
   SETTING_SUB,
   SettingRow,
   SUMMARY,
   SUMMARY_TITLE,
-  WEBHOOK_INPUT,
+  SwitchPending,
 } from "./parts";
+import {
+  CheckPending,
+  CheckRow,
+  HintRow,
+  IntervalSection,
+  NUM,
+  RECHECK_TEXT,
+  RecheckControls,
+  ROTATION_TEXT,
+  RotationControls,
+  SummaryTools,
+  UnitSelect,
+} from "./proxy/chrome";
+import { ProxyChips } from "./proxy/ProxyChips";
+import { PROXY_CARD_OPEN_KEY } from "./proxy/model";
 
 /** One placeholder tile while the list loads; the count is unknown until it lands. */
 export const MAPPING_SKELETONS = 1;
 
-/** A shimmer bar standing in for a control while the config loads. */
-function Bar({ className }: { className: string }) {
-  return <span aria-hidden="true" data-skeleton="" className={cx("cc-skeleton block shrink-0", className)} />;
+const noop = () => undefined;
+
+/** The 28px backup tokens button at the top right of the Client Token box. */
+export const BACKUP_BTN =
+  "absolute top-2 right-2.5 flex size-7 cursor-pointer items-center justify-center rounded-[10px] border border-border bg-[rgba(255,255,255,0.04)] px-1.5 py-px text-accent opacity-90 outline-none hover:border-accent hover:opacity-100 focus-visible:border-accent focus-visible:opacity-100";
+
+export function BackupIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
 }
 
-/** Global Configuration body while the config loads: the loaded form's grid, field boxes, labels and hints,
- * with empty boxes and bars where the values go, so each box sits where the form puts it. */
+/** The Add Bot to Server link; INVITE_OFF until the bot's client id is known. */
+export const INVITE_LINK = "inline-flex items-center gap-[5px] text-xs font-medium text-accent no-underline transition-opacity max-sm:self-start";
+export const INVITE_OFF = "pointer-events-none cursor-default opacity-30";
+
+export function InviteIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+      <path d="M12 8V4H8" />
+      <rect width="16" height="12" x="4" y="8" rx="2" />
+      <path d="M2 14h2" />
+      <path d="M20 14h2" />
+      <path d="M15 13v2" />
+      <path d="M9 13v2" />
+    </svg>
+  );
+}
+
+/** The Log Level dropdown's box at the right of its row. */
+export const LOG_LEVEL_BOX = "ml-auto w-[100px] shrink-0";
+
+/** A token box: the empty password field with its eye button. */
+function TokenBox() {
+  return (
+    <div className="relative w-full">
+      <input type="password" className={cx(FIELD_INPUT, "border-border")} />
+      <button type="button" className={FIELD_REVEAL}>
+        <EyeIcon />
+      </button>
+    </div>
+  );
+}
+
+/** Global Configuration body while the config loads: the loaded form's grid, field boxes, labels, hints
+ * and buttons as inert chrome, empty boxes where typed values go and bars where a switch or choice goes. */
 export function GlobalConfigLoading() {
   return (
-    <div role="status" aria-busy="true" aria-label="Loading configuration" className="grid grid-cols-2 gap-x-[22px] gap-y-3 max-[900px]:grid-cols-1">
-      <div className={GC_FIELD}>
-        <span className={GC_LABEL}>Server Token</span>
-        <span className={GC_HINT}>{FIELD_TIPS.SERVER_TOKEN}</span>
-        <div className="relative w-full">
-          <input type="password" disabled tabIndex={-1} aria-hidden="true" className={cx(FIELD_INPUT, "border-border")} />
+    <div role="status" aria-busy="true" aria-label="Loading configuration" className="mt-3.5">
+      <div inert className="grid grid-cols-2 gap-x-[22px] gap-y-3 max-[900px]:grid-cols-1">
+        <div className={GC_FIELD}>
+          <span className={GC_LABEL}>Server Token</span>
+          <span className={GC_HINT}>{FIELD_TIPS.SERVER_TOKEN}</span>
+          <TokenBox />
         </div>
-      </div>
-      <div className={GC_FIELD}>
-        <span className={cx(GC_LABEL, "mt-1 mb-2.5 w-fit")}>Client Token</span>
-        <span className={GC_HINT}>{FIELD_TIPS.CLIENT_TOKEN}</span>
-        <div className="relative w-full">
-          <input type="password" disabled tabIndex={-1} aria-hidden="true" className={cx(FIELD_INPUT, "border-border")} />
+        <div className={GC_FIELD}>
+          <span className={cx(GC_LABEL, "mt-1 mb-2.5 w-fit")}>Client Token</span>
+          <button type="button" className={BACKUP_BTN}>
+            <BackupIcon />
+          </button>
+          <span className={GC_HINT}>{FIELD_TIPS.CLIENT_TOKEN}</span>
+          <TokenBox />
         </div>
-      </div>
-      <div className="col-span-full -mt-1 grid grid-cols-2 gap-x-[22px] gap-y-2 max-[900px]:grid-cols-1">
-        <div className={cx(SETTING_ROW, "flex-col items-stretch")}>
-          <div>
-            <div className={SETTING_LABEL}>
-              <span className="text-[13px] font-medium">Command Users</span>
-              <span className={SETTING_SUB}>{FIELD_TIPS.COMMAND_USERS}</span>
-            </div>
-            <div className="mt-1.5">
-              <div className="flex min-h-[42px] items-center rounded-control border border-border bg-[#140b26] px-3 py-2" />
+        <div className="col-span-full -mt-1 grid grid-cols-2 gap-x-[22px] gap-y-2 max-[900px]:grid-cols-1">
+          <div className={cx(SETTING_ROW, "flex-col items-stretch")}>
+            <div>
+              <div className={SETTING_LABEL}>
+                <span className="text-[13px] font-medium">Command Users</span>
+                <span className={SETTING_SUB}>{FIELD_TIPS.COMMAND_USERS}</span>
+              </div>
+              <div className="mt-1.5">
+                <div className="flex min-h-[42px] items-center rounded-control border border-border bg-[#140b26] px-3 py-2" />
+              </div>
             </div>
           </div>
+          <SettingRow label="Auto Start" hint={FIELD_TIPS.COPYCORD_AUTOSTART}>
+            <div className="ml-auto flex shrink-0 items-center">
+              <SwitchPending />
+            </div>
+          </SettingRow>
+          <SettingRow label="Log Level" hint={FIELD_TIPS.LOG_LEVEL}>
+            <ToolbarSelect id="LOG_LEVEL-skeleton" value="" options={[]} onChange={noop} pending pendingLabel="INFO" className={LOG_LEVEL_BOX} />
+          </SettingRow>
+          <SettingRow label="Max Log Size" hint={FIELD_TIPS.LOG_MAX_SIZE_MB}>
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              <input type="number" className={PS_INPUT} />
+              <span className={PS_UNIT}>MB</span>
+            </div>
+          </SettingRow>
         </div>
-        <SettingRow label="Auto Start" hint={FIELD_TIPS.COPYCORD_AUTOSTART}>
-          <Bar className="ml-auto h-[22px] w-[38px] rounded-[999px]" />
-        </SettingRow>
-        <SettingRow label="Log Level" hint={FIELD_TIPS.LOG_LEVEL}>
-          <Bar className="ml-auto h-[34px] w-[100px] rounded-lg" />
-        </SettingRow>
-        <SettingRow label="Max Log Size" hint={FIELD_TIPS.LOG_MAX_SIZE_MB}>
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <Bar className="h-8 w-16 rounded-lg" />
-            <span className={PS_UNIT}>MB</span>
-          </div>
-        </SettingRow>
-      </div>
-      <div className="col-span-full mt-3 flex flex-wrap gap-2.5 max-sm:flex-col">
-        <span className={cx(GHOST, "invisible flex")}>Save</span>
-        <span className="flex-1 max-sm:hidden" />
-        <span className="inline-flex items-center gap-[5px] text-xs font-medium text-accent opacity-30 max-sm:self-start">Add Bot to Server</span>
+        <div className="col-span-full mt-3 flex flex-wrap gap-2.5 max-sm:flex-col">
+          <button type="button" className={cx(GHOST, "invisible flex")}>
+            Save
+          </button>
+          <button type="button" className={cx(GHOST, "invisible flex")}>
+            Cancel
+          </button>
+          <span className="flex-1 max-sm:hidden" />
+          <span className={cx(INVITE_LINK, INVITE_OFF)}>
+            <InviteIcon />
+            Add Bot to Server
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -103,15 +178,33 @@ export function MappingTileSkeleton() {
   return <Skeleton.Card height="auto" testId="mapping-skeleton" className="min-h-[150px]" />;
 }
 
-function DocIcon() {
-  return <span aria-hidden="true" className="inline-flex size-3.5 opacity-50" />;
+/** The Cloning Configuration hint, search box, tile grid and Add tile, shared with the loaded card. */
+export const MAPPINGS_HINT = "m-0 max-w-[480px] min-w-[200px] flex-[1_1_auto] text-xs leading-[1.4] text-muted opacity-90";
+export const MAPPINGS_HINT_TEXT = "Map a source server to a target server to enable cloning for that pair";
+export const MAPPINGS_SEARCH =
+  "ml-0 inline-block min-w-[220px] rounded-lg border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[13.3333px] text-[#e6e1ff] caret-[#7c5cff] outline-none transition placeholder:text-[#e6e1ff]/55 focus-visible:border-[#7c5cff]";
+export const MAPPING_GRID =
+  "mt-4 grid max-h-80 min-h-[180px] grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4 overflow-y-auto py-2 pr-1 max-[600px]:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] max-[600px]:gap-3";
+export const NEW_MAPPING_TILE =
+  "group/new relative flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-[rgba(255,255,255,0.02)] p-4 text-left text-muted transition max-[600px]:min-h-[120px] max-[600px]:p-3.5";
+
+export function NewMappingPlus() {
+  return (
+    <span className="new-card-inner flex flex-col items-center text-center leading-none select-none">
+      <span className="new-card-plus leading-[0] text-accent select-none group-hover/new:text-text group-focus/new:text-text">
+        <NewMappingIcon />
+      </span>
+    </span>
+  );
 }
 
-function Summary({ title }: { title: string }) {
+/** A card summary: the title, its docs link and the chevron, with any extra tools between. */
+function Summary({ title, href, label, children }: { title: string; href: string; label?: string; children?: ReactNode }) {
   return (
     <summary className={SUMMARY} onClick={(e) => e.preventDefault()}>
       <h3 className={SUMMARY_TITLE}>{title}</h3>
-      <DocIcon />
+      <DocLink href={href} label={label} inert />
+      {children ? <span inert className="contents">{children}</span> : null}
       <Chevron />
     </summary>
   );
@@ -122,12 +215,12 @@ export function DashboardSkeleton() {
     <div className="flex flex-col" role="status" aria-busy="true" aria-label="Loading page" data-testid="dashboard-skeleton">
       <h1 className="sr-only">Configuration</h1>
       <PromoCards />
-      <section data-testid="card-skeleton" className="mt-[18px] rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text">
+      <section data-testid="card-skeleton" className={BOTS_CARD}>
         <header>
-          <h2 className="my-[0.83em] text-[24px] leading-[normal] font-bold">Bots</h2>
+          <h2 className={BOTS_TITLE}>Bots</h2>
         </header>
         <div className="w-full overflow-x-hidden">
-          <table className="mt-2 w-full table-fixed border-collapse text-left">
+          <table className={BOTS_TABLE}>
             <thead>
               <tr>
                 <th className={cx(BOTS_HEAD, "text-left")}>Component</th>
@@ -141,9 +234,7 @@ export function DashboardSkeleton() {
                 <tr key={role}>
                   <td className={cx(BOTS_CELL, "text-left")}>{label}</td>
                   <td className={cx(BOTS_CELL, "text-center")}>
-                    <span data-skeleton="" className={cx(BOTS_STATE, "cc-skeleton border-transparent text-transparent")}>
-                      stopped
-                    </span>
+                    <BotStatePending />
                   </td>
                   <td className={cx(BOTS_CELL, "text-center")} />
                   <td className={cx(BOTS_CELL, "text-center")} />
@@ -152,105 +243,91 @@ export function DashboardSkeleton() {
             </tbody>
           </table>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2.5 max-sm:grid max-sm:grid-cols-1">
+        <div inert className="mt-3 flex flex-wrap gap-2.5 max-sm:grid max-sm:grid-cols-1">
           <span className="inline max-sm:block">
-            <button type="button" disabled className={cx(GHOST, "inline-flex max-sm:w-full")}>
+            <button type="button" className={cx(GHOST, "inline-flex max-sm:w-full")}>
               Start
             </button>
           </span>
           <span className="flex-1 max-sm:hidden" />
-          <button type="button" disabled className={cx(GHOST, "flex max-sm:w-full")}>
+          <button type="button" className={cx(GHOST, "flex max-sm:w-full")}>
             View server logs
           </button>
-          <button type="button" disabled className={cx(GHOST, "flex max-sm:w-full")}>
+          <button type="button" className={cx(GHOST, "flex max-sm:w-full")}>
             View client logs
           </button>
         </div>
       </section>
       <details open data-testid="card-skeleton" className={CARD}>
-        <Summary title="Global Configuration" />
-        <div className="mt-3.5">
-          <GlobalConfigLoading />
-        </div>
+        <Summary title="Global Configuration" href={CARD_DOCS.global} />
+        <GlobalConfigLoading />
       </details>
       <details open data-testid="card-skeleton" className={CARD}>
-        <Summary title="Cloning Configuration" />
+        <Summary title="Cloning Configuration" href={CARD_DOCS.mappings} />
         <div className="mt-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="m-0 max-w-[480px] min-w-[200px] flex-[1_1_auto] text-xs leading-[1.4] text-muted opacity-90">
-              Map a source server to a target server to enable cloning for that pair
-            </p>
+          <div inert className="flex flex-wrap items-center justify-between gap-3">
+            <p className={MAPPINGS_HINT}>{MAPPINGS_HINT_TEXT}</p>
             <div className="ml-auto">
-              <input
-                type="text"
-                disabled
-                placeholder="Search mappings…"
-                aria-label="Search mappings"
-                className="ml-0 inline-block min-w-[220px] rounded-lg border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[13.3333px] text-[#e6e1ff] outline-none placeholder:text-[#e6e1ff]/55"
-              />
+              <input type="text" placeholder="Search mappings…" aria-label="Search mappings" className={MAPPINGS_SEARCH} />
             </div>
           </div>
-          <div className="mt-4 grid max-h-80 min-h-[180px] grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4 overflow-y-auto py-2 pr-1 max-[600px]:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] max-[600px]:gap-3">
-            <span className="flex rounded-xl border border-dashed border-border bg-[rgba(255,255,255,0.02)] p-4 max-[600px]:min-h-[120px]" />
+          <div className={MAPPING_GRID}>
+            <span inert className={NEW_MAPPING_TILE}>
+              <NewMappingPlus />
+            </span>
             {Array.from({ length: MAPPING_SKELETONS }, (_, i) => (
               <MappingTileSkeleton key={i} />
             ))}
           </div>
         </div>
       </details>
-      <details data-testid="card-skeleton" className={CARD}>
-        <Summary title="Notifications" />
-        <div className="srv-proxy-body mt-3.5">
-          <p className={SECTION_HINT}>{NOTIF_HINT}</p>
-          <div className="mb-3.5 flex gap-2">
-            <input
-              type="text"
-              disabled
-              tabIndex={-1}
-              aria-hidden="true"
-              placeholder="https://discord.com/api/webhooks/..."
-              className={WEBHOOK_INPUT}
-            />
-            <button type="button" disabled tabIndex={-1} className={GHOST_XS_GREEN}>
-              Test
-            </button>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {NOTIF_ROWS.map((r) => (
-              <div key={r.event} className={EVENT_ROW}>
-                <div className={SETTING_LABEL}>
-                  <span className="text-[13px] font-medium">{r.label}</span>
-                  <span className={SETTING_SUB}>{r.hint}</span>
-                </div>
-                <Bar className="h-[22px] w-[38px] rounded-[999px]" />
-              </div>
-            ))}
-          </div>
+      <details open={readCardOpen(CARD_OPEN_KEYS.notifications)} data-testid="card-skeleton" className={CARD}>
+        <Summary title="Notifications" href={CARD_DOCS.notifications} label="Notifications docs" />
+        <div inert className="srv-proxy-body mt-3.5">
+          <NotifFields url="" events={null} />
         </div>
       </details>
-      <details data-testid="card-skeleton" className={CARD}>
-        <Summary title="Sync Settings" />
+      <details open={readCardOpen(CARD_OPEN_KEYS.sync)} data-testid="card-skeleton" className={CARD}>
+        <Summary title="Sync Settings" href={CARD_DOCS.sync} label="Sync Settings docs" />
+        <div inert className="srv-proxy-body mt-3.5">
+          <SyncFields form={null} />
+        </div>
       </details>
-      <details data-testid="card-skeleton" className={CARD}>
-        <Summary title="Proxy" />
-        <div className="srv-proxy-body mt-3.5">
-          <div className="mb-3">
-            <span className={CHECK_LABEL}>
-              <span className={cx(CHECK, "inline-block")} />
-              <span>Enable proxies for client</span>
-            </span>
+      <details open={readCardOpen(PROXY_CARD_OPEN_KEY)} data-testid="card-skeleton" className={CARD}>
+        <Summary title="Proxy" href={CARD_DOCS.proxy} label="Proxy docs">
+          <SummaryTools chip={null} />
+        </Summary>
+        <div inert className="srv-proxy-body mt-3.5">
+          <div className="srv-proxy-toggle-row mb-3">
+            <CheckRow label="Enable proxies for client">
+              <CheckPending />
+            </CheckRow>
           </div>
-          <div className="mb-2.5 flex items-start justify-between gap-3">
-            <p className={PROXY_HINT}>
-              Paste one or more proxies &mdash; <code>host:port</code> &middot; <code>host:port:user:pass</code>{" "}
-              &middot; <code>user:pass@host:port</code>
-            </p>
-            <div className="flex shrink-0 gap-1.5">
-              <span className={GHOST_XS_GREEN}>Test All</span>
-              <span className={GHOST_XS_RED}>Clear</span>
-            </div>
-          </div>
-          <div className={PROXY_CHIPS} />
+          <HintRow>
+            <button type="button" className={GHOST_XS_GREEN}>
+              Test All
+            </button>
+            <button type="button" className={GHOST_XS_RED}>
+              Clear
+            </button>
+          </HintRow>
+          <ProxyChips proxies={[]} favorites={new Set()} results={{}} onAdd={noop} onRemove={noop} onRemoveLast={noop} onToggleFavorite={noop} />
+          <IntervalSection locked hint={ROTATION_TEXT} check={<CheckRow label="Rotate every"><CheckPending /></CheckRow>} controls={<RotationControls on={false} />} />
+          <IntervalSection
+            locked
+            hint={RECHECK_TEXT}
+            check={
+              <CheckRow label="Return to a favorite every">
+                <CheckPending />
+              </CheckRow>
+            }
+            controls={
+              <RecheckControls off>
+                <input type="number" disabled className={NUM} />
+                <UnitSelect id="srv-proxy-fav-recheck-unit-skeleton" value="" disabled pending onChange={noop} />
+              </RecheckControls>
+            }
+          />
         </div>
       </details>
     </div>

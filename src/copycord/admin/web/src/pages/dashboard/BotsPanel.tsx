@@ -11,7 +11,7 @@ import { api, errorText } from "../../lib/api";
 import type { LogStream } from "../../types/api";
 import type { BotRole, BotStatuses, StatusResponse } from "../../types/dashboard";
 import { useNotify } from "../system/providers";
-import { BOT_ROLES, BOTS_CELL as CELL, BOTS_HEAD as HEAD, BOTS_STATE as STATE, GHOST, GHOST_DISABLED } from "./parts";
+import { BOT_ROLES, BotStatePending, BOTS_CARD, BOTS_CELL as CELL, BOTS_HEAD as HEAD, BOTS_STATE as STATE, BOTS_TABLE, BOTS_TITLE, GHOST, GHOST_DISABLED } from "./parts";
 import {
   anyRunning,
   displayStatus,
@@ -42,6 +42,8 @@ export interface BotsPanelProps {
 export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, WebSocketImpl }: BotsPanelProps) {
   const notify = useNotify();
   const [statuses, setStatuses] = useState<BotStatuses>(EMPTY_STATUSES);
+  // The state badges are bars, like the page skeleton's, until the first status answer or push.
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Record<BotRole, boolean>>({ server: false, client: false });
   // When each row's uptime was reported, so it counts up between reports like the old page.
@@ -58,6 +60,8 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
     } catch {
       // The table keeps its last state; the websocket fills it in.
       return "failed";
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -73,6 +77,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
       const update = statusFromWs(msg);
       if (!update) return;
       setStatuses((s) => ({ ...s, [update.role]: update.status }));
+      setLoaded(true);
       setStamps((t) => ({ ...t, [update.role]: Date.now() }));
       setNow(Date.now());
     },
@@ -106,12 +111,12 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
   };
 
   return (
-    <section className="mt-[18px] rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text">
+    <section className={BOTS_CARD}>
       <header>
-        <h2 className="my-[0.83em] text-[24px] leading-[normal] font-bold">Bots</h2>
+        <h2 className={BOTS_TITLE}>Bots</h2>
       </header>
       <div className="w-full overflow-x-hidden">
-        <table className="mt-2 w-full table-fixed border-collapse border-[#808080] text-left [&_tr]:border-[#808080]">
+        <table className={BOTS_TABLE}>
           <thead>
             <tr>
               <th className={cx(HEAD, "text-left")}>Component</th>
@@ -128,12 +133,16 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                 <tr key={role}>
                   <td className={cx(CELL, "text-left")}>{label}</td>
                   <td className={cx(CELL, "text-center")}>
-                    <span
-                      id={`${role}-state`}
-                      className={cx(STATE, s.running ? "bg-[#183a2e] text-[#baf7d0]" : "bg-[#3a1c20] text-[#ffc5cf]")}
-                    >
-                      {s.running ? "running" : "stopped"}
-                    </span>
+                    {loaded ? (
+                      <span
+                        id={`${role}-state`}
+                        className={cx(STATE, s.running ? "bg-[#183a2e] text-[#baf7d0]" : "bg-[#3a1c20] text-[#ffc5cf]")}
+                      >
+                        {s.running ? "running" : "stopped"}
+                      </span>
+                    ) : (
+                      <BotStatePending />
+                    )}
                   </td>
                   <td id={`${role}-uptime`} className={cx(CELL, "text-center")}>
                     {s.running && s.uptime_sec != null

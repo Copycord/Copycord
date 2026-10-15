@@ -6,9 +6,10 @@ import { useToast } from "../../components/Toast";
 import { api } from "../../lib/api";
 import type { NotifEvent, NotifEvents, NotifSettingsReply, NotifTestReply } from "../../types/dashboard-notify";
 import { CollapseCard } from "./notify/CollapseCard";
-import { DEFAULT_EVENTS, NOTIF_HINT, NOTIF_ROWS, mergeEvents, notifPayload } from "./notify/model";
+import { DEFAULT_EVENTS, mergeEvents, notifPayload } from "./notify/model";
+import { NotifFields } from "./notify/NotifFields";
 import { useDebouncedSave } from "./notify/useDebouncedSave";
-import { EVENT_ROW, GHOST_XS_GREEN, SECTION_HINT, SETTING_LABEL, SETTING_SUB, Switch, WEBHOOK_INPUT } from "./parts";
+import { CARD_DOCS, CARD_OPEN_KEYS } from "./parts";
 
 /** The App shell test renders without a ToastProvider. */
 function useOptionalToast(): ReturnType<typeof useToast> | null {
@@ -23,6 +24,8 @@ export function NotificationsSection() {
   const toast = useOptionalToast();
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<NotifEvents>(DEFAULT_EVENTS);
+  // The switches are bars, like the page skeleton's, until the settings answer.
+  const [loaded, setLoaded] = useState(false);
   const [testing, setTesting] = useState(false);
   const scheduleSave = useDebouncedSave((v: { url: string; events: NotifEvents }) =>
     api.put("/api/notifications/settings", notifPayload(v.url, v.events)),
@@ -37,7 +40,8 @@ export function NotificationsSection() {
         setUrl(j.webhook_url || "");
         setEvents(mergeEvents(j.events));
       })
-      .catch((e: unknown) => console.error("Failed to load notification settings:", e));
+      .catch((e: unknown) => console.error("Failed to load notification settings:", e))
+      .finally(() => live && setLoaded(true));
     return () => {
       live = false;
     };
@@ -71,43 +75,17 @@ export function NotificationsSection() {
     <CollapseCard
       id="notifications-card"
       title="Notifications"
-      docsHref="https://copycord.github.io/Copycord/docs/configuration/advanced#notifications"
-      storageKey="cpc.notifications-card-open"
+      docsHref={CARD_DOCS.notifications}
+      storageKey={CARD_OPEN_KEYS.notifications}
     >
-      <p className={SECTION_HINT}>{NOTIF_HINT}</p>
-      <div className="notif-webhook-row mb-3.5 flex gap-2">
-        <input
-          type="text"
-          id="notif-webhook-url"
-          aria-label="Webhook URL"
-          placeholder="https://discord.com/api/webhooks/..."
-          spellCheck={false}
-          value={url}
-          onChange={(e) => changeUrl(e.target.value)}
-          className={WEBHOOK_INPUT}
-        />
-        <button id="notif-test-btn" type="button" disabled={testing} onClick={sendTest} className={GHOST_XS_GREEN}>
-          {testing ? "Sending…" : "Test"}
-        </button>
-      </div>
-      <div className="notif-events-list flex flex-col gap-1.5">
-        {NOTIF_ROWS.map((r) => (
-          <div key={r.event} className={EVENT_ROW}>
-            <div className={SETTING_LABEL}>
-              <span className="text-[13px] font-medium">{r.label}</span>
-              <span className={SETTING_SUB}>{r.hint}</span>
-            </div>
-            <Switch
-              id={`notif-toggle-${r.event}`}
-              label={r.label}
-              checked={events[r.event]}
-              onChange={(on) => changeEvent(r.event, on)}
-              data={{ "data-event": r.event }}
-              className="notif-toggle shrink-0"
-            />
-          </div>
-        ))}
-      </div>
+      <NotifFields
+        url={url}
+        events={loaded ? events : null}
+        testing={testing}
+        onUrl={changeUrl}
+        onEvent={changeEvent}
+        onTest={() => void sendTest()}
+      />
     </CollapseCard>
   );
 }

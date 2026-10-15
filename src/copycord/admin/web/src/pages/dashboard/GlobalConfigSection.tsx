@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChipInput, Spinner, cx } from "../../components/ui";
-import { GlobalConfigLoading } from "./DashboardSkeleton";
+import { BACKUP_BTN, BackupIcon, GlobalConfigLoading, INVITE_LINK, INVITE_OFF, InviteIcon, LOG_LEVEL_BOX } from "./DashboardSkeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { api, errorText } from "../../lib/api";
 import type { StatusResponse } from "../../types/dashboard";
@@ -16,7 +16,6 @@ import { BackupTokensModal } from "./config/BackupTokensModal";
 import { TokenInput } from "./config/TokenInput";
 import {
   BAD_TOKENS_MESSAGE,
-  DOCS_URL,
   EMPTY_CONFIG,
   FIELD_TIPS,
   inviteUrl,
@@ -28,7 +27,7 @@ import {
   validateTokens,
 } from "./config/model";
 import { STATUS_URL, statusesFrom, anyRunning } from "./model";
-import { CARD, Chevron, DocLink, GC_FIELD as FIELD, GC_HINT as HINT, GC_LABEL as LABEL, GHOST, GHOST_DISABLED, PS_INPUT, PS_UNIT, SettingRow, SETTING_LABEL, SETTING_ROW, SETTING_SUB, SUMMARY, SUMMARY_TITLE, Switch } from "./parts";
+import { CARD, CARD_DOCS, Chevron, DocLink, GC_FIELD as FIELD, GC_HINT as HINT, GC_LABEL as LABEL, GHOST, GHOST_DISABLED, PS_INPUT, PS_UNIT, SettingRow, SETTING_LABEL, SETTING_ROW, SETTING_SUB, SUMMARY, SUMMARY_TITLE, Switch } from "./parts";
 
 const LOCK_TITLE = "Stop the bot to edit global configuration";
 const START_NEEDS_TOKENS = "Provide SERVER_TOKEN and CLIENT_TOKEN to start.";
@@ -149,12 +148,18 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
     <details id="global-config-card" open className={CARD}>
       <summary className={SUMMARY}>
         <h3 className={SUMMARY_TITLE}>Global Configuration</h3>
-        <DocLink href={DOCS_URL} />
+        <DocLink href={CARD_DOCS.global} />
         <Chevron />
       </summary>
 
       {baseline === null ? (
-        <div className="mt-3.5">{loadError ? <p role="alert" className="text-sm text-danger">Could not load the configuration.</p> : <GlobalConfigLoading />}</div>
+        loadError ? (
+          <div className="mt-3.5">
+            <p role="alert" className="text-sm text-danger">Could not load the configuration.</p>
+          </div>
+        ) : (
+          <GlobalConfigLoading />
+        )
       ) : (
         <form
           id="cfg-form"
@@ -188,12 +193,9 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
                 aria-label="Manage backup CLIENT_TOKENs"
                 title="Manage backup tokens"
                 onClick={() => setBackupOpen(true)}
-                className="absolute top-2 right-2.5 flex size-7 cursor-pointer items-center justify-center rounded-[10px] border border-border bg-[rgba(255,255,255,0.04)] px-1.5 py-px text-accent opacity-90 outline-none hover:border-accent hover:opacity-100 focus-visible:border-accent focus-visible:opacity-100"
+                className={BACKUP_BTN}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
+                <BackupIcon />
               </button>
               <span id="CLIENT_TOKEN-help" className={HINT}>
                 {FIELD_TIPS.CLIENT_TOKEN}
@@ -236,7 +238,7 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
                   value={values.LOG_LEVEL}
                   options={LOG_LEVELS}
                   onChange={(v) => set("LOG_LEVEL", v === "DEBUG" ? "DEBUG" : "INFO")}
-                  className="ml-auto w-[100px] shrink-0"
+                  className={LOG_LEVEL_BOX}
                 />
               </SettingRow>
 
@@ -289,18 +291,12 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
                 rel="noopener noreferrer"
                 title="Invite your bot to a clone server"
                 className={cx(
-                  "bot-invite-btn inline-flex items-center gap-[5px] text-xs font-medium text-accent no-underline transition-opacity max-sm:self-start",
-                  invite ? "opacity-80 hover:opacity-100" : "bot-invite-disabled pointer-events-none cursor-default opacity-30",
+                  "bot-invite-btn",
+                  INVITE_LINK,
+                  invite ? "opacity-80 hover:opacity-100" : cx("bot-invite-disabled", INVITE_OFF),
                 )}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-                  <path d="M12 8V4H8" />
-                  <rect width="16" height="12" x="4" y="8" rx="2" />
-                  <path d="M2 14h2" />
-                  <path d="M20 14h2" />
-                  <path d="M15 13v2" />
-                  <path d="M9 13v2" />
-                </svg>
+                <InviteIcon />
                 Add Bot to Server
               </a>
             </div>

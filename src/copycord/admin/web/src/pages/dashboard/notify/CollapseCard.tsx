@@ -3,15 +3,7 @@
 
 import { useState } from "react";
 import type { ReactNode, SyntheticEvent } from "react";
-import { CARD, Chevron, DocLink, SUMMARY, SUMMARY_TITLE } from "../parts";
-
-function readOpen(key: string): boolean {
-  try {
-    return localStorage.getItem(key) === "1";
-  } catch {
-    return false;
-  }
-}
+import { CARD, Chevron, DocLink, readCardOpen, SUMMARY, SUMMARY_TITLE } from "../parts";
 
 export interface CollapseCardProps {
   id: string;
@@ -23,7 +15,7 @@ export interface CollapseCardProps {
 }
 
 export function CollapseCard({ id, title, docsHref, storageKey, children }: CollapseCardProps) {
-  const [open, setOpen] = useState(() => readOpen(storageKey));
+  const [open, setOpen] = useState(() => readCardOpen(storageKey));
 
   function onToggle(e: SyntheticEvent<HTMLDetailsElement>) {
     const next = e.currentTarget.open;

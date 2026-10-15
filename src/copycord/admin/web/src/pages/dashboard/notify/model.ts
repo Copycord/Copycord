@@ -32,6 +32,22 @@ export const DEFAULT_EVENTS: NotifEvents = {
 
 export const DEFAULT_SYNC: SyncForm = { startupDelay: "15", guildDelay: "3", randomize: true };
 
+/** The Sync Settings card text, shared with the dashboard skeleton. */
+export const SYNC_HINT =
+  "When the client starts, it scans each server you're cloning and sends the full structure (channels, roles, " +
+  "emojis) to the bot so it knows what to sync. These settings control how fast that happens. Slower is always " +
+  "safer if you have many servers. Changes apply on next client restart.";
+
+export const SYNC_DELAYS: Array<{ key: "startupDelay" | "guildDelay"; id: string; label: string; hint: string; min: number; max: number }> = [
+  { key: "startupDelay", id: "sync-startup-delay", label: "Startup Delay", hint: "Wait time after login before sending sitemaps", min: 1, max: 120 },
+  { key: "guildDelay", id: "sync-guild-delay", label: "Inter-Guild Delay", hint: "Pause between each server sitemap to help avoid rate limits.", min: 1, max: 30 },
+];
+
+export const SYNC_RANDOMIZE = {
+  label: "Randomize Order",
+  hint: "Process servers in random order each startup to avoid predictable patterns",
+} as const;
+
 /** Events the server knows about replace the defaults; unknown keys are ignored. */
 export function mergeEvents(reply: NotifSettingsReply["events"]): NotifEvents {
   const out = { ...DEFAULT_EVENTS };

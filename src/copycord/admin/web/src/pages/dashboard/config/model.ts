@@ -41,8 +41,6 @@ export const FIELD_TIPS = {
     "Maximum size of each log file in megabytes before older entries are pruned. Set to 0 to disable pruning.",
 } as const;
 
-export const DOCS_URL = "https://copycord.github.io/Copycord/docs/getting-started/first-run";
-
 /** The links the old page got from links.json at startup. */
 export const PROMO_LINKS = {
   github: "https://github.com/Copycord/Copycord",

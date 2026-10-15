@@ -25,10 +25,19 @@ const EYE_OFF = (
   <path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
 );
 
+/** The reveal button's 16px eye, open or struck through. */
+export function EyeIcon({ shown = false }: { shown?: boolean }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="pointer-events-none block">
+      {shown ? EYE_OFF : EYE}
+    </svg>
+  );
+}
+
 export const FIELD_INPUT =
   "inline-block w-full rounded-control border bg-[#140b26] py-3 pr-9 pl-3 text-[13.3333px] text-text outline-none " +
   "transition-[border-color] duration-200 focus:border-accent";
-const FIELD_REVEAL =
+export const FIELD_REVEAL =
   "absolute top-1/2 right-3 m-0 flex -translate-y-1/2 cursor-pointer items-center justify-center border-0 bg-transparent p-0 " +
   "leading-[0] text-text opacity-60 outline-none hover:opacity-85 focus-visible:opacity-85";
 const REVEAL =
@@ -64,9 +73,7 @@ export function TokenInput({ id, value, onChange, invalid, placeholder, field = 
         onClick={() => setShown((s) => !s)}
         className={field ? FIELD_REVEAL : REVEAL}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="pointer-events-none block">
-          {shown ? EYE_OFF : EYE}
-        </svg>
+        <EyeIcon shown={shown} />
       </button>
     </div>
   );

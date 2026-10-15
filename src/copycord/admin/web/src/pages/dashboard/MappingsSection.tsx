@@ -5,13 +5,21 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { cx } from "../../components/ui";
-import { MAPPING_SKELETONS, MappingTileSkeleton } from "./DashboardSkeleton";
+import {
+  MAPPING_GRID,
+  MAPPING_SKELETONS,
+  MAPPINGS_HINT,
+  MAPPINGS_HINT_TEXT,
+  MAPPINGS_SEARCH,
+  MappingTileSkeleton,
+  NewMappingPlus,
+  NEW_MAPPING_TILE,
+} from "./DashboardSkeleton";
 import { errorText } from "../../lib/api";
 import type { DashboardMapping } from "../../types/dashboard-mappings";
 import { useNotify, useSafeConfirm } from "../system/providers";
 import { MappingCard } from "./mappings/MappingCard";
-import { NewMappingIcon } from "./mappings/icons";
-import { CARD, Chevron, DocLink, SUMMARY, SUMMARY_TITLE } from "./parts";
+import { CARD, CARD_DOCS, Chevron, DocLink, SUMMARY, SUMMARY_TITLE } from "./parts";
 import {
   deleteBody,
   deleteMapping,
@@ -27,8 +35,6 @@ export interface MappingsSectionProps {
   /** A bot is running; the cards are locked like the old setGuildCardsLocked. */
   locked?: boolean;
 }
-
-const DOCS_URL = "https://copycord.github.io/Copycord/docs/configuration/cloning-options";
 
 const errText = errorText;
 
@@ -91,15 +97,13 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
     <details id="guild-config-card" open className={CARD}>
       <summary className={SUMMARY}>
         <h3 className={SUMMARY_TITLE}>Cloning Configuration</h3>
-        <DocLink href={DOCS_URL} />
+        <DocLink href={CARD_DOCS.mappings} />
         <Chevron />
       </summary>
 
       <div className="mt-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="m-0 max-w-[480px] min-w-[200px] flex-[1_1_auto] text-xs leading-[1.4] text-muted opacity-90">
-            Map a source server to a target server to enable cloning for that pair
-          </p>
+          <p className={MAPPINGS_HINT}>{MAPPINGS_HINT_TEXT}</p>
           <div className="ml-auto">
             <input
               id="mappingSearchInput"
@@ -116,15 +120,12 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
                   e.currentTarget.blur();
                 }
               }}
-              className="ml-0 inline-block min-w-[220px] rounded-lg border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[13.3333px] text-[#e6e1ff] caret-[#7c5cff] outline-none transition placeholder:text-[#e6e1ff]/55 focus-visible:border-[#7c5cff]"
+              className={MAPPINGS_SEARCH}
             />
           </div>
         </div>
 
-        <div
-          id="guild-mapping-list"
-          className="guild-mapping-list mt-4 grid max-h-80 min-h-[180px] grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4 overflow-y-auto py-2 pr-1 max-[600px]:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] max-[600px]:gap-3"
-        >
+        <div id="guild-mapping-list" className={cx("guild-mapping-list", MAPPING_GRID)}>
           <button
             id="new-mapping-card"
             type="button"
@@ -132,16 +133,13 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
             title="Add new mapping"
             onClick={() => openMappingModal()}
             className={cx(
-              "guild-card guild-card--new group/new relative flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-[rgba(255,255,255,0.02)] p-4 text-left text-muted transition max-[600px]:min-h-[120px] max-[600px]:p-3.5",
+              "guild-card guild-card--new",
+              NEW_MAPPING_TILE,
               "hover:-translate-y-0.5 hover:border-accent hover:bg-accent/8 hover:text-text focus:border-accent focus:bg-accent/8 focus:outline-none",
               locked && "locked pointer-events-none opacity-50 grayscale-[0.4]",
             )}
           >
-            <span className="new-card-inner flex flex-col items-center text-center leading-none select-none">
-              <span className="new-card-plus leading-[0] text-accent select-none group-hover/new:text-text group-focus/new:text-text">
-                <NewMappingIcon />
-              </span>
-            </span>
+            <NewMappingPlus />
           </button>
           {!loaded
             ? Array.from({ length: MAPPING_SKELETONS }, (_, i) => <MappingTileSkeleton key={i} />)

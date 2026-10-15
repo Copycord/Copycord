@@ -28,6 +28,11 @@ export const BOT_ROLES: Array<{ role: "server" | "client"; label: string }> = [
   { role: "client", label: "Client" },
 ];
 
+/** The Bots card and its table, shared with the dashboard skeleton. */
+export const BOTS_CARD = "mt-[18px] rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text";
+export const BOTS_TITLE = "my-[0.83em] text-[24px] leading-[normal] font-bold";
+export const BOTS_TABLE = "mt-2 w-full table-fixed border-collapse border-[#808080] text-left [&_tr]:border-[#808080]";
+
 // The old .runtime-table: fixed layout, 110px State and 120px Uptime columns,
 // muted 0.9rem headers, a rule under every row, centered cells after the first.
 export const BOTS_HEAD = "border-b border-b-border px-3 py-2 align-middle text-[0.9rem] font-medium whitespace-nowrap text-muted";
@@ -36,6 +41,25 @@ export const BOTS_CELL = "border-b border-b-border px-3 py-2 align-middle text-[
 // The old .runtime-table .badge with .badge-ok / .badge-stop.
 export const BOTS_STATE =
   "inline-block rounded-[12px] border border-border px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
+
+/** A shimmer bar standing in for a value until the API answers. */
+export function Bar({ className }: { className: string }) {
+  return <span aria-hidden="true" data-skeleton="" className={cx("cc-skeleton block shrink-0", className)} />;
+}
+
+/** The Bots state badge until the first status lands: the badge box with a bar over it. */
+export function BotStatePending() {
+  return (
+    <span data-skeleton="" className={cx(BOTS_STATE, "cc-skeleton border-transparent text-transparent")}>
+      stopped
+    </span>
+  );
+}
+
+/** The label.toggle switch until its value lands: a bar the size of the 38x22 track. */
+export function SwitchPending({ className }: { className?: string }) {
+  return <Bar className={cx("h-[22px] w-[38px] rounded-[999px]", className)} />;
+}
 
 /** details.card.srv-proxy-card; the summary chevron turns with group-open. */
 export const CARD = "group mt-[18px] rounded-card border border-border bg-(image:--card-gradient) p-[18px] text-text";
@@ -118,8 +142,32 @@ export const GHOST_XS_RED = `${GHOST_XS} ${GHOST_RED_HOVER}`;
 const BOOK =
   "M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z";
 
-/** .card-doc-link: the faded book icon next to a card title. */
-export function DocLink({ href, label = "View docs" }: { href: string; label?: string }) {
+/** Where each card's docs link points, shared with the dashboard skeleton. */
+export const CARD_DOCS = {
+  global: "https://copycord.github.io/Copycord/docs/getting-started/first-run",
+  mappings: "https://copycord.github.io/Copycord/docs/configuration/cloning-options",
+  notifications: "https://copycord.github.io/Copycord/docs/configuration/advanced#notifications",
+  sync: "https://copycord.github.io/Copycord/docs/configuration/advanced#sync-timing",
+  proxy: "https://copycord.github.io/Copycord/docs/configuration/advanced#proxy-support",
+} as const;
+
+/** The localStorage keys the two CollapseCards keep their open state under, the old ones (Proxy has PROXY_CARD_OPEN_KEY). */
+export const CARD_OPEN_KEYS = {
+  notifications: "cpc.notifications-card-open",
+  sync: "cpc.sync-card-open",
+} as const;
+
+/** Whether a collapsible card was left open; the skeleton reads it too so the card does not jump. */
+export function readCardOpen(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** .card-doc-link: the faded book icon next to a card title. `inert` for the skeleton copy. */
+export function DocLink({ href, label = "View docs", inert }: { href: string; label?: string; inert?: boolean }) {
   return (
     <a
       href={href}
@@ -127,6 +175,7 @@ export function DocLink({ href, label = "View docs" }: { href: string; label?: s
       rel="noopener noreferrer"
       title="View docs"
       aria-label={label}
+      inert={inert}
       onClick={(e) => e.stopPropagation()}
       className="card-doc-link inline-flex items-center justify-center text-muted no-underline opacity-50 transition hover:text-accent hover:opacity-100"
     >
