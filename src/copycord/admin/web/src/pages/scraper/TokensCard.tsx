@@ -136,7 +136,7 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
         </div>
       </form>
 
-      <div id="sc-token-list" className="mt-3 max-h-[340px] overflow-y-auto [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]">
+      <div id="sc-token-list" className="mt-3 max-h-[340px] overflow-y-auto">
         {loading && tokens.length === 0 ? (
           <TokenListPlaceholder />
         ) : tokens.length === 0 ? (

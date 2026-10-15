@@ -177,7 +177,7 @@ export function BackupTokensModal({ open, onClose }: BackupTokensModalProps) {
 
         <div
           id="backupTokensList"
-          className="mt-2.5 min-h-[140px] flex-1 overflow-auto overscroll-contain p-2.5 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-gutter:stable_both-edges] [scrollbar-width:thin]"
+          className="mt-2.5 min-h-[140px] flex-1 overflow-auto overscroll-contain p-2.5 [scrollbar-gutter:stable_both-edges]"
         >
           {tokens === null && !loadError ? (
             <Spinner />

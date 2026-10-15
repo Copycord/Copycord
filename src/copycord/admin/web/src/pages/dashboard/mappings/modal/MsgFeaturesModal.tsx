@@ -53,7 +53,7 @@ export function MsgFeaturesModal({ settings, onToggle, onClose }: Props) {
             ✕
           </button>
         </div>
-        <div className="msg-features-body max-h-[70vh] overflow-y-auto px-5 pb-5 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]">
+        <div className="msg-features-body max-h-[70vh] overflow-y-auto px-5 pb-5">
           <p className="msg-features-desc mt-0 mb-4 text-xs leading-normal text-muted">
             Customize how cloned messages appear in the clone server. Toggle features on or off per mapping.
           </p>

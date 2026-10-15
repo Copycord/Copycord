@@ -50,7 +50,7 @@ const NUM =
 const MENU_ITEM =
   "user-token-menu-item flex w-full cursor-pointer items-center gap-[9px] rounded-input border-0 bg-transparent px-2.5 py-2 text-left text-[13px] font-medium text-text hover:bg-white/6";
 const RESULTS =
-  "user-token-bulk-results mt-2.5 flex max-h-[180px] flex-col gap-1 overflow-y-auto [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]";
+  "user-token-bulk-results mt-2.5 flex max-h-[180px] flex-col gap-1 overflow-y-auto";
 const SEARCH_ICON =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239e95b7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E\")";
 const GEAR =
@@ -691,7 +691,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
 
               <div
                 id="userTokensList"
-                className="user-tokens-list mt-1.5 flex max-h-[216px] flex-col gap-1.5 overflow-y-auto overscroll-contain pr-1 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]"
+                className="user-tokens-list mt-1.5 flex max-h-[216px] flex-col gap-1.5 overflow-y-auto overscroll-contain pr-1"
               >
                 {verifying ? (
                   <div className="user-token-verify-loading flex items-center justify-center gap-2.5 px-2 py-[26px] text-[13px] text-muted">

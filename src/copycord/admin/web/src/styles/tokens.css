@@ -116,6 +116,26 @@
   a {
     color: var(--color-accent);
   }
+  /* Every scroller, the page itself included: a thin accent thumb on a clear track. In the base layer so
+     a utility such as [scrollbar-width:none] still hides a bar on purpose. Chrome 121+ and Firefox read
+     the two standard properties; Safari and older Chrome read the -webkit- rules. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-accent) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background: var(--color-accent) padding-box;
+  }
 }
 
 /* Skeleton placeholders (components/ui/Skeleton.tsx): a soft light sweep over

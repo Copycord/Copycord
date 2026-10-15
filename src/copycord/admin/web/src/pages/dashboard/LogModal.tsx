@@ -157,7 +157,7 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
           }}
           className={cx(
             "m-0 flex-1 overflow-auto overscroll-contain rounded-b-panel bg-[#0e0720] px-4 py-3 font-mono text-xs leading-normal",
-            "whitespace-pre-wrap text-[#e6e1ff] [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]",
+            "whitespace-pre-wrap text-[#e6e1ff]",
           )}
         >
           {view.length ? view.join("\n") + "\n" : ""}

@@ -204,7 +204,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
           autoComplete="off"
           noValidate
           onSubmit={(e) => void submit(e)}
-          className="mapping-form min-h-0 flex-auto overflow-x-hidden overflow-y-auto px-6 pt-5 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]"
+          className="mapping-form min-h-0 flex-auto overflow-x-hidden overflow-y-auto px-6 pt-5"
         >
           <input type="hidden" id="map_mapping_id" name="mapping_id" value={form.mapping_id} readOnly />
           <div className="mapping-section border-b border-border py-3.5">

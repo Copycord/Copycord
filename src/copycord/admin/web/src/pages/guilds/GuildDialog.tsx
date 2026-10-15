@@ -155,7 +155,7 @@ export function GuildDialog({
         </header>
         <div
           className={cx(
-            "scraper-body min-h-0 flex-1 overflow-auto [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]",
+            "scraper-body min-h-0 flex-1 overflow-auto",
             top ? "px-4 py-3.5" : "px-[18px] py-3.5 [scrollbar-gutter:stable]",
           )}
         >

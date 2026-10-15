@@ -39,10 +39,9 @@ export function listCategories(categories: BackfillOptionCategory[], query: stri
 const selectable = (c: BackfillOptionChannel) => !c.busy;
 
 // The list is the form's only scroller: its height leaves room in the 80vh modal for the other
-// fields, so the modal body does not scroll as well; the thin accent scrollbar of the other dialogs.
+// fields, so the modal body does not scroll as well.
 const LIST_SCROLL =
-  "max-h-[clamp(9rem,calc(80vh_-_34rem),40vh)] overflow-x-hidden overflow-y-auto overscroll-contain " +
-  "[scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]";
+  "max-h-[clamp(9rem,calc(80vh_-_34rem),40vh)] overflow-x-hidden overflow-y-auto overscroll-contain";
 
 export function ChannelPicker({ categories, selected, onChange, error }: ChannelPickerProps) {
   const [query, setQuery] = useState("");

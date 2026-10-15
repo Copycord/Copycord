@@ -22,7 +22,7 @@ const COL = "mx-0.5 min-w-0 rounded-panel border border-border bg-control px-[18
 // #filters-modal .chips, .chip and .chip-input over the shared ChipInput.
 const CHIPS =
   "[&>div]:max-h-24 [&>div]:min-h-12 [&>div]:items-start [&>div]:gap-1.5 [&>div]:overflow-y-auto [&>div]:bg-[#0f0820] [&>div]:bg-none " +
-  "[&>div]:px-2.5 [&>div]:pt-2.5 [&>div]:pb-1.5 [&>div]:[scrollbar-color:var(--color-accent)_transparent] [&>div]:[scrollbar-width:thin] " +
+  "[&>div]:px-2.5 [&>div]:pt-2.5 [&>div]:pb-1.5 " +
   "[&>div:focus-within]:shadow-none [&>div:focus-within]:ring-0 " +
   "[&_li>button]:rounded-input [&_li>button]:px-2.5 [&_li>button]:py-1.5 [&_li>button]:leading-[1.4] " +
   "[&_li>button:hover]:border-white/15 [&_li>button:hover]:bg-white/8 " +
@@ -203,7 +203,7 @@ export function FiltersModal({ mapping, onClosed }: FiltersModalProps) {
       >
         <form
           id="form-filters"
-          className="padded flex max-h-[calc(85vh-60px)] min-h-0 flex-col gap-5 overflow-y-auto px-5 pt-4 pb-5 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]" autoComplete="off" onSubmit={onSubmit}>
+          className="padded flex max-h-[calc(85vh-60px)] min-h-0 flex-col gap-5 overflow-y-auto px-5 pt-4 pb-5" autoComplete="off" onSubmit={onSubmit}>
           <input type="hidden" id="filters_mapping_id" name="mapping_id" value={mid} readOnly />
           {load === "failed" ? (
             <p role="alert" className="text-sm text-danger">

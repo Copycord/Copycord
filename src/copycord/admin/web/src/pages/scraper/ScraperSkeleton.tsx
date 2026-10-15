@@ -119,7 +119,7 @@ export function ScraperSkeleton() {
               </Button>
             </div>
           </div>
-          <div className="mt-3 max-h-[340px] overflow-y-auto [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]">
+          <div className="mt-3 max-h-[340px] overflow-y-auto">
             <TokenListPlaceholder />
           </div>
         </Card>

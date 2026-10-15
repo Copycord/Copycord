@@ -105,7 +105,7 @@ export const PROXY_HINT =
 
 /** .srv-proxy-chips, the bordered proxy list box. */
 export const PROXY_CHIPS =
-  "srv-proxy-chips flex max-h-[220px] min-h-[44px] flex-col gap-1 overflow-y-auto rounded-btn border border-border bg-control px-2.5 py-2 transition-[border-color,box-shadow] duration-150 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin] focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(167,139,250,0.12)]";
+  "srv-proxy-chips flex max-h-[220px] min-h-[44px] flex-col gap-1 overflow-y-auto rounded-btn border border-border bg-control px-2.5 py-2 transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:shadow-[0_0_0_3px_rgba(167,139,250,0.12)]";
 
 /** .btn.btn-xs with .btn-ghost-green or .btn-ghost-red: 28px, 12px accent label that turns green or red on hover. */
 const GHOST_XS =

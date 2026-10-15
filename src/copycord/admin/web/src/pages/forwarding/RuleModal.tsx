@@ -246,7 +246,7 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
               </button>
             </header>
 
-            <div className="modal-body relative min-h-0 flex-auto overflow-x-hidden overflow-y-auto px-4 pt-3 pb-0 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]">
+            <div className="modal-body relative min-h-0 flex-auto overflow-x-hidden overflow-y-auto px-4 pt-3 pb-0">
               <form id="forwarding-form" autoComplete="off" noValidate onSubmit={(e) => void onSubmit(e)}>
                 <input type="hidden" id="fwd_id" value={form.rule_id} />
                 <Section title="Basic Information">

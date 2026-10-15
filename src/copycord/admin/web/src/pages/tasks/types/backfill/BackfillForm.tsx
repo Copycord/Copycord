@@ -38,8 +38,6 @@ const RANGE_OPTIONS: { value: RangeMode; label: string }[] = [
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 
-// The thin accent scrollbar of the other dialogs on the modal body.
-const BODY_CLASS = "px-4 pb-4 [scrollbar-color:var(--color-accent)_transparent] [scrollbar-width:thin]";
 const FIELDSET = "m-0 flex min-w-0 flex-col gap-1 border-0 p-0";
 const CHOICE = "flex cursor-pointer items-center gap-2 text-sm text-text";
 
@@ -148,7 +146,7 @@ export function BackfillForm({ type, open, onClose, prefill }: TaskFormProps) {
     ) : null;
 
   return (
-    <Modal open={open} onClose={onClose} title={prefill ? `Re-run ${type.title}` : `Run ${type.title}`} className="w-[min(640px,92vw)]" bodyClassName={BODY_CLASS} footer={footer}>
+    <Modal open={open} onClose={onClose} title={prefill ? `Re-run ${type.title}` : `Run ${type.title}`} className="w-[min(640px,92vw)]" footer={footer}>
       <form id="backfill-form" noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <Field label="Mapping" error={errors.mapping} id="bf-mapping">
           <Select
