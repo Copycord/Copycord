@@ -164,8 +164,10 @@ describe("Tasks page", () => {
     const loading = screen.getByRole("status", { name: "Loading run" });
     expect(within(loading).getByRole("heading", { level: 2, hidden: true })).toHaveTextContent("Backfill history");
     expect(within(loading).getByRole("link", { name: "Backfill history", hidden: true })).toHaveAttribute("href", "/tasks?type=backfill_channels");
-    expect(await screen.findByRole("heading", { level: 2, name: "Backfill history" })).toBeInTheDocument();
-    expect(screen.queryByRole("status", { name: "Loading run" })).toBeNull();
+    // The run lands with the same title, the types still out.
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Loading run" })).toBeNull());
+    expect(screen.getByRole("heading", { level: 2, name: "Backfill history" })).toBeInTheDocument();
+    expect(screen.getByText("#12")).toBeInTheDocument();
   });
 
   it("opens a run with its header and the Summary, Steps and Report sections, no log", async () => {
