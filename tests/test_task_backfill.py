@@ -198,11 +198,47 @@ async def test_busy_channel_is_skipped_and_cancel_ends_cancelled(svc, sent, mapp
 async def test_cancel_without_end_frames_still_ends_cancelled(svc, sent, mapping):
     run = await svc.start("backfill_channels", {"mapping_id": mapping, "category_ids": [str(CAT)]})
     await _until(lambda: len(_of(sent, "backfill_run")) == 3)
+    await _frame("backfill_job", job_id=f"{run.id}:{CH[0]}", state="running")
+    await _frame("backfill_job_delivered", job_id=f"{run.id}:{CH[0]}", delivered=7, total=20)
     await svc.cancel(run.id)
     done = await _settled(svc, run.id)
     assert done.status == "cancelled"
     assert len(_of(sent, "backfill_cancel")) == 3
     assert {s["state"] for s in done.steps} == {"cancelled"}
+    assert _steps(svc, run.id)[str(CH[0])]["note"] == "Cancelled after 7 messages"
+    assert _steps(svc, run.id)[str(CH[1])]["note"] == "Cancelled"
+    assert done.report["channels"][0]["delivered"] == 7
+    assert done.summary["delivered"] == 7 and done.summary["cancelled"] == 3
+    assert backfill._jobs == {}
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_the_server_delivers_waits_for_its_count(svc, sent, mapping):
+    """The client pulled everything; the server is forwarding. The step stays running until the
+    server's backfill_job_end, then ends cancelled with what it delivered."""
+    run = await svc.start("backfill_channels", {"mapping_id": mapping, "channel_ids": [str(CH[0])]})
+    await _until(lambda: len(_of(sent, "backfill_run")) == 1)
+    job_id = f"{run.id}:{CH[0]}"
+    await _frame("backfill_job", job_id=job_id, state="running")
+    await _frame("backfill_job_progress", job_id=job_id, pulled=35, total_estimate=35)
+    await _frame("backfill_job_delivered", job_id=job_id, delivered=12, total=35)
+
+    await svc.cancel(run.id)
+    await _until(lambda: _of(sent, "backfill_cancel"))
+    assert _of(sent, "backfill_cancel") == [{"job_id": job_id}]
+    assert _steps(svc, run.id)[str(CH[0])]["state"] == "running"
+
+    await _frame("backfill_job_end", job_id=job_id, ok=False, error="cancelled", delivered=13)
+    done = await _settled(svc, run.id)
+    assert done.status == "cancelled"
+    step = _steps(svc, run.id)[str(CH[0])]
+    assert step["state"] == "cancelled" and step["done"] == 13
+    assert step["note"] == "Cancelled after 13 messages"
+    assert done.report["channels"][0]["outcome"] == "cancelled"
+    assert done.report["channels"][0]["delivered"] == 13
+    assert done.summary["delivered"] == 13 and done.summary["cancelled"] == 1
+    assert any(ln["msg"] == "Cancelled #chan0 after 13 messages" for ln in done.log_lines)
+    assert backfill._jobs == {} and backfill.busy_channels() == {}
 
 
 @pytest.mark.asyncio

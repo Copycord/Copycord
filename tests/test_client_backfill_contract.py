@@ -171,6 +171,45 @@ async def test_cancel_while_running_stops_at_next_page():
     end = cl.ws.of("backfill_job_end")
     assert end == [{"job_id": "r", "ok": False, "error": "cancelled", "last_orig_message_id": "3"}]
     assert cl.ws.of("backfill_stream_end") == []
+    assert cl.ws.of("backfill_job_cancel") == [{"job_id": "r"}]
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_the_pull_is_passed_to_the_server():
+    """The client ended the job; the server may still be forwarding what was pulled."""
+    eng = _StubEngine([[1, 2], []])
+    cl = _listener(eng)
+    await cl._on_ws({"type": "backfill_run", "data": _run("d", "444")})
+    await _drain(cl)
+    assert cl._bf_jobs == {}
+
+    res = await cl._on_ws({"type": "backfill_cancel", "data": {"job_id": "d"}})
+    assert res == {"ok": True, "job_id": "d", "state": "delivering"}
+    assert cl.ws.of("backfill_job_cancel") == [{"job_id": "d"}]
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_the_last_page_ends_cancelled():
+    gate = asyncio.Event()
+
+    class _LastPage:
+        async def run_channel(self, chan_id, **params):
+            await _CURRENT_JOB.get().progress(pulled=2, last_id=2, force=True)
+            await gate.wait()
+
+    cl = _listener(_LastPage())
+    await cl._on_ws({"type": "backfill_run", "data": _run("z", "555")})
+    await asyncio.sleep(0.05)
+    res = await cl._on_ws({"type": "backfill_cancel", "data": {"job_id": "z"}})
+    assert res["state"] == "running"
+    gate.set()
+    await _drain(cl)
+
+    assert cl.ws.of("backfill_stream_end") == [{"channel_id": "555"}]
+    assert cl.ws.of("backfill_job_end") == [
+        {"job_id": "z", "ok": False, "error": "cancelled", "last_orig_message_id": "2"}
+    ]
+    assert cl._bf_jobs == {} and cl._bf_queued == set()
 
 
 @pytest.mark.asyncio

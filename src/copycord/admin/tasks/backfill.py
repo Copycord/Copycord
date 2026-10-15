@@ -553,6 +553,8 @@ async def _wait_jobs(ctx: Any, jobs: list[_Job]) -> None:
             return
         live = [j for j in jobs if not j.terminal]
         await ctx.log(f"Cancelling {len(live)} job{'s' if len(live) != 1 else ''}", level="warning")
+        # The client stops pulling (or drops a queued job) and tells the server, which stops
+        # forwarding; each job then ends with backfill_job_end and what it delivered.
         for job in live:
             await _send({"type": "backfill_cancel", "data": {"job_id": job.job_id}})
         try:
@@ -561,8 +563,11 @@ async def _wait_jobs(ctx: Any, jobs: list[_Job]) -> None:
             pass
         for job in jobs:
             if not job.terminal:
-                await job.step.finish("cancelled", "Cancelled")
+                job.result["delivered"] = job.delivered
+                await job.step.finish("cancelled", _cancelled_note(job.delivered))
                 job.result["finished_at"] = job.step.data["finished_at"]
+                await ctx.log(f"Cancelled #{job.name} after {_fmt(job.delivered)} messages "
+                              f"(no end from the client)", level="warning", step=job.step.key)
     finally:
         cancel_wait.cancel()
         if not all_done.done():

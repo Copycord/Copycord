@@ -2292,7 +2292,9 @@ class ClientListener:
                     }
                 )
                 if job is not None:
-                    await self._end_backfill_job(job, ok=job.error is None, error=job.error)
+                    # A cancel that lands after the last page still ends the job cancelled.
+                    error = job.error or ("cancelled" if job.cancelled else None)
+                    await self._end_backfill_job(job, ok=error is None, error=error)
 
             except asyncio.CancelledError:
 
@@ -2367,10 +2369,13 @@ class ClientListener:
         return await self._enqueue_backfill(chan_id, params, job=job)
 
     async def _cancel_backfill_job(self, job_id: str) -> dict:
-        """Drop a queued job, or flag a running one to stop at its next page."""
+        """Drop a queued job, or flag a running one to stop at its next page. The server is told
+        too: it may still be forwarding what was pulled, long after this side ended the job."""
+        with contextlib.suppress(Exception):
+            await self.ws.send({"type": "backfill_job_cancel", "data": {"job_id": job_id}})
         job = self._bf_jobs.get(job_id)
         if job is None:
-            return {"ok": False, "job_id": job_id, "error": "unknown job"}
+            return {"ok": True, "job_id": job_id, "state": "delivering"}
         job.cancelled = True
         pending = getattr(self._bf_queue, "_queue", None)
         for item in list(pending or []):

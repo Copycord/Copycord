@@ -1245,6 +1245,17 @@ class ServerReceiver:
         _, job = self._bf_job_for_channel(orig)
         return bool(job and job.get("cancelled"))
 
+    def _bf_cancel_job(self, job_id: str) -> dict:
+        """backfill_job_cancel from the client. Forwards still waiting on the channel's send gate
+        (messages, threads, stickers) return unsent and new ones are dropped, so the drain ends after
+        the send in flight; backfill_job_end then reports the job cancelled with what it delivered."""
+        job = self._bf_jobs.get(job_id) if job_id else None
+        if job is None:
+            return {"ok": True, "job_id": job_id, "state": "unknown"}
+        job["cancelled"] = True
+        logger.info("[bf] Cancelling backfill of #%s (job %s)", job.get("channel"), job_id)
+        return {"ok": True, "job_id": job_id, "state": "cancelling"}
+
     def _bf_note_delivered(self, orig: int) -> None:
         """BackfillManager.note_sent hook: publish the job's delivered count, at most every BF_PROGRESS_INTERVAL seconds with a trailing publish."""
         job_id, job = self._bf_job_for_channel(orig)
@@ -1432,6 +1443,8 @@ class ServerReceiver:
                             orig,
                         )
                         return
+                    if self._bf_job_cancelled(orig):
+                        return
                     t = self._track(
                         self._handle_backfill_message(data), name="bf-handle"
                     )
@@ -1466,6 +1479,8 @@ class ServerReceiver:
                         parent = int(data.get("thread_parent_id") or 0)
                     except Exception:
                         parent = 0
+                    if parent and self._bf_job_cancelled(parent):
+                        return
                     t = self._track(
                         self._handle_backfill_thread_message(data), name="bf-thread"
                     )
@@ -1622,6 +1637,10 @@ class ServerReceiver:
                 await self.bus.publish("client", msg)
                 return
 
+            elif typ == "backfill_job_cancel":
+                data = msg.get("data") or {}
+                return self._bf_cancel_job(str(data.get("job_id") or ""))
+
             elif typ == "backfill_job_end":
                 data = msg.get("data") or {}
                 job_id = str(data.get("job_id") or "")
@@ -1646,6 +1665,8 @@ class ServerReceiver:
                     self._bf_job_by_channel.pop(orig, None)
                 orig_out = orig if orig is not None else data.get("original_channel_id")
                 last_id = data.get("last_orig_message_id")
+                # A job cancelled while the server delivered ended its pull fine on the client.
+                cancelled = bool(job.get("cancelled"))
                 await self.bus.publish(
                     "client",
                     {
@@ -1655,8 +1676,8 @@ class ServerReceiver:
                             "original_channel_id": (
                                 str(orig_out) if orig_out is not None else None
                             ),
-                            "ok": bool(data.get("ok")),
-                            "error": data.get("error"),
+                            "ok": bool(data.get("ok")) and not cancelled,
+                            "error": "cancelled" if cancelled else data.get("error"),
                             "delivered": int(delivered or 0),
                             "last_orig_message_id": (
                                 str(last_id) if last_id is not None else None
@@ -8709,6 +8730,8 @@ class ServerReceiver:
 
         gate = self._get_backfill_gate_for_source(parent_id)
         async with gate:
+            if self._bf_job_cancelled(parent_id):
+                return
             return await self.handle_thread_message(data)
 
     async def forward_message(self, msg: Dict):
@@ -8732,6 +8755,8 @@ class ServerReceiver:
 
         gate = self._get_backfill_gate_for_source(source_id)
         async with gate:
+            if self._bf_job_cancelled(source_id):
+                return
             return await self._forward_message_inner(msg)
 
     async def _forward_message_inner(self, msg: Dict):

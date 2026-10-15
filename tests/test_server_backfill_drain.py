@@ -241,3 +241,66 @@ def test_resumed_job_counts_from_its_own_start(ServerReceiver):
         return rx.backfill.job_counts(CID)
 
     assert asyncio.run(go()) == (5, 35)
+
+
+def test_cancel_while_delivering_stops_the_queued_forwards(ServerReceiver):
+    """The client already ended its pull (stream end and job end are in); the server is still
+    forwarding when the cancel comes. The send in flight finishes, the queued ones never go out,
+    and the job ends cancelled with the one delivered message and nothing left behind."""
+
+    async def go():
+        release = asyncio.Event()
+        rx = _rx(ServerReceiver, asyncio.Event())
+        rx._bf_send_gate_by_source = {}
+        sent = []
+
+        async def _inner(msg):
+            await release.wait()
+            sent.append(int(msg["message_id"]))
+            rx.backfill.note_sent(int(msg["channel_id"]), int(msg["message_id"]))
+
+        async def _bf_message(data):
+            await rx.forward_message(data)
+
+        rx._forward_message_inner = _inner
+        rx._handle_backfill_message = _bf_message
+        bf = rx.backfill
+
+        await rx._on_ws({"type": "backfill_job", "data": {"job_id": JOB, "original_channel_id": str(CID), "state": "running", "queue_position": None}})
+        ids = [1521898853337409001 + i for i in range(5)]
+        for mid in ids:
+            await rx._on_ws(_message_frame(mid))
+        stream_end = asyncio.create_task(rx._on_ws({"type": "backfill_stream_end", "data": {"channel_id": str(CID)}}))
+        job_end = asyncio.create_task(rx._on_ws({"type": "backfill_job_end", "data": {"job_id": JOB, "ok": True, "error": None, "last_orig_message_id": str(ids[-1])}}))
+        await asyncio.sleep(0.05)
+        assert "backfill_job_end" not in _types(rx)
+
+        res = await rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": JOB}})
+        assert res == {"ok": True, "job_id": JOB, "state": "cancelling"}
+        attached = bf._attach_count[CID]
+        await rx._on_ws(_message_frame(1521898853337409100))
+        assert bf._attach_count[CID] == attached, "a message after the cancel is dropped"
+
+        release.set()
+        await asyncio.wait_for(asyncio.gather(stream_end, job_end), 2.0)
+        return rx, sent, ids
+
+    rx, sent, ids = asyncio.run(go())
+
+    assert sent == ids[:1]
+    types = _types(rx)
+    assert types.index("backfill_job_cleanup") < types.index("backfill_job_end")
+    end = rx.bus.sent[-1]["payload"]["data"]
+    assert end["ok"] is False and end["error"] == "cancelled" and end["delivered"] == 1
+    assert rx._bf_jobs == {} and rx._bf_job_by_channel == {}
+    assert CID not in rx._active_backfills
+    assert not rx.backfill._attached.get(CID) and rx.backfill._inflight.get(CID, 0) == 0
+    assert CID not in rx.backfill._progress
+    assert [f["type"] for f in rx.bot.ws_manager.sent] == ["backfill_done"]
+
+
+def test_cancel_for_an_unknown_job_is_harmless(ServerReceiver):
+    rx = _rx(ServerReceiver, asyncio.Event())
+    res = asyncio.run(rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": "nope"}}))
+    assert res == {"ok": True, "job_id": "nope", "state": "unknown"}
+    assert rx.bus.sent == []
