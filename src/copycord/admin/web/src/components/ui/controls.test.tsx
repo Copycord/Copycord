@@ -43,6 +43,21 @@ describe("Button", () => {
     render(<Button variant="danger">Delete</Button>);
     expect(screen.getByRole("button").className).toContain("bg-[linear-gradient(180deg,#ef4444,#b91c1c)]");
   });
+
+  it("holds an attached button still on hover and press, other buttons keep the lift", () => {
+    render(
+      <>
+        <Button variant="ghost" attached>
+          Search
+        </Button>
+        <Button variant="ghost">Other</Button>
+      </>,
+    );
+    const still = screen.getByRole("button", { name: "Search" }).className;
+    for (const c of ["enabled:hover:translate-y-0!", "enabled:hover:shadow-none!", "enabled:active:scale-100!"]) expect(still).toContain(c);
+    expect(still).not.toContain("ring-0!");
+    expect(screen.getByRole("button", { name: "Other" }).className).not.toContain("enabled:hover:translate-y-0!");
+  });
 });
 
 describe("Field", () => {

@@ -141,7 +141,7 @@ export function RunSearch({ value, onSearch }: { value: string; onSearch: (q: st
         onChange={(e) => setText(e.target.value)}
         className="min-w-0 flex-1 rounded-r-none"
       />
-      <Button type="submit" variant="ghost" aria-label="Search" className="rounded-l-none border-l-0">
+      <Button type="submit" variant="ghost" attached aria-label="Search" className="rounded-l-none border-l-0">
         <svg aria-hidden viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6">
           <circle cx="7" cy="7" r="4.5" />
           <path d="M10.5 10.5 14 14" strokeLinecap="round" />

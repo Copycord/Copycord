@@ -24,6 +24,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   wide?: boolean;
   /** No focus ring and no shadow, as the old #confirm-modal .btns .btn. */
   flat?: boolean;
+  /** Joined to an input, as the runs search submit: hover only tints, no lift, no press scale, no shadow. */
+  attached?: boolean;
   ref?: Ref<HTMLButtonElement>;
 }
 
@@ -93,6 +95,9 @@ const SIZE: Record<ButtonSize, string> = {
 };
 
 const FLAT = "ring-0! shadow-none! enabled:hover:shadow-none!";
+// The flat hover without dropping the focus ring, so a button attached to an input stays in its group.
+const ATTACHED =
+  "enabled:hover:translate-y-0! enabled:hover:shadow-none! enabled:active:translate-y-0! enabled:active:scale-100!";
 
 export function Button({
   variant = "secondary",
@@ -100,6 +105,7 @@ export function Button({
   loading = false,
   wide = false,
   flat = false,
+  attached = false,
   type = "button",
   disabled,
   className,
@@ -120,6 +126,7 @@ export function Button({
         SIZE[size],
         wide && "min-w-[170px]",
         flat && FLAT,
+        attached && ATTACHED,
         className,
       )}
       {...rest}
