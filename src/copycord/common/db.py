@@ -1000,9 +1000,13 @@ class DBManager:
                     last_orig_message_id  TEXT,                          
                     last_orig_timestamp   TEXT,
                     error                 TEXT,
-                    task_run_id           INTEGER
+                    task_run_id           TEXT
                 );
             """,
+            # task_run_id was INTEGER before run ids became uuid hex strings; the
+            # rebuild copies the old numbers as text and _migrate_task_run_ids
+            # rewrites them to the runs' new ids
+            force_rebuild=self._column_type("backfill_runs", "task_run_id") == "INTEGER",
             required_columns={
                 "task_run_id",
                 "run_id",
@@ -1485,11 +1489,16 @@ class DBManager:
         )
 
         # Tasks framework: one row per run of any task type; the short log rides in progress_json, the result in report_json
-        self._ensure_table(
+        self._migrate_task_run_ids()
+        self._ensure_table(**self._task_runs_schema())
+
+    def _task_runs_schema(self, id_expr: str = "id") -> dict:
+        """_ensure_table arguments for task_runs; id_expr is what the rebuild copies into id."""
+        return dict(
             name="task_runs",
             create_sql_template="""
                 CREATE TABLE {table} (
-                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id             TEXT PRIMARY KEY NOT NULL,
                     type           TEXT NOT NULL,
                     number         INTEGER NOT NULL,
                     status         TEXT NOT NULL DEFAULT 'queued',
@@ -1508,13 +1517,73 @@ class DBManager:
                 );
             """,
             required_columns=set(TASK_RUN_COLUMNS),
-            copy_map={c: c for c in TASK_RUN_COLUMNS},
+            copy_map={c: (id_expr if c == "id" else c) for c in TASK_RUN_COLUMNS},
             post_sql=[
-                "CREATE INDEX IF NOT EXISTS idx_task_runs_type_id ON task_runs(type, id DESC);",
+                # ids are random, so lists page by created_at; the old (type, id) index is gone with the rebuild
+                "DROP INDEX IF EXISTS idx_task_runs_type_id;",
+                "CREATE INDEX IF NOT EXISTS idx_task_runs_type_created ON task_runs(type, created_at DESC);",
                 "CREATE INDEX IF NOT EXISTS idx_task_runs_status ON task_runs(status);",
                 "CREATE INDEX IF NOT EXISTS idx_task_runs_created ON task_runs(created_at);",
             ],
         )
+
+    def _migrate_task_run_ids(self) -> None:
+        """task_runs.id was INTEGER AUTOINCREMENT; it is now a uuid4 hex string.
+        Each old run gets a fresh id, backfill_runs.task_run_id follows it, and the
+        table is rebuilt with every other column copied as is, all in one transaction."""
+        if self._column_type("task_runs", "id") != "INTEGER":
+            return
+        id_map = [
+            (int(r[0]), uuid.uuid4().hex)
+            for r in self.conn.execute("SELECT id FROM task_runs").fetchall()
+        ]
+        in_txn = self.conn.in_transaction
+        sp_name = "sp_migrate_task_run_ids"
+        if in_txn:
+            self.conn.execute(f"SAVEPOINT {sp_name};")
+        else:
+            self.conn.execute("BEGIN;")
+        try:
+            self.conn.execute(
+                "CREATE TEMP TABLE _task_run_id_map (old_id INTEGER PRIMARY KEY, new_id TEXT NOT NULL);"
+            )
+            self.conn.executemany(
+                "INSERT INTO _task_run_id_map (old_id, new_id) VALUES (?, ?)", id_map
+            )
+            if self._table_exists("backfill_runs"):
+                # compared as text: the backfill_runs rebuild may already hold '5' for 5;
+                # a link to a run that no longer exists becomes NULL
+                self.conn.execute(
+                    "UPDATE backfill_runs SET task_run_id = ("
+                    "SELECT m.new_id FROM _task_run_id_map m "
+                    "WHERE CAST(m.old_id AS TEXT) = CAST(backfill_runs.task_run_id AS TEXT)"
+                    ") WHERE task_run_id IS NOT NULL"
+                )
+            self._ensure_table(
+                **self._task_runs_schema(
+                    "(SELECT m.new_id FROM _task_run_id_map m WHERE m.old_id = task_runs.id)"
+                ),
+                force_rebuild=True,
+            )
+            self.conn.execute("DROP TABLE temp._task_run_id_map;")
+            if in_txn:
+                self.conn.execute(f"RELEASE SAVEPOINT {sp_name};")
+            else:
+                self.conn.execute("COMMIT;")
+        except Exception:
+            if in_txn:
+                self.conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
+                self.conn.execute(f"RELEASE SAVEPOINT {sp_name};")
+            else:
+                self.conn.execute("ROLLBACK;")
+            raise
+
+    def _column_type(self, table: str, column: str) -> str | None:
+        """Declared type of one column (upper case), None when the table or column is missing."""
+        for r in self.conn.execute(f"PRAGMA table_info({table})").fetchall():
+            if r[1] == column:
+                return str(r[2]).upper()
+        return None
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -1537,8 +1606,10 @@ class DBManager:
         copy_map: dict[str, str],
         post_sql: list[str] | None = None,
         forbidden_columns: set[str] | None = None,
+        force_rebuild: bool = False,
     ):
-        """Create or rebuild table `name` to match the target schema."""
+        """Create or rebuild table `name` to match the target schema; force_rebuild
+        rebuilds an existing table whose columns match but whose types changed."""
         post_sql = post_sql or []
         forbidden_columns = forbidden_columns or set()
 
@@ -1555,7 +1626,7 @@ class DBManager:
         missing_required = not required_columns.issubset(existing_cols)
         has_forbidden = bool(forbidden_columns.intersection(existing_cols))
 
-        if (not missing_required) and (not has_forbidden):
+        if (not missing_required) and (not has_forbidden) and (not force_rebuild):
             for stmt in post_sql:
                 self.conn.execute(stmt)
             return
@@ -2952,7 +3023,7 @@ class DBManager:
         run_id: str | None = None,
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
-        task_run_id: int | None = None,
+        task_run_id: str | None = None,
     ) -> str:
         run_id = run_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
@@ -2980,7 +3051,7 @@ class DBManager:
                     json.dumps(range_json or {}),
                     now,
                     now,
-                    int(task_run_id) if task_run_id is not None else None,
+                    str(task_run_id) if task_run_id is not None else None,
                 ),
             )
         return run_id
@@ -3108,7 +3179,7 @@ class DBManager:
         return datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
     @_in_tx
-    def task_run_insert(self, fields: dict) -> int:
+    def task_run_insert(self, fields: dict) -> str:
         """Insert a run and return its id. number is MAX+1 for the type, taken in
         the same INSERT statement so two inserts never share a number."""
         row = {
@@ -3121,17 +3192,18 @@ class DBManager:
         now = self._task_now()
         row.setdefault("created_at", now)
         row.setdefault("updated_at", row["created_at"])
-        cols = ["type", "number", *row.keys()]
-        cur = self.conn.execute(
+        run_id = uuid.uuid4().hex
+        cols = ["id", "type", "number", *row.keys()]
+        self.conn.execute(
             f"INSERT INTO task_runs ({', '.join(cols)}) "
-            f"SELECT ?, COALESCE(MAX(number), 0) + 1, {', '.join('?' * len(row))} "
+            f"SELECT ?, ?, COALESCE(MAX(number), 0) + 1, {', '.join('?' * len(row))} "
             "FROM task_runs WHERE type = ?",
-            (str(fields["type"]), *row.values(), str(fields["type"])),
+            (run_id, str(fields["type"]), *row.values(), str(fields["type"])),
         )
-        return int(cur.lastrowid)
+        return run_id
 
     @_in_tx
-    def task_run_update(self, run_id: int, **fields) -> bool:
+    def task_run_update(self, run_id: str, **fields) -> bool:
         """Set the given columns (updated_at defaults to now); True when the row exists."""
         bad = set(fields) - _TASK_RUN_MUTABLE
         if bad:
@@ -3140,14 +3212,14 @@ class DBManager:
         sets = ", ".join(f"{k} = ?" for k in fields)
         cur = self.conn.execute(
             f"UPDATE task_runs SET {sets} WHERE id = ?",
-            (*(_task_run_value(k, v) for k, v in fields.items()), int(run_id)),
+            (*(_task_run_value(k, v) for k, v in fields.items()), str(run_id)),
         )
         return cur.rowcount > 0
 
-    def task_run_get(self, run_id: int) -> Optional[dict]:
+    def task_run_get(self, run_id: str) -> Optional[dict]:
         with self._tx():
             row = self.conn.execute(
-                "SELECT * FROM task_runs WHERE id = ?", (int(run_id),)
+                "SELECT * FROM task_runs WHERE id = ?", (str(run_id),)
             ).fetchone()
         return dict(row) if row else None
 
@@ -3208,18 +3280,18 @@ class DBManager:
                 f"SELECT COUNT(*) FROM task_runs {clause}", args
             ).fetchone()[0]
             rows = self.conn.execute(
-                f"SELECT * FROM task_runs {clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM task_runs {clause} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
                 (*args, per_page, (page - 1) * per_page),
             ).fetchall()
         return [dict(r) for r in rows], int(total)
 
     @_in_tx
-    def task_runs_recover(self) -> list[int]:
+    def task_runs_recover(self) -> list[str]:
         """On boot: queued and running runs become failed; returns their ids."""
         ids = [
-            int(r[0])
+            str(r[0])
             for r in self.conn.execute(
-                "SELECT id FROM task_runs WHERE status IN ('queued', 'running') ORDER BY id"
+                "SELECT id FROM task_runs WHERE status IN ('queued', 'running') ORDER BY created_at, rowid"
             ).fetchall()
         ]
         if ids:
@@ -3232,9 +3304,9 @@ class DBManager:
         return ids
 
     @_in_tx
-    def task_run_delete(self, run_id: int) -> bool:
+    def task_run_delete(self, run_id: str) -> bool:
         """Delete one run row; True when it existed."""
-        cur = self.conn.execute("DELETE FROM task_runs WHERE id = ?", (int(run_id),))
+        cur = self.conn.execute("DELETE FROM task_runs WHERE id = ?", (str(run_id),))
         return cur.rowcount > 0
 
     def task_runs_types(self) -> list[str]:

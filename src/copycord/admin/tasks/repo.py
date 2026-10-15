@@ -1,6 +1,6 @@
 """SQLite task-run repository: the RunRepo TaskService expects, over the
-DBManager task_runs methods. TaskRun in, TaskRun out; ids are ints here and
-the wire layer turns them into strings."""
+DBManager task_runs methods. TaskRun in, TaskRun out; ids are uuid hex
+strings end to end."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def run_from_row(row: dict) -> TaskRun:
         actor=row.get("actor") or "admin",
         inputs=_loads(row.get("inputs_json"), {}),
         context=_loads(row.get("context_json"), {}) or {},
-        id=int(row["id"]),
+        id=str(row["id"]),
         created_at=row.get("created_at"),
         started_at=row.get("started_at"),
         finished_at=row.get("finished_at"),
@@ -67,7 +67,7 @@ class SqliteTaskRepo:
     def __init__(self, db: DBManager):
         self.db = db
 
-    def insert_run(self, run: TaskRun) -> int:
+    def insert_run(self, run: TaskRun) -> str:
         """Insert and return the id. The DB assigns number atomically (MAX+1 in
         the INSERT); run.number is set to what was stored."""
         fields = {k: v for k, v in _row_fields(run).items() if v is not None}
@@ -84,10 +84,10 @@ class SqliteTaskRepo:
             fields.pop("created_at")
         if not fields["updated_at"]:
             fields.pop("updated_at")
-        self.db.task_run_update(int(run.id), **fields)
+        self.db.task_run_update(str(run.id), **fields)
 
-    def get_run(self, run_id: int) -> Optional[TaskRun]:
-        row = self.db.task_run_get(int(run_id))
+    def get_run(self, run_id: str) -> Optional[TaskRun]:
+        row = self.db.task_run_get(str(run_id))
         return run_from_row(row) if row else None
 
     def list_runs(self, filters: Optional[dict] = None, page: int = 1,
@@ -107,8 +107,8 @@ class SqliteTaskRepo:
     def next_number(self, type_key: str) -> int:
         return self.db.task_run_next_number(type_key)
 
-    def delete_run(self, run_id: int) -> None:
-        self.db.task_run_delete(int(run_id))
+    def delete_run(self, run_id: str) -> None:
+        self.db.task_run_delete(str(run_id))
 
     def list_types(self) -> list[str]:
         return self.db.task_runs_types()

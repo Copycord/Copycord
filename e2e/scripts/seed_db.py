@@ -31,7 +31,7 @@ from copycord.admin.tasks.service import TaskRun  # noqa: E402
 repo = SqliteTaskRepo(db)
 runs, _ = repo.list_runs({"type": "backfill_channels"})
 if runs:
-    run_id = int(runs[0].id)
+    run_id = str(runs[0].id)
 else:
     mapping = db.list_guild_mappings()[0]
     mapping_id = str(mapping["mapping_id"])

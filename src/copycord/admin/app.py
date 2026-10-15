@@ -374,7 +374,7 @@ async def spa_page():
 
 for _page in SPA_PAGES:
     app.add_api_route(_page, spa_page, methods=["GET"], include_in_schema=False)
-# Deep links such as /tasks/runs/12 reload into the SPA.
+# Deep links such as /tasks/runs/<run id> reload into the SPA.
 app.add_api_route("/tasks/{rest:path}", spa_page, methods=["GET"], include_in_schema=False)
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Request
@@ -22,6 +23,8 @@ TRIGGERS = ("manual", "rerun", "api")
 MAX_PER_PAGE = 200
 
 BOTS_DOWN = "Start the bots first"
+
+_RUN_ID = re.compile(r"[0-9a-f]{32}")
 
 _service: Optional[TaskService] = None
 # Answers whether the server and client bots are both running; app.py wires it to /api/status.
@@ -56,12 +59,10 @@ def _error(status: int, detail: Any, **extra) -> JSONResponse:
     return JSONResponse({"detail": detail, **extra}, status_code=status)
 
 
-def _run_id(raw: str) -> Optional[int]:
-    try:
-        value = int(str(raw).strip())
-    except ValueError:
-        return None
-    return value if value > 0 else None
+def _run_id(raw: str) -> Optional[str]:
+    """A run id is a uuid4 hex string; anything else is no run (404)."""
+    value = str(raw).strip().lower()
+    return value if _RUN_ID.fullmatch(value) else None
 
 
 def _int(raw: Optional[str], default: int, lo: int, hi: Optional[int] = None) -> int:

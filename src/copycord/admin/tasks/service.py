@@ -20,6 +20,7 @@ import asyncio
 import copy
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
@@ -64,7 +65,7 @@ class TaskRun:
     actor: str
     inputs: dict
     context: dict = field(default_factory=dict)
-    id: Optional[int] = None
+    id: Optional[str] = None
     steps: list = field(default_factory=list)
     summary: dict = field(default_factory=dict)
     log_lines: list = field(default_factory=list)
@@ -125,15 +126,15 @@ class TaskRun:
 
 class RunRepo(Protocol):
     """task_runs storage. list_runs filters: type, status (str or list), actor,
-    context (context label), q (title, context label or "#number"); newest id
+    context (context label), q (title, context label or "#number"); newest created
     first; page is 1 based; returns (runs, total matching)."""
 
-    def insert_run(self, run: TaskRun) -> int: ...
+    def insert_run(self, run: TaskRun) -> str: ...
     def update_run(self, run: TaskRun) -> None: ...
-    def get_run(self, run_id: int) -> Optional[TaskRun]: ...
+    def get_run(self, run_id: str) -> Optional[TaskRun]: ...
     def list_runs(self, filters: dict, page: int = 1, per_page: int = 25) -> tuple[list[TaskRun], int]: ...
     def next_number(self, type_key: str) -> int: ...
-    def delete_run(self, run_id: int) -> None: ...
+    def delete_run(self, run_id: str) -> None: ...
     def list_types(self) -> list[str]: ...
 
 
@@ -147,24 +148,25 @@ class RunFinished(Exception):
 
 class MemoryRunRepo:
     def __init__(self):
-        self.rows: dict[int, TaskRun] = {}
+        self.rows: dict[str, TaskRun] = {}
         self.writes = 0
-        self._next_id = 1
+        # insert order breaks created_at ties, as rowid does in SQLite
+        self._order: dict[str, int] = {}
 
-    def insert_run(self, run: TaskRun) -> int:
-        run_id = self._next_id
-        self._next_id += 1
+    def insert_run(self, run: TaskRun) -> str:
+        run_id = uuid.uuid4().hex
         row = copy.deepcopy(run)
         row.id = run_id
         self.rows[run_id] = row
+        self._order[run_id] = len(self._order)
         return run_id
 
     def update_run(self, run: TaskRun) -> None:
         self.writes += 1
         self.rows[run.id] = copy.deepcopy(run)
 
-    def get_run(self, run_id: int) -> Optional[TaskRun]:
-        row = self.rows.get(int(run_id))
+    def get_run(self, run_id: str) -> Optional[TaskRun]:
+        row = self.rows.get(str(run_id))
         return copy.deepcopy(row) if row else None
 
     def list_runs(self, filters: Optional[dict] = None, page: int = 1, per_page: int = 25):
@@ -188,15 +190,16 @@ class MemoryRunRepo:
                 return False
             return True
 
-        hits = sorted((r for r in self.rows.values() if match(r)), key=lambda r: r.id, reverse=True)
+        hits = sorted((r for r in self.rows.values() if match(r)),
+                      key=lambda r: (r.created_at or "", self._order.get(r.id, 0)), reverse=True)
         start = (max(1, page) - 1) * per_page
         return [copy.deepcopy(r) for r in hits[start:start + per_page]], len(hits)
 
     def next_number(self, type_key: str) -> int:
         return 1 + max((r.number for r in self.rows.values() if r.type == type_key), default=0)
 
-    def delete_run(self, run_id: int) -> None:
-        self.rows.pop(int(run_id), None)
+    def delete_run(self, run_id: str) -> None:
+        self.rows.pop(str(run_id), None)
 
     def list_types(self) -> list[str]:
         return sorted({r.type for r in self.rows.values()})
@@ -228,8 +231,8 @@ class TaskService:
         self._clock = clock
         self._lookups = lookups
         self._grace = cancel_grace
-        self._active: dict[int, tuple[RunContext, asyncio.Task]] = {}
-        self._watchdogs: dict[int, asyncio.Task] = {}
+        self._active: dict[str, tuple[RunContext, asyncio.Task]] = {}
+        self._watchdogs: dict[str, asyncio.Task] = {}
         self._slots: dict[str, asyncio.Semaphore] = {}
 
     # starting
@@ -345,7 +348,7 @@ class TaskService:
     async def cancel(self, run_id: Any) -> TaskRun:
         """Ask the runner to stop; a run still going after the grace period is
         cancelled by force. KeyError for an unknown run, RunFinished if it ended."""
-        run_id = int(run_id)
+        run_id = str(run_id)
         active = self._active.get(run_id)
         if active is None:
             run = self.repo.get_run(run_id)
@@ -395,7 +398,7 @@ class TaskService:
     # reading
 
     def get(self, run_id: Any) -> Optional[TaskRun]:
-        run_id = int(run_id)
+        run_id = str(run_id)
         active = self._active.get(run_id)
         if active is not None:
             return active[0].run
