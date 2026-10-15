@@ -27,13 +27,21 @@ import {
   STEP_LIST,
   BUSY,
   FADE_IN,
-  FRAME,
+  LIST_BODY,
+  LIST_FRAME,
   FRAME_HEAD,
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
   PER_PAGE,
   RAIL_LIST,
   ROW_BOX,
+  ROW_CHIPS,
+  ROW_CHIPS_EXTRA,
+  ROW_ID,
+  ROW_MAIN,
+  ROW_MENU,
+  ROW_NAME,
+  ROW_TIMING,
   RUNS_COUNT_KEY,
   RunRowsLoading,
   TasksHeader,
@@ -70,7 +78,7 @@ describe("run row skeleton", () => {
     const { container } = render(
       <MemoryRouter>
         <ul>
-          <RunRow run={RUN} typeTitle="Backfill channels" actions={<div className="shrink-0 self-start">menu</div>} />
+          <RunRow run={RUN} typeTitle="Backfill channels" actions={<div className={ROW_MENU}>menu</div>} />
         </ul>
         <RunRowsLoading rows={1} />
       </MemoryRouter>,
@@ -80,9 +88,33 @@ describe("run row skeleton", () => {
     expect(real!.className.startsWith(ROW_BOX)).toBe(true);
     const cols = (li: Element) => Array.from(li.children).map(layout);
     expect(cols(skeleton!)).toEqual(cols(real!));
-    // Title and type lines: a title line and a text-xs line with the same gap.
-    expect(skeleton!.children[1]!.children).toHaveLength(2);
-    expect(skeleton!.children[1]!.children[1]!.className).toContain("mt-0.5 text-xs");
+    // Glyph, name and ID, chips, timing, menu.
+    expect(real!.children).toHaveLength(5);
+    expect(Array.from(real!.children).slice(1).map((c) => c.className)).toEqual([ROW_MAIN, ROW_CHIPS, ROW_TIMING, ROW_MENU]);
+    expect(Array.from(skeleton!.children).slice(1).map((c) => c.className)).toEqual([ROW_MAIN, ROW_CHIPS, ROW_TIMING, ROW_MENU]);
+    // The name line over the run ID line, in the same type and gap; the skeleton has bars in both.
+    const lines = (li: Element) => Array.from(li.children[1]!.children).map((c) => c.className.replace(/^block /, ""));
+    expect(lines(real!)).toEqual([ROW_NAME, ROW_ID]);
+    expect(lines(skeleton!)).toEqual(lines(real!));
+    expect(skeleton!.children[1]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
+    // The chips: the status pill, then mapping, trigger and actor, each a Badge box; bars for the values.
+    const chips = (li: Element) => {
+      const box = li.children[2]!;
+      return { pill: box.children[0]!.className, extra: box.children[1]!.className, chips: box.children[1]!.children.length };
+    };
+    expect(chips(real!)).toEqual({ pill: "inline-flex", extra: ROW_CHIPS_EXTRA, chips: 3 });
+    expect(chips(skeleton!)).toEqual(chips(real!));
+    expect(real!.children[2]!.textContent).toBe("SuccessMain mappingManualadmin");
+    expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]").length).toBeGreaterThanOrEqual(4);
+    // Started over duration.
+    expect(real!.children[3]!.children).toHaveLength(2);
+    expect(skeleton!.children[3]!.children).toHaveLength(2);
+  });
+
+  it("keeps the runs card unclipped and at least as tall as the tallest filter list under its head", () => {
+    expect(LIST_FRAME.split(" ")).not.toContain("overflow-hidden");
+    // ToolbarSelect's list: max-h-[180px], 4 px under its toggle.
+    expect(Number(/min-h-\[(\d+)px\]/.exec(LIST_BODY)?.[1])).toBeGreaterThanOrEqual(184);
   });
 
   it("draws as many rows as the list had last time, at most a page, one on a first visit, and the empty state with none", () => {
@@ -128,7 +160,8 @@ function chrome(root: HTMLElement) {
     search: within(root).queryAllByRole("searchbox", { hidden: true }).length,
     searchButton: within(root).queryAllByRole("button", { name: "Search", hidden: true }).length,
     railEntries: byClass(RAIL_LIST).children.length,
-    frames: root.querySelectorAll(`[class="${FRAME}"]`).length,
+    frames: root.querySelectorAll(`[class="${LIST_FRAME}"]`).length,
+    bodies: root.querySelectorAll(`[class="${LIST_BODY}"]`).length,
     headGroups: Array.from(head.children).map((c) => c.className),
     headLeft: byClass(FRAME_HEAD_LEFT).children.length,
     dropdowns: Array.from(byClass(FRAME_HEAD_FILTERS).querySelectorAll("button[aria-haspopup=listbox]")).map(label),
@@ -191,6 +224,9 @@ describe("page skeleton", () => {
       search: 1,
       searchButton: 1,
       railEntries: 1,
+      // The runs card does not clip, and its body keeps the height an open filter list needs.
+      frames: 1,
+      bodies: 1,
       headLeft: 2,
       autoRefresh: "Auto-refresh: Off",
       dropdowns: ["Task type: All", "Status: All", "Mapping: All", "Actor: All"],

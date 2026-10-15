@@ -54,21 +54,23 @@ describe("status glyph alignment", () => {
       </MemoryRouter>,
     );
     const glyphs = Array.from(container.querySelectorAll("[data-status]"));
-    // Running steps sort first in the step list.
+    // The run row's glyph, then the small glyph in its status pill. Running steps sort first in the step list.
     // The last is the small glyph inside the header's status pill.
-    expect(glyphs.map((g) => g.getAttribute("data-status"))).toEqual(["success", "running", "success", "success", "success"]);
+    expect(glyphs.map((g) => g.getAttribute("data-status"))).toEqual(["success", "success", "running", "success", "success", "success"]);
     // Colours and the header glyph's fade in aside.
     const fade = FADE_IN.split(" ");
     const boxes = glyphs.map((g) => classes(g).filter((c) => !c.startsWith("text-") && !fade.includes(c)).sort().join(" "));
     expect(new Set(boxes)).toEqual(new Set([[...BOX].sort().join(" ")]));
-    const [row, , , header] = glyphs.map((g) => g.parentElement!);
-    // The run row keeps its other columns at the top; the glyph, a direct child, centres on the title and meta lines.
+    const [row, , , , header] = glyphs.map((g) => g.parentElement!);
+    // The run row centres its columns; the glyph, a direct child, centres on the name and run ID lines.
     expect(row!.tagName).toBe("LI");
-    expect(row!.className).toContain("items-start");
-    expect(row!.children[1]!.textContent).toContain("Backfill #general");
-    expect(row!.children[1]!.textContent).toContain("Manual run by admin");
+    expect(row!.className).toContain("items-center");
+    expect(Array.from(row!.children[1]!.children).map((c) => c.textContent)).toEqual(["Backfill channels #1", "1"]);
+    // The pill's glyph sits inside the row's status pill, not on the row.
+    expect(glyphs[1]!.closest("li")).toBe(row);
+    expect(glyphs[1]!.parentElement).not.toBe(row);
     // A step row is the glyph's parent.
-    expect(glyphs[1]!.parentElement!.className).toBe(STEP_ROW);
+    expect(glyphs[2]!.parentElement!.className).toBe(STEP_ROW);
     // The header centres the glyph beside its title line (title, number, status pill).
     expect(header!.className).toBe(RUN_HEAD_MAIN);
     expect(header!.children[1]!.querySelector("h2")).not.toBeNull();

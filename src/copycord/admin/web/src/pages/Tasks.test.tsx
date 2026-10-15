@@ -101,21 +101,31 @@ beforeEach(() => {
 });
 
 describe("Tasks page", () => {
-  it("lists runs with status, title link, type line and context badge", async () => {
+  it("lists runs by task name and number over the run ID, with the status pill, mapping, trigger and actor chips", async () => {
     serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 }), run({ id: "9e8d7c6b5a4f4e3d8c2b1a0f9e8d7c6b", number: 11, title: "Backfill 3 channels", status: "failed" })]);
     renderAt("/tasks");
     const list = await screen.findByRole("list", { name: "Task runs" });
     const rows = within(list).getAllByRole("listitem");
     expect(rows).toHaveLength(2);
     expect(screen.getByText("2 task runs")).toBeInTheDocument();
-    expect(within(rows[0]!).getByRole("link", { name: "Backfill #general" })).toHaveAttribute("href", "/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
+    const link = await within(rows[0]!).findByRole("link", { name: "Backfill channels #12" });
+    expect(link).toHaveAttribute("href", "/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
+    // The run's own title is gone from the row; only the link's tooltip keeps it.
+    expect(link).toHaveAttribute("title", "Backfill #general");
+    expect(rows[1]).not.toHaveTextContent("Backfill 3 channels");
     expect(within(rows[0]!).getByRole("img", { name: "Success" })).toBeInTheDocument();
     expect(within(rows[1]!).getByRole("img", { name: "Failed" })).toBeInTheDocument();
-    expect(await within(rows[0]!).findByText("Backfill channels #12: Manual run by admin")).toBeInTheDocument();
+    // The run ID line: the first 8 characters in mono, the full id in its title.
+    const id = within(rows[0]!).getByText("4f2a9c1e");
+    expect(id).toHaveClass("font-mono");
+    expect(id).toHaveAttribute("title", "Run ID 4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
+    // The chips read as on the run page: status pill, mapping, trigger, actor.
+    expect(within(rows[0]!).getByText("Success")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Failed")).toBeInTheDocument();
     expect(within(rows[0]!).getByText("Main mapping")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("Manual")).toBeInTheDocument();
+    expect(within(rows[0]!).getByText("admin")).toBeInTheDocument();
     expect(within(rows[0]!).getByText("48s")).toBeInTheDocument();
-    // the uuid id only lives in the link; the row shows "#<number>"
-    expect(list).not.toHaveTextContent("4f2a9c1e");
 
     const rail = screen.getByRole("navigation", { name: "Task types" });
     expect(within(rail).getByRole("link", { name: /All tasks/ })).toHaveAttribute("aria-current", "page");
@@ -152,7 +162,7 @@ describe("Tasks page", () => {
     // A first visit: the id in words, no shimmer in the title or the description line.
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Backfill channels");
     expect(first.container.querySelector("h2 [data-skeleton], h2 + p [data-skeleton]")).toBeNull();
-    await screen.findByRole("link", { name: "Backfill #general" });
+    await screen.findByRole("link", { name: "Backfill channels #12" });
     first.unmount();
 
     // A visit after the types loaded once: their own title and description, still before they answer.
@@ -184,7 +194,7 @@ describe("Tasks page", () => {
   it("sends the URL filters with the list fetch and narrows it from the dropdowns", async () => {
     const fn = serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
     renderAt("/tasks?status=failed&actor=admin&q=general&context=m1&page=2");
-    await screen.findByRole("link", { name: "Backfill #general" });
+    await screen.findByRole("link", { name: "Backfill channels #12" });
     const first = new URL(listCalls(fn)[0]!, "http://x").searchParams;
     expect(Object.fromEntries(first)).toMatchObject({ status: "failed", actor: "admin", q: "general", context: "m1", page: "2" });
     expect(screen.getByRole("searchbox", { name: "Search runs" })).toHaveValue("general");
@@ -194,6 +204,21 @@ describe("Tasks page", () => {
     // A filter change goes back to page 1.
     expect(listCalls(fn).at(-1)).toContain("page=1");
     expect(listCalls(fn).at(-1)).toContain("status=failed");
+  });
+
+  it("names the filter on the closed control only, lists plain options, and opens the list in a card that does not clip it", async () => {
+    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
+    renderAt("/tasks");
+    await screen.findByRole("link", { name: "Backfill channels #12" });
+    expect(screen.getByRole("button", { name: "Auto-refresh: 30s" })).toBeInTheDocument();
+    for (const name of ["Task type: All", "Mapping: All", "Actor: All"]) expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Status: All" }));
+    const listbox = screen.getByRole("listbox", { name: "Status" });
+    expect(within(listbox).getAllByRole("option").map((o) => o.textContent)).toEqual(["All", "Queued", "Running", "Success", "Failed", "Cancelled"]);
+    // Nothing between the open list and the page clips it, the runs card included.
+    for (let el = listbox.parentElement; el; el = el.parentElement) expect(el.getAttribute("class") ?? "").not.toMatch(/overflow-(hidden|clip|auto|y-auto)/);
+    fireEvent.click(within(listbox).getByRole("option", { name: "Cancelled" }));
+    expect(await screen.findByRole("button", { name: "Status: Cancelled" })).toBeInTheDocument();
   });
 
   it("typing a search keeps the rows, with no skeleton and no empty state until the search answers", async () => {
@@ -215,7 +240,7 @@ describe("Tasks page", () => {
     expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull();
     expect(screen.queryByText("No runs match")).toBeNull();
     expect(screen.queryByText("No task runs yet")).toBeNull();
-    expect(within(list).getByRole("link", { name: "Backfill #general" })).toBeInTheDocument();
+    expect(within(list).getByRole("link", { name: "Backfill channels #12" })).toBeInTheDocument();
     expect(list).toHaveAttribute("aria-busy", "true");
     // Quietly: a dim that waits 300 ms before it shows, and fades back when the answer lands.
     expect(list.className).toContain(BUSY);
@@ -333,7 +358,7 @@ describe("Tasks page", () => {
       },
     });
     renderAt("/tasks");
-    await openMenu("Backfill #general");
+    await openMenu("Backfill channels #12");
     expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "Cancel run" }));
     // The run page asks the same, word for word.
@@ -351,7 +376,7 @@ describe("Tasks page", () => {
       handle: (_url, method) => (method === "POST" ? Response.json({ detail: "Run already success" }, { status: 409 }) : undefined),
     });
     renderAt("/tasks");
-    await openMenu("Backfill #general");
+    await openMenu("Backfill channels #12");
     fireEvent.click(screen.getByRole("menuitem", { name: "Cancel run" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
     expect(await screen.findByText("Run already success")).toBeInTheDocument();
@@ -367,13 +392,13 @@ describe("Tasks page", () => {
       },
     });
     renderAt("/tasks");
-    await openMenu("Backfill #general");
+    await openMenu("Backfill channels #12");
     expect(screen.queryByRole("menuitem", { name: "Cancel run" })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(await screen.findByText("The run and its report are deleted. This cannot be undone.")).toBeInTheDocument();
     const before = listCalls(fn).length;
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(screen.queryByRole("link", { name: "Backfill #general" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("link", { name: "Backfill channels #12" })).toBeNull());
     expect(deleted).toEqual(["/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]);
     expect(screen.getByText("1 task run")).toBeInTheDocument();
     expect(await screen.findByText("Deleted Backfill channels #12")).toBeInTheDocument();
@@ -386,17 +411,17 @@ describe("Tasks page", () => {
         method === "DELETE" ? Response.json({ detail: "Run is running; cancel it first" }, { status: 409 }) : undefined,
     });
     renderAt("/tasks");
-    await openMenu("Backfill #general");
+    await openMenu("Backfill channels #12");
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     expect(await screen.findByText("Run is running; cancel it first")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Backfill #general" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Backfill channels #12" })).toBeInTheDocument();
   });
 
   it("a finished run's menu holds View and Delete only", async () => {
     serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
     renderAt("/tasks");
-    await openMenu("Backfill #general");
+    await openMenu("Backfill channels #12");
     expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["View", "Delete"]);
   });
 });

@@ -131,7 +131,7 @@ describe("RunHeader", () => {
     expect(screen.getByRole("link", { name: "Backfill channels" })).toHaveAttribute("href", "/tasks?type=backfill_channels");
     expect(screen.getByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
     expect(screen.getByText("#12")).toBeInTheDocument();
-    expect(screen.getByText("Manual run")).toBeInTheDocument();
+    expect(screen.getByText("Manual")).toBeInTheDocument();
     expect(screen.getByText("admin")).toBeInTheDocument();
     expect(screen.getByText("Main mapping")).toBeInTheDocument();
     expect(screen.getByTitle("Duration")).toHaveTextContent("48s");
@@ -258,7 +258,7 @@ describe("Run page structure", () => {
         number: "#12",
         status: "Running",
         actions: ["Run actions", "Copy run ID"],
-        chips: ["Main mapping", "Manual run", "admin", expect.any(String), expect.any(String), "ID4f2a9c1e"],
+        chips: ["Main mapping", "Manual", "admin", expect.any(String), expect.any(String), "ID4f2a9c1e"],
       },
       cards: [
         {
