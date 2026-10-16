@@ -35,10 +35,10 @@ const BOX = STATUS_BOX.split(" ");
 const NUDGE = /^-?(m[tby]?|self|align|translate-y|top|relative|h)(-|$)/;
 
 describe("status colours", () => {
-  it("gives each state one colour on every surface: blue active, green done, red failed, amber cancelled, neutral skipped", () => {
+  it("gives each state one colour on every surface: blue queued, purple running, green done, red failed, amber cancelled, neutral skipped", () => {
     expect(COLOUR).toEqual({
       queued: "text-info",
-      running: "text-info",
+      running: "text-accent",
       success: "text-good",
       failed: "text-danger",
       cancelled: "text-custom-ink",
@@ -52,6 +52,28 @@ describe("status colours", () => {
       expect(glyph.getAttribute("aria-label")).toBeTruthy();
       unmount();
     }
+  });
+
+  it("draws running as the app's purple Spinner in the glyph's box, still labelled Running, spinning under reduced motion too", () => {
+    for (const [size, px] of [[undefined, "16px"], [14, "14px"], [20, "20px"]] as const) {
+      const { container, unmount } = render(<StatusIcon status="running" size={size} />);
+      const glyph = screen.getByRole("img", { name: "Running" });
+      expect(glyph).toHaveAttribute("title", "Running");
+      expect(glyph.querySelector("svg")).toBeNull();
+      const ring = glyph.querySelector("[data-spinner]")!;
+      expect(classes(ring)).toEqual(expect.arrayContaining(["animate-spin", "rounded-full", "border-2", "border-line-2", "border-t-accent"]));
+      expect(classes(ring).filter((c) => c.startsWith("motion-"))).toEqual([]);
+      expect((ring as HTMLElement).style.width).toBe(px);
+      expect((ring as HTMLElement).style.height).toBe(px);
+      // The glyph says the word; the ring adds no second status region.
+      expect(container.querySelector("[role=status]")).toBeNull();
+      expect(ring.parentElement).toHaveAttribute("aria-hidden", "true");
+      unmount();
+    }
+    // Queued keeps its blue hollow dot.
+    render(<StatusIcon status="queued" />);
+    expect(screen.getByRole("img", { name: "Queued" }).querySelector("svg circle")).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Queued" }).querySelector("[data-spinner]")).toBeNull();
   });
 
   it("says the status in its title and label, the word the filters use", () => {

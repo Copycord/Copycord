@@ -1,6 +1,6 @@
 // Behaviour tests for the smaller components.
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -37,6 +37,26 @@ describe("Button", () => {
     expect(screen.getByRole("status", { name: "Working" })).toBeInTheDocument();
     await userEvent.setup().click(btn);
     expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("keeps its label in place while loading: the label goes see-through, the spinner sits centred over it", () => {
+    const { rerender } = render(<Button>Save</Button>);
+    expect(screen.getByRole("button")).not.toHaveClass("relative");
+    expect(screen.queryByRole("status")).toBeNull();
+    rerender(<Button loading>Save</Button>);
+    const btn = screen.getByRole("button", { name: /Save/ });
+    expect(btn).toHaveClass("relative");
+    // The label is still in the DOM and the accessible name, only made transparent (not hidden from the name).
+    const label = within(btn).getByText("Save");
+    expect(label).toHaveClass("opacity-0");
+    expect(label).not.toHaveClass("invisible");
+    expect(label).not.toHaveClass("hidden");
+    expect(btn).toHaveAccessibleName(/Save/);
+    // The spinner is out of the flow, over the whole button, centred both ways.
+    const spinner = within(btn).getByRole("status", { name: "Working" });
+    expect(spinner.className.split(" ")).toEqual(expect.arrayContaining(["absolute", "inset-0", "items-center", "justify-center"]));
+    expect(spinner.nextSibling).toBeNull();
+    expect(btn.firstElementChild).toBe(label);
   });
 
   it("applies variant classes", () => {

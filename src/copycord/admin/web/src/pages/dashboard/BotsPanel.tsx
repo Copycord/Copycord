@@ -5,7 +5,7 @@
 // which a report only moves when it is more than 2 s off.
 
 import { useCallback, useEffect, useState } from "react";
-import { Spinner, cx, useReveal } from "../../components/ui";
+import { BUSY_HOST, BusyContent, cx, useReveal } from "../../components/ui";
 import { useWsMessages } from "../../hooks/useWsMessages";
 import type { UseWsOptions } from "../../hooks/useWsMessages";
 import { api, errorText } from "../../lib/api";
@@ -220,10 +220,9 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
             disabled={busy || (!running && !!startBlocked)}
             aria-busy={busy || undefined}
             title={running ? undefined : (startBlocked ?? undefined)}
-            className={cx(GHOST, GHOST_DISABLED, "inline-flex max-sm:w-full")}
+            className={cx(GHOST, GHOST_DISABLED, "inline-flex max-sm:w-full", busy && BUSY_HOST)}
           >
-            {busy ? <Spinner size="sm" label="Working" /> : null}
-            {running ? "Stop" : "Start"}
+            <BusyContent busy={busy}>{running ? "Stop" : "Start"}</BusyContent>
           </button>
         </form>
         <span className="flex-1 max-sm:hidden" />

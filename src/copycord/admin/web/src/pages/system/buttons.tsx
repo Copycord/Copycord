@@ -4,7 +4,7 @@
 // on hover. Classes follow components/ui/Button.tsx.
 
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes } from "react";
-import { cx, Spinner } from "../../components/ui";
+import { BUSY_HOST, BusyContent, cx } from "../../components/ui";
 import { GHOST_RED_HOVER, GHOST_TINT_FILL } from "../../components/ui/Button";
 
 // The old .btn had no gap; only the loading spinner gets one.
@@ -80,12 +80,12 @@ export function GhostButton({
           ? `${GHOST_RED_HOVER} ${GHOST_TINT_FILL}`
           : "enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-line-1 enabled:hover:shadow-soft " +
               "enabled:active:translate-y-0 enabled:active:scale-[0.97] disabled:opacity-55",
+        loading && BUSY_HOST,
         className,
       )}
       {...rest}
     >
-      {loading ? <Spinner size="sm" label="Working" /> : null}
-      {children}
+      <BusyContent busy={loading}>{children}</BusyContent>
     </button>
   );
 }

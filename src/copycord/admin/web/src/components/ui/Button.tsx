@@ -4,7 +4,7 @@
 
 import type { ButtonHTMLAttributes, Ref } from "react";
 import { cx } from "./cx";
-import { Spinner } from "./Spinner";
+import { BUSY_HOST, BusyContent } from "./Spinner";
 
 export type ButtonVariant =
   | "primary"
@@ -127,12 +127,12 @@ export function Button({
         wide && "min-w-[170px]",
         flat && FLAT,
         attached && ATTACHED,
+        loading && BUSY_HOST,
         className,
       )}
       {...rest}
     >
-      {loading ? <Spinner size="sm" label="Working" /> : null}
-      {children}
+      <BusyContent busy={loading}>{children}</BusyContent>
     </button>
   );
 }

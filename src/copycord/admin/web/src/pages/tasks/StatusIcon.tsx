@@ -1,9 +1,10 @@
 // Run and step status glyphs in one colour per state, the same on every surface: success green
-// check-circle, failed red x-circle, cancelled amber slashed circle, running a blue spinning ring, queued
-// a blue hollow dot, skipped a neutral arrow. Each is an img with the status word as its label and title
+// check-circle, failed red x-circle, cancelled amber slashed circle, running the app's purple Spinner (it
+// spins under reduced motion too, as it says the run is in progress), queued a blue hollow dot, skipped a neutral arrow. Each is an img with the status word as its label and title
 // (on a run row, the run title and a step row it alone carries the status), so colour is never the only signal.
 // The glyph's box centres itself on the row that holds it (STATUS_BOX).
 
+import { Spinner } from "../../components/ui/Spinner";
 import { cx } from "../../components/ui/cx";
 import type { RunStatus, StepState } from "../../types/tasks";
 import { STATUS_BOX } from "./TasksSkeleton";
@@ -17,10 +18,10 @@ export const STATUS_LABEL: Record<RunStatus | StepState, string> = {
   skipped: "Skipped",
 };
 
-/** The text colour of each state: blue while active, green done, red failed, amber cancelled, neutral skipped. */
+/** The text colour of each state: blue queued, the accent purple running, green done, red failed, amber cancelled, neutral skipped. */
 export const COLOUR: Record<RunStatus | StepState, string> = {
   queued: "text-info",
-  running: "text-info",
+  running: "text-accent",
   success: "text-good",
   failed: "text-danger",
   cancelled: "text-custom-ink",
@@ -48,16 +49,14 @@ export function StatusIcon({
       data-testid={testId}
       className={cx(STATUS_BOX, COLOUR[status], className)}
     >
-      <svg
-        viewBox="0 0 16 16"
-        width={size}
-        height={size}
-        aria-hidden="true"
-        focusable="false"
-        className={status === "running" ? "animate-spin" : undefined}
-      >
-        <Glyph status={status} />
-      </svg>
+      {status === "running" ? (
+        // The app's one loading spinner (purple arc on the neutral track) in the glyph's box; this span says the word.
+        <Spinner size={size} label={null} />
+      ) : (
+        <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false">
+          <Glyph status={status} />
+        </svg>
+      )}
     </span>
   );
 }
@@ -90,13 +89,6 @@ function Glyph({ status }: { status: RunStatus | StepState }) {
         <>
           <circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
           <path d="M5 8h6M8.75 5.5 11.25 8l-2.5 2.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      );
-    case "running":
-      return (
-        <>
-          <circle cx="8" cy="8" r="6.75" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
-          <path d="M8 1.25A6.75 6.75 0 0 1 14.75 8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </>
       );
     default:

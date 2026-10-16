@@ -483,10 +483,11 @@ export function StatusTabs({ counts, value, onSelect = noop }: StatusTabsProps) 
   );
 }
 
-/** A rail entry's right side: a blue running badge when the type has active runs, then its run count. */
+/** A rail entry's right side: a purple running badge (the running status colour) when the type has active runs, then its run count. */
 export const RAIL_COUNTS = "ml-auto inline-flex shrink-0 items-center gap-2";
 export const RAIL_COUNT = "text-xs text-muted tabular-nums";
-export const RAIL_RUNNING = "inline-flex items-center gap-1 text-xs font-medium text-info tabular-nums";
+export const RAIL_RUNNING = "inline-flex items-center gap-1 text-xs font-medium text-accent tabular-nums";
+export const RAIL_RUNNING_DOT = "size-1.5 rounded-full bg-accent animate-pulse";
 
 export function RailCounts({ total, active = 0 }: { total: number | null; active?: number }) {
   return (
@@ -494,7 +495,7 @@ export function RailCounts({ total, active = 0 }: { total: number | null; active
     <span aria-hidden="true" className={RAIL_COUNTS}>
       {active > 0 ? (
         <span className={RAIL_RUNNING}>
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-info animate-pulse" />
+          <span aria-hidden="true" className={RAIL_RUNNING_DOT} />
           {active}
         </span>
       ) : null}

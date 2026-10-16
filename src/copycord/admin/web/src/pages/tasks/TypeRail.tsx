@@ -1,5 +1,5 @@
 // Left column of the Tasks page: "All tasks", then one entry per registered type, each with its run
-// count and a blue running badge while it has active runs.
+// count and a purple running badge while it has active runs.
 
 import { Link } from "react-router";
 import { cx } from "../../components/ui/cx";

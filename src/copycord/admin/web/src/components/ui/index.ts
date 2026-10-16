@@ -14,7 +14,7 @@ export { Field, FieldSelect, Input, Select, Textarea } from "./Field";
 export type { FieldSelectProps, SelectOption } from "./Field";
 export { REVEAL, Skeleton, SkeletonSection, useReveal } from "./Skeleton";
 export type { SkeletonProps } from "./Skeleton";
-export { Spinner } from "./Spinner";
+export { BUSY_HOST, BusyContent, Spinner } from "./Spinner";
 export { Table } from "./Table";
 export type { Column } from "./Table";
 export { Tabs } from "./Tabs";

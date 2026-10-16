@@ -5,7 +5,7 @@
 // two-column grid of bordered field boxes (.grid, .field-token, .gc-setting-row).
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChipInput, Spinner, cx } from "../../components/ui";
+import { BUSY_HOST, BusyContent, ChipInput, cx } from "../../components/ui";
 import { BACKUP_BTN, BackupIcon, GlobalConfigLoading, INVITE_LINK, INVITE_OFF, InviteIcon, LOG_LEVEL_BOX } from "./DashboardSkeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { api, errorText } from "../../lib/api";
@@ -267,10 +267,9 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
                 disabled={!dirty || locked || saving}
                 aria-busy={saving || undefined}
                 title={locked ? LOCK_TITLE : undefined}
-                className={cx(GHOST, "flex", dirty ? GHOST_DISABLED : "invisible")}
+                className={cx(GHOST, "flex", dirty ? GHOST_DISABLED : "invisible", saving && BUSY_HOST)}
               >
-                {saving ? <Spinner size="sm" label="Working" /> : null}
-                Save
+                <BusyContent busy={saving}>Save</BusyContent>
               </button>
               <button
                 id="cfg-cancel-btn"
