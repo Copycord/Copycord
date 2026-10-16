@@ -27,9 +27,9 @@ import {
   TYPE_ICON,
 } from "./treeClasses";
 
-/** No panel: the title, the controls and the tree sit on the page, inset as far as the content of the other pages' cards
- *  (18px padding and a 1px transparent border), so the title lines up across pages. */
-export const CHANNELS_CARD = "mt-[18px] border border-transparent p-[18px] text-text max-sm:mx-2";
+/** No panel: the title, the controls and the tree sit on the page with no side inset, on the container edge like every
+ *  other page's title and first card. */
+export const CHANNELS_CARD = "mt-[18px] border-y border-transparent py-[18px] text-text";
 export const CONTROLS = "flex flex-wrap items-center gap-2.5";
 /** The Guild mapping select: its toggle sizes to its label, so both rows give it one floor that the loading bar
  *  and a usual mapping name fit under; the search box after it then stands in the same place. */
@@ -42,13 +42,14 @@ export const SEARCH_INPUT =
   "hover:border-log-input-focus hover:[box-shadow:0_0_0_1px_var(--color-log-input-focus)] focus:border-log-input-focus focus:[box-shadow:0_0_0_1px_var(--color-log-input-focus)]";
 
 /** Delete orphans: a danger outline (danger text and border, no fill, the soft danger fill on hover) at the right end
- *  of the control row, apart from the filters. Disabled with the standard look (60%, not-allowed) while there are none. */
+ *  of the control row, apart from the filters. While there are none it drops the red (neutral border, muted text,
+ *  not-allowed) so it reads as disabled. */
 export const DELETE_ALL_BTN =
   "ml-auto flex h-[34px] cursor-pointer items-center justify-center rounded-input border border-danger bg-transparent px-2.5 " +
   "text-[13px] leading-8 font-semibold text-danger transition-colors duration-150 " +
   "enabled:hover:bg-danger-a10 enabled:active:bg-danger/18 " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28 " +
-  "disabled:cursor-not-allowed disabled:opacity-60";
+  "disabled:cursor-not-allowed disabled:border-border disabled:text-muted";
 
 /** .card-titlebar: the h2, then one wrapping row of controls (.titlebar-actions). The old visible h2 is the page's top heading. */
 export function ChannelsTitle() {
@@ -142,7 +143,7 @@ export function ChannelsSkeleton() {
             <ToolbarSelect id="ch-filter-skel" nativeHidden label="Filter" value="all" options={FILTER_OPTIONS} onChange={noop} />
             <ToolbarSelect id="ch-sort-skel" nativeHidden label="Sort" value="name" options={SORT_OPTIONS} onChange={noop} />
             {/* The page opens with no orphans until the verify scan reports some. */}
-            <button type="button" disabled className={DELETE_ALL_BTN}>
+            <button type="button" disabled aria-disabled title="No orphans to delete" className={DELETE_ALL_BTN}>
               {deleteOrphansLabel(0)}
             </button>
           </span>

@@ -43,7 +43,9 @@ export const GHOST_GREEN_HOVER = "enabled:hover:border-good enabled:hover:text-g
  *  danger text and border, no fill, the soft danger fill on hover. Important, so it wins over a base border and fill. */
 export const DANGER_OUTLINE =
   "border-danger! bg-transparent! text-danger! enabled:hover:bg-danger-a10! enabled:active:bg-danger/18! " +
-  "enabled:hover:translate-y-0! enabled:hover:shadow-none! disabled:opacity-60";
+  "enabled:hover:translate-y-0! enabled:hover:shadow-none! " +
+  // Disabled drops the red: the neutral border and muted icon and text, so it never reads as live.
+  "disabled:cursor-not-allowed! disabled:border-border! disabled:text-muted!";
 
 // The old .btn had no gap; only buttons with an icon get one.
 const BASE =
@@ -126,6 +128,7 @@ export function Button({
       ref={ref}
       type={type}
       disabled={disabled || loading}
+      aria-disabled={disabled || loading || undefined}
       aria-busy={loading || undefined}
       className={cx(
         BASE,

@@ -294,10 +294,11 @@ export function Logs() {
           <button
             type="button"
             id="logs-clear-all"
-            title="Clear all logs"
+            title={nothingToClear ? "Nothing to clear" : "Clear all logs"}
             aria-label="Clear all logs"
             className={CLEAR_ALL_BTN}
             disabled={clearBusy || nothingToClear}
+            aria-disabled={clearBusy || nothingToClear || undefined}
             onClick={() => void clearAll()}
           >
             <LogsIcon name="trash" size={16} />

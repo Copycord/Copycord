@@ -151,6 +151,8 @@ export function Channels() {
               id="orph-delall"
               type="button"
               disabled={actions.deleteAll.disabled}
+              aria-disabled={actions.deleteAll.disabled || undefined}
+              title={orphanCount === 0 ? "No orphans to delete" : undefined}
               onClick={actions.deleteAll.onClick}
               className={DELETE_ALL_BTN}
             >

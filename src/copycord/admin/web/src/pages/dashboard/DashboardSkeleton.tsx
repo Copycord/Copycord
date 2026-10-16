@@ -270,9 +270,8 @@ export function DashboardSkeleton() {
             <thead>
               <tr>
                 <th className={cx(BOTS_HEAD, "text-left")}>Component</th>
-                <th className={cx(BOTS_HEAD, "w-[110px] text-center")}>State</th>
+                <th className={cx(BOTS_HEAD, "w-[200px] text-center")}>State</th>
                 <th className={cx(BOTS_HEAD, "w-[120px] text-center")}>Uptime</th>
-                <th className={cx(BOTS_HEAD, "text-center")}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -282,7 +281,6 @@ export function DashboardSkeleton() {
                   <td className={cx(BOTS_CELL, "text-center")}>
                     <BotStatePending />
                   </td>
-                  <td className={cx(BOTS_CELL, "text-center")} />
                   <td className={cx(BOTS_CELL, "text-center")} />
                 </tr>
               ))}

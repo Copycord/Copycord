@@ -28,11 +28,11 @@ export function Card({ title, actions, className, children, ...rest }: CardProps
   );
 }
 
-/** No panel (rule f): a page's title, controls and cards sit on the page, inset as far as a Card's content
- *  (18px padding and a 1px transparent border) so titles line up across pages, as on Channels. */
+/** No panel (rule f): a page's title, controls and cards sit on the page with no side inset, so the title, toolbar
+ *  and first card start on the container edge like Dashboard, Scraper, Logs and Tasks. */
 export function PageFrame({ className, children, ...rest }: HTMLAttributes<HTMLElement>) {
   return (
-    <section className={cx("mt-[18px] border border-transparent p-[18px] text-text", className)} {...rest}>
+    <section className={cx("mt-[18px] border-y border-transparent py-[18px] text-text", className)} {...rest}>
       {children}
     </section>
   );

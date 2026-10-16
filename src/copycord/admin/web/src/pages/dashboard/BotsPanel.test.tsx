@@ -83,6 +83,10 @@ describe("BotsPanel status poll", () => {
     expect(calls()).toBe(3);
     expect(document.getElementById("server-status")).toHaveTextContent("Cloning guild");
     expect(document.getElementById("server-uptime")).toHaveTextContent("1m 5s");
+    // No Status column: the exceptional status is a second line in the State cell, three columns throughout.
+    const headers = [...document.querySelectorAll("#runtime-body")[0]!.closest("table")!.querySelectorAll("th")];
+    expect(headers.map((th) => th.textContent)).toEqual(["Component", "State", "Uptime"]);
+    expect(document.getElementById("server-status")!.closest("td")).toBe(document.getElementById("server-state")!.closest("td"));
   });
 
   it("slows to 8 s while a role reports an error", async () => {

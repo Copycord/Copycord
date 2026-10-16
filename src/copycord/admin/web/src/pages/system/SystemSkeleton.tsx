@@ -24,11 +24,11 @@ export const ACTIONS_CELL = cx(CELL, "pr-4 text-right");
 export const ROW_ACTIONS = "inline-flex flex-col items-end gap-2 md:flex-row md:whitespace-nowrap";
 export const ROW_BUTTON = "max-md:min-h-[34px] max-md:px-3";
 
-/** No page panel (rule f): the title sits on the page, inset as far as the Guilds and Channels titles, and the
+/** No page panel (rule f): the title sits on the page at the container edge, as on every page, and the
  *  Database card is the one card under it. */
 export function SystemTitle() {
   return (
-    <div className="px-[19px] pt-[37px]">
+    <div className="pt-[37px]">
       <h1 className="my-[0.83em] text-[24px] font-bold">System</h1>
     </div>
   );

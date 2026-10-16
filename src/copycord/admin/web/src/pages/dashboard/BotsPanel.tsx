@@ -154,9 +154,8 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
           <thead>
             <tr>
               <th className={cx(HEAD, "text-left")}>Component</th>
-              <th className={cx(HEAD, "w-[110px] text-center")}>State</th>
+              <th className={cx(HEAD, "w-[200px] text-center")}>State</th>
               <th className={cx(HEAD, "w-[120px] text-center")}>Uptime</th>
-              <th className={cx(HEAD, "text-center")}>Status</th>
             </tr>
           </thead>
           <tbody id="runtime-body">
@@ -178,11 +177,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                     ) : (
                       <BotStatePending />
                     )}
-                  </td>
-                  <td id={`${role}-uptime`} className={cx(CELL, "text-center")}>
-                    {s.running && s.uptime_sec != null && start != null ? <Uptime start={start} /> : ""}
-                  </td>
-                  <td className={cx(CELL, "text-center")}>
+                    {/* Only an exceptional status shows (rule c), as a second muted line under the state chip. */}
                     <span
                       id={`${role}-status`}
                       title={note}
@@ -190,12 +185,15 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                       tabIndex={note ? 0 : -1}
                       onClick={() => setExpanded((x) => ({ ...x, [role]: !x[role] }))}
                       className={cx(
-                        "inline-block max-w-[200px] cursor-pointer overflow-hidden rounded-[20px] bg-wash-6 px-2.5 py-[3px] align-middle text-[11px] font-medium text-ellipsis text-muted empty:hidden",
+                        "mx-auto mt-1 block max-w-[184px] cursor-pointer overflow-hidden text-[11px] font-medium text-ellipsis text-muted empty:hidden",
                         expanded[role] ? "whitespace-normal" : "whitespace-nowrap",
                       )}
                     >
                       {note}
                     </span>
+                  </td>
+                  <td id={`${role}-uptime`} className={cx(CELL, "text-center")}>
+                    {s.running && s.uptime_sec != null && start != null ? <Uptime start={start} /> : ""}
                   </td>
                 </tr>
               );
