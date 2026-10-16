@@ -165,14 +165,17 @@ export function Modal({
 }
 
 const BUBBLE_ALIGN = {
-  /** The old .tip-bubble: at the label's left edge, one line. */
-  start: "left-0 max-w-[80vw] overflow-x-auto whitespace-nowrap after:left-3.5",
+  /**
+   * The old .tip-bubble: at the label's left edge, one line when it fits, else wraps at 360px.
+   * No bubble sets overflow: a clipped bubble scrolls vertically and hides the arrow.
+   */
+  start: "left-0 max-w-[min(360px,calc(100vw-32px))] break-words whitespace-normal after:left-3.5",
   /** #mapping-modal .tip-bubble: centered 60px right of the label, wraps at 240px. */
   center:
-    "left-1/2 max-w-[min(240px,calc(100vw-32px))] translate-x-[calc(-50%+60px)] overflow-x-hidden break-words whitespace-normal " +
+    "left-1/2 max-w-[min(240px,calc(100vw-32px))] translate-x-[calc(-50%+60px)] break-words whitespace-normal " +
     "after:left-[calc(50%-60px)] after:-translate-x-1/2",
   /** #filters-modal .tip-bubble: at the label, 200 to 260px wide, wraps. */
-  wrap: "left-0 max-w-[260px] min-w-[200px] overflow-x-auto break-words whitespace-normal after:left-3.5",
+  wrap: "left-0 max-w-[260px] min-w-[200px] break-words whitespace-normal after:left-3.5",
 } as const;
 
 /** Below the label with the arrow on top (the old look), or above it with the arrow underneath. */

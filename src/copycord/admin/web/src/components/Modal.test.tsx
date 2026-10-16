@@ -146,4 +146,12 @@ describe("TipLabel placement", () => {
     expect(bubble.className).toContain("after:border-t-surface-deep");
     expect(bubble.className).not.toContain("after:border-b-surface-deep");
   });
+
+  it.each(["start", "center", "wrap"] as const)("the %s bubble sets no overflow, so it never scrolls", (align) => {
+    render(<TipLabel text="Blocked words" tip="Not forwarded" tipLabel="What is it?" align={align} />);
+    const bubble = screen.getByRole("tooltip", { hidden: true });
+    expect(bubble.className).not.toMatch(/(^|\s|:)overflow-/);
+    expect(bubble.className).toContain("break-words");
+    expect(bubble.className).toContain("after:content-['']");
+  });
 });
