@@ -20,6 +20,7 @@ import {
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
   LIST_FRAME,
+  META_ITEM,
   MetaDot,
   MetaGlyph,
   ROW,
@@ -27,6 +28,7 @@ import {
   ROW_ID,
   ROW_LINK,
   ROW_MAIN,
+  ROW_MAPPING,
   ROW_MENU,
   ROW_META,
   ROW_META_ITEM,
@@ -158,29 +160,34 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
             {typeTitle} #{run.number}
           </Link>
         </div>
+        {/* Each dot leads its item in one box, so a cut line ends on a whole item, never on a dot. */}
         <div className={ROW_META}>
           <span className={ROW_ID} title={`Run ID ${run.id}`}>
             {run.id.slice(0, 8)}
           </span>
-          <MetaDot />
           {mapping ? (
-            <>
-              <span title="Mapping">{mapping}</span>
+            <span className={ROW_META_ITEM}>
               <MetaDot />
-            </>
+              <span title="Mapping" className={ROW_MAPPING}>
+                {mapping}
+              </span>
+            </span>
           ) : null}
           <span className={ROW_META_ITEM}>
-            <MetaGlyph name="trigger" />
-            {triggerLabel(run)}
+            <MetaDot />
+            <span className={META_ITEM}>
+              <MetaGlyph name="trigger" />
+              {triggerLabel(run)}
+            </span>
           </span>
           {run.actor ? (
-            <>
+            <span className={ROW_META_ITEM}>
               <MetaDot />
-              <span className={ROW_META_ITEM}>
+              <span className={META_ITEM}>
                 <MetaGlyph name="actor" />
                 {run.actor}
               </span>
-            </>
+            </span>
           ) : null}
         </div>
       </div>

@@ -49,8 +49,8 @@ export const PAGER = "flex items-center justify-between gap-3 border-t border-bo
 /** The box of a run row; ROW adds the hover tint. The skeleton row uses the box alone so both stand equally tall. */
 export const ROW_BOX = "relative flex min-h-16 items-center gap-3 border-b border-border px-4 py-2.5 last:rounded-b-card last:border-b-0";
 export const ROW = `${ROW_BOX} transition-colors duration-150 hover:bg-rail-hover`;
-/** A run row's left column: the task name over the meta line. From 1024 px it keeps 200 px, so the outcome gives way first. */
-export const ROW_MAIN = "min-w-0 flex-1 lg:min-w-[200px]";
+/** A run row's left column: the task name over the meta line, as wide as its words; the outcome gives way first. */
+export const ROW_MAIN = "min-w-0 flex-auto";
 /** The name line: the task name and number. */
 export const ROW_HEAD = "flex h-6 min-w-0 items-center gap-2";
 export const ROW_NAME = "min-w-0 truncate text-sm leading-5 font-semibold";
@@ -63,8 +63,10 @@ export const ROW_LINK =
  * apart, cut with an ellipsis at its end when the row is narrow.
  */
 export const ROW_META = "mt-1 h-[18px] min-w-0 truncate text-[13px] leading-[18px] text-muted [&>*+*]:ml-1.5";
-/** A glyph and its words on a row's meta line, top-aligned so the glyph sits centred on the 18 px line. */
-export const ROW_META_ITEM = "inline-flex items-center gap-1 align-top";
+/** A dot and the item after it on a row's meta line, one box top-aligned so its glyph sits centred on the 18 px line. */
+export const ROW_META_ITEM = "inline-flex items-center gap-1.5 align-top";
+/** The mapping on a row's meta line: plain text like the trigger and actor, a long name cut at 24 characters. */
+export const ROW_MAPPING = "min-w-0 max-w-[24ch] truncate";
 /** A run ID in mono, the list row and the run page alike. */
 export const ROW_ID = "font-mono text-xs";
 /** One item of a meta line: a 12 px glyph and its words. */
@@ -73,7 +75,7 @@ export const META_DOT = "text-muted/50";
 /** The mapping on the run page's meta line: a link-like name, so a subtle outlined chip rather than plain text. */
 export const MAPPING_CHIP = "inline-block max-w-[20ch] truncate rounded-full border border-line-2 px-1.5 text-xs leading-4 text-text-2";
 /** What the run did, one muted line right-aligned before the timing; it gives way first, and is gone below 1024 px. */
-export const ROW_OUTCOME = "h-[18px] min-w-0 truncate text-right text-[13px] leading-[18px] text-muted tabular-nums max-lg:hidden";
+export const ROW_OUTCOME = "h-[18px] min-w-0 shrink-[100] truncate text-right text-[13px] leading-[18px] text-muted tabular-nums max-lg:hidden";
 /** Started (relative) over duration, each after a small glyph, 13 px muted with tabular numbers. */
 export const ROW_TIMING = "flex w-[80px] shrink-0 flex-col gap-1 text-[13px] leading-[18px] text-muted tabular-nums max-sm:hidden";
 export const ROW_TIME = "flex items-center gap-1.5 whitespace-nowrap";
@@ -619,7 +621,7 @@ function RunRowLoading({ nameWidth }: { nameWidth: number }) {
           <TextBar width={nameWidth} className={ROW_NAME} />
         </div>
         <div className={ROW_META}>
-          <Skeleton.Text width={nameWidth + 130} className="align-top" />
+          <Skeleton.Text width={nameWidth + 160} className="align-top" />
         </div>
       </div>
       <span className={ROW_OUTCOME}>

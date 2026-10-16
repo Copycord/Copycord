@@ -42,6 +42,7 @@ import {
   ROW_OUTCOME,
   ROW_TIME,
   ROW_MAIN,
+  ROW_MAPPING,
   ROW_MENU,
   ROW_NAME,
   ROW_TIMING,
@@ -113,12 +114,15 @@ describe("run row skeleton", () => {
     expect(skeleton!.children[1]!.children[0]!.children).toHaveLength(1);
     expect(real!.querySelector(`[class="${ROW_LINK}"]`)).toHaveTextContent("Backfill channels #1");
     expect(skeleton!.querySelector(`[class="${ROW_NAME}"], [class="block ${ROW_NAME}"]`)).not.toBeNull();
-    // The meta line: run ID, mapping as plain text (no chip), trigger and actor, each glyph item top-aligned.
+    // The meta line: run ID, mapping as plain text (no chip), trigger and actor; each dot leads its item in
+    // one box, so a line cut at its end never ends on a dot.
     const meta = real!.children[1]!.children[1]!;
     expect(meta.textContent).toBe("1·Main mapping·Manual·admin");
     expect(real!.querySelector(`[class="${ROW_ID}"]`)).toHaveAttribute("title", "Run ID 1");
-    expect(meta.querySelector('[title="Mapping"]')!.getAttribute("class")).toBeNull();
-    expect(meta.querySelectorAll(`[class="${ROW_META_ITEM}"]`)).toHaveLength(2);
+    expect(meta.querySelector('[title="Mapping"]')!.className).toBe(ROW_MAPPING);
+    expect(ROW_MAPPING).not.toMatch(/border|rounded/);
+    expect(Array.from(meta.children).map((c) => c.className)).toEqual([ROW_ID, ROW_META_ITEM, ROW_META_ITEM, ROW_META_ITEM]);
+    for (const item of Array.from(meta.children).slice(1)) expect(item.firstElementChild!.textContent).toBe("·");
     expect(ROW_META.split(" ")).toContain("truncate");
     // The outcome as one line with no bar; the skeleton bars it.
     expect(within(real!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");
@@ -126,7 +130,7 @@ describe("run row skeleton", () => {
     expect(real!.querySelector("[role=progressbar]")).toBeNull();
     expect(skeleton!.querySelector("[role=progressbar]")).toBeNull();
     expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]")).toHaveLength(1);
-    expect(ROW_OUTCOME.split(" ")).toEqual(expect.arrayContaining(["text-right", "truncate", "max-lg:hidden"]));
+    expect(ROW_OUTCOME.split(" ")).toEqual(expect.arrayContaining(["text-right", "truncate", "shrink-[100]", "max-lg:hidden"]));
     expect(ROW_OUTCOME).not.toMatch(/w-\[/);
     // Started over duration, each a glyph and its value; the skeleton draws the glyphs and bars the values.
     const timing = (li: Element) => Array.from(li.children[3]!.children).map((c) => `${c.className} ${c.querySelectorAll("svg").length}`);
