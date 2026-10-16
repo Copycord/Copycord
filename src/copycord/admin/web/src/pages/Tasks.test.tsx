@@ -101,7 +101,7 @@ beforeEach(() => {
 });
 
 describe("Tasks page", () => {
-  it("lists runs as one link each: name and status badge over the run ID, mapping, trigger and actor, the outcome and its bar, started over duration", async () => {
+  it("lists runs as one link each: the status glyph, the name over the run ID, mapping, trigger and actor, the outcome line, started over duration", async () => {
     serve([
       run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12, summary: { success: 2, failed: 0, skipped: 0, cancelled: 4, delivered: 92 }, step_count: 6 }),
       run({ id: "9e8d7c6b5a4f4e3d8c2b1a0f9e8d7c6b", number: 11, title: "Backfill 3 channels", status: "failed" }),
@@ -116,20 +116,21 @@ describe("Tasks page", () => {
     // The run's own title is gone from the row; the link's tooltip keeps it with the start date.
     expect(link.getAttribute("title")).toMatch(/^Backfill #general, started /);
     expect(rows[1]).not.toHaveTextContent("Backfill 3 channels");
-    // One coloured status badge per row, its word always there.
-    expect(within(rows[0]!).getByTitle("Status: Success")).toHaveTextContent("Success");
-    expect(within(rows[1]!).getByTitle("Status: Failed")).toHaveTextContent("Failed");
+    // The status glyph alone carries the status, its word in the label and title; no badge on the row.
+    expect(within(rows[0]!).getByRole("img", { name: "Success" })).toHaveAttribute("title", "Success");
+    expect(within(rows[1]!).getByRole("img", { name: "Failed" })).toHaveAttribute("title", "Failed");
+    expect(within(rows[1]!).queryByTitle("Status: Failed")).toBeNull();
+    expect(rows[1]).not.toHaveTextContent("Failed");
     // The run ID line: the first 8 characters in mono, the full id in its title.
     const id = within(rows[0]!).getByText("4f2a9c1e");
     expect(id).toHaveClass("font-mono");
     expect(id).toHaveAttribute("title", "Run ID 4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
-    // The meta line: the run ID, the mapping chip, the trigger and the actor.
-    expect(id.parentElement!.parentElement).toHaveTextContent("4f2a9c1e·Main mapping·Manual·admin");
-    // What the run did, from its summary, over the segmented bar; a run with nothing to count says nothing.
+    // The meta line: the run ID, the mapping as plain text, the trigger and the actor.
+    expect(id.parentElement).toHaveTextContent("4f2a9c1e·Main mapping·Manual·admin");
+    // What the run did, from its summary, one line with no bar; a run with nothing to count says nothing.
     expect(within(rows[0]!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");
-    expect(within(rows[0]!).getByRole("progressbar", { name: "6 of 6 steps finished" })).toBeInTheDocument();
     expect(within(rows[1]!).getByTestId("run-outcome").textContent).toBe("");
-    expect(within(rows[1]!).queryByRole("progressbar")).toBeNull();
+    expect(within(list).queryByRole("progressbar")).toBeNull();
     // Started (relative, the date in the title) over the duration.
     expect(within(rows[0]!).getByTitle("Duration")).toHaveTextContent("48s");
     expect(within(rows[0]!).getByTitle(/^Started /)).toBeInTheDocument();
@@ -389,7 +390,7 @@ describe("Tasks page", () => {
     expect(within(dialog).getByText("Work already done is kept; the run stops at its next checkpoint.")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Keep running" })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
-    expect(await screen.findByTitle("Status: Cancelled")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Cancelled" })).toBeInTheDocument();
     expect(calls).toEqual(["/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b/cancel"]);
   });
 

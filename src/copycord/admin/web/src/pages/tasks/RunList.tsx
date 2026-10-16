@@ -9,8 +9,8 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
-import { deliveredOf, outcomeText, SegBar, stepCounts } from "./Outcome";
-import { RunStatusPill, StatusIcon } from "./StatusIcon";
+import { deliveredOf, outcomeText, stepCounts } from "./Outcome";
+import { StatusIcon } from "./StatusIcon";
 import {
   AUTO_REFRESH_LABEL,
   AUTO_REFRESH_OPTIONS,
@@ -20,21 +20,17 @@ import {
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
   LIST_FRAME,
-  MAPPING_CHIP,
-  META_ITEM,
   MetaDot,
   MetaGlyph,
   ROW,
   ROW_HEAD,
   ROW_ID,
-  ROW_ID_BOX,
   ROW_LINK,
   ROW_MAIN,
   ROW_MENU,
   ROW_META,
+  ROW_META_ITEM,
   ROW_OUTCOME,
-  ROW_OUTCOME_TEXT,
-  ROW_SEG,
   ROW_TIME,
   ROW_TIMING,
   RUN_COUNT,
@@ -141,14 +137,13 @@ export interface RunRowProps {
 }
 
 /**
- * One run, the whole row a link: the status glyph centred on the row, the task name and number with its
- * coloured status badge (the word alone), over the meta line (run ID in mono, the mapping chip, trigger
- * and actor after 12 px glyphs); the outcome line in full over its segmented bar; the timing; the menu.
+ * One run, the whole row a link: the status glyph centred on the row (it alone carries the status), the
+ * task name and number over the meta line (run ID in mono, mapping, trigger and actor after 12 px glyphs,
+ * cut with an ellipsis at its end); the outcome line, right-aligned; the timing; the menu.
  */
 export function RunRow({ run, typeTitle, actions }: RunRowProps) {
   const mapping = run.context?.label;
-  const counts = stepCounts(run);
-  const outcome = outcomeText(counts, deliveredOf(run));
+  const outcome = outcomeText(stepCounts(run), deliveredOf(run));
   const started = formatWhen(run.started_at ?? run.created_at);
   return (
     <li className={ROW} data-run-id={run.id}>
@@ -162,32 +157,26 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
           >
             {typeTitle} #{run.number}
           </Link>
-          <RunStatusPill status={run.status} className="shrink-0" />
         </div>
         <div className={ROW_META}>
-          {/* Below 1280 px the ID gives its room to the mapping, trigger and actor; the run page has it. */}
-          <span className={ROW_ID_BOX}>
-            <span className={ROW_ID} title={`Run ID ${run.id}`}>
-              {run.id.slice(0, 8)}
-            </span>
-            <MetaDot />
+          <span className={ROW_ID} title={`Run ID ${run.id}`}>
+            {run.id.slice(0, 8)}
           </span>
+          <MetaDot />
           {mapping ? (
             <>
-              <span className={MAPPING_CHIP} title="Mapping">
-                {mapping}
-              </span>
+              <span title="Mapping">{mapping}</span>
               <MetaDot />
             </>
           ) : null}
-          <span className={META_ITEM}>
+          <span className={ROW_META_ITEM}>
             <MetaGlyph name="trigger" />
             {triggerLabel(run)}
           </span>
           {run.actor ? (
             <>
               <MetaDot />
-              <span className={META_ITEM}>
+              <span className={ROW_META_ITEM}>
                 <MetaGlyph name="actor" />
                 {run.actor}
               </span>
@@ -195,12 +184,9 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
           ) : null}
         </div>
       </div>
-      <div className={ROW_OUTCOME}>
-        <span data-testid="run-outcome" title={outcome} className={ROW_OUTCOME_TEXT}>
-          {outcome}
-        </span>
-        {counts ? <SegBar counts={counts} className={ROW_SEG} /> : <span aria-hidden="true" className={cx(ROW_SEG, "rounded-full bg-line-1")} />}
-      </div>
+      <span data-testid="run-outcome" title={outcome || undefined} className={ROW_OUTCOME}>
+        {outcome}
+      </span>
       <RunTiming run={run} />
       {actions}
     </li>

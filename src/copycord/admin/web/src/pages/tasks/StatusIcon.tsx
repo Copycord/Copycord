@@ -1,7 +1,7 @@
 // Run and step status glyphs in one colour per state, the same on every surface: success green
 // check-circle, failed red x-circle, cancelled amber slashed circle, running a blue spinning ring, queued
-// a blue hollow dot, skipped a neutral arrow. Each is an img with a label and a title, and the status
-// badge on the same row carries the word, so colour is never the only signal.
+// a blue hollow dot, skipped a neutral arrow. Each is an img with the status word as its label and title
+// (on a run row it alone carries the status; the run page adds the badge), so colour is never the only signal.
 // The glyph's box centres itself on the row that holds it (STATUS_BOX).
 
 import { Badge, type BadgeTone } from "../../components/ui/Badge";

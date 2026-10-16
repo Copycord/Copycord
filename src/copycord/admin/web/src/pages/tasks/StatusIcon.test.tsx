@@ -101,11 +101,11 @@ describe("status glyph alignment", () => {
     // The header's glyph fades in with the run's other parts; the box itself is the same everywhere.
     const boxes = glyphs.map((g) => classes(g).filter((c) => !c.startsWith("text-") && !FADE_IN.split(" ").includes(c)).sort().join(" "));
     expect(new Set(boxes)).toEqual(new Set([[...BOX].sort().join(" ")]));
-    // The row's only glyph is its first child, centred on the whole row; the badge is the word alone.
+    // The row's only glyph is its first child, centred on the whole row; it alone carries the status, no badge.
     const row = container.querySelector("li")!;
     expect(row.querySelectorAll("[data-status]")).toHaveLength(1);
     expect(row.firstElementChild).toBe(row.querySelector("[data-status]"));
-    expect(row.querySelector("[title^='Status:'] svg")).toBeNull();
+    expect(row.querySelector("[title^='Status:']")).toBeNull();
     // A step row is the glyph's parent, and says its state in words in the same colour.
     expect(glyphs[1]!.parentElement!.className).toBe(STEP_ROW);
     const state = glyphs[1]!.parentElement!.lastElementChild!;

@@ -49,30 +49,31 @@ export const PAGER = "flex items-center justify-between gap-3 border-t border-bo
 /** The box of a run row; ROW adds the hover tint. The skeleton row uses the box alone so both stand equally tall. */
 export const ROW_BOX = "relative flex min-h-16 items-center gap-3 border-b border-border px-4 py-2.5 last:rounded-b-card last:border-b-0";
 export const ROW = `${ROW_BOX} transition-colors duration-150 hover:bg-rail-hover`;
-/** A run row's left column: the task name and its status badge over the meta line. */
-export const ROW_MAIN = "min-w-0 flex-1";
-/** The name line: the task name and number, then the run's one coloured badge. */
+/** A run row's left column: the task name over the meta line. From 1024 px it keeps 200 px, so the outcome gives way first. */
+export const ROW_MAIN = "min-w-0 flex-1 lg:min-w-[200px]";
+/** The name line: the task name and number. */
 export const ROW_HEAD = "flex h-6 min-w-0 items-center gap-2";
 export const ROW_NAME = "min-w-0 truncate text-sm leading-5 font-semibold";
 /** The name is the row's link: its ::before covers the whole row, so the row clicks through and shows one focus ring. */
 export const ROW_LINK =
   `${ROW_NAME} text-text no-underline outline-none hover:underline before:absolute before:inset-0 before:content-[''] ` +
   "focus-visible:before:outline-2 focus-visible:before:-outline-offset-2 focus-visible:before:outline-accent";
-/** "0d88ac5a · Clone-1 · Manual · admin": 13 px muted text with 12 px glyphs, the mapping a quiet outlined chip. */
-export const ROW_META = "mt-1 flex h-[18px] min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] leading-[18px] text-muted";
+/**
+ * "0d88ac5a · Clone-1 · Manual · admin": one line of 13 px muted text with 12 px glyphs, the items 6 px
+ * apart, cut with an ellipsis at its end when the row is narrow.
+ */
+export const ROW_META = "mt-1 h-[18px] min-w-0 truncate text-[13px] leading-[18px] text-muted [&>*+*]:ml-1.5";
+/** A glyph and its words on a row's meta line, top-aligned so the glyph sits centred on the 18 px line. */
+export const ROW_META_ITEM = "inline-flex items-center gap-1 align-top";
 /** A run ID in mono, the list row and the run page alike. */
 export const ROW_ID = "font-mono text-xs";
-/** The run ID and its dot on a row's meta line, gone below 1280 px so the mapping, trigger and actor keep their room. */
-export const ROW_ID_BOX = "contents max-xl:hidden";
 /** One item of a meta line: a 12 px glyph and its words. */
 export const META_ITEM = "inline-flex shrink-0 items-center gap-1";
 export const META_DOT = "text-muted/50";
-/** The mapping on a meta line: a link-like name, so a subtle outlined chip rather than plain text. */
+/** The mapping on the run page's meta line: a link-like name, so a subtle outlined chip rather than plain text. */
 export const MAPPING_CHIP = "inline-block max-w-[20ch] truncate rounded-full border border-line-2 px-1.5 text-xs leading-4 text-text-2";
-/** The outcome column, wide enough for "6 steps · 4 done · 1 failed · 1 cancelled · 224 delivered" in full, over the thin segmented bar. */
-export const ROW_OUTCOME = "flex w-[368px] shrink-0 flex-col gap-2 max-lg:hidden";
-export const ROW_OUTCOME_TEXT = "h-[18px] truncate text-[13px] leading-[18px] text-muted tabular-nums";
-export const ROW_SEG = "h-1 w-full";
+/** What the run did, one muted line right-aligned before the timing; it gives way first, and is gone below 1024 px. */
+export const ROW_OUTCOME = "h-[18px] min-w-0 truncate text-right text-[13px] leading-[18px] text-muted tabular-nums max-lg:hidden";
 /** Started (relative) over duration, each after a small glyph, 13 px muted with tabular numbers. */
 export const ROW_TIMING = "flex w-[80px] shrink-0 flex-col gap-1 text-[13px] leading-[18px] text-muted tabular-nums max-sm:hidden";
 export const ROW_TIME = "flex items-center gap-1.5 whitespace-nowrap";
@@ -604,10 +605,10 @@ export function RailEntryLoading() {
 }
 
 /**
- * One loading row in the shape of RunRow (RunList.tsx): the same box, a bar for the name beside the status
- * badge's box, a bar on the meta line, bars for the outcome line and its segmented bar, the two timing
- * lines with their glyphs as themselves and bars for the values, and the row menu button, each in the
- * same type size and padding as the real element, so the first page lands without the list jumping.
+ * One loading row in the shape of RunRow (RunList.tsx): the same box, a round bar for the status glyph,
+ * a bar for the name, a bar on the meta line, a bar for the outcome line, the two timing lines with their
+ * glyphs as themselves and bars for the values, and the row menu button, each in the same type size and
+ * padding as the real element, so the first page lands without the list jumping.
  */
 function RunRowLoading({ nameWidth }: { nameWidth: number }) {
   return (
@@ -616,18 +617,14 @@ function RunRowLoading({ nameWidth }: { nameWidth: number }) {
       <div className={ROW_MAIN}>
         <div className={ROW_HEAD}>
           <TextBar width={nameWidth} className={ROW_NAME} />
-          <StatusPillLoading />
         </div>
         <div className={ROW_META}>
-          <Skeleton.Text width={nameWidth + 110} />
+          <Skeleton.Text width={nameWidth + 130} className="align-top" />
         </div>
       </div>
-      <div className={ROW_OUTCOME}>
-        <span className={ROW_OUTCOME_TEXT}>
-          <Skeleton.Text>6 steps · 4 done · 1 failed · 1 cancelled · 224 delivered</Skeleton.Text>
-        </span>
-        <Skeleton rounded="rounded-full" className={ROW_SEG} />
-      </div>
+      <span className={ROW_OUTCOME}>
+        <Skeleton.Text>6 steps · 4 done · 1 failed · 1 cancelled · 224 delivered</Skeleton.Text>
+      </span>
       <div className={ROW_TIMING}>
         <span className={ROW_TIME}>
           <MetaGlyph name="started" />
