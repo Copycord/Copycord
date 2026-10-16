@@ -142,7 +142,7 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
                 setQuery("");
               }
             }}
-            className="ml-0 min-w-[220px] rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[#e6e1ff] caret-[#7c5cff] outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[color-mix(in_srgb,#e6e1ff_55%,transparent)] placeholder:opacity-75 hover:border-[#7c5cff] hover:shadow-[0_0_0_0.25px_#7c5cff] focus:border-[#7c5cff] focus:shadow-[0_0_0_0.25px_#7c5cff]"
+            className="ml-0 min-w-[220px] rounded-input border border-log-input-edge bg-log-input-bg px-2.5 py-1.5 text-text-soft caret-log-input-focus outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[color-mix(in_srgb,var(--color-text-soft)_55%,transparent)] placeholder:opacity-75 hover:border-log-input-focus hover:shadow-[0_0_0_0.25px_var(--color-log-input-focus)] focus:border-log-input-focus focus:shadow-[0_0_0_0.25px_var(--color-log-input-focus)]"
           />
           <button type="button" id="log-close" aria-label="Close" onClick={onClose} className={`verify-close ${MODAL_CLOSE}`}>
             ✕
@@ -156,8 +156,8 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
             follow.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
           }}
           className={cx(
-            "m-0 flex-1 overflow-auto overscroll-contain rounded-b-panel bg-[#0e0720] px-4 py-3 font-mono text-xs leading-normal",
-            "whitespace-pre-wrap text-[#e6e1ff]",
+            "m-0 flex-1 overflow-auto overscroll-contain rounded-b-panel bg-log-bg px-4 py-3 font-mono text-xs leading-normal",
+            "whitespace-pre-wrap text-text-soft",
           )}
         >
           {view.length ? view.join("\n") + "\n" : ""}

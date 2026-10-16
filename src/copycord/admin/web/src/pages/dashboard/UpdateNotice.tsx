@@ -15,7 +15,7 @@ export function UpdateNotice() {
       target="_blank"
       rel="noopener"
       title={`Copycord ${data.latest}`}
-      className="block text-center text-[0.8rem] font-bold leading-tight text-[#e53935] no-underline hover:underline"
+      className="block text-center text-[0.8rem] font-bold leading-tight text-update no-underline hover:underline"
     >
       New Update Available
     </a>

@@ -56,7 +56,7 @@ export function FavHelpModal({ onClose }: { onClose: () => void }) {
   return (
     <Shell id="proxy-fav-help-modal" closeId="proxy-fav-help-close" title="Favorite proxies" onClose={onClose}>
       <p className={HINT}>
-        Click the <span className="text-[#ffc83d]">★</span> on any proxy to mark it a favorite. Favorites apply{" "}
+        Click the <span className="text-favorite">★</span> on any proxy to mark it a favorite. Favorites apply{" "}
         <strong>only</strong> to how the client connects to the Discord gateway. Nothing else uses them.
       </p>
       <ul className="mt-2.5 mb-3 list-disc pl-[18px] text-[13px] leading-[1.6] text-muted [&>li]:mb-1">
@@ -213,7 +213,7 @@ export function SettingsModal({ values, onChange, onCommit, onClose }: SettingsM
 }
 
 function ResultRows({ rows, tone }: { rows: ProxyTestResult[]; tone: "fail" | "slow" }) {
-  const color = tone === "fail" ? "text-[#ff6b6b]" : "text-[#ff9800]";
+  const color = tone === "fail" ? "text-fail" : "text-warn";
   return (
     <>
       {rows.map((r) => (
@@ -245,22 +245,22 @@ export function ResultsModal(p: ResultsModalProps) {
     <Shell id="proxy-results-modal" closeId="proxy-results-close" title="Proxy Test Results" onClose={p.onClose}>
       <div className="flex flex-col gap-4 pt-3">
         <div className="flex flex-wrap gap-2.5">
-          <Stat n={p.good} label="healthy" cls="bg-[rgba(76,175,80,0.1)] text-[#4caf50]" />
-          {p.slow.length ? <Stat n={p.slow.length} label="slow" cls="bg-[rgba(255,152,0,0.1)] text-[#ff9800]" /> : null}
+          <Stat n={p.good} label="healthy" cls="bg-ok-a10 text-ok" />
+          {p.slow.length ? <Stat n={p.slow.length} label="slow" cls="bg-warn-a10 text-warn" /> : null}
           {p.failed.length ? (
-            <Stat n={p.failed.length} label="failed" cls="bg-[rgba(255,80,80,0.1)] text-[#ff6b6b]" />
+            <Stat n={p.failed.length} label="failed" cls="bg-fail-a10 text-fail" />
           ) : null}
         </div>
         <div className="max-h-60 overflow-y-auto">
           {p.failed.length ? (
             <>
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[#ff6b6b]">Failed</div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-fail">Failed</div>
               <ResultRows rows={p.failed} tone="fail" />
             </>
           ) : null}
           {p.slow.length ? (
             <>
-              <div className="mb-1 mt-2.5 text-[11px] font-semibold uppercase tracking-wide text-[#ff9800]">
+              <div className="mb-1 mt-2.5 text-[11px] font-semibold uppercase tracking-wide text-warn">
                 Slow (&gt;{p.slowSec}s)
               </div>
               <ResultRows rows={p.slow} tone="slow" />

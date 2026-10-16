@@ -64,7 +64,7 @@ const noop = () => undefined;
 
 /** The 28px backup tokens button at the top right of the Client Token box. */
 export const BACKUP_BTN =
-  "absolute top-2 right-2.5 flex size-7 cursor-pointer items-center justify-center rounded-[10px] border border-border bg-[rgba(255,255,255,0.04)] px-1.5 py-px text-accent opacity-90 outline-none hover:border-accent hover:opacity-100 focus-visible:border-accent focus-visible:opacity-100";
+  "absolute top-2 right-2.5 flex size-7 cursor-pointer items-center justify-center rounded-[10px] border border-border bg-wash-4 px-1.5 py-px text-accent opacity-90 outline-none hover:border-accent hover:opacity-100 focus-visible:border-accent focus-visible:opacity-100";
 
 export function BackupIcon() {
   return (
@@ -134,7 +134,7 @@ export function GlobalConfigLoading() {
                 <span className={SETTING_SUB}>{FIELD_TIPS.COMMAND_USERS}</span>
               </div>
               <div className="mt-1.5">
-                <div className="flex min-h-[42px] items-center rounded-control border border-border bg-[#140b26] px-3 py-2" />
+                <div className="flex min-h-[42px] items-center rounded-control border border-border bg-control px-3 py-2" />
               </div>
             </div>
           </div>
@@ -174,7 +174,7 @@ export function GlobalConfigLoading() {
 // One mapping tile (.guild-card): avatar, name and host line, then the Settings, Filters, status, Clone and
 // Delete buttons. MappingCard and the loading tile share these, so both have the same boxes.
 export const MAPPING_CARD =
-  "relative flex min-w-0 flex-col items-stretch overflow-hidden rounded-xl border p-3 text-left text-text [box-shadow:0_4px_12px_rgba(0,0,0,0.4)] transition max-[600px]:min-h-[110px]";
+  "relative flex min-w-0 flex-col items-stretch overflow-hidden rounded-xl border p-3 text-left text-text [box-shadow:0_4px_12px_var(--color-shadow-40)] transition max-[600px]:min-h-[110px]";
 export const MAPPING_INNER = "flex h-full w-full flex-col items-stretch gap-0.5";
 export const MAPPING_HEADER = "flex items-center gap-2.5";
 export const MAPPING_AVATAR = "size-9 min-w-9 shrink-0 rounded-[50%] object-cover";
@@ -184,8 +184,8 @@ export const MAPPING_NAME =
 export const MAPPING_ROUTE = "mt-px truncate text-[11px] text-muted opacity-70";
 export const MAPPING_ACTIONS = "mt-auto flex gap-1.5 border-t border-t-border pt-2";
 export const MAPPING_ICON_BTN =
-  "inline-flex size-7 min-h-7 cursor-pointer items-center justify-center rounded-md border-0 bg-[rgba(255,255,255,0.04)] p-0 text-xs leading-none " +
-  "text-muted transition hover:bg-[rgba(167,139,250,0.12)] hover:text-accent active:translate-y-px disabled:cursor-default disabled:opacity-50 [&_svg]:block";
+  "inline-flex size-7 min-h-7 cursor-pointer items-center justify-center rounded-md border-0 bg-wash-4 p-0 text-xs leading-none " +
+  "text-muted transition hover:bg-accent-a12 hover:text-accent active:translate-y-px disabled:cursor-default disabled:opacity-50 [&_svg]:block";
 
 /** As many tiles as the list had last time; one on a first visit, the common case. */
 export const MAPPINGS_COUNT_KEY = "dashboard.mappings";
@@ -227,11 +227,11 @@ export function MappingTileSkeleton() {
 export const MAPPINGS_HINT = "m-0 max-w-[480px] min-w-[200px] flex-[1_1_auto] text-xs leading-[1.4] text-muted opacity-90";
 export const MAPPINGS_HINT_TEXT = "Map a source server to a target server to enable cloning for that pair";
 export const MAPPINGS_SEARCH =
-  "ml-0 inline-block min-w-[220px] rounded-lg border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[13.3333px] text-[#e6e1ff] caret-[#7c5cff] outline-none transition placeholder:text-[#e6e1ff]/55 focus-visible:border-[#7c5cff]";
+  "ml-0 inline-block min-w-[220px] rounded-lg border border-log-input-edge bg-log-input-bg px-2.5 py-1.5 text-[13.3333px] text-text-soft caret-log-input-focus outline-none transition placeholder:text-text-soft/55 focus-visible:border-log-input-focus";
 export const MAPPING_GRID =
   "mt-4 grid max-h-80 min-h-[180px] grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4 overflow-y-auto py-2 pr-1 max-[600px]:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] max-[600px]:gap-3";
 export const NEW_MAPPING_TILE =
-  "group/new relative flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-[rgba(255,255,255,0.02)] p-4 text-left text-muted transition max-[600px]:min-h-[120px] max-[600px]:p-3.5";
+  "group/new relative flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-wash-2 p-4 text-left text-muted transition max-[600px]:min-h-[120px] max-[600px]:p-3.5";
 
 export function NewMappingPlus() {
   return (

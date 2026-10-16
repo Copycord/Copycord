@@ -171,7 +171,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                     {loaded ? (
                       <span
                         id={`${role}-state`}
-                        className={cx(STATE, s.running ? "bg-[#183a2e] text-[#baf7d0]" : "bg-[#3a1c20] text-[#ffc5cf]", reveal)}
+                        className={cx(STATE, s.running ? "bg-run-bg text-run-text" : "bg-stop-bg text-stop-text", reveal)}
                       >
                         {s.running ? "running" : "stopped"}
                       </span>
@@ -190,7 +190,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                       tabIndex={note ? 0 : -1}
                       onClick={() => setExpanded((x) => ({ ...x, [role]: !x[role] }))}
                       className={cx(
-                        "inline-block max-w-[200px] cursor-pointer overflow-hidden rounded-[20px] bg-[rgba(255,255,255,0.06)] px-2.5 py-[3px] align-middle text-[11px] font-medium text-ellipsis text-muted empty:hidden",
+                        "inline-block max-w-[200px] cursor-pointer overflow-hidden rounded-[20px] bg-wash-6 px-2.5 py-[3px] align-middle text-[11px] font-medium text-ellipsis text-muted empty:hidden",
                         expanded[role] ? "whitespace-normal" : "whitespace-nowrap",
                       )}
                     >

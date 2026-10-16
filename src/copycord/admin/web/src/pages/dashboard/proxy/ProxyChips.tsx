@@ -23,7 +23,7 @@ export interface ProxyChipsProps {
 const TONE: Record<string, string> = {
   loading: "border-accent/50 opacity-80",
   pass: "border-good/60",
-  slow: "border-[#ff9800]/70",
+  slow: "border-warn/70",
   fail: "border-danger/70",
 };
 

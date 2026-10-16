@@ -217,7 +217,7 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
                     value={values.COMMAND_USERS}
                     onChange={(ids) => set("COMMAND_USERS", ids)}
                     className={cx(
-                      "mt-1.5 [&>div]:min-h-[42px] [&>div]:gap-2 [&>div]:bg-[#140b26] [&>div]:bg-none [&>div]:px-3 [&>div]:py-2",
+                      "mt-1.5 [&>div]:min-h-[42px] [&>div]:gap-2 [&>div]:bg-control [&>div]:bg-none [&>div]:px-3 [&>div]:py-2",
                       "[&_input]:min-w-0 [&_input]:font-[inherit] [&_input]:text-[14px] [&_input]:leading-[1.4]",
                     )}
                   />
