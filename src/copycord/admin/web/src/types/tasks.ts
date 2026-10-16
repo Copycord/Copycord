@@ -59,6 +59,8 @@ export interface TaskRun {
   finished_at: string | null;
   error: string | null;
   summary: Record<string, number> | null;
+  /** How many steps the run has; list rows and frames carry it without the steps themselves. */
+  step_count?: number;
   /** The detail response carries the friendly log lines; list rows may carry a count or nothing. */
   log_lines?: unknown;
   steps?: TaskStep[];

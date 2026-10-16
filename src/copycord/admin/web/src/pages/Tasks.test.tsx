@@ -101,8 +101,11 @@ beforeEach(() => {
 });
 
 describe("Tasks page", () => {
-  it("lists runs by task name and number over a plain line of run ID, trigger, actor and mapping, with started over duration", async () => {
-    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 }), run({ id: "9e8d7c6b5a4f4e3d8c2b1a0f9e8d7c6b", number: 11, title: "Backfill 3 channels", status: "failed" })]);
+  it("lists runs as one link each: name and status badge over the run ID, mapping, trigger and actor, the outcome and its bar, started over duration", async () => {
+    serve([
+      run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12, summary: { success: 2, failed: 0, skipped: 0, cancelled: 4, delivered: 92 }, step_count: 6 }),
+      run({ id: "9e8d7c6b5a4f4e3d8c2b1a0f9e8d7c6b", number: 11, title: "Backfill 3 channels", status: "failed" }),
+    ]);
     renderAt("/tasks");
     const list = await screen.findByRole("list", { name: "Task runs" });
     const rows = within(list).getAllByRole("listitem");
@@ -110,18 +113,23 @@ describe("Tasks page", () => {
     expect(screen.getByText("2 task runs")).toBeInTheDocument();
     const link = await within(rows[0]!).findByRole("link", { name: "Backfill channels #12" });
     expect(link).toHaveAttribute("href", "/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
-    // The run's own title is gone from the row; only the link's tooltip keeps it.
-    expect(link).toHaveAttribute("title", "Backfill #general");
+    // The run's own title is gone from the row; the link's tooltip keeps it with the start date.
+    expect(link.getAttribute("title")).toMatch(/^Backfill #general, started /);
     expect(rows[1]).not.toHaveTextContent("Backfill 3 channels");
-    expect(within(rows[0]!).getByRole("img", { name: "Success" })).toBeInTheDocument();
-    expect(within(rows[1]!).getByRole("img", { name: "Failed" })).toBeInTheDocument();
+    // One coloured status badge per row, its word always there.
+    expect(within(rows[0]!).getByTitle("Status: Success")).toHaveTextContent("Success");
+    expect(within(rows[1]!).getByTitle("Status: Failed")).toHaveTextContent("Failed");
     // The run ID line: the first 8 characters in mono, the full id in its title.
     const id = within(rows[0]!).getByText("4f2a9c1e");
     expect(id).toHaveClass("font-mono");
     expect(id).toHaveAttribute("title", "Run ID 4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
-    // The plain meta line: the run ID, how it started and by whom, the mapping; no status pill or chips.
-    expect(id.parentElement).toHaveTextContent("4f2a9c1e · Manual run by admin · Main mapping");
-    expect(within(rows[0]!).queryByText("Success")).toBeNull();
+    // The meta line: the run ID, the mapping chip, the trigger and the actor.
+    expect(id.parentElement).toHaveTextContent("4f2a9c1e·Main mapping·Manual·admin");
+    // What the run did, from its summary, over the segmented bar; a run with nothing to count says nothing.
+    expect(within(rows[0]!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");
+    expect(within(rows[0]!).getByRole("progressbar", { name: "6 of 6 steps finished" })).toBeInTheDocument();
+    expect(within(rows[1]!).getByTestId("run-outcome").textContent).toBe("");
+    expect(within(rows[1]!).queryByRole("progressbar")).toBeNull();
     // Started (relative, the date in the title) over the duration.
     expect(within(rows[0]!).getByTitle("Duration")).toHaveTextContent("48s");
     expect(within(rows[0]!).getByTitle(/^Started /)).toBeInTheDocument();
@@ -134,16 +142,27 @@ describe("Tasks page", () => {
     expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
   });
 
-  it("shows the empty state when there are no runs", async () => {
+  it("shows the empty state when there are no runs: icon, words, Run Backfill channels, and no pager", async () => {
     serve([]);
     renderAt("/tasks");
     // The loading list stands in the empty state's shape with the same words, so wait for it to go.
     await waitFor(() => expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull());
     expect(screen.getByText("No task runs yet")).toBeInTheDocument();
     expect(screen.getByText("0 task runs")).toBeInTheDocument();
-    expect(screen.getByText("Pick a task type on the left to run one")).toBeInTheDocument();
+    expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Run Backfill channels" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
-    expect(screen.getByText("No task runs yet").parentElement!.className).not.toMatch(/border-dashed/);
+    const box = screen.getByText("No task runs yet").parentElement!;
+    expect(box.className).not.toMatch(/border-dashed/);
+    expect(box.querySelector("svg")).not.toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeNull();
+  });
+
+  it("opens the backfill form from the empty state's button", async () => {
+    serve([]);
+    renderAt("/tasks");
+    fireEvent.click(await screen.findByRole("button", { name: "Run Backfill channels" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
   it("shows the type title and description when a type is picked", async () => {
@@ -237,7 +256,7 @@ describe("Tasks page", () => {
     await waitFor(() => expect(held.answer).toBeDefined(), { timeout: 2000 });
     // The search is out: the old row stays, marked busy, and nothing else appears.
     expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull();
-    expect(screen.queryByText("No runs match")).toBeNull();
+    expect(screen.queryByText("No runs match these filters")).toBeNull();
     expect(screen.queryByText("No task runs yet")).toBeNull();
     expect(within(list).getByRole("link", { name: "Backfill channels #12" })).toBeInTheDocument();
     expect(list).toHaveAttribute("aria-busy", "true");
@@ -247,7 +266,7 @@ describe("Tasks page", () => {
     expect(listCalls(fn).filter((u) => u.includes("q="))).toEqual([expect.stringContaining("q=nope")]);
 
     await act(async () => held.answer!());
-    expect(await screen.findByText("No runs match")).toBeInTheDocument();
+    expect(await screen.findByText("No runs match these filters")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull();
   });
 
@@ -265,35 +284,36 @@ describe("Tasks page", () => {
     expect(listCalls(fn).at(-1)).toContain("page=1");
   });
 
-  it("shows No runs match with Clear filters when a filtered list is empty", async () => {
+  it("shows No runs match these filters with Clear filters when a filtered list is empty", async () => {
     const fn = serve([]);
     renderAt("/tasks?status=failed");
-    expect(await screen.findByText("No runs match")).toBeInTheDocument();
+    expect(await screen.findByText("No runs match these filters")).toBeInTheDocument();
+    expect(screen.getByText("Try other filters, or clear them to see every run")).toBeInTheDocument();
     const clears = screen.getAllByRole("button", { name: "Clear filters" });
     fireEvent.click(clears[clears.length - 1]!);
     expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
     expect(listCalls(fn).at(-1)).not.toContain("status=");
-    expect(screen.getByText("Pick a task type on the left to run one")).toBeInTheDocument();
+    expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
   });
 
-  it("shows No task runs yet with the Run task hint on an empty type page with no filter, Run task only in the header", async () => {
+  it("shows No task runs yet with the type's own button on an empty type page with no filter, Run task in the header", async () => {
     serve([]);
     renderAt("/tasks?type=backfill_channels");
     const title = await screen.findByText("No task runs yet");
-    expect(screen.getByText("Run task above to start one")).toBeInTheDocument();
-    expect(screen.queryByText("No runs match")).toBeNull();
+    expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
+    expect(screen.queryByText("No runs match these filters")).toBeNull();
     expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
     expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(1);
-    // Plain text in the runs frame: no second dashed card, no button inside.
+    // Inside the runs frame, not a second dashed card; its one button runs this type.
     const box = title.parentElement!;
     expect(box.className).not.toMatch(/border/);
-    expect(within(box).queryByRole("button")).toBeNull();
+    expect(within(box).getAllByRole("button").map((b) => b.textContent)).toEqual(["Run Backfill channels"]);
   });
 
-  it("shows No runs match on a type page only when a filter is set, and Clear filters stays on the type", async () => {
+  it("shows No runs match these filters on a type page only when a filter is set, and Clear filters stays on the type", async () => {
     const fn = serve([]);
     renderAt("/tasks?type=backfill_channels&actor=bot");
-    expect(await screen.findByText("No runs match")).toBeInTheDocument();
+    expect(await screen.findByText("No runs match these filters")).toBeInTheDocument();
     const clears = screen.getAllByRole("button", { name: "Clear filters" });
     fireEvent.click(clears[clears.length - 1]!);
     expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
@@ -365,7 +385,7 @@ describe("Tasks page", () => {
     expect(within(dialog).getByText("Work already done is kept; the run stops at its next checkpoint.")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Keep running" })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
-    expect(await screen.findByRole("img", { name: "Cancelled" })).toBeInTheDocument();
+    expect(await screen.findByTitle("Status: Cancelled")).toBeInTheDocument();
     expect(calls).toEqual(["/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b/cancel"]);
   });
 

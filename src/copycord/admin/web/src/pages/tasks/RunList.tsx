@@ -9,7 +9,8 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
-import { StatusIcon } from "./StatusIcon";
+import { deliveredOf, outcomeText, SegBar, stepCounts } from "./Outcome";
+import { RunStatusPill } from "./StatusIcon";
 import {
   AUTO_REFRESH_LABEL,
   AUTO_REFRESH_OPTIONS,
@@ -19,13 +20,20 @@ import {
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
   LIST_FRAME,
+  MAPPING_CHIP,
+  META_ITEM,
+  MetaDot,
   MetaGlyph,
   ROW,
+  ROW_HEAD,
   ROW_ID,
+  ROW_LINK,
   ROW_MAIN,
   ROW_MENU,
   ROW_META,
-  ROW_NAME,
+  ROW_OUTCOME,
+  ROW_OUTCOME_TEXT,
+  ROW_SEG,
   ROW_TIME,
   ROW_TIMING,
   RUN_COUNT,
@@ -99,12 +107,15 @@ export function runDuration(run: TaskRun, now: number): string | null {
   return Number.isNaN(start) || Number.isNaN(end) ? null : formatDuration(end - start);
 }
 
-/** "Manual run by admin": how the run started and who started it, plain text for the row and the run page. */
+const TRIGGERED: Record<string, string> = { manual: "Triggered manually", rerun: "Triggered by a re-run", api: "Triggered via the API" };
+
+/** "Triggered manually by admin": how the run started and who started it, for the run page's meta line. */
 export function triggeredText(run: Pick<TaskRun, "trigger" | "actor">): string {
-  return run.actor ? `${triggerLabel(run)} run by ${run.actor}` : `${triggerLabel(run)} run`;
+  const how = TRIGGERED[run.trigger] ?? "Triggered";
+  return run.actor ? `${how} by ${run.actor}` : how;
 }
 
-/** The row's right side: started as relative time (the date in the title) over the duration, each after a small glyph. */
+/** The row's right side: started as relative time over the duration, each after a small glyph; the date in the titles. */
 export function RunTiming({ run }: { run: TaskRun }) {
   const now = useNow(run.status === "running");
   const duration = runDuration(run, now);
@@ -130,25 +141,62 @@ export interface RunRowProps {
   actions?: ReactNode;
 }
 
-/** One run: the glyph (its status in the colour and title), the task name and number over a plain meta line, the timing and the menu. */
+/**
+ * One run, the whole row a link: the task name and number with its one coloured status badge, over the
+ * meta line (run ID in mono, the mapping chip, trigger and actor after 12 px glyphs); the outcome line
+ * over its segmented bar; the timing; the menu.
+ */
 export function RunRow({ run, typeTitle, actions }: RunRowProps) {
   const mapping = run.context?.label;
+  const counts = stepCounts(run);
+  const outcome = outcomeText(counts, deliveredOf(run));
+  const started = formatWhen(run.started_at ?? run.created_at);
   return (
     <li className={ROW} data-run-id={run.id}>
-      <StatusIcon status={run.status} />
       <div className={ROW_MAIN}>
-        <div className={ROW_NAME}>
-          <Link to={`/tasks/runs/${encodeURIComponent(run.id)}`} title={run.title} className="text-text no-underline hover:underline">
+        <div className={ROW_HEAD}>
+          <Link
+            to={`/tasks/runs/${encodeURIComponent(run.id)}`}
+            title={started ? `${run.title}, started ${started}` : run.title}
+            className={ROW_LINK}
+          >
             {typeTitle} #{run.number}
           </Link>
+          <RunStatusPill status={run.status} className="shrink-0" />
         </div>
         <div className={ROW_META}>
           <span className={ROW_ID} title={`Run ID ${run.id}`}>
             {run.id.slice(0, 8)}
           </span>
-          {` · ${triggeredText(run)}`}
-          {mapping ? <span title="Mapping">{` · ${mapping}`}</span> : null}
+          {mapping ? (
+            <>
+              <MetaDot />
+              <span className={MAPPING_CHIP} title="Mapping">
+                {mapping}
+              </span>
+            </>
+          ) : null}
+          <MetaDot />
+          <span className={META_ITEM}>
+            <MetaGlyph name="trigger" />
+            {triggerLabel(run)}
+          </span>
+          {run.actor ? (
+            <>
+              <MetaDot />
+              <span className={META_ITEM}>
+                <MetaGlyph name="actor" />
+                {run.actor}
+              </span>
+            </>
+          ) : null}
         </div>
+      </div>
+      <div className={ROW_OUTCOME}>
+        <span data-testid="run-outcome" className={ROW_OUTCOME_TEXT}>
+          {outcome}
+        </span>
+        {counts ? <SegBar counts={counts} className={ROW_SEG} /> : <span aria-hidden="true" className={cx(ROW_SEG, "rounded-full bg-line-1")} />}
       </div>
       <RunTiming run={run} />
       {actions}

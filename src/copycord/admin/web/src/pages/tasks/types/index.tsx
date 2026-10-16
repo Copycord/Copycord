@@ -41,6 +41,8 @@ export interface TaskTypeEntry {
   describeInputs: (inputs: Record<string, unknown>, run?: InputsRun, schema?: Record<string, unknown>) => InputRow[];
   /** Words for the summary keys the type reports; a key without one is shown in words from its name. */
   summaryLabels?: Record<string, string>;
+  /** The summary key the run page shows large at the top of the Summary card, and its words after the number. */
+  hero?: { key: string; label: string };
   /** A finished step's note in the words its running label uses; null keeps the server's note. */
   stepNote?: (step: TaskStep) => string | null;
 }
@@ -118,14 +120,15 @@ function describeBackfill(inputs: Record<string, unknown>, run?: InputsRun): Inp
   return rows;
 }
 
-// The tiles use the Steps card's words: steps done, failed, skipped, cancelled, and messages delivered.
+// The tiles use the Steps card's words with their unit, steps or messages; delivered is the hero count.
 const BACKFILL_SUMMARY: Record<string, string> = {
-  success: "Done",
-  failed: "Failed",
-  skipped: "Skipped",
-  cancelled: "Cancelled",
-  delivered: "Delivered",
+  success: "Steps done",
+  failed: "Steps failed",
+  skipped: "Steps skipped",
+  cancelled: "Steps cancelled",
+  delivered: "Messages delivered",
 };
+const BACKFILL_HERO = { key: "delivered", label: "messages delivered" };
 
 /**
  * A running channel reads "9 of 36 delivered, 36 pulled"; once it ends it reads "36 delivered" (or "9
@@ -158,6 +161,7 @@ export const TASK_TYPES: Record<string, TaskTypeEntry> = {
     Form: BackfillForm,
     describeInputs: describeBackfill,
     summaryLabels: BACKFILL_SUMMARY,
+    hero: BACKFILL_HERO,
     stepNote: backfillStepNote,
   },
 };
@@ -195,6 +199,13 @@ export function summaryStats(run: Pick<TaskRun, "type" | "summary" | "report">):
   return Object.entries(summary)
     .filter((e): e is [string, number] => typeof e[1] === "number")
     .map(([key, value]) => ({ key, label: labels[key] ?? humanize(key), value }));
+}
+
+/** The type's hero count when the run reports it: "92" and "messages delivered"; null otherwise. */
+export function heroStat(run: Pick<TaskRun, "type" | "summary" | "report">): SummaryStat | null {
+  const hero = entryFor(run.type).hero;
+  const stat = hero ? summaryStats(run).find((s) => s.key === hero.key) : undefined;
+  return hero && stat ? { ...stat, label: hero.label } : null;
 }
 
 // JSON schema subset the generic form understands.

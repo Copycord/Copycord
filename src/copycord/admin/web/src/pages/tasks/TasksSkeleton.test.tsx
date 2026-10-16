@@ -14,33 +14,37 @@ import { rememberRunTypes, rememberTypes } from "./typeLabels";
 import {
   ALL_TASKS_DESCRIPTION,
   CARD_HEAD,
+  OVERVIEW,
+  PAGE,
   STAT_TILE,
   STEP_EMPTY,
   STEP_ROW_PX,
   RunDetailSkeleton,
-  STEPS_BAR,
   STEPS_COUNT_KEY,
   STEPS_HEAD,
-  STEPS_PCT,
-  STEPS_PROGRESS,
   STEP_LIST,
   BUSY,
   FADE_IN,
   LIST_FRAME,
+  META_ITEM,
   FRAME_HEAD,
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
   PER_PAGE,
   RAIL_LIST,
   ROW_BOX,
+  ROW_HEAD,
   ROW_ID,
+  ROW_LINK,
   ROW_META,
+  ROW_OUTCOME,
+  ROW_OUTCOME_TEXT,
   ROW_TIME,
-  RUN_FACTS,
   ROW_MAIN,
   ROW_MENU,
   ROW_NAME,
   ROW_TIMING,
+  RUN_PAGES_KEY,
   RUNS_COUNT_KEY,
   RunRowsLoading,
   TasksHeader,
@@ -74,10 +78,11 @@ const layout = (el: Element) =>
 
 describe("run row skeleton", () => {
   it("has the box and the columns of a real run row", () => {
+    const run: TaskRun = { ...RUN, status: "cancelled", summary: { success: 2, failed: 0, skipped: 0, cancelled: 4, delivered: 92 }, step_count: 6 };
     const { container } = render(
       <MemoryRouter>
         <ul>
-          <RunRow run={RUN} typeTitle="Backfill channels" actions={<div className={ROW_MENU}>menu</div>} />
+          <RunRow run={run} typeTitle="Backfill channels" actions={<div className={ROW_MENU}>menu</div>} />
         </ul>
         <RunRowsLoading rows={1} />
       </MemoryRouter>,
@@ -87,18 +92,23 @@ describe("run row skeleton", () => {
     expect(real!.className.startsWith(ROW_BOX)).toBe(true);
     const cols = (li: Element) => Array.from(li.children).map(layout);
     expect(cols(skeleton!)).toEqual(cols(real!));
-    // Glyph, name and meta line, timing, menu; no status pill or chips in the row.
-    expect(real!.children).toHaveLength(4);
-    expect(Array.from(real!.children).slice(1).map((c) => c.className)).toEqual([ROW_MAIN, ROW_TIMING, ROW_MENU]);
-    expect(Array.from(skeleton!.children).slice(1).map((c) => c.className)).toEqual([ROW_MAIN, ROW_TIMING, ROW_MENU]);
-    expect(real!.querySelector("[class*=rounded-full]")).toBeNull();
-    // The name line over the plain meta line, in the same type and gap; the skeleton has bars in both.
-    const lines = (li: Element) => Array.from(li.children[1]!.children).map((c) => c.className.replace(/^block /, ""));
-    expect(lines(real!)).toEqual([ROW_NAME, ROW_META]);
+    // Name and meta line, the outcome, timing, menu; no glyph column of its own.
+    expect(Array.from(real!.children).map((c) => c.className)).toEqual([ROW_MAIN, ROW_OUTCOME, ROW_TIMING, ROW_MENU]);
+    expect(Array.from(skeleton!.children).map((c) => c.className)).toEqual([ROW_MAIN, ROW_OUTCOME, ROW_TIMING, ROW_MENU]);
+    // The name line (the name and the one status badge) over the meta line; the skeleton has the badge's box and bars.
+    const lines = (li: Element) => Array.from(li.children[0]!.children).map((c) => c.className);
+    expect(lines(real!)).toEqual([ROW_HEAD, ROW_META]);
     expect(lines(skeleton!)).toEqual(lines(real!));
-    expect(skeleton!.children[1]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
-    expect(real!.children[1]!.children[1]!.textContent).toBe("1 · Manual run by admin · Main mapping");
+    expect(real!.querySelector(`[class="${ROW_LINK}"]`)).toHaveTextContent("Backfill channels #1");
+    expect(real!.children[0]!.children[0]!.lastElementChild).toHaveTextContent("Cancelled");
+    expect(skeleton!.querySelector(`[class="${ROW_NAME}"], [class="block ${ROW_NAME}"]`)).not.toBeNull();
+    expect(real!.children[0]!.children[1]!.textContent).toBe("1·Main mapping·Manual·admin");
     expect(real!.querySelector(`[class="${ROW_ID}"]`)).toHaveAttribute("title", "Run ID 1");
+    // The outcome line over the segmented bar; the skeleton bars both.
+    expect(within(real!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");
+    expect(within(real!).getByTestId("run-outcome").className).toBe(ROW_OUTCOME_TEXT);
+    expect(within(real!).getByRole("progressbar", { name: "6 of 6 steps finished" })).toBeInTheDocument();
+    expect(skeleton!.children[1]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
     // Started over duration, each a glyph and its value; the skeleton draws the glyphs and bars the values.
     const timing = (li: Element) => Array.from(li.children[2]!.children).map((c) => `${c.className} ${c.querySelectorAll("svg").length}`);
     expect(timing(real!)).toEqual([`${ROW_TIME} 1`, `${ROW_TIME} 1`]);
@@ -107,10 +117,18 @@ describe("run row skeleton", () => {
     expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
   });
 
-  it("keeps the runs card unclipped with no empty minimum body under one row", () => {
+  it("makes the whole row one link with a focus ring and a hover tint, the menu above it", () => {
+    expect(ROW_LINK).toMatch(/before:absolute before:inset-0/);
+    expect(ROW_LINK).toMatch(/focus-visible:before:outline-2/);
+    expect(ROW_BOX.split(" ")).toContain("relative");
+    expect(ROW_MENU.split(" ")).toEqual(expect.arrayContaining(["relative", "z-10"]));
+  });
+
+  it("keeps the runs card unclipped with no empty minimum body under one row, the page at most 1280 px and centred", () => {
     expect(LIST_FRAME.split(" ")).not.toContain("overflow-hidden");
     expect(LIST_FRAME).not.toMatch(/min-h-/);
-    expect(ROW_BOX).toMatch(/min-h-14/);
+    expect(ROW_BOX).toMatch(/min-h-16/);
+    expect(PAGE.split(" ")).toEqual(expect.arrayContaining(["mx-auto", "max-w-[1280px]"]));
   });
 
   it("draws as many rows as the list had last time, at most a page, one on a first visit, and the empty state with none", () => {
@@ -122,7 +140,7 @@ describe("run row skeleton", () => {
     };
     expect(rows().li).toBe(1);
     localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "0");
-    expect(rows()).toEqual({ li: 0, empty: "No task runs yetPick a task type on the left to run one" });
+    expect(rows()).toEqual({ li: 0, empty: "No task runs yetRuns show up here once a task startsRun Backfill channels" });
     localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "4");
     expect(rows().li).toBe(4);
     localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "90");
@@ -208,9 +226,11 @@ describe("page skeleton", () => {
     await screen.findByRole("link", { name: "Backfill channels" });
     const loaded = chrome(page.container);
     expect(screen.getByText("No task runs yet").closest(".flex-col")!.className).toBe(skelEmpty);
-    // The empty state is plain text inside the runs frame, not a second dashed card, and has no Run task.
+    // The empty state sits inside the runs frame, not a second dashed card: icon, title, a line, and the
+    // button to run the backfill, in the skeleton's shape.
     expect(page.container.querySelector(".border-dashed")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Run Backfill channels" })).toBeEnabled();
+    expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
 
     expect(skeleton).toEqual(loaded);
     expect(loaded).toMatchObject({
@@ -224,8 +244,27 @@ describe("page skeleton", () => {
       headLeft: 2,
       autoRefresh: "Auto-refresh: Off",
       dropdowns: ["Task type: All", "Status: All", "Mapping: All", "Actor: All"],
-      pager: ["Previous true", "Next true"],
+      // One page: no pager in either.
+      pager: [],
     });
+  });
+
+  it("draws the pager while loading only when the last list had more than one page", () => {
+    const pager = () => {
+      const { container, unmount } = render(
+        <MemoryRouter initialEntries={["/tasks"]}>
+          <TasksSkeleton />
+        </MemoryRouter>,
+      );
+      const n = container.querySelectorAll("nav[aria-label=Pagination]").length;
+      unmount();
+      return n;
+    };
+    expect(pager()).toBe(0);
+    localStorage.setItem(`skel:${RUN_PAGES_KEY}`, "1");
+    expect(pager()).toBe(0);
+    localStorage.setItem(`skel:${RUN_PAGES_KEY}`, "3");
+    expect(pager()).toBe(1);
   });
 
   it("on a run url shows the run page's header and cards, not the list", () => {
@@ -251,7 +290,7 @@ describe("page skeleton", () => {
     expect(within(container).queryAllByRole("searchbox", { hidden: true })).toHaveLength(0);
   });
 
-  it("draws the Steps card with the loaded card's head and rows, bars only for the counts, the bar and the rows", () => {
+  it("draws the Steps card with the loaded card's head and rows, bars only for the counts and the rows", () => {
     localStorage.setItem(`skel:${STEPS_COUNT_KEY}`, "3");
     const steps: TaskStep[] = [
       { key: "a", title: "#a", state: "running", done: 1, total: 4 },
@@ -275,23 +314,13 @@ describe("page skeleton", () => {
     };
     const skelHead = head(skel!);
     const realHead = head(real!);
-    // Title, counts line, the overall bar with its percent and the filter, in the same boxes.
-    expect(skelHead.parts).toHaveLength(4);
+    // Title, counts line and the filter, in the same boxes; no percent bar (the run's bar is in the Summary).
+    expect(skelHead.parts).toHaveLength(3);
     expect(skelHead.parts).toEqual(realHead.parts);
-    const progress = (s: Element) => s.querySelector(`[class="${STEPS_HEAD}"]`)!.children[2] as HTMLElement;
-    expect(progress(skel!).className).toBe(STEPS_PROGRESS);
-    expect(progress(skel!).firstElementChild!.className).toBe(STEPS_PCT);
-    expect(progress(real!).firstElementChild).toHaveTextContent("42%");
-    // The skeleton's bar takes the track's size (w-28 h-1, 112 by 4 px); the pair hides on small screens.
-    const skelBar = progress(skel!).children[1] as HTMLElement;
-    expect(skelBar.style.width).toBe("112px");
-    expect(skelBar.style.height).toBe("4px");
-    expect(STEPS_BAR.split(" ")).toEqual(expect.arrayContaining(["w-28", "h-1", "shrink-0"]));
-    expect(STEPS_PROGRESS.split(" ")).toContain("max-sm:hidden");
-    expect(progress(real!).children[1]!.className.startsWith(STEPS_BAR)).toBe(true);
+    expect(real!.querySelector(`[class="${STEPS_HEAD}"] [role=progressbar]`)).toBeNull();
     expect(skelHead).toMatchObject({ title: "Steps", filter: "Status: All" });
     expect(realHead).toMatchObject({ title: "Steps", filter: "Status: All" });
-    // Bars only where the run's data lands: the counts line and the overall bar, not the title or the filter.
+    // Bars only where the run's data lands: the counts line, not the title or the filter.
     expect(skel!.querySelector("h3 [data-skeleton]")).toBeNull();
     expect(skel!.querySelector(`[data-testid=steps-summary] [data-skeleton]`)).not.toBeNull();
     const rows = (s: Element) => Array.from(s.querySelectorAll("li")).map((li) => li.className);
@@ -421,15 +450,20 @@ describe("run page skeleton structure", () => {
       ],
     };
     const blocks = (root: Element) => ({
-      // No chip strip under the title; the facts grid in the Summary card, labels as text; the badge beside the number; the actions button.
-      chipRows: root.querySelectorAll("header .flex-wrap").length,
-      facts: Array.from(root.querySelectorAll(`section[aria-label=Summary] [class="${RUN_FACTS}"] > div > dt`)).map((d) => d.textContent),
-      factValues: root.querySelectorAll(`section[aria-label=Summary] [class="${RUN_FACTS}"] > div > dd`).length,
-      copy: root.querySelectorAll("section[aria-label=Summary] button[aria-label='Copy run ID']").length,
+      // The meta line under the title, its static words as text in both; the badge beside the number; the actions button.
+      meta: Array.from(root.querySelectorAll(`header [data-testid=run-meta] > [class="${META_ITEM}"]`)).map((s) =>
+        Array.from(s.childNodes)
+          .filter((n) => n.nodeType === 3)
+          .map((n) => n.textContent!.trim())
+          .join(""),
+      ),
+      metaGlyphs: root.querySelectorAll("header [data-testid=run-meta] svg").length,
+      copy: root.querySelectorAll("header button[aria-label='Copy run ID']").length,
       pill: root.querySelectorAll("header [data-testid=run-status] > span").length,
       menu: root.querySelectorAll("header button[aria-label='Run actions']").length,
       headerLines: root.querySelectorAll("header p").length,
       cardHeads: root.querySelectorAll(`[class="${CARD_HEAD}"]`).length,
+      overview: root.querySelectorAll(`section[aria-label=Summary] > [class="${OVERVIEW}"]`).length,
       tiles: root.querySelectorAll(`section[aria-label=Summary] dl > [class="${STAT_TILE}"]`).length,
       inputs: root.querySelectorAll("section[aria-label=Summary] dl > .contents").length,
       steps: root.querySelectorAll("section[aria-label=Steps] li").length,
@@ -447,7 +481,19 @@ describe("run page skeleton structure", () => {
       </MemoryRouter>,
     );
     const skel = blocks(container);
-    expect(real).toMatchObject({ chipRows: 0, facts: ["Triggered", "Mapping", "Started", "Duration", "Run ID"], factValues: 5, copy: 1, pill: 1, menu: 1, cardHeads: 2, tiles: 3, steps: 6 });
+    expect(real).toMatchObject({
+      meta: ["", "started", "", "mapping", "ID"],
+      metaGlyphs: 5,
+      copy: 1,
+      pill: 1,
+      menu: 1,
+      headerLines: 1,
+      cardHeads: 2,
+      overview: 1,
+      // delivered is the hero; channels and failed stay tiles.
+      tiles: 2,
+      steps: 6,
+    });
     expect(real.inputs).toBeGreaterThan(0);
     // The error sits on the title line, so the header has no line the skeleton lacks.
     expect(skel).toEqual(real);

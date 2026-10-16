@@ -21,10 +21,14 @@ import {
   MAIN,
   PAGE,
   RUNS_COUNT_KEY,
+  RUNS_EMPTY,
+  RUN_PAGES_KEY,
   RunPager,
+  RunsEmptyIcon,
   TasksHeader,
   TasksHeading,
   readAutoRefresh,
+  readPagerShown,
 } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
 import { rememberRunTypes, rememberTypes, typeLabel } from "./tasks/typeLabels";
@@ -44,17 +48,32 @@ export const BOTS_DOWN = "Start the bots first";
  * "Run task" on a type page opens that type's form. All tasks has none: the rail picks the type first.
  * A type that needs the bots keeps the button off, with the reason beside it, until both bots run.
  */
-export function RunTaskButton({ type, onRun, botsUp = null }: RunTaskButtonProps) {
+export function RunTaskButton({
+  type,
+  onRun,
+  botsUp = null,
+  label = "Run task",
+  reason = true,
+}: RunTaskButtonProps & { label?: string; reason?: boolean }) {
   const blocked = Boolean(type.requires_bots) && botsUp !== true;
   const down = blocked && botsUp === false;
   return (
     <div className="flex shrink-0 items-center gap-2.5">
-      {down ? <span className="text-sm text-muted">{BOTS_DOWN}</span> : null}
+      {down && reason ? <span className="text-sm text-muted">{BOTS_DOWN}</span> : null}
       <Button variant="primary" disabled={blocked} title={down ? BOTS_DOWN : undefined} onClick={() => onRun(type)}>
-        Run task
+        {label}
       </Button>
     </div>
   );
+}
+
+/**
+ * The empty list's call to action: "Run Backfill channels", off while a type that needs the bots lacks
+ * them; the reason beside it only on All tasks, since a type page's header already says it.
+ */
+function EmptyRunButton({ type, onRun, reason }: { type: TaskType; onRun: (type: TaskType) => void; reason: boolean }) {
+  const botsUp = useBotsRunning(Boolean(type.requires_bots));
+  return <RunTaskButton type={type} botsUp={botsUp} onRun={onRun} label={`Run ${type.title}`} reason={reason} />;
 }
 
 interface OpenForm {
@@ -101,7 +120,7 @@ export function Tasks() {
                 description={label ? label.description : ALL_TASKS_DESCRIPTION}
                 action={runAction}
               />
-              <RunsView types={types} typeTitle={typeTitle} />
+              <RunsView types={types} typeTitle={typeTitle} runType={selected ?? (typeKey ? undefined : defaultType(types))} onRun={openForm} />
             </>
           )}
         </div>
@@ -114,7 +133,20 @@ export function Tasks() {
 /** Poll this often while the socket is down and auto-refresh is Off, so the list still moves. */
 const SOCKET_DOWN_POLL_S = 30;
 
-function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: string) => string }) {
+/** The type All tasks offers to run from its empty list: backfill when there is one, else the first type. */
+function defaultType(types: TaskType[]): TaskType | undefined {
+  return types.find((t) => t.key === "backfill_channels") ?? types[0];
+}
+
+interface RunsViewProps {
+  types: TaskType[];
+  typeTitle: (key: string) => string;
+  /** The type the empty list offers to run, once the types load. */
+  runType?: TaskType;
+  onRun: (type: TaskType) => void;
+}
+
+function RunsView({ types, typeTitle, runType, onRun }: RunsViewProps) {
   const { filters, active, set, setPage, clear } = useRunFilters();
   const { runs, total, loading, refreshing, settled, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
@@ -125,6 +157,7 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   const onSearch = useCallback((q: string) => set("q", q), [set]);
   useLastCount(RUNS_COUNT_KEY, settled ? runs.length : undefined);
+  useLastCount(RUN_PAGES_KEY, settled ? pages : undefined);
   // So a run opened from this list names its type before it loads.
   useEffect(() => rememberRunTypes(runs), [runs]);
 
@@ -173,14 +206,18 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
     }
   };
 
-  // Plain text inside the runs frame; the header's Run task is the only one on the page. Which one
-  // shows follows the filters the held page answers, so it changes only when a fetch settles.
-  const emptyFor = useRef({ active, scoped: Boolean(filters.type) });
-  if (settled) emptyFor.current = { active, scoped: Boolean(filters.type) };
+  // Inside the runs frame, both in one shape (icon, title, a line, one button) so the loading list can
+  // stand in for either. Which one shows follows the filters the held page answers, so it changes only
+  // when a fetch settles.
+  const emptyFor = useRef({ active });
+  if (settled) emptyFor.current = { active };
   const empty = emptyFor.current.active ? (
     <EmptyState
       plain
-      title="No runs match"
+      className={RUNS_EMPTY}
+      icon={<RunsEmptyIcon />}
+      title="No runs match these filters"
+      description="Try other filters, or clear them to see every run"
       action={
         <Button variant="ghost" onClick={clear}>
           Clear filters
@@ -190,12 +227,28 @@ function RunsView({ types, typeTitle }: { types: TaskType[]; typeTitle: (key: st
   ) : (
     <EmptyState
       plain
+      className={RUNS_EMPTY}
+      icon={<RunsEmptyIcon />}
       title="No task runs yet"
-      description={emptyFor.current.scoped ? "Run task above to start one" : "Pick a task type on the left to run one"}
+      description="Runs show up here once a task starts"
+      action={
+        runType ? (
+          <EmptyRunButton type={runType} onRun={onRun} reason={!filters.type} />
+        ) : (
+          // The types have not answered yet: the button's place, held empty.
+          <span aria-hidden="true" className="invisible">
+            <Button variant="primary" disabled>
+              Run task
+            </Button>
+          </span>
+        )
+      }
     />
   );
 
-  const footer = <RunPager page={page} pages={loading ? null : pages} onPage={setPage} />;
+  // One page needs no pager; while the first page loads, the pager stands only if the last list had more.
+  const pagerShown = loading ? readPagerShown() : pages > 1;
+  const footer = pagerShown ? <RunPager page={page} pages={loading ? null : pages} onPage={setPage} /> : null;
 
   return (
     <>

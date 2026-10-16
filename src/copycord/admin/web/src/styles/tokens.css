@@ -24,6 +24,8 @@
   --color-brand-ghost-2: rgba(139, 92, 246, 0.32);
   --color-danger: #ef4444;
   --color-good: #10b981;
+  /* Active work (a running or queued task run); the only blue in the theme. */
+  --color-info: #4f9cf7;
   --color-custom-ink: #facc15;
   --color-progress: #22c55e;
   --color-control: #140b26;

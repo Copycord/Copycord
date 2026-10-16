@@ -1,59 +1,68 @@
-// One run at /tasks/runs/:id, the same page for every task type: the header with its status glyph, title,
-// number, status badge and the "Run actions" menu (Copy run ID, Download report, Cancel while active,
-// Delete when finished) on one line, then one column: the summary card (the run's facts label over value,
-// the counts the type reports as stat tiles, then its Inputs), the Steps card and the collapsed
-// "Report (JSON)" panel. Everything type specific comes from the registry in ./types.
+// One run at /tasks/runs/:id, the same page for every task type: the header with the title, number and
+// the run's one coloured status badge, Cancel run while it is active and the "Run actions" menu (Copy run
+// ID, Download report, Delete when finished) on one line, the meta line under it ("Triggered manually by
+// admin · started ... · ran 1m 55s · mapping Clone-1 · ID 0d88ac5a"), then one column: the summary card
+// (the hero count and the segmented step bar, the step counts as stat tiles, then its Inputs), the Steps
+// card and the collapsed "Report (JSON)" panel. Everything type specific comes from the registry in ./types.
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Badge } from "../../components/ui/Badge";
+import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { useLastLabels } from "../../components/ui/lastCount";
 import { api, errorText } from "../../lib/api";
 import { ACTIVE_STATUSES } from "../../types/tasks";
-import type { TaskRun, TaskType } from "../../types/tasks";
+import type { StepState, TaskRun, TaskType } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
+import { finishedText, SegBar, stepCounts } from "./Outcome";
 import { ReportPanel, reportUrl, useRunToast } from "./ReportPanel";
 import { formatAgo, formatWhen, runConfirm, runDuration, triggeredText, useNow } from "./RunList";
 import { runUrl, useTaskRun } from "./runStore";
-import { RunStatusPill, StatusIcon } from "./StatusIcon";
+import { COLOUR, RunStatusPill } from "./StatusIcon";
 import { StepList, formatCount } from "./StepList";
 import {
   BUSY,
   FADE_IN,
+  HERO_LABEL,
+  HERO_VALUE,
   INPUT_CHIPS,
   INPUT_CHIPS_MAX,
   INPUTS_BOX,
   INPUTS_LABELS_KEY,
   INPUTS_LIST,
   INPUTS_TITLE,
+  MAPPING_CHIP,
+  OVERVIEW_BAR,
+  RUN_ACTIONS,
   RUN_BODY,
   RUN_BREADCRUMB,
   RUN_CARD,
   RUN_CRUMB,
   RUN_ERROR,
   RUN_HEADER,
-  RUN_HEAD_MAIN,
   RUN_HEAD_ROW,
   RUN_NUMBER,
   RUN_PILL,
   RUN_TITLE,
   RUN_TITLE_ROW,
   RunDetailSkeleton,
-  RunFacts,
   RunIdValue,
+  RunMetaLine,
+  RunOverview,
   STATS_LABELS_KEY,
   STATS_LIST,
   STAT_LABEL,
   STAT_TILE,
   STAT_VALUE,
+  STAT_ZERO,
   SummaryHead,
   typeUrl,
 } from "./TasksSkeleton";
 import { rememberRunTypes, runTypeOf, typeLabel } from "./typeLabels";
-import { describeRunInputs, entryFor, summaryStats } from "./types";
+import { describeRunInputs, entryFor, heroStat, summaryStats } from "./types";
 
 /** A list input as small display chips on one line, the first few and "+N more"; the count in the title. */
 export function InputChips({ chips, title }: { chips: string[]; title: string }) {
@@ -70,7 +79,7 @@ export function InputChips({ chips, title }: { chips: string[]; title: string })
   );
 }
 
-/** Copies the run's full id to the clipboard and says so in a toast; the Run ID cell and the Run actions menu. */
+/** Copies the run's full id to the clipboard and says so in a toast; the meta line's copy button and the Run actions menu. */
 export function useCopyRunId(id: string): () => Promise<void> {
   const toast = useRunToast();
   return async () => {
@@ -83,33 +92,54 @@ export function useCopyRunId(id: string): () => Promise<void> {
   };
 }
 
-/** The run's facts, label over value: Triggered, Mapping, Started (the date, relative in the title), Duration, Run ID. */
-export function RunDetails({ run }: { run: TaskRun }) {
+/** The meta line under the title: how and by whom, started (the date, then relative), how long, the mapping, the ID. */
+export function RunMeta({ run }: { run: TaskRun }) {
+  const active = ACTIVE_STATUSES.includes(run.status);
   const now = useNow(run.status === "running");
   const duration = runDuration(run, now);
   const started = run.started_at ?? run.created_at;
+  const when = formatWhen(started);
+  const mapping = run.context?.label;
   const copyId = useCopyRunId(run.id);
   return (
-    <RunFacts
-      testIds={{ started: "run-started", duration: "run-duration", id: "run-id" }}
+    <RunMetaLine
       values={{
         trigger: <span className={FADE_IN}>{triggeredText(run)}</span>,
-        context: <span className={FADE_IN}>{run.context?.label || "-"}</span>,
         started: (
-          <span className={cx("tabular-nums", FADE_IN)} title={formatAgo(started, now)}>
-            {formatWhen(started) || "-"}
+          <span data-testid="run-started" className={cx("tabular-nums", FADE_IN)}>
+            {when ? `${when} (${formatAgo(started, now)})` : "-"}
           </span>
         ),
-        duration: <span className={cx("tabular-nums", FADE_IN)}>{duration ?? "-"}</span>,
+        ran: (
+          <span data-testid="run-duration" className={cx("tabular-nums", FADE_IN)}>
+            {duration == null ? (active ? "not started" : "-") : `${active ? "running" : "ran"} ${duration}`}
+          </span>
+        ),
+        mapping: mapping ? (
+          <span className={cx(MAPPING_CHIP, FADE_IN)} title="Mapping">
+            {mapping}
+          </span>
+        ) : null,
         id: <RunIdValue id={run.id} onCopy={() => void copyId()} />,
       }}
     />
   );
 }
 
-/** The run's facts, then the counts as stat tiles, then the run's Inputs; the tiles show once the run reports counts. */
+/** A step count's colour by the state it counts; a count of zero is dimmed. */
+function statClass(key: string, value: number): string {
+  if (value === 0) return STAT_ZERO;
+  return key in COLOUR ? COLOUR[key as StepState] : "text-text";
+}
+
+/**
+ * The hero count beside "6/6 steps finished" over the segmented bar, then the other counts as stat tiles,
+ * then the run's Inputs; the tiles show once the run reports counts.
+ */
 export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<string, unknown> }) {
-  const stats = summaryStats(run);
+  const hero = heroStat(run);
+  const stats = summaryStats(run).filter((s) => s.key !== hero?.key);
+  const counts = stepCounts(run);
   const rows = describeRunInputs(run, schema);
   // The skeleton of the next run page prints these labels and stands as tall.
   useLastLabels(STATS_LABELS_KEY, stats.map((s) => s.label));
@@ -117,13 +147,30 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
   return (
     <section aria-label="Summary" className={RUN_CARD}>
       <SummaryHead />
-      <RunDetails run={run} />
+      <RunOverview
+        hero={
+          hero ? (
+            <>
+              <span className={cx(HERO_VALUE, FADE_IN)}>{formatCount(hero.value)}</span>
+              <span className={cx(HERO_LABEL, FADE_IN)}>{hero.label}</span>
+            </>
+          ) : null
+        }
+        finished={counts ? <span className={FADE_IN}>{finishedText(counts)}</span> : null}
+        bar={
+          counts ? (
+            <SegBar counts={counts} className={cx(OVERVIEW_BAR, FADE_IN)} />
+          ) : (
+            <div aria-hidden="true" className={cx(OVERVIEW_BAR, "rounded-full bg-line-1")} />
+          )
+        }
+      />
       {stats.length ? (
         <dl aria-label="Counts" className={cx(STATS_LIST, FADE_IN)}>
           {stats.map((s) => (
             <div key={s.key} className={STAT_TILE}>
               <dt className={STAT_LABEL}>{s.label}</dt>
-              <dd className={STAT_VALUE}>{formatCount(s.value)}</dd>
+              <dd className={cx(STAT_VALUE, statClass(s.key, s.value))}>{formatCount(s.value)}</dd>
             </div>
           ))}
         </dl>
@@ -149,12 +196,11 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
 
 type Ask = "cancel" | "delete" | null;
 
-/** The header's three-dot menu: Copy run ID, Download report, Cancel run while active, Delete once finished. */
+/** The header's three-dot menu: Copy run ID, Download report, Delete once finished. Cancel run is its own button. */
 export function runMenuItems(run: TaskRun, on: { copyId: () => void; download: () => void; ask: (a: "cancel" | "delete") => void }): MenuItem[] {
   const items: MenuItem[] = [{ act: "copy-id", label: "Copy run ID", onSelect: on.copyId }];
   if (run.report != null) items.push({ act: "download", label: "Download report", onSelect: on.download });
-  if (ACTIVE_STATUSES.includes(run.status)) items.push({ act: "cancel", label: "Cancel run", onSelect: () => on.ask("cancel") });
-  else items.push({ act: "delete", label: "Delete", danger: true, separator: true, onSelect: () => on.ask("delete") });
+  if (!ACTIVE_STATUSES.includes(run.status)) items.push({ act: "delete", label: "Delete", danger: true, separator: true, onSelect: () => on.ask("delete") });
   return items;
 }
 
@@ -164,6 +210,7 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
   const [ask, setAsk] = useState<Ask>(null);
   const [busy, setBusy] = useState(false);
   const name = `${typeTitle} #${run.number}`;
+  const active = ACTIVE_STATUSES.includes(run.status);
 
   const copyId = useCopyRunId(run.id);
 
@@ -209,23 +256,25 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
       </nav>
       <div className={RUN_HEAD_ROW}>
         {/* The type's title is a label the skeleton already showed; the run's own parts fade in. */}
-        <div className={RUN_HEAD_MAIN}>
-          <StatusIcon status={run.status} size={20} className={FADE_IN} />
-          <div className={RUN_TITLE_ROW}>
-            <h2 className={RUN_TITLE} title={run.title}>
-              {typeTitle}
-            </h2>
-            <span className={cx(RUN_NUMBER, FADE_IN)}>#{run.number}</span>
-            <RunStatusPill status={run.status} testId="run-status" className={cx(RUN_PILL, FADE_IN)} />
-            {/* On the title line, not a line of its own, so the page stands as tall as its skeleton. */}
-            {run.status === "failed" && run.error ? (
-              <span data-testid="run-error" title={run.error} className={cx(RUN_ERROR, FADE_IN)}>
-                {run.error}
-              </span>
-            ) : null}
-          </div>
+        <div className={RUN_TITLE_ROW}>
+          <h2 className={RUN_TITLE} title={run.title}>
+            {typeTitle}
+          </h2>
+          <span className={cx(RUN_NUMBER, FADE_IN)}>#{run.number}</span>
+          <RunStatusPill status={run.status} testId="run-status" className={cx(RUN_PILL, FADE_IN)} />
+          {/* On the title line, not a line of its own, so the page stands as tall as its skeleton. */}
+          {run.status === "failed" && run.error ? (
+            <span data-testid="run-error" title={run.error} className={cx(RUN_ERROR, FADE_IN)}>
+              {run.error}
+            </span>
+          ) : null}
         </div>
-        <div className={cx("shrink-0", busy && BUSY)} aria-busy={busy || undefined}>
+        <div className={cx(RUN_ACTIONS, busy && BUSY)} aria-busy={busy || undefined}>
+          {active ? (
+            <Button variant="ghost-red" size="sm" disabled={busy} onClick={() => setAsk("cancel")} className={FADE_IN}>
+              Cancel run
+            </Button>
+          ) : null}
           <RowMenu
             kind="channel"
             label="Run actions"
@@ -234,6 +283,7 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
           />
         </div>
       </div>
+      <RunMeta run={run} />
       <ConfirmDialog open={ask !== null} {...runConfirm(ask ?? "cancel", name)} onResult={(ok) => void onConfirm(ok)} />
     </header>
   );

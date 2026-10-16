@@ -4,7 +4,7 @@
 import type { ReactNode } from "react";
 import { cx } from "./cx";
 
-export type BadgeTone = "neutral" | "good" | "warn" | "bad" | "accent";
+export type BadgeTone = "neutral" | "good" | "warn" | "bad" | "accent" | "info";
 
 const TONE: Record<BadgeTone, string> = {
   neutral: "border-border bg-bg2 text-[#e6e1ff]",
@@ -12,6 +12,7 @@ const TONE: Record<BadgeTone, string> = {
   warn: "border-custom-ink/35 bg-custom-ink/12 text-custom-ink",
   bad: "border-danger/35 bg-danger/12 text-danger",
   accent: "border-accent/35 bg-brand-ghost text-accent",
+  info: "border-info/35 bg-info/12 text-info",
 };
 
 /** md: 24 px tall; sm: 20 px, to sit in a 20 px line of text without growing it. */

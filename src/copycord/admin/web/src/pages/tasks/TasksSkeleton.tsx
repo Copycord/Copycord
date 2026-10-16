@@ -17,7 +17,8 @@ import { RowMenu } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { runTypeOf, typeLabel } from "./typeLabels";
 
-export const PAGE = "my-3 flex w-full gap-6 max-md:flex-col";
+/** The rail and the page's column, at most 1280 px wide and centred, so a wide screen keeps a row together. */
+export const PAGE = "mx-auto my-3 flex w-full max-w-[1280px] gap-6 max-md:flex-col";
 export const RAIL = "w-[240px] shrink-0 max-md:w-full";
 export const RAIL_ITEM =
   "relative flex items-center justify-between gap-2 rounded-rail px-3 py-1.5 text-sm text-text no-underline transition-colors " +
@@ -45,19 +46,35 @@ export const RUN_COUNT = "font-semibold text-text";
 /** The pager under the runs (RunPager). */
 export const PAGER = "flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted";
 /** The box of a run row; ROW adds the hover tint. The skeleton row uses the box alone so both stand equally tall. */
-export const ROW_BOX = "flex min-h-14 items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0";
-export const ROW = `${ROW_BOX} transition-colors hover:bg-rail-hover`;
-/** A run row's left column: the task name and number over the plain meta line. */
+export const ROW_BOX = "relative flex min-h-16 items-center gap-3 border-b border-border px-4 py-2.5 last:rounded-b-card last:border-b-0";
+export const ROW = `${ROW_BOX} transition-colors duration-150 hover:bg-rail-hover`;
+/** A run row's left column: the task name and its status badge over the meta line. */
 export const ROW_MAIN = "min-w-0 flex-1";
-export const ROW_NAME = "truncate text-sm leading-5 font-semibold";
-/** "0d88ac5a · Manual run by admin · Clone-1", 13 px muted text, no pills. */
-export const ROW_META = "mt-1 truncate text-[13px] leading-[18px] text-muted";
-/** The 8-char run ID at the start of the meta line. */
-export const ROW_ID = "font-mono";
+/** The name line: the task name and number, then the run's one coloured badge. */
+export const ROW_HEAD = "flex h-6 min-w-0 items-center gap-2";
+export const ROW_NAME = "min-w-0 truncate text-sm leading-5 font-semibold";
+/** The name is the row's link: its ::before covers the whole row, so the row clicks through and shows one focus ring. */
+export const ROW_LINK =
+  `${ROW_NAME} text-text no-underline outline-none hover:underline before:absolute before:inset-0 before:content-[''] ` +
+  "focus-visible:before:outline-2 focus-visible:before:-outline-offset-2 focus-visible:before:outline-accent";
+/** "0d88ac5a · Clone-1 · Manual · admin": 13 px muted text with 12 px glyphs, the mapping a quiet outlined chip. */
+export const ROW_META = "mt-1 flex h-[18px] min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] leading-[18px] text-muted";
+/** A run ID in mono, the list row and the run page alike. */
+export const ROW_ID = "font-mono text-xs";
+/** One item of a meta line: a 12 px glyph and its words. */
+export const META_ITEM = "inline-flex shrink-0 items-center gap-1";
+export const META_DOT = "text-muted/50";
+/** The mapping on a meta line: a link-like name, so a subtle outlined chip rather than plain text. */
+export const MAPPING_CHIP = "inline-block max-w-[20ch] truncate rounded-full border border-line-2 px-1.5 text-xs leading-4 text-text-2";
+/** The outcome column: "6 steps · 2 done · 4 cancelled · 92 delivered" over the thin segmented bar. */
+export const ROW_OUTCOME = "flex w-[300px] shrink-0 flex-col gap-2 max-lg:hidden";
+export const ROW_OUTCOME_TEXT = "h-[18px] truncate text-[13px] leading-[18px] text-muted tabular-nums";
+export const ROW_SEG = "h-1 w-full";
 /** Started (relative) over duration, each after a small glyph, 13 px muted with tabular numbers. */
 export const ROW_TIMING = "flex w-[96px] shrink-0 flex-col gap-1 text-[13px] leading-[18px] text-muted tabular-nums max-sm:hidden";
 export const ROW_TIME = "flex items-center gap-1.5 whitespace-nowrap";
-export const ROW_MENU = "shrink-0";
+/** Above the row link's cover, so the kebab opens its menu instead of the run. */
+export const ROW_MENU = "relative z-10 shrink-0";
 export const SEARCH_FORM = "mb-4 flex";
 export const SEARCH_INPUT = "min-w-0 flex-1 rounded-r-none";
 export const SEARCH_BUTTON = "rounded-l-none border-l-0";
@@ -66,17 +83,19 @@ export const SEARCH_BUTTON = "rounded-l-none border-l-0";
 export const RUN_HEADER = "mb-4";
 export const RUN_BREADCRUMB = "mb-2 text-sm text-muted";
 export const RUN_CRUMB = "text-accent no-underline hover:underline";
-/** The glyph, title and status badge on the left, the run's actions menu on the right, all on one centred line. */
+/** The title and status badge on the left, Cancel (while active) and the actions menu on the right, one centred line. */
 export const RUN_HEAD_ROW = "flex min-h-9 items-center justify-between gap-3";
-/** The header's glyph beside its title row, as in a run list row. */
-export const RUN_HEAD_MAIN = "flex min-w-0 items-center gap-3";
 /** The type's title, the run's number, its status badge and a failed run's error, on one line. */
 export const RUN_TITLE_ROW = "flex min-w-0 items-center gap-2";
 export const RUN_TITLE = "m-0 shrink-0 text-[22px] leading-8 font-bold text-text";
 export const RUN_NUMBER = "shrink-0 text-[22px] leading-8 text-muted";
-/** The status badge beside the number: the app's Badge at 24 px with 13 px text, a 14 px glyph and the status word. */
-export const RUN_PILL = "ml-2 shrink-0";
-export const RUN_PILL_BADGE = "gap-1.5 px-2.5 text-[13px]! leading-[18px]!";
+/** The status badge: 24 px, 12 px text, a 12 px glyph and the status word; the run page header and each run row. */
+export const RUN_PILL = "ml-1 shrink-0";
+export const RUN_PILL_BADGE = "h-6 gap-1.5 px-2.5 py-0! leading-none! font-medium!";
+/** Right of the title line: Cancel run while the run is active, then the Run actions menu. */
+export const RUN_ACTIONS = "flex shrink-0 items-center gap-2";
+/** "Triggered manually by admin · started ... · ran 1m 55s · mapping Clone-1 · ID 0d88ac5a": muted inline text under the title. */
+export const RUN_META = "m-0 mt-1.5 flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] leading-5 text-muted";
 
 /** A type's page, where the run page's breadcrumb leads. */
 export function typeUrl(key: string): string {
@@ -84,17 +103,10 @@ export function typeUrl(key: string): string {
 }
 /** A failed run's error after the status badge: quiet text, cut to one line, the whole of it in the title. */
 export const RUN_ERROR = "min-w-0 max-w-[48ch] truncate text-sm text-muted";
-/** The run's facts at the top of the Summary card: label-over-value cells in one row that wraps on narrow screens. */
-export const RUN_FACTS = "m-0 flex flex-wrap gap-x-10 gap-y-3 border-b border-border px-4 py-3";
-export const RUN_FACT = "min-w-0";
-export const RUN_FACT_LABEL = "text-xs leading-4 text-muted";
-export const RUN_FACT_VALUE = "m-0 mt-1 flex items-center gap-1.5 text-sm leading-6 text-text";
-/** The Run ID cell's copy button, a 24 px hit box around a 14 px glyph, inside the value's line. */
+/** The run ID's copy button on the meta line, a 20 px hit box around a 12 px glyph, inside the line's height. */
 export const RUN_ID_COPY =
-  "inline-flex size-6 cursor-pointer items-center justify-center rounded-btn border-0 bg-transparent p-0 text-muted " +
-  "hover:bg-rail-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent/70 disabled:cursor-default";
-/** The fact labels in order; labels, so the skeleton prints them as text. */
-export const RUN_FACT_LABELS = { trigger: "Triggered", context: "Mapping", started: "Started", duration: "Duration", id: "Run ID" } as const;
+  "inline-flex size-5 cursor-pointer items-center justify-center rounded-rail border-0 bg-transparent p-0 text-muted " +
+  "hover:bg-rail-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default";
 /** How many of a run's channels its Inputs show as chips before "+N more". */
 export const INPUT_CHIPS_MAX = 4;
 /** The chips of one Inputs value: one 20 px line that never wraps, so the row keeps its text height. */
@@ -119,9 +131,26 @@ const META_GLYPHS = {
       <path d="M10.75 5.25V3.75a1.5 1.5 0 0 0-1.5-1.5h-5.5a1.5 1.5 0 0 0-1.5 1.5v5.5a1.5 1.5 0 0 0 1.5 1.5h1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
     </>
   ),
+  trigger: <path d="M9.25 1.75 3.5 9.25h4.25l-1 5 5.75-7.5H8.25l1-5Z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />,
+  actor: (
+    <>
+      <circle cx="8" cy="5.25" r="2.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2.75 14c.6-2.6 2.7-4.25 5.25-4.25s4.65 1.65 5.25 4.25" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </>
+  ),
+  mapping: (
+    <path
+      d="M2.5 5.25h10.5M10.5 2.75l2.5 2.5-2.5 2.5M13.5 10.75H3M5.5 8.25 3 10.75l2.5 2.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  ),
 } as const;
 
-/** A small muted glyph before a value (the row's timing lines, the Run ID copy button): a label, so the skeleton draws it too. */
+/** A small muted glyph before a value (meta lines, the row's timing, the run ID copy button): a label, so the skeleton draws it too. */
 export function MetaGlyph({ name, size = 12 }: { name: keyof typeof META_GLYPHS; size?: number }) {
   return (
     <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false" className="shrink-0 text-muted">
@@ -130,51 +159,114 @@ export function MetaGlyph({ name, size = 12 }: { name: keyof typeof META_GLYPHS;
   );
 }
 
+/** The middle dot between the items of a meta line. */
+export function MetaDot() {
+  return (
+    <span aria-hidden="true" className={META_DOT}>
+      ·
+    </span>
+  );
+}
+
 /** The status badge's box as itself; its glyph and word are the run's status, so they shimmer. */
 export function StatusPillLoading({ testId, className }: { testId?: string; className?: string }) {
   return (
     <span data-testid={testId} className={cx("inline-flex", className)}>
       <Badge className={RUN_PILL_BADGE}>
-        <Skeleton width={14} height={14} rounded="rounded-full" />
-        <Skeleton.Text>Running</Skeleton.Text>
+        <Skeleton width={12} height={12} rounded="rounded-full" />
+        <Skeleton.Text>Cancelled</Skeleton.Text>
       </Badge>
     </span>
   );
 }
 
-export type RunFactKey = keyof typeof RUN_FACT_LABELS;
+export interface RunMetaValues {
+  /** "Triggered manually by admin". */
+  trigger: ReactNode;
+  /** After the static word "started": the date and the relative time. */
+  started: ReactNode;
+  /** "ran 1m 55s", or "running 12s" while active. */
+  ran: ReactNode;
+  /** After the static word "mapping": the mapping chip; null leaves the item out. */
+  mapping: ReactNode | null;
+  /** After the static word "ID": the short id and its copy button. */
+  id: ReactNode;
+}
 
-/** The facts grid of the Summary card: each label as text over its value; the skeleton passes bars as the values. */
-export function RunFacts({ values, testIds = {} }: { values: Record<RunFactKey, ReactNode>; testIds?: Partial<Record<RunFactKey, string>> }) {
+/** The run page's meta line under the title: the static words as text, the run's values (or the skeleton's bars) between them. */
+export function RunMetaLine({ values }: { values: RunMetaValues }) {
   return (
-    <dl aria-label="Run details" className={RUN_FACTS}>
-      {(Object.keys(RUN_FACT_LABELS) as RunFactKey[]).map((k) => (
-        <div key={k} className={RUN_FACT}>
-          <dt className={RUN_FACT_LABEL}>{RUN_FACT_LABELS[k]}</dt>
-          <dd data-testid={testIds[k]} className={RUN_FACT_VALUE}>
-            {values[k]}
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <p data-testid="run-meta" className={RUN_META}>
+      <span className={META_ITEM}>
+        <MetaGlyph name="trigger" />
+        {values.trigger}
+      </span>
+      <MetaDot />
+      <span className={META_ITEM}>
+        <MetaGlyph name="started" />
+        started {values.started}
+      </span>
+      <MetaDot />
+      <span className={META_ITEM}>
+        <MetaGlyph name="duration" />
+        {values.ran}
+      </span>
+      {values.mapping != null ? (
+        <>
+          <MetaDot />
+          <span className={META_ITEM}>
+            <MetaGlyph name="mapping" />
+            mapping {values.mapping}
+          </span>
+        </>
+      ) : null}
+      <MetaDot />
+      <span className={META_ITEM}>ID {values.id}</span>
+    </p>
   );
 }
 
-/** The Run ID value: the first 8 characters in mono and the copy button; the full id in the title. id null: a bar, the button inert. */
+/** The run ID value: the first 8 characters in mono and the copy button; the full id in the title. id null: a bar, the button inert. */
 export function RunIdValue({ id, onCopy }: { id: string | null; onCopy?: () => void }) {
   return (
     <>
       {id ? (
-        <span className="font-mono" title={`Run ID ${id}`}>
+        <span data-testid="run-id" className={ROW_ID} title={`Run ID ${id}`}>
           {id.slice(0, 8)}
         </span>
       ) : (
-        <Skeleton.Text className="font-mono">00000000</Skeleton.Text>
+        <Skeleton.Text className={ROW_ID}>00000000</Skeleton.Text>
       )}
       <button type="button" aria-label="Copy run ID" title="Copy run ID" disabled={!id} onClick={onCopy} className={RUN_ID_COPY}>
-        <MetaGlyph name="copy" size={14} />
+        <MetaGlyph name="copy" size={12} />
       </button>
     </>
+  );
+}
+
+/** The Summary card's top: the hero count (messages delivered) and "6/6 steps finished" over the segmented bar. */
+export const OVERVIEW = "border-b border-border px-4 py-3";
+export const OVERVIEW_ROW = "flex h-10 items-end justify-between gap-4";
+export const HERO = "flex min-w-0 items-baseline gap-2";
+export const HERO_VALUE = "text-[32px] leading-10 font-semibold tabular-nums text-accent";
+export const HERO_LABEL = "truncate text-sm text-muted";
+export const FINISHED = "shrink-0 pb-1 text-[13px] leading-5 tabular-nums text-muted";
+export const OVERVIEW_BAR = "mt-3 h-1.5 w-full";
+
+/** The overview's frame; the run page and its skeleton pass the hero, the finished line and the bar. */
+export function RunOverview({ hero, finished, bar }: { hero: ReactNode; finished: ReactNode; bar: ReactNode }) {
+  return (
+    <div className={OVERVIEW}>
+      <div className={OVERVIEW_ROW}>
+        <div data-testid="run-hero" className={HERO}>
+          {hero}
+        </div>
+        <span data-testid="run-finished" className={FINISHED}>
+          {finished}
+        </span>
+      </div>
+      {bar}
+    </div>
   );
 }
 
@@ -189,7 +281,9 @@ export const CARD_META = "min-w-0 flex-1 truncate text-[13px] text-muted";
 export const STATS_LIST = "m-0 grid auto-cols-fr grid-flow-col divide-x divide-border border-b border-border";
 export const STAT_TILE = "min-w-0 px-4 py-3";
 export const STAT_LABEL = "truncate text-xs text-muted";
-export const STAT_VALUE = "m-0 mt-1 text-xl leading-7 font-semibold tabular-nums text-text";
+export const STAT_VALUE = "m-0 mt-1 text-xl leading-7 font-semibold tabular-nums";
+/** A count of zero reads dimmed, so the counts that matter stand out. */
+export const STAT_ZERO = "font-medium! text-muted/50";
 /** The tile and Inputs labels the run page showed last time (lastCount.ts), printed by the skeleton. */
 export const STATS_LABELS_KEY = "tasks.stat-labels";
 export const INPUTS_LABELS_KEY = "tasks.input-labels";
@@ -197,29 +291,26 @@ export const INPUTS_LABELS_KEY = "tasks.input-labels";
 export const INPUTS_BOX = "px-4 py-3";
 export const INPUTS_TITLE = "m-0 mb-2 text-xs font-semibold text-muted";
 export const INPUTS_LIST = "m-0 grid grid-cols-[minmax(110px,max-content)_1fr] gap-x-6 gap-y-1 text-sm leading-5";
-/** The status glyph's box (StatusIcon): it centres itself on the whole row it sits in, whatever the row
- * aligns its other columns to. A run list row (title and meta line), a step row and the run header (title
- * and meta line, RUN_HEAD_MAIN) all hold it as a direct flex child, so it sits mid-row in each. */
+/** The status glyph's box (StatusIcon): it centres itself on the line it sits in, a step row or the inside
+ * of a status badge, whatever that line aligns its other parts to. */
 export const STATUS_BOX = "inline-flex shrink-0 items-center self-center";
-/** The Steps card head: the title, the counts line, the overall bar with its percent and the status filter on one line. */
+/** The Steps card head: the title, the counts line and the status filter on one line (the run's bar is in the Summary). */
 export const STEPS_HEAD = CARD_HEAD;
 export const STEPS_TITLE = CARD_TITLE;
 export const STEPS_SUMMARY = CARD_META;
-/** The overall bar in the head: its percent caption, then the track. */
-export const STEPS_PROGRESS = "flex shrink-0 items-center gap-2 max-sm:hidden";
-export const STEPS_PCT = "w-10 text-right text-xs tabular-nums text-muted";
-/** The overall bar's track in the head, and a running step's thin bar in its row. */
-export const STEPS_BAR = "h-1 w-28 shrink-0 overflow-hidden rounded-full bg-line-1";
+/** A running step's thin bar in its row. */
 export const STEP_BAR = "h-1 w-24 shrink-0 overflow-hidden rounded-full bg-line-1 max-sm:w-12";
 /** Rows are one fixed line each, so the list stops at STEP_ROWS_MAX rows and scrolls past that. */
 export const STEP_ROWS_MAX = 12;
 /** One step row's height in px (h-9 in STEP_ROW). */
 export const STEP_ROW_PX = 36;
 export const STEP_LIST = "m-0 max-h-[432px] list-none overflow-y-auto p-0";
-/** One step row, 36 px: glyph, title, the thin bar while running, the note on the right. */
+/** One step row, 36 px: glyph, title, the thin bar while running, the note, then the state in its colour. */
 export const STEP_ROW = "flex h-9 items-center gap-2.5 border-b border-border px-4 text-sm last:border-b-0";
 export const STEP_TITLE = "min-w-0 flex-1 truncate font-medium text-text";
 export const STEP_NOTE = "max-w-[50%] truncate text-right text-xs";
+/** The step's state in words at the row's right edge, coloured like its glyph, so colour is never the only signal. */
+export const STEP_STATE = "w-[72px] shrink-0 text-right text-xs font-medium";
 /** No steps, or none in the filter: one muted line centred in the rows' place, as tall as they stood. */
 export const STEP_EMPTY = "m-0 flex min-h-9 items-center justify-center px-4 text-[13px] text-muted";
 /** The steps the run page showed last time (lastCount.ts), so the loading card stands as tall. */
@@ -244,28 +335,18 @@ export function stepRowsHeight(n: number): number {
 export interface StepsHeadProps {
   /** The counts line, or its bar while the run loads. */
   summary: ReactNode;
-  /** The overall percent, or its placeholder. */
-  percent: ReactNode;
-  /** The overall bar, or its placeholder. */
-  progress: ReactNode;
   filter: StepFilter;
   onFilter: (value: StepFilter) => void;
   id: string;
 }
 
 /** The Steps card head; the loaded card and the run skeleton both draw it, so they cannot drift. */
-export function StepsHead({ summary, percent, progress, filter, onFilter, id }: StepsHeadProps) {
+export function StepsHead({ summary, filter, onFilter, id }: StepsHeadProps) {
   return (
     <div className={STEPS_HEAD}>
       <h3 className={STEPS_TITLE}>Steps</h3>
       <span data-testid="steps-summary" className={STEPS_SUMMARY}>
         {summary}
-      </span>
-      <span className={STEPS_PROGRESS}>
-        <span data-testid="steps-percent" className={STEPS_PCT}>
-          {percent}
-        </span>
-        {progress}
       </span>
       <ToolbarSelect
         id={id}
@@ -309,6 +390,13 @@ export const ALL_TASKS_DESCRIPTION = "Showing runs from all task types";
 export const PER_PAGE = 25;
 /** The rows the run list showed last time (lastCount.ts), so the loading list stands as tall. */
 export const RUNS_COUNT_KEY = "tasks.runs";
+/** The pages the run list had last time: the loading list draws the pager only when there was more than one. */
+export const RUN_PAGES_KEY = "tasks.pages";
+
+/** Whether the loading list draws the pager: the list had more than one page last time. */
+export function readPagerShown(): boolean {
+  return readLastCount(RUN_PAGES_KEY, 1, 10000) > 1;
+}
 
 export const AUTO_REFRESH_KEY = "tasks:autorefresh";
 /** The closed control reads "Auto-refresh: Off" (ToolbarSelect prefix); the options stay plain. */
@@ -390,8 +478,9 @@ export function SearchGlyph() {
 }
 
 /**
- * Previous, the page label and Next under the runs. Always there, one page included, so the frame keeps
- * its height; pages is null until the first page lands (a bar on the label, both buttons disabled).
+ * Previous, the page label and Next under the runs, only when there is more than one page (the loading
+ * list draws it when the last list had more, readPagerShown); pages is null until the first page lands
+ * (a bar on the label, both buttons disabled).
  */
 export function RunPager({ page, pages, onPage = noop }: { page: number; pages: number | null; onPage?: (p: number) => void }) {
   return (
@@ -424,20 +513,28 @@ export function RailEntryLoading() {
 }
 
 /**
- * One loading row in the shape of RunRow (RunList.tsx): the same box, the status glyph, bars on the name
- * line and the plain meta line, the two timing lines with their glyphs as themselves and bars for the
- * values, and the row menu button, each in the same type size and padding as the real element, so the
- * first page lands without the list jumping.
+ * One loading row in the shape of RunRow (RunList.tsx): the same box, a bar for the name beside the status
+ * badge's box, a bar on the meta line, bars for the outcome line and its segmented bar, the two timing
+ * lines with their glyphs as themselves and bars for the values, and the row menu button, each in the
+ * same type size and padding as the real element, so the first page lands without the list jumping.
  */
 function RunRowLoading({ nameWidth }: { nameWidth: number }) {
   return (
     <li className={ROW_BOX}>
-      <span className={STATUS_BOX}>
-        <Skeleton width={16} height={16} rounded="rounded-full" />
-      </span>
       <div className={ROW_MAIN}>
-        <TextBar width={nameWidth} className={ROW_NAME} />
-        <TextBar width={nameWidth + 90} className={ROW_META} />
+        <div className={ROW_HEAD}>
+          <TextBar width={nameWidth} className={ROW_NAME} />
+          <StatusPillLoading />
+        </div>
+        <div className={ROW_META}>
+          <Skeleton.Text width={nameWidth + 110} />
+        </div>
+      </div>
+      <div className={ROW_OUTCOME}>
+        <span className={ROW_OUTCOME_TEXT}>
+          <Skeleton.Text>6 steps · 2 done · 4 cancelled · 92 delivered</Skeleton.Text>
+        </span>
+        <Skeleton rounded="rounded-full" className={ROW_SEG} />
       </div>
       <div className={ROW_TIMING}>
         <span className={ROW_TIME}>
@@ -457,13 +554,33 @@ function RunRowLoading({ nameWidth }: { nameWidth: number }) {
   );
 }
 
-/** The empty state (Tasks.tsx) with bars on its two lines, for a list that had no runs last time. */
+/** The runs empty state's icon (Tasks.tsx): a static mark, so the skeleton draws it as itself. */
+export function RunsEmptyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+      <path d="M7.5 9.5h9M7.5 13h6M7.5 16.5h4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** The runs empty state: icon, title, a line under it and one button, the same shape whichever variant shows. */
+export const RUNS_EMPTY = "py-12";
+
+/** The empty state (Tasks.tsx) with bars on its lines and its button's box, for a list that had no runs last time. */
 function RunsEmptyLoading() {
   return (
     <EmptyState
       plain
+      className={RUNS_EMPTY}
+      icon={<RunsEmptyIcon />}
       title={<Skeleton.Text>No task runs yet</Skeleton.Text>}
-      description={<Skeleton.Text>Pick a task type on the left to run one</Skeleton.Text>}
+      description={<Skeleton.Text>Runs show up here once a task starts</Skeleton.Text>}
+      action={
+        <Button variant="ghost" disabled>
+          <Skeleton.Text>Run Backfill channels</Skeleton.Text>
+        </Button>
+      }
     />
   );
 }
@@ -501,11 +618,11 @@ function InlineBar({ width }: { width: number }) {
 
 const STEP_WIDTHS = [["34%", 72], ["26%", 96], ["30%", 84]] as const;
 const INPUT_WIDTHS = [60, 90, 70, 80];
-/** A first visit draws a backfill run's shape: its five tiles, its six inputs and six steps, bars for every label. */
-const FIRST_VISIT_TILES = 5;
+/** A first visit draws a backfill run's shape: its four step tiles, its six inputs and six steps, bars for every label. */
+const FIRST_VISIT_TILES = 4;
 const FIRST_VISIT_INPUTS = 6;
 const FIRST_VISIT_STEPS = 6;
-const TILE_WIDTHS = [36, 40, 44, 52, 48];
+const TILE_WIDTHS = [64, 68, 76, 84];
 
 export interface RunDetailSkeletonProps {
   /** The run's type key when known before the run loads (typeLabels.ts runTypeOf): its title shows as text. */
@@ -516,13 +633,13 @@ export interface RunDetailSkeletonProps {
 
 /**
  * The run page until the run answers, also the page's own loading state: the header with the type's
- * title as text when the run's type is known (bars in its place only when it cannot be), bars for the
- * glyph and number, the status badge's box with bars inside and the "Run actions" button as itself and
- * inert on the same line, the summary card with the fact labels as text over bars, then
- * the tile and Inputs labels the last run page showed and bars for their values (a backfill run's five
- * tiles and six rows, all bars, on a first visit), the Steps card with its real head (bars for the counts
- * and the overall bar, the real filter) and as many bar rows as the last run showed, and the collapsed
- * Report line.
+ * title as text when the run's type is known (bars in its place only when it cannot be), a bar for the
+ * number, the status badge's box with bars inside and the "Run actions" button as itself and inert on the
+ * same line, the meta line with its static words as text and bars for the run's values, the summary card
+ * with bars for the hero count, the finished line and the segmented bar, then the tile and Inputs labels
+ * the last run page showed and bars for their values (a backfill run's four tiles and six rows, all bars,
+ * on a first visit), the Steps card with its real head (a bar for the counts, the real filter) and as many
+ * bar rows as the last run showed, and the collapsed Report line.
  */
 export function RunDetailSkeleton({
   runType = null,
@@ -552,32 +669,37 @@ export function RunDetailSkeleton({
             )}
           </nav>
           <div className={RUN_HEAD_ROW}>
-            <div className={RUN_HEAD_MAIN}>
-              <span className={STATUS_BOX}>
-                <Skeleton width={20} height={20} rounded="rounded-full" />
-              </span>
-              <div className={RUN_TITLE_ROW}>
-                <h2 className={RUN_TITLE}>{title ?? <TextBar width={180} />}</h2>
-                <Skeleton.Text className="shrink-0 text-[22px] leading-8">#00</Skeleton.Text>
-                <StatusPillLoading testId="run-status" className={RUN_PILL} />
-              </div>
+            <div className={RUN_TITLE_ROW}>
+              <h2 className={RUN_TITLE}>{title ?? <TextBar width={180} />}</h2>
+              <Skeleton.Text className="shrink-0 text-[22px] leading-8">#00</Skeleton.Text>
+              <StatusPillLoading testId="run-status" className={RUN_PILL} />
             </div>
-            <div className="shrink-0">
+            <div className={RUN_ACTIONS}>
               <RowMenu kind="channel" label="Run actions" items={[]} disabled />
             </div>
           </div>
+          <RunMetaLine
+            values={{
+              trigger: <Skeleton.Text>Triggered manually by admin</Skeleton.Text>,
+              started: <Skeleton.Text>Oct 15, 5:06 PM EDT (5h ago)</Skeleton.Text>,
+              ran: <Skeleton.Text>ran 1m 55s</Skeleton.Text>,
+              mapping: <Skeleton.Box className={MAPPING_CHIP}>Clone-1</Skeleton.Box>,
+              id: <RunIdValue id={null} />,
+            }}
+          />
         </header>
         <div className={RUN_BODY}>
           <section aria-label="Summary" className={RUN_CARD}>
             <SummaryHead />
-            <RunFacts
-              values={{
-                trigger: <Skeleton.Text>Manual run by admin</Skeleton.Text>,
-                context: <Skeleton.Text>Main mapping</Skeleton.Text>,
-                started: <Skeleton.Text>Oct 15, 5:06 PM EDT</Skeleton.Text>,
-                duration: <Skeleton.Text>1m 55s</Skeleton.Text>,
-                id: <RunIdValue id={null} />,
-              }}
+            <RunOverview
+              hero={
+                <>
+                  <Skeleton.Text className={HERO_VALUE}>000</Skeleton.Text>
+                  <Skeleton.Text className={HERO_LABEL}>messages delivered</Skeleton.Text>
+                </>
+              }
+              finished={<Skeleton.Text>6/6 steps finished</Skeleton.Text>}
+              bar={<Skeleton rounded="rounded-full" className={OVERVIEW_BAR} />}
             />
             {stats.length ? (
               <dl className={STATS_LIST}>
@@ -612,14 +734,7 @@ export function RunDetailSkeleton({
             </div>
           </section>
           <section aria-label="Steps" className={RUN_CARD}>
-            <StepsHead
-              id="steps-filter-skeleton"
-              summary={<Skeleton.Text width={180} />}
-              percent={null}
-              progress={<Skeleton width={112} height={4} rounded="rounded-full" className="shrink-0" />}
-              filter=""
-              onFilter={noop}
-            />
+            <StepsHead id="steps-filter-skeleton" summary={<Skeleton.Text width={180} />} filter="" onFilter={noop} />
             {steps === 0 ? (
               <p className={STEP_EMPTY}>
                 <Skeleton.Text>No steps yet</Skeleton.Text>
@@ -635,6 +750,9 @@ export function RunDetailSkeleton({
                       </span>
                       <TextBar width={title} className="min-w-0 flex-1" />
                       <TextBar width={note} className="text-xs" />
+                      <span className={STEP_STATE}>
+                        <Skeleton.Text>Cancelled</Skeleton.Text>
+                      </span>
                     </li>
                   );
                 })}
@@ -726,7 +844,7 @@ export function TasksSkeleton() {
                   </div>
                 </div>
                 <RunRowsLoading />
-                <RunPager page={Number(params.get("page")) || 1} pages={null} />
+                {readPagerShown() ? <RunPager page={Number(params.get("page")) || 1} pages={null} /> : null}
               </div>
             </>
           )}

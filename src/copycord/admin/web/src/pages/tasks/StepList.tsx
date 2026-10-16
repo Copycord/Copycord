@@ -1,23 +1,24 @@
-// The run detail's Steps card, the same for every task type. The head sums the steps up (counts by
-// state, an overall bar) and filters them by state; under it one dense line per step with its status
-// glyph, its title, a thin bar while it runs and its note on the right. Running and failed steps sort
-// to the top, and the list scrolls past twelve rows, so a run of a hundred channels keeps a short card.
+// The run detail's Steps card, the same for every task type. The head counts the steps by state and
+// filters them by state (the run's segmented bar is in the Summary card); under it one dense line per
+// step with its status glyph, its title, a thin bar while it runs, its note and its state in words in the
+// state's colour. Running and failed steps sort to the top, and the list scrolls past twelve rows, so a
+// run of a hundred channels keeps a short card.
 
 import { useMemo, useState } from "react";
 import { useLastCount } from "../../components/ui/lastCount";
 import { cx } from "../../components/ui/cx";
 import type { StepState, TaskRun, TaskStep } from "../../types/tasks";
-import { STATUS_LABEL, StatusIcon } from "./StatusIcon";
+import { COLOUR, STATUS_LABEL, StatusIcon } from "./StatusIcon";
 import {
   FADE_IN,
   RUN_CARD,
-  STEPS_BAR,
   STEPS_COUNT_KEY,
   STEP_BAR,
   STEP_EMPTY,
   STEP_LIST,
   STEP_NOTE,
   STEP_ROW,
+  STEP_STATE,
   STEP_TITLE,
   StepsHead,
   stepRowsHeight,
@@ -45,6 +46,9 @@ export function stepLabel(step: TaskStep, noteOf?: StepNote): string {
   if (step.note) return step.note;
   return STATUS_LABEL[step.state] ?? step.state;
 }
+
+/** A step's state in words at the row's edge: the filter's words, so a finished step reads "Done". */
+export const STEP_STATE_LABEL: Record<StepState, string> = { ...STATUS_LABEL, success: "Done" };
 
 /** The counts line words, in the order the line reads; a state with no steps is left out. */
 const COUNT_WORDS: [StepState, string][] = [
@@ -76,21 +80,6 @@ export function orderSteps(steps: TaskStep[]): TaskStep[] {
     .map(({ s }) => s);
 }
 
-/** Share of the run done, 0 to 1: a finished step counts whole, a running one by its done of total, a queued one not at all. */
-export function overallProgress(steps: TaskStep[]): number | null {
-  if (!steps.length) return null;
-  let sum = 0;
-  for (const s of steps) {
-    if (s.state === "queued") continue;
-    if (s.state === "running") {
-      if (s.done != null && s.total != null && s.total > 0) sum += Math.max(0, Math.min(1, s.done / s.total));
-      continue;
-    }
-    sum += 1;
-  }
-  return sum / steps.length;
-}
-
 const NONE: Record<Exclude<StepFilter, "">, string> = {
   running: "No running steps",
   queued: "No queued steps",
@@ -99,33 +88,6 @@ const NONE: Record<Exclude<StepFilter, "">, string> = {
   cancelled: "No cancelled steps",
   skipped: "No skipped steps",
 };
-
-function OverallBar({ steps }: { steps: TaskStep[] }) {
-  const share = overallProgress(steps);
-  // The track keeps its place before the first step lands.
-  if (share == null) return <div aria-hidden="true" className={cx(STEPS_BAR, "invisible")} />;
-  const pct = Math.round(share * 100);
-  return (
-    <div
-      role="progressbar"
-      aria-label="Overall progress"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={pct}
-      title={`${pct}% done`}
-      className={cx(STEPS_BAR, FADE_IN)}
-    >
-      <div className="h-full rounded-full bg-progress" style={{ width: `${share * 100}%` }} />
-    </div>
-  );
-}
-
-/** The overall share as a caption beside its bar, empty before the first step lands. */
-function OverallPercent({ steps }: { steps: TaskStep[] }) {
-  const share = overallProgress(steps);
-  if (share == null) return null;
-  return <span className={FADE_IN}>{Math.round(share * 100)}%</span>;
-}
 
 function StepBar({ step }: { step: TaskStep }) {
   if (step.done == null || step.total == null || step.total <= 0) return null;
@@ -139,7 +101,7 @@ function StepBar({ step }: { step: TaskStep }) {
       aria-valuenow={step.done}
       className={STEP_BAR}
     >
-      <div className="h-full rounded-full bg-progress" style={{ width: `${pct}%` }} />
+      <div className="h-full rounded-full bg-info" style={{ width: `${pct}%` }} />
     </div>
   );
 }
@@ -152,14 +114,7 @@ export function StepList({ run, noteOf }: { run: TaskRun; noteOf?: StepNote }) {
   useLastCount(STEPS_COUNT_KEY, steps.length);
   return (
     <section aria-label="Steps" className={RUN_CARD}>
-      <StepsHead
-        id="steps-filter"
-        summary={<span className={FADE_IN}>{stepSummary(steps)}</span>}
-        percent={<OverallPercent steps={steps} />}
-        progress={<OverallBar steps={steps} />}
-        filter={filter}
-        onFilter={setFilter}
-      />
+      <StepsHead id="steps-filter" summary={<span className={FADE_IN}>{stepSummary(steps)}</span>} filter={filter} onFilter={setFilter} />
       {!steps.length ? (
         <p className={cx(STEP_EMPTY, FADE_IN)}>No steps yet</p>
       ) : !shown.length ? (
@@ -169,15 +124,19 @@ export function StepList({ run, noteOf }: { run: TaskRun; noteOf?: StepNote }) {
       ) : (
         <ul className={cx(STEP_LIST, FADE_IN)}>
           {shown.map((s) => {
-            const note = stepLabel(s, noteOf);
+            const word = STEP_STATE_LABEL[s.state] ?? s.state;
+            const label = stepLabel(s, noteOf);
+            // The state is in words at the edge; a note that only repeats it is left out.
+            const note = label === word || label === STATUS_LABEL[s.state] ? "" : label;
             return (
               <li key={s.key} className={STEP_ROW}>
                 <StatusIcon status={s.state} size={14} />
                 <span className={STEP_TITLE}>{s.title}</span>
                 {s.state === "running" ? <StepBar step={s} /> : null}
-                <span title={note} className={cx(STEP_NOTE, s.state === "failed" ? "text-danger" : "text-muted")}>
+                <span title={note || undefined} className={cx(STEP_NOTE, s.state === "failed" ? "text-danger" : "text-muted")}>
                   {note}
                 </span>
+                <span className={cx(STEP_STATE, COLOUR[s.state])}>{word}</span>
               </li>
             );
           })}
