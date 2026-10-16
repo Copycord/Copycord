@@ -27,7 +27,7 @@ export const FWD_EMPTY = "flex flex-col items-center justify-center gap-2 px-6 p
 // then the footer buttons and count.
 export const RULE_CARD = cx(
   "w-full self-start rounded-[14px] border border-border bg-card",
-  "px-[18px] pt-4 pb-3.5 [box-shadow:0_2px_8px_var(--color-shadow-20)] transition duration-200 max-[480px]:p-3.5",
+  "px-[18px] pt-4 pb-3.5 [box-shadow:0_2px_8px_var(--color-shadow-20)] max-[480px]:p-3.5",
 );
 export const RULE_HEADER = "flex items-start justify-between gap-3 max-[640px]:flex-col max-[640px]:gap-2.5";
 export const RULE_TITLE_BOX = "flex min-h-7 min-w-0 flex-1 items-center";

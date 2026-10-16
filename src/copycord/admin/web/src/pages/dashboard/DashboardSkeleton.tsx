@@ -19,6 +19,9 @@ import {
   BotStatePending,
   BOTS_CARD,
   BOTS_CELL,
+  BOTS_COL_COMPONENT,
+  BOTS_COL_STATE,
+  BOTS_COL_UPTIME,
   BOTS_HEAD,
   BOTS_TABLE,
   BOTS_TITLE,
@@ -269,19 +272,19 @@ export function DashboardSkeleton() {
           <table className={BOTS_TABLE}>
             <thead>
               <tr>
-                <th className={cx(BOTS_HEAD, "w-[120px] text-left")}>Component</th>
-                <th className={cx(BOTS_HEAD, "w-[180px] text-left max-sm:w-[130px]")}>State</th>
-                <th className={cx(BOTS_HEAD, "text-left")}>Uptime</th>
+                <th className={cx(BOTS_HEAD, BOTS_COL_COMPONENT)}>Component</th>
+                <th className={cx(BOTS_HEAD, BOTS_COL_STATE)}>State</th>
+                <th className={cx(BOTS_HEAD, BOTS_COL_UPTIME)}>Uptime</th>
               </tr>
             </thead>
             <tbody>
               {BOT_ROLES.map(({ role, label }) => (
                 <tr key={role}>
-                  <td className={cx(BOTS_CELL, "text-left")}>{label}</td>
-                  <td className={cx(BOTS_CELL, "text-left")}>
+                  <td className={cx(BOTS_CELL, BOTS_COL_COMPONENT)}>{label}</td>
+                  <td className={cx(BOTS_CELL, BOTS_COL_STATE)}>
                     <BotStatePending />
                   </td>
-                  <td className={cx(BOTS_CELL, "text-left")} />
+                  <td className={cx(BOTS_CELL, BOTS_COL_UPTIME)} />
                 </tr>
               ))}
             </tbody>

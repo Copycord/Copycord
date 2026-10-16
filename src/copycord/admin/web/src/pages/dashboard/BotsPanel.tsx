@@ -12,7 +12,7 @@ import { api, errorText } from "../../lib/api";
 import type { LogStream } from "../../types/api";
 import type { BotRole, BotStatuses, StatusResponse } from "../../types/dashboard";
 import { useNotify } from "../system/providers";
-import { BOT_ROLES, BotStatePending, BOTS_CARD, BOTS_CELL as CELL, BOTS_HEAD as HEAD, BOTS_STATE as STATE, BOTS_TABLE, BOTS_TITLE, GHOST, GHOST_DISABLED } from "./parts";
+import { BOT_ROLES, BotStatePending, BOTS_CARD, BOTS_CELL as CELL, BOTS_COL_COMPONENT, BOTS_COL_STATE, BOTS_COL_UPTIME, BOTS_HEAD as HEAD, BOTS_STATE as STATE, BOTS_TABLE, BOTS_TITLE, GHOST, GHOST_DISABLED } from "./parts";
 import {
   anyRunning,
   displayStatus,
@@ -153,9 +153,9 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
         <table className={BOTS_TABLE}>
           <thead>
             <tr>
-              <th className={cx(HEAD, "w-[120px] text-left")}>Component</th>
-              <th className={cx(HEAD, "w-[180px] text-left max-sm:w-[130px]")}>State</th>
-              <th className={cx(HEAD, "text-left")}>Uptime</th>
+              <th className={cx(HEAD, BOTS_COL_COMPONENT)}>Component</th>
+              <th className={cx(HEAD, BOTS_COL_STATE)}>State</th>
+              <th className={cx(HEAD, BOTS_COL_UPTIME)}>Uptime</th>
             </tr>
           </thead>
           <tbody id="runtime-body">
@@ -165,8 +165,8 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
               const note = displayStatus(s.status);
               return (
                 <tr key={role}>
-                  <td className={cx(CELL, "text-left")}>{label}</td>
-                  <td className={cx(CELL, "text-left")}>
+                  <td className={cx(CELL, BOTS_COL_COMPONENT)}>{label}</td>
+                  <td className={cx(CELL, BOTS_COL_STATE)}>
                     {loaded ? (
                       <span
                         id={`${role}-state`}
@@ -192,7 +192,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                       {note}
                     </span>
                   </td>
-                  <td id={`${role}-uptime`} className={cx(CELL, "text-left")}>
+                  <td id={`${role}-uptime`} className={cx(CELL, BOTS_COL_UPTIME)}>
                     {s.running && s.uptime_sec != null && start != null ? <Uptime start={start} /> : ""}
                   </td>
                 </tr>

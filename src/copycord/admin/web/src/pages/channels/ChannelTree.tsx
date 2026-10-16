@@ -5,7 +5,7 @@
 import { memo } from "react";
 import type { ReactNode } from "react";
 import { ChannelTypeIcon } from "../../components/icons";
-import { cx } from "../../components/ui";
+import { CARD_HOVER, cx } from "../../components/ui";
 import { categoryBadge, channelBadges, chTypeIcon, idSides } from "./model";
 import type { ChannelBadge, ChannelTree as Tree, TreeChannel } from "./model";
 import type { ChannelTreeSlots } from "./slots";
@@ -111,7 +111,7 @@ function NoId({ title }: { title: string }) {
   );
 }
 
-// The card is not clickable (only its ⋯ menu is), so it has no hover state.
+// Same hover as the Guilds tiles (CARD_HOVER); only the ⋯ menu is clickable.
 const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCardProps) {
   const badges = channelBadges(c);
   const ids = idSides(c);
@@ -119,7 +119,7 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCa
     <article
       data-cid={c.id}
       data-orphan={c.orphan ? "1" : undefined}
-      className={cx("ch-card", CARD, c.orphan ? "border-white/12" : "border-border")}
+      className={cx("ch-card", CARD, CARD_HOVER, c.orphan ? "border-white/12" : "border-border")}
     >
       <div className={CARD_HEAD}>
         <span className={CARD_NAME}>

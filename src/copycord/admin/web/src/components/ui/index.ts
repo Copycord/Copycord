@@ -2,7 +2,7 @@ export { Badge, StatusPill } from "./Badge";
 export type { BadgeTone, Status } from "./Badge";
 export { Button } from "./Button";
 export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button";
-export { Card, PageFrame } from "./Card";
+export { Card, CARD_HOVER, PageFrame } from "./Card";
 export { Checkbox, Radio } from "./Checkbox";
 export type { CheckboxProps } from "./Checkbox";
 export { ChipInput, mergeChips, splitChips } from "./ChipInput";

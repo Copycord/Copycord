@@ -2,7 +2,7 @@
 // status pill, the Edit, Enable/Disable, Duplicate and Delete buttons and the
 // per rule forwarded count. Old class names stay as hooks for the e2e specs.
 
-import { cx } from "../../components/ui";
+import { CARD_HOVER, cx } from "../../components/ui";
 import type { ForwardingRule } from "../../types/forwarding";
 import { describeProvider } from "./forwardingApi";
 import {
@@ -79,7 +79,7 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
   const enabled = Boolean(rule.enabled);
   const provider = (rule.provider || "").toLowerCase();
   return (
-    <article data-id={rule.rule_id} className={cx("fwd-card", RULE_CARD, className)}>
+    <article data-id={rule.rule_id} className={cx("fwd-card", RULE_CARD, CARD_HOVER, className)}>
       <header className={RULE_HEADER}>
         <div className={RULE_TITLE_BOX}>
           <h3 className={cx("fwd-card-title", RULE_TITLE)}>{rule.label}</h3>

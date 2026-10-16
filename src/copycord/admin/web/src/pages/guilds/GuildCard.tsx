@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import type { MouseEvent } from "react";
-import { cx } from "../../components/ui";
+import { CARD_HOVER, cx } from "../../components/ui";
 import type { GuildSummary } from "../../types/guilds";
 import { GUILD_BODY, GUILD_CARD, GUILD_NAME, ICON_FRAME } from "./GuildsSkeleton";
 import { FALLBACK_ICON } from "./model";
@@ -34,11 +34,7 @@ export function GuildCard({ guild, menuOpen, onOpenMenu }: GuildCardProps) {
     // .guild-card: 12px card with the old lift on hover; the body is the button that opens the menu.
     <article
       data-gid={guild.id}
-      className={cx(
-        GUILD_CARD,
-        "transition-[border-color,box-shadow,transform,background-color] duration-150",
-        "hover:-translate-y-0.5 hover:border-accent hover:bg-card-hover hover:[box-shadow:0_8px_20px_var(--color-shadow-60)]",
-      )}
+      className={cx(GUILD_CARD, CARD_HOVER)}
     >
       <button
         type="button"

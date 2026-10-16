@@ -28,6 +28,13 @@ export function Card({ title, actions, className, children, ...rest }: CardProps
   );
 }
 
+/** The Guilds tile hover, shared by every grid card (Guilds, Channels, Forwarding rules): a 2px lift, accent
+ *  border, hover fill and a deeper shadow. Live cards only; skeletons keep the base card. */
+export const CARD_HOVER = cx(
+  "transition-[border-color,box-shadow,transform,background-color] duration-150",
+  "hover:-translate-y-0.5 hover:border-accent hover:bg-card-hover hover:[box-shadow:0_8px_20px_var(--color-shadow-60)]",
+);
+
 /** No panel (rule f): a page's title, controls and cards sit on the page with no side inset, so the title, toolbar
  *  and first card start on the container edge like Dashboard, Scraper, Logs and Tasks. */
 export function PageFrame({ className, children, ...rest }: HTMLAttributes<HTMLElement>) {

@@ -45,8 +45,6 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
   // One stream per open; a dropped stream reconnects after RETRY_MS like the old page.
   useEffect(() => {
     if (!which) return;
-    setLines([]);
-    setQuery("");
     follow.current = true;
     let closed = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
@@ -68,6 +66,10 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
       closed = true;
       if (retry) clearTimeout(retry);
       client?.close();
+      // Clear on close, not on open: the next open then never paints the old tail at the top.
+      setLines([]);
+      setQuery("");
+      follow.current = true;
     };
     // notifyRef keeps the stream from restarting when the toast hook rebuilds.
   }, [which, EventSourceImpl]);
@@ -88,10 +90,12 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
 
   const view = filterLines(lines, query);
 
+  // Before paint, so the body opens already at the bottom and new lines keep it
+  // there only while the reader has not scrolled up. Plain assignment, no smooth scroll.
   useLayoutEffect(() => {
     const el = bodyRef.current;
     if (el && follow.current) el.scrollTop = el.scrollHeight;
-  }, [view.length, query]);
+  }, [which, view.length, query]);
 
   if (!open) return null;
 
