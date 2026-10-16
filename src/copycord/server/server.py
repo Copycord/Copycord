@@ -1797,6 +1797,9 @@ class ServerReceiver:
             elif typ == "reload_channel_name_blacklist":
                 await self._load_channel_name_blacklist_cache()
                 logger.info("[chan-blacklist] Cache reloaded from DB")
+
+            elif typ == "fetch_message":
+                return await self._fetch_message_live(data or {})
         finally:
             if token is not None:
                 logctx.guild_name.reset(token)
@@ -7697,6 +7700,105 @@ class ServerReceiver:
             out.append(e)
         return out if changed else embeds
 
+    async def _fetch_message_live(self, data: dict) -> dict:
+        """fetch_message from the admin Messages page: read one message through the bot.
+        data.targets is a list of {channel_id, message_id}, tried in order (the clone first);
+        the reply carries the first one found, or the error of the last one tried."""
+        if not self.bot.is_ready():
+            return {"ok": False, "error": "bot_not_ready", "status": 503}
+        last: dict = {"ok": False, "error": "not_found", "status": 404}
+        for target in data.get("targets") or []:
+            try:
+                cid = int(target.get("channel_id") or 0)
+                mid = int(target.get("message_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not cid or not mid:
+                continue
+            try:
+                ch = self.bot.get_channel(cid) or await self.bot.fetch_channel(cid)
+                m = await ch.fetch_message(mid)
+            except NotFound:
+                last = {"ok": False, "error": "not_found", "status": 404}
+                continue
+            except Forbidden:
+                last = {"ok": False, "error": "forbidden", "status": 403}
+                continue
+            except HTTPException as e:
+                if getattr(e, "status", None) == 429:
+                    retry = getattr(getattr(e, "response", None), "headers", {}) or {}
+                    try:
+                        retry_after = float(retry.get("Retry-After") or 1)
+                    except (TypeError, ValueError):
+                        retry_after = 1.0
+                    return {"ok": False, "error": "rate_limited", "status": 429, "retry_after": retry_after}
+                last = {"ok": False, "error": "discord_error", "status": 502, "detail": str(e)[:200]}
+                continue
+            except Exception as e:
+                last = {"ok": False, "error": "discord_error", "status": 502, "detail": str(e)[:200]}
+                continue
+            author = getattr(m, "author", None)
+            return {
+                "ok": True,
+                "source": target.get("source") or "",
+                "message": {
+                    "id": str(m.id),
+                    "channel_id": str(cid),
+                    "content": m.content or "",
+                    "author": {
+                        "id": str(author.id) if author else None,
+                        "name": getattr(author, "display_name", None) if author else None,
+                        "username": getattr(author, "name", None) if author else None,
+                        "avatar_url": (
+                            str(author.display_avatar.url)
+                            if author and getattr(author, "display_avatar", None)
+                            else None
+                        ),
+                    },
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                    "edited_at": m.edited_at.isoformat() if m.edited_at else None,
+                    "attachments": [
+                        {
+                            "filename": a.filename,
+                            "url": a.url,
+                            "size": a.size,
+                            "content_type": getattr(a, "content_type", None),
+                        }
+                        for a in (m.attachments or [])
+                    ],
+                    "embeds": [
+                        {
+                            "title": e.title or None,
+                            "description": e.description or None,
+                            "url": e.url or None,
+                            "author": getattr(e.author, "name", None) or None,
+                            "footer": getattr(e.footer, "text", None) or None,
+                            "image": getattr(e.image, "url", None) or None,
+                            "thumbnail": getattr(e.thumbnail, "url", None) or None,
+                            "fields": [{"name": f.name, "value": f.value} for f in (e.fields or [])],
+                        }
+                        for e in (m.embeds or [])
+                    ],
+                },
+            }
+        return last
+
+    @staticmethod
+    def _message_meta(msg: dict) -> dict:
+        """Small per-message fields kept for the Messages page; never the content.
+        The original timestamp comes from the message id snowflake in the DB layer."""
+        try:
+            author_id = int(msg.get("author_id")) if msg.get("author_id") else None
+        except (TypeError, ValueError):
+            author_id = None
+        return {
+            "author_id": author_id,
+            "author_name": msg.get("author_display_name") or msg.get("author") or None,
+            "author_username": msg.get("author") or None,
+            "attachment_count": len(msg.get("attachments") or []),
+            "embed_count": len(msg.get("embeds") or []),
+        }
+
     def _record_token_message(
         self,
         *,
@@ -7728,6 +7830,7 @@ class ServerReceiver:
                 webhook_url=None,
                 cloned_guild_id=int(cloned_guild_id) if cloned_guild_id else None,
                 sent_token_id=str(sent_token_id) if sent_token_id else None,
+                **self._message_meta(msg),
             )
         except Exception:
             logger.exception("upsert_message_mapping failed (user token)")
@@ -9135,6 +9238,7 @@ class ServerReceiver:
                             cloned_message_id=cloned_mid,
                             webhook_url=used_url,
                             cloned_guild_id=int(clone_gid) if clone_gid else None,
+                            **self._message_meta(msg),
                         )
 
                         ev = self._inflight_events.get(orig_mid)
@@ -10934,6 +11038,7 @@ class ServerReceiver:
                             cloned_message_id=cloned_mid,
                             webhook_url=used_url,
                             cloned_guild_id=guild.id,
+                            **self._message_meta(data),
                         )
                         logger.debug(
                             "[map] upserted thread message map orig_tid=%s→clone_tid=%s orig_mid=%s→clone_mid=%s",
