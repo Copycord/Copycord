@@ -1,8 +1,8 @@
-// One run at /tasks/runs/:id, the same page for every task type: the header with its status glyph, number,
-// status pill, the "Run actions" menu (Copy run ID, Download report, Cancel while active, Delete when
-// finished) and a row of display chips (mapping, trigger, actor, started, duration, run ID), then one column: the
-// summary card (the counts the type reports as stat tiles, then its Inputs), the Steps card and the
-// collapsed "Report (JSON)" panel. Everything type specific comes from the registry in ./types.
+// One run at /tasks/runs/:id, the same page for every task type: the header with its status glyph, title,
+// number, status badge and the "Run actions" menu (Copy run ID, Download report, Cancel while active,
+// Delete when finished) on one line, then one column: the summary card (the run's facts label over value,
+// the counts the type reports as stat tiles, then its Inputs), the Steps card and the collapsed
+// "Report (JSON)" panel. Everything type specific comes from the registry in ./types.
 
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
@@ -16,7 +16,7 @@ import { ACTIVE_STATUSES } from "../../types/tasks";
 import type { TaskRun, TaskType } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ReportPanel, reportUrl, useRunToast } from "./ReportPanel";
-import { ContextBadge, formatAgo, formatWhen, runConfirm, runDuration, triggerLabel, useNow } from "./RunList";
+import { formatAgo, formatWhen, runConfirm, runDuration, triggeredText, useNow } from "./RunList";
 import { runUrl, useTaskRun } from "./runStore";
 import { RunStatusPill, StatusIcon } from "./StatusIcon";
 import { StepList, formatCount } from "./StepList";
@@ -29,7 +29,6 @@ import {
   INPUTS_LABELS_KEY,
   INPUTS_LIST,
   INPUTS_TITLE,
-  MetaChip,
   RUN_BODY,
   RUN_BREADCRUMB,
   RUN_CARD,
@@ -38,13 +37,13 @@ import {
   RUN_HEADER,
   RUN_HEAD_MAIN,
   RUN_HEAD_ROW,
-  RUN_META,
   RUN_NUMBER,
   RUN_PILL,
   RUN_TITLE,
   RUN_TITLE_ROW,
   RunDetailSkeleton,
-  RunIdChip,
+  RunFacts,
+  RunIdValue,
   STATS_LABELS_KEY,
   STATS_LIST,
   STAT_LABEL,
@@ -71,7 +70,44 @@ export function InputChips({ chips, title }: { chips: string[]; title: string })
   );
 }
 
-/** The counts as stat tiles over the run's Inputs; the tiles show once the run reports counts. */
+/** Copies the run's full id to the clipboard and says so in a toast; the Run ID cell and the Run actions menu. */
+export function useCopyRunId(id: string): () => Promise<void> {
+  const toast = useRunToast();
+  return async () => {
+    try {
+      await navigator.clipboard.writeText(id);
+      toast.show("Run ID copied", { kind: "success" });
+    } catch {
+      toast.show("Could not copy the run ID.", { kind: "error" });
+    }
+  };
+}
+
+/** The run's facts, label over value: Triggered, Mapping, Started (the date, relative in the title), Duration, Run ID. */
+export function RunDetails({ run }: { run: TaskRun }) {
+  const now = useNow(run.status === "running");
+  const duration = runDuration(run, now);
+  const started = run.started_at ?? run.created_at;
+  const copyId = useCopyRunId(run.id);
+  return (
+    <RunFacts
+      testIds={{ started: "run-started", duration: "run-duration", id: "run-id" }}
+      values={{
+        trigger: <span className={FADE_IN}>{triggeredText(run)}</span>,
+        context: <span className={FADE_IN}>{run.context?.label || "-"}</span>,
+        started: (
+          <span className={cx("tabular-nums", FADE_IN)} title={formatAgo(started, now)}>
+            {formatWhen(started) || "-"}
+          </span>
+        ),
+        duration: <span className={cx("tabular-nums", FADE_IN)}>{duration ?? "-"}</span>,
+        id: <RunIdValue id={run.id} onCopy={() => void copyId()} />,
+      }}
+    />
+  );
+}
+
+/** The run's facts, then the counts as stat tiles, then the run's Inputs; the tiles show once the run reports counts. */
 export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<string, unknown> }) {
   const stats = summaryStats(run);
   const rows = describeRunInputs(run, schema);
@@ -81,6 +117,7 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
   return (
     <section aria-label="Summary" className={RUN_CARD}>
       <SummaryHead />
+      <RunDetails run={run} />
       {stats.length ? (
         <dl aria-label="Counts" className={cx(STATS_LIST, FADE_IN)}>
           {stats.map((s) => (
@@ -122,23 +159,13 @@ export function runMenuItems(run: TaskRun, on: { copyId: () => void; download: (
 }
 
 export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string }) {
-  const now = useNow(run.status === "running");
-  const duration = runDuration(run, now);
-  const started = run.started_at ?? run.created_at;
   const navigate = useNavigate();
   const toast = useRunToast();
   const [ask, setAsk] = useState<Ask>(null);
   const [busy, setBusy] = useState(false);
   const name = `${typeTitle} #${run.number}`;
 
-  const copyId = async () => {
-    try {
-      await navigator.clipboard.writeText(run.id);
-      toast.show("Run ID copied", { kind: "success" });
-    } catch {
-      toast.show("Could not copy the run ID.", { kind: "error" });
-    }
-  };
+  const copyId = useCopyRunId(run.id);
 
   const download = () => {
     const a = document.createElement("a");
@@ -206,24 +233,6 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
             items={runMenuItems(run, { copyId: () => void copyId(), download, ask: setAsk })}
           />
         </div>
-      </div>
-      <div className={cx(RUN_META, FADE_IN)}>
-        <ContextBadge run={run} title="Mapping" />
-        <MetaChip glyph="trigger" title="Trigger">
-          {triggerLabel(run)}
-        </MetaChip>
-        <MetaChip glyph="actor" title="Started by">
-          {run.actor}
-        </MetaChip>
-        <MetaChip glyph="started" testId="run-started" title={`Started ${formatWhen(started)}`}>
-          {formatAgo(started, now)}
-        </MetaChip>
-        {duration ? (
-          <MetaChip glyph="duration" testId="run-duration" title="Duration">
-            {duration}
-          </MetaChip>
-        ) : null}
-        <RunIdChip id={run.id} onCopy={() => void copyId()} />
       </div>
       <ConfirmDialog open={ask !== null} {...runConfirm(ask ?? "cancel", name)} onResult={(ok) => void onConfirm(ok)} />
     </header>

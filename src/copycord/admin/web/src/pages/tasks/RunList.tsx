@@ -3,33 +3,30 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Badge } from "../../components/ui/Badge";
 import type { ConfirmOptions } from "../../components/ui/ConfirmDialog";
 import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
-import { RunStatusPill, StatusIcon } from "./StatusIcon";
+import { StatusIcon } from "./StatusIcon";
 import {
   AUTO_REFRESH_LABEL,
   AUTO_REFRESH_OPTIONS,
   BUSY,
-  CONTEXT_CHIP,
   FADE_IN,
   FRAME_HEAD,
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
-  LIST_BODY,
   LIST_FRAME,
-  MetaChip,
+  MetaGlyph,
   ROW,
-  ROW_CHIPS,
-  ROW_CHIPS_EXTRA,
   ROW_ID,
   ROW_MAIN,
   ROW_MENU,
+  ROW_META,
   ROW_NAME,
+  ROW_TIME,
   ROW_TIMING,
   RUN_COUNT,
   RunCountLoading,
@@ -42,7 +39,7 @@ export { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS } from "./TasksSkeleton";
 // rerun: runs stored before Re-run was removed still say how they started; nothing starts one now.
 const TRIGGER: Record<string, string> = { manual: "Manual", rerun: "Re-run", api: "API" };
 
-/** How the run started, for the trigger chip: "Manual". */
+/** How the run started: "Manual". */
 export function triggerLabel(run: Pick<TaskRun, "trigger">): string {
   return TRIGGER[run.trigger] ?? "Other";
 }
@@ -102,23 +99,26 @@ export function runDuration(run: TaskRun, now: number): string | null {
   return Number.isNaN(start) || Number.isNaN(end) ? null : formatDuration(end - start);
 }
 
-/** The branch-like pill: the mapping the run works on. */
-export function ContextBadge({ run, title }: { run: TaskRun; title?: string }) {
-  if (!run.context?.label) return null;
-  return (
-    <Badge tone="neutral" className={CONTEXT_CHIP} title={title}>
-      {run.context.label}
-    </Badge>
-  );
+/** "Manual run by admin": how the run started and who started it, plain text for the row and the run page. */
+export function triggeredText(run: Pick<TaskRun, "trigger" | "actor">): string {
+  return run.actor ? `${triggerLabel(run)} run by ${run.actor}` : `${triggerLabel(run)} run`;
 }
 
+/** The row's right side: started as relative time (the date in the title) over the duration, each after a small glyph. */
 export function RunTiming({ run }: { run: TaskRun }) {
   const now = useNow(run.status === "running");
   const duration = runDuration(run, now);
+  const started = run.started_at ?? run.created_at;
   return (
     <div className={ROW_TIMING}>
-      <span title="Started">{formatWhen(run.started_at ?? run.created_at)}</span>
-      {duration ? <span title="Duration">{duration}</span> : null}
+      <span className={ROW_TIME} title={`Started ${formatWhen(started)}`}>
+        <MetaGlyph name="started" />
+        {formatAgo(started, now)}
+      </span>
+      <span className={ROW_TIME} title="Duration">
+        <MetaGlyph name="duration" />
+        {duration ?? "-"}
+      </span>
     </div>
   );
 }
@@ -130,8 +130,9 @@ export interface RunRowProps {
   actions?: ReactNode;
 }
 
-/** One run: the task name and number over the run ID, then the run page's status pill and chips, the timing and the menu. */
+/** One run: the glyph (its status in the colour and title), the task name and number over a plain meta line, the timing and the menu. */
 export function RunRow({ run, typeTitle, actions }: RunRowProps) {
+  const mapping = run.context?.label;
   return (
     <li className={ROW} data-run-id={run.id}>
       <StatusIcon status={run.status} />
@@ -141,21 +142,13 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
             {typeTitle} #{run.number}
           </Link>
         </div>
-        <div className={ROW_ID} title={`Run ID ${run.id}`}>
-          {run.id.slice(0, 8)}
+        <div className={ROW_META}>
+          <span className={ROW_ID} title={`Run ID ${run.id}`}>
+            {run.id.slice(0, 8)}
+          </span>
+          {` · ${triggeredText(run)}`}
+          {mapping ? <span title="Mapping">{` · ${mapping}`}</span> : null}
         </div>
-      </div>
-      <div className={ROW_CHIPS}>
-        <RunStatusPill status={run.status} />
-        <span className={ROW_CHIPS_EXTRA}>
-          <ContextBadge run={run} title="Mapping" />
-          <MetaChip glyph="trigger" title="Trigger">
-            {triggerLabel(run)}
-          </MetaChip>
-          <MetaChip glyph="actor" title="Started by">
-            {run.actor}
-          </MetaChip>
-        </span>
       </div>
       <RunTiming run={run} />
       {actions}
@@ -246,21 +239,19 @@ export function RunList({
         </div>
         {filters ? <div className={FRAME_HEAD_FILTERS}>{filters}</div> : null}
       </div>
-      <div className={LIST_BODY}>
-        {loading ? (
-          <RunRowsLoading />
-        ) : runs.length === 0 ? (
-          <div aria-busy={refreshing || undefined} className={cx(FADE_IN, refreshing && BUSY)}>
-            {empty ?? <EmptyState plain title="No task runs yet" />}
-          </div>
-        ) : (
-          <ul aria-label="Task runs" aria-busy={refreshing || undefined} className={cx("m-0 list-none p-0", FADE_IN, refreshing && BUSY)}>
-            {runs.map((r) => (
-              <RunRow key={r.id} run={r} typeTitle={typeTitle(r.type)} actions={rowActions?.(r)} />
-            ))}
-          </ul>
-        )}
-      </div>
+      {loading ? (
+        <RunRowsLoading />
+      ) : runs.length === 0 ? (
+        <div aria-busy={refreshing || undefined} className={cx(FADE_IN, refreshing && BUSY)}>
+          {empty ?? <EmptyState plain title="No task runs yet" />}
+        </div>
+      ) : (
+        <ul aria-label="Task runs" aria-busy={refreshing || undefined} className={cx("m-0 list-none p-0", FADE_IN, refreshing && BUSY)}>
+          {runs.map((r) => (
+            <RunRow key={r.id} run={r} typeTitle={typeTitle(r.type)} actions={rowActions?.(r)} />
+          ))}
+        </ul>
+      )}
       {footer}
     </div>
   );

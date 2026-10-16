@@ -6,7 +6,7 @@
 import { Badge, type BadgeTone } from "../../components/ui/Badge";
 import { cx } from "../../components/ui/cx";
 import type { RunStatus, StepState } from "../../types/tasks";
-import { STATUS_BOX } from "./TasksSkeleton";
+import { RUN_PILL_BADGE, STATUS_BOX } from "./TasksSkeleton";
 
 export const STATUS_LABEL: Record<RunStatus | StepState, string> = {
   queued: "Queued",
@@ -46,13 +46,13 @@ const PILL_TONE: Record<RunStatus, BadgeTone> = {
   cancelled: "neutral",
 };
 
-/** A run's status as a pill: the app's Badge, a 12 px glyph and the status word. The run page header and the run list rows. */
+/** A run's status as a badge: the app's Badge at 24 px with 13 px text, a 14 px glyph and the status word. The run page header. */
 export function RunStatusPill({ status, testId, className }: { status: RunStatus; testId?: string; className?: string }) {
   return (
     <span data-testid={testId} className={cx("inline-flex", className)}>
-      <Badge tone={PILL_TONE[status] ?? "neutral"}>
+      <Badge tone={PILL_TONE[status] ?? "neutral"} className={RUN_PILL_BADGE}>
         <span aria-hidden="true" className="inline-flex">
-          <StatusIcon status={status} size={12} />
+          <StatusIcon status={status} size={14} />
         </span>
         {STATUS_LABEL[status]}
       </Badge>

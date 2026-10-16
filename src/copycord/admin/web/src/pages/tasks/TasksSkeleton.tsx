@@ -34,11 +34,8 @@ export const FADE_IN = "transition-opacity duration-[180ms] ease-out starting:op
 /** Held content while a refetch is out: dimmed only once the fetch passes 300 ms, so a quick answer never flickers. */
 export const BUSY = "opacity-60 delay-300";
 export const FRAME = "overflow-hidden rounded-card border border-border bg-card";
-/** The runs card: FRAME without the clip, so an open filter list is never cut off by the card's edge. */
+/** The runs card: FRAME without the clip, so an open filter list hangs past the card's bottom edge, over the page. */
 export const LIST_FRAME = "rounded-card border border-border bg-card";
-/** The rows or the empty state under the frame head: never shorter than the tallest filter list (180 px and its
- *  4 px gap), so with one run or none an open list still ends inside the card. */
-export const LIST_BODY = "min-h-[184px]";
 export const FRAME_HEAD = "flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5 text-sm";
 /** Left of the frame head: the run count and Auto-refresh. */
 export const FRAME_HEAD_LEFT = "flex items-center gap-4";
@@ -48,17 +45,18 @@ export const RUN_COUNT = "font-semibold text-text";
 /** The pager under the runs (RunPager). */
 export const PAGER = "flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted";
 /** The box of a run row; ROW adds the hover tint. The skeleton row uses the box alone so both stand equally tall. */
-export const ROW_BOX = "flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0";
-export const ROW = `${ROW_BOX} hover:bg-rail-hover`;
-/** A run row's left column: the task name and number over the run ID, 38 px like the timing column. */
+export const ROW_BOX = "flex min-h-14 items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0";
+export const ROW = `${ROW_BOX} transition-colors hover:bg-rail-hover`;
+/** A run row's left column: the task name and number over the plain meta line. */
 export const ROW_MAIN = "min-w-0 flex-1";
-export const ROW_NAME = "truncate text-sm leading-5 font-medium";
-export const ROW_ID = "mt-0.5 truncate font-mono text-xs leading-4 text-muted";
-/** The row's chips, as on the run page: the status pill, then mapping, trigger and actor (hidden on narrow screens). */
-export const ROW_CHIPS = "flex shrink-0 items-center gap-2";
-export const ROW_CHIPS_EXTRA = "flex items-center gap-2 max-lg:hidden";
-/** Started over duration, 13 px muted with tabular numbers. */
-export const ROW_TIMING = "flex w-[170px] shrink-0 flex-col gap-0.5 text-[13px] leading-[18px] text-muted tabular-nums max-md:w-auto";
+export const ROW_NAME = "truncate text-sm leading-5 font-semibold";
+/** "0d88ac5a · Manual run by admin · Clone-1", 13 px muted text, no pills. */
+export const ROW_META = "mt-1 truncate text-[13px] leading-[18px] text-muted";
+/** The 8-char run ID at the start of the meta line. */
+export const ROW_ID = "font-mono";
+/** Started (relative) over duration, each after a small glyph, 13 px muted with tabular numbers. */
+export const ROW_TIMING = "flex w-[96px] shrink-0 flex-col gap-1 text-[13px] leading-[18px] text-muted tabular-nums max-sm:hidden";
+export const ROW_TIME = "flex items-center gap-1.5 whitespace-nowrap";
 export const ROW_MENU = "shrink-0";
 export const SEARCH_FORM = "mb-4 flex";
 export const SEARCH_INPUT = "min-w-0 flex-1 rounded-r-none";
@@ -68,46 +66,41 @@ export const SEARCH_BUTTON = "rounded-l-none border-l-0";
 export const RUN_HEADER = "mb-4";
 export const RUN_BREADCRUMB = "mb-2 text-sm text-muted";
 export const RUN_CRUMB = "text-accent no-underline hover:underline";
-/** The glyph, title and status pill on the left, the run's actions menu on the right. */
-export const RUN_HEAD_ROW = "flex items-center justify-between gap-3";
+/** The glyph, title and status badge on the left, the run's actions menu on the right, all on one centred line. */
+export const RUN_HEAD_ROW = "flex min-h-9 items-center justify-between gap-3";
 /** The header's glyph beside its title row, as in a run list row. */
 export const RUN_HEAD_MAIN = "flex min-w-0 items-center gap-3";
-/** The type's title, the run's number, its status pill and a failed run's error, on one line. */
+/** The type's title, the run's number, its status badge and a failed run's error, on one line. */
 export const RUN_TITLE_ROW = "flex min-w-0 items-center gap-2";
-export const RUN_TITLE = "m-0 shrink-0 text-[22px] font-bold text-text";
-export const RUN_NUMBER = "shrink-0 text-[22px] text-muted";
-/** The status pill beside the number: the app's Badge, a small glyph and the status word. */
-export const RUN_PILL = "ml-1 shrink-0";
+export const RUN_TITLE = "m-0 shrink-0 text-[22px] leading-8 font-bold text-text";
+export const RUN_NUMBER = "shrink-0 text-[22px] leading-8 text-muted";
+/** The status badge beside the number: the app's Badge at 24 px with 13 px text, a 14 px glyph and the status word. */
+export const RUN_PILL = "ml-2 shrink-0";
+export const RUN_PILL_BADGE = "gap-1.5 px-2.5 text-[13px]! leading-[18px]!";
 
 /** A type's page, where the run page's breadcrumb leads. */
 export function typeUrl(key: string): string {
   return `/tasks?type=${encodeURIComponent(key)}`;
 }
-/** The meta chips under the title, on the cards' left edge: each a 24 px Badge, so the row is that tall. */
-export const RUN_META = "mt-3 flex min-h-6 flex-wrap items-center gap-2 text-xs text-muted";
-/** A failed run's error after the status pill: quiet text, cut to one line, the whole of it in the title. */
+/** A failed run's error after the status badge: quiet text, cut to one line, the whole of it in the title. */
 export const RUN_ERROR = "min-w-0 max-w-[48ch] truncate text-sm text-muted";
-/** A display chip of the meta row: the neutral Badge in normal weight. Not a button. */
-export const RUN_CHIP = "font-normal";
-/** The mapping chip: the run list's branch-like pill (ContextBadge). */
-export const CONTEXT_CHIP = "border-transparent bg-brand-ghost font-mono font-normal text-accent";
-/** The run ID chip's copy button, a 16 px glyph inside the chip's line. */
+/** The run's facts at the top of the Summary card: label-over-value cells in one row that wraps on narrow screens. */
+export const RUN_FACTS = "m-0 flex flex-wrap gap-x-10 gap-y-3 border-b border-border px-4 py-3";
+export const RUN_FACT = "min-w-0";
+export const RUN_FACT_LABEL = "text-xs leading-4 text-muted";
+export const RUN_FACT_VALUE = "m-0 mt-1 flex items-center gap-1.5 text-sm leading-6 text-text";
+/** The Run ID cell's copy button, a 24 px hit box around a 14 px glyph, inside the value's line. */
 export const RUN_ID_COPY =
-  "-mr-1 inline-flex size-4 cursor-pointer items-center justify-center rounded border-0 bg-transparent p-0 text-muted " +
-  "hover:text-text focus-visible:outline-2 focus-visible:outline-accent/70 disabled:cursor-default";
+  "inline-flex size-6 cursor-pointer items-center justify-center rounded-btn border-0 bg-transparent p-0 text-muted " +
+  "hover:bg-rail-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent/70 disabled:cursor-default";
+/** The fact labels in order; labels, so the skeleton prints them as text. */
+export const RUN_FACT_LABELS = { trigger: "Triggered", context: "Mapping", started: "Started", duration: "Duration", id: "Run ID" } as const;
 /** How many of a run's channels its Inputs show as chips before "+N more". */
 export const INPUT_CHIPS_MAX = 4;
 /** The chips of one Inputs value: one 20 px line that never wraps, so the row keeps its text height. */
 export const INPUT_CHIPS = "flex min-w-0 items-center gap-1 overflow-hidden";
 
-const CHIP_GLYPHS = {
-  trigger: <path d="M5.5 3.5v9l7-4.5z" fill="currentColor" />,
-  actor: (
-    <>
-      <circle cx="8" cy="5.5" r="2.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M2.75 14c.7-2.75 2.8-4.25 5.25-4.25s4.55 1.5 5.25 4.25" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </>
-  ),
+const META_GLYPHS = {
   started: (
     <>
       <rect x="2.25" y="3.25" width="11.5" height="10.5" rx="1.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -128,50 +121,60 @@ const CHIP_GLYPHS = {
   ),
 } as const;
 
-/** A 12 px glyph in a chip: a label, never data, so the skeleton draws it too. */
-export function ChipGlyph({ name }: { name: keyof typeof CHIP_GLYPHS }) {
+/** A small muted glyph before a value (the row's timing lines, the Run ID copy button): a label, so the skeleton draws it too. */
+export function MetaGlyph({ name, size = 12 }: { name: keyof typeof META_GLYPHS; size?: number }) {
   return (
-    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false" className="shrink-0 text-muted">
-      {CHIP_GLYPHS[name]}
+    <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" focusable="false" className="shrink-0 text-muted">
+      {META_GLYPHS[name]}
     </svg>
   );
 }
 
-/** One display chip of the run's meta row; the skeleton passes a bar as the value. */
-export function MetaChip({ glyph, title, testId, children }: { glyph: keyof typeof CHIP_GLYPHS; title?: string; testId?: string; children: ReactNode }) {
+/** The status badge's box as itself; its glyph and word are the run's status, so they shimmer. */
+export function StatusPillLoading({ testId, className }: { testId?: string; className?: string }) {
   return (
-    <span data-testid={testId} className="inline-flex">
-      <Badge className={RUN_CHIP} title={title}>
-        <ChipGlyph name={glyph} />
-        {children}
+    <span data-testid={testId} className={cx("inline-flex", className)}>
+      <Badge className={RUN_PILL_BADGE}>
+        <Skeleton width={14} height={14} rounded="rounded-full" />
+        <Skeleton.Text>Running</Skeleton.Text>
       </Badge>
     </span>
   );
 }
 
-/** "ID 4f2a9c1e" and its copy button; the full id is in the title. id null: a bar and the button inert. */
-export function RunIdChip({ id, onCopy }: { id: string | null; onCopy?: () => void }) {
+export type RunFactKey = keyof typeof RUN_FACT_LABELS;
+
+/** The facts grid of the Summary card: each label as text over its value; the skeleton passes bars as the values. */
+export function RunFacts({ values, testIds = {} }: { values: Record<RunFactKey, ReactNode>; testIds?: Partial<Record<RunFactKey, string>> }) {
   return (
-    <span data-testid="run-id" className="inline-flex">
-      <Badge className={RUN_CHIP} title={id ? `Run ID ${id}` : undefined}>
-        <span className="text-muted">ID</span>
-        {id ? <span className="font-mono">{id.slice(0, 8)}</span> : <Skeleton.Text className="font-mono">00000000</Skeleton.Text>}
-        <button type="button" aria-label="Copy run ID" title="Copy run ID" disabled={!id} onClick={onCopy} className={RUN_ID_COPY}>
-          <ChipGlyph name="copy" />
-        </button>
-      </Badge>
-    </span>
+    <dl aria-label="Run details" className={RUN_FACTS}>
+      {(Object.keys(RUN_FACT_LABELS) as RunFactKey[]).map((k) => (
+        <div key={k} className={RUN_FACT}>
+          <dt className={RUN_FACT_LABEL}>{RUN_FACT_LABELS[k]}</dt>
+          <dd data-testid={testIds[k]} className={RUN_FACT_VALUE}>
+            {values[k]}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
-/** The status pill's box as itself; its glyph and word are the run's status, so they shimmer. */
-export function StatusPillLoading({ testId, className }: { testId?: string; className?: string }) {
+
+/** The Run ID value: the first 8 characters in mono and the copy button; the full id in the title. id null: a bar, the button inert. */
+export function RunIdValue({ id, onCopy }: { id: string | null; onCopy?: () => void }) {
   return (
-    <span data-testid={testId} className={cx("inline-flex", className)}>
-      <Badge>
-        <Skeleton width={12} height={12} rounded="rounded-full" />
-        <Skeleton.Text>Running</Skeleton.Text>
-      </Badge>
-    </span>
+    <>
+      {id ? (
+        <span className="font-mono" title={`Run ID ${id}`}>
+          {id.slice(0, 8)}
+        </span>
+      ) : (
+        <Skeleton.Text className="font-mono">00000000</Skeleton.Text>
+      )}
+      <button type="button" aria-label="Copy run ID" title="Copy run ID" disabled={!id} onClick={onCopy} className={RUN_ID_COPY}>
+        <MetaGlyph name="copy" size={14} />
+      </button>
+    </>
   );
 }
 
@@ -421,10 +424,10 @@ export function RailEntryLoading() {
 }
 
 /**
- * One loading row in the shape of RunRow (RunList.tsx): the same box, the status glyph, the name and run
- * ID lines, the status pill and the mapping, trigger and actor chips as their own boxes with bars inside,
- * the two timing lines and the row menu button, each in the same type size and padding as the real
- * element, so the first page lands without the list jumping.
+ * One loading row in the shape of RunRow (RunList.tsx): the same box, the status glyph, bars on the name
+ * line and the plain meta line, the two timing lines with their glyphs as themselves and bars for the
+ * values, and the row menu button, each in the same type size and padding as the real element, so the
+ * first page lands without the list jumping.
  */
 function RunRowLoading({ nameWidth }: { nameWidth: number }) {
   return (
@@ -434,27 +437,17 @@ function RunRowLoading({ nameWidth }: { nameWidth: number }) {
       </span>
       <div className={ROW_MAIN}>
         <TextBar width={nameWidth} className={ROW_NAME} />
-        <TextBar width={64} className={ROW_ID} />
-      </div>
-      <div className={ROW_CHIPS}>
-        <StatusPillLoading />
-        <span className={ROW_CHIPS_EXTRA}>
-          <span className="inline-flex">
-            <Badge className={CONTEXT_CHIP}>
-              <Skeleton.Text>Main mapping</Skeleton.Text>
-            </Badge>
-          </span>
-          <MetaChip glyph="trigger">
-            <Skeleton.Text>Manual</Skeleton.Text>
-          </MetaChip>
-          <MetaChip glyph="actor">
-            <Skeleton.Text>admin</Skeleton.Text>
-          </MetaChip>
-        </span>
+        <TextBar width={nameWidth + 90} className={ROW_META} />
       </div>
       <div className={ROW_TIMING}>
-        <TextBar width={128} />
-        <TextBar width={36} />
+        <span className={ROW_TIME}>
+          <MetaGlyph name="started" />
+          <Skeleton.Text>5h ago</Skeleton.Text>
+        </span>
+        <span className={ROW_TIME}>
+          <MetaGlyph name="duration" />
+          <Skeleton.Text>1m 55s</Skeleton.Text>
+        </span>
       </div>
       <div className={ROW_MENU}>
         {/* The row menu button box with its glyph hidden. */}
@@ -524,8 +517,8 @@ export interface RunDetailSkeletonProps {
 /**
  * The run page until the run answers, also the page's own loading state: the header with the type's
  * title as text when the run's type is known (bars in its place only when it cannot be), bars for the
- * glyph and number, the status pill's box with bars inside, the "Run actions" button as itself and
- * inert, the meta chips as themselves with bars where their values go, the summary card with
+ * glyph and number, the status badge's box with bars inside and the "Run actions" button as itself and
+ * inert on the same line, the summary card with the fact labels as text over bars, then
  * the tile and Inputs labels the last run page showed and bars for their values (a backfill run's five
  * tiles and six rows, all bars, on a first visit), the Steps card with its real head (bars for the counts
  * and the overall bar, the real filter) and as many bar rows as the last run showed, and the collapsed
@@ -565,7 +558,7 @@ export function RunDetailSkeleton({
               </span>
               <div className={RUN_TITLE_ROW}>
                 <h2 className={RUN_TITLE}>{title ?? <TextBar width={180} />}</h2>
-                <Skeleton.Text className="shrink-0 text-[22px]">#00</Skeleton.Text>
+                <Skeleton.Text className="shrink-0 text-[22px] leading-8">#00</Skeleton.Text>
                 <StatusPillLoading testId="run-status" className={RUN_PILL} />
               </div>
             </div>
@@ -573,30 +566,19 @@ export function RunDetailSkeleton({
               <RowMenu kind="channel" label="Run actions" items={[]} disabled />
             </div>
           </div>
-          <div className={RUN_META}>
-            <span className="inline-flex">
-              <Badge className={CONTEXT_CHIP}>
-                <Skeleton.Text>Main mapping</Skeleton.Text>
-              </Badge>
-            </span>
-            <MetaChip glyph="trigger">
-              <Skeleton.Text>Manual</Skeleton.Text>
-            </MetaChip>
-            <MetaChip glyph="actor">
-              <Skeleton.Text>admin</Skeleton.Text>
-            </MetaChip>
-            <MetaChip glyph="started">
-              <Skeleton.Text>12m ago</Skeleton.Text>
-            </MetaChip>
-            <MetaChip glyph="duration">
-              <Skeleton.Text>1m 29s</Skeleton.Text>
-            </MetaChip>
-            <RunIdChip id={null} />
-          </div>
         </header>
         <div className={RUN_BODY}>
           <section aria-label="Summary" className={RUN_CARD}>
             <SummaryHead />
+            <RunFacts
+              values={{
+                trigger: <Skeleton.Text>Manual run by admin</Skeleton.Text>,
+                context: <Skeleton.Text>Main mapping</Skeleton.Text>,
+                started: <Skeleton.Text>Oct 15, 5:06 PM EDT</Skeleton.Text>,
+                duration: <Skeleton.Text>1m 55s</Skeleton.Text>,
+                id: <RunIdValue id={null} />,
+              }}
+            />
             {stats.length ? (
               <dl className={STATS_LIST}>
                 {stats.map((label, i) => (
@@ -743,9 +725,7 @@ export function TasksSkeleton() {
                     ))}
                   </div>
                 </div>
-                <div className={LIST_BODY}>
-                  <RunRowsLoading />
-                </div>
+                <RunRowsLoading />
                 <RunPager page={Number(params.get("page")) || 1} pages={null} />
               </div>
             </>
