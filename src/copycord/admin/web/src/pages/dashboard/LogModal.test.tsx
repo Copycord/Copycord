@@ -80,6 +80,9 @@ describe("LogModal scroll position", () => {
     vi.useFakeTimers();
     try {
       render(<LogModal which="server" onClose={() => {}} EventSourceImpl={EsImpl} />);
+      // A slow stream: nothing yet after 400 ms, so the shimmer stays up.
+      act(() => vi.advanceTimersByTime(400));
+      expect(document.querySelector("[data-testid=log-loading]")).not.toBeNull();
       act(() => last().emit(many(50)));
       act(() => vi.advanceTimersByTime(100));
       act(() => last().emit(many(50, "batch2")));

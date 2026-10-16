@@ -18,10 +18,11 @@ import { appendCapped, clearLogs, filterLines, parseLogData } from "./model";
 const STICK_PX = 24;
 const RETRY_MS = 1500;
 // The server sends the backlog in 50-line batches; the body stays hidden until
-// they stop arriving (quiet for SETTLE_MS, at most SETTLE_MAX_MS) so it appears
-// once, already at the bottom, instead of visibly scrolling down batch by batch.
+// they stop arriving (quiet for SETTLE_MS after a batch) so it appears once,
+// already at the bottom, instead of visibly scrolling down batch by batch. An
+// empty log sends no batch at all, so SETTLE_MAX_MS ends the wait regardless.
 const SETTLE_MS = 150;
-const SETTLE_MAX_MS = 1000;
+const SETTLE_MAX_MS = 2500;
 // Log lines shimmer in the body while the backlog loads (widths vary like real lines).
 const PLACEHOLDER_WIDTHS = ["72%", "58%", "84%", "46%", "77%", "63%", "88%", "52%", "69%", "41%", "80%", "57%"];
 
@@ -60,7 +61,6 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
     let quiet: ReturnType<typeof setTimeout> | undefined;
     const settle = () => setSettled(true);
     const cap = setTimeout(settle, SETTLE_MAX_MS);
-    quiet = setTimeout(settle, SETTLE_MS);
     const start = () => {
       client = logStream(which, {
         EventSourceImpl,
