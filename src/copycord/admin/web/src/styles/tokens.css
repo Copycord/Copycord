@@ -1,7 +1,7 @@
-/* Tailwind entry and design tokens. The palette: near-black neutral surfaces
-   barely tinted toward the brand hue (base #0c0c14, surface #12121b, elevated
-   #181826, hover #1e1e2d), hairline borders (#262637, strong #34344a), three
-   text steps (#ededf4, #a3a3b8, #6e6e86), the brand purple as the one accent,
+/* Tailwind entry and design tokens. The palette: near-black surfaces barely
+   tinted toward the brand hue (base #0c0c14, surface #12121b), a near-neutral
+   grey for inputs and raised cards (elevated #1a1a1e, hover #212126), hairline
+   borders (#262637, strong #34344a), three text steps (#ededf4, #a3a3b8, #6e6e86), the brand purple as the one accent,
    and semantic status colours: success #3ecf8e, warning #f5a524 (cancelled and
    stopped too), danger #f0506e, info #4f9cf7, neutral #8b8b9e. */
 @import "tailwindcss";
@@ -10,7 +10,7 @@
   --color-page: #0c0c14;
   --color-bg2: #262637;
   --color-bg-2: #12121b;
-  --color-bg-3: #181826;
+  --color-bg-3: #1a1a1e;
   --color-card: #12121b;
   --color-card-solid: #12121b;
   --color-text: #ededf4;
@@ -33,7 +33,7 @@
   /* Warning: cancelled, stopped, degraded, customised. */
   --color-custom-ink: #f5a524;
   --color-progress: #3ecf8e;
-  --color-control: #181826;
+  --color-control: #1a1a1e;
   --color-rail-hover: rgba(255, 255, 255, 0.05);
   --color-rail-active: rgba(139, 92, 246, 0.16);
 
@@ -77,7 +77,7 @@
 @theme static {
   --color-border-strong: #34344a;
   --color-surface-deep: #12121b;
-  --color-control-top: #181826;
+  --color-control-top: #1a1a1e;
   --color-text-soft: #ededf4;
   --color-text-status: #a3a3b8;
   --color-accent-soft: #c4b5fd;
@@ -85,8 +85,8 @@
   --color-good-deep: #23a06a;
   --color-primary-hover: #9366f9;
   --color-primary-edge: #4c2d7a;
-  --color-secondary-top: #181826;
-  --color-secondary-bottom: #181826;
+  --color-secondary-top: #1a1a1e;
+  --color-secondary-bottom: #1a1a1e;
   --color-danger-soft: #f4728b;
   --color-danger-strong: #d9405d;
   --color-danger-deep: #c4304f;
@@ -110,9 +110,9 @@
 
   /* Dashboard */
   --color-field-readonly: #12121b;
-  --color-card-hover: rgba(30, 30, 45, 0.6);
+  --color-card-hover: rgba(33, 33, 38, 0.6);
   --color-log-bg: #0c0c14;
-  --color-log-input-bg: #181826;
+  --color-log-input-bg: #1a1a1e;
   --color-log-input-edge: #34344a;
   --color-log-input-focus: #8b5cf6;
   --color-table-rule: #34344a;
@@ -205,12 +205,12 @@
   /* Scraper */
   --color-good-soft: #3ecf8e;
   --color-caution: #f5a524;
-  --color-control-a35: rgba(24, 24, 38, 0.35);
-  --color-control-a40: rgba(24, 24, 38, 0.4);
-  --color-control-a50: rgba(24, 24, 38, 0.5);
-  --color-control-a60: rgba(24, 24, 38, 0.6);
-  --color-control-a70: rgba(24, 24, 38, 0.7);
-  --color-control-a80: rgba(24, 24, 38, 0.8);
+  --color-control-a35: rgba(26, 26, 30, 0.35);
+  --color-control-a40: rgba(26, 26, 30, 0.4);
+  --color-control-a50: rgba(26, 26, 30, 0.5);
+  --color-control-a60: rgba(26, 26, 30, 0.6);
+  --color-control-a70: rgba(26, 26, 30, 0.7);
+  --color-control-a80: rgba(26, 26, 30, 0.8);
   --color-good-soft-a10: rgba(62, 207, 142, 0.1);
   --color-good-soft-a25: rgba(62, 207, 142, 0.25);
   --color-good-a8: rgba(62, 207, 142, 0.08);
