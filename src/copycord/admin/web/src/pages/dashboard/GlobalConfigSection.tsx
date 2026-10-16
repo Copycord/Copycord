@@ -292,7 +292,7 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
                 className={cx(
                   "bot-invite-btn",
                   INVITE_LINK,
-                  invite ? "opacity-80 hover:opacity-100" : cx("bot-invite-disabled", INVITE_OFF),
+                  !invite && cx("bot-invite-disabled", INVITE_OFF),
                 )}
               >
                 <InviteIcon />

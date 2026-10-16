@@ -75,9 +75,10 @@ export function BackupIcon() {
   );
 }
 
-/** The Add Bot to Server link; INVITE_OFF until the bot's client id is known. */
-export const INVITE_LINK = "inline-flex items-center gap-[5px] text-xs font-medium text-accent no-underline transition-opacity max-sm:self-start";
-export const INVITE_OFF = "pointer-events-none cursor-default opacity-30";
+/** The Add Bot to Server link in the full accent (6.6:1 on the card, rule b); INVITE_OFF, muted and dimmed as a disabled
+ *  control, until the bot's client id is known. */
+export const INVITE_LINK = "inline-flex items-center gap-[5px] text-xs font-medium text-accent no-underline hover:underline max-sm:self-start";
+export const INVITE_OFF = "pointer-events-none cursor-default text-muted! opacity-60";
 
 export function InviteIcon() {
   return (
