@@ -5,6 +5,7 @@
 
 import type { ButtonHTMLAttributes } from "react";
 import { Button, Card, Skeleton, cx } from "../../components/ui";
+import { DANGER_OUTLINE } from "../../components/ui/Button";
 import { readLastCount } from "../../components/ui/lastCount";
 
 /** The rule grid, shared with the page so both lay the tiles out the same way. */
@@ -60,7 +61,7 @@ export function FooterButton({
       className={cx(
         FOOTER_BUTTON,
         danger
-          ? "text-accent enabled:hover:border-danger enabled:hover:bg-line-1 enabled:hover:text-danger"
+          ? DANGER_OUTLINE
           : "text-accent enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-line-1 enabled:hover:shadow-soft",
         className,
       )}

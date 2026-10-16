@@ -3,6 +3,7 @@
 // page and LogRow take their shared classes and loading rows from here.
 
 import { cx } from "../../components/ui/cx";
+import { DANGER_OUTLINE } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { LogsIcon } from "./icons";
@@ -19,7 +20,7 @@ export const ICON_BTN =
 export const REFRESH_BTN = cx(ICON_BTN, "enabled:hover:border-accent/40 enabled:hover:bg-primary-a10 enabled:hover:text-accent");
 export const CLEAR_ALL_BTN = cx(
   ICON_BTN,
-  "enabled:hover:border-danger-a30 enabled:hover:bg-danger-a10 enabled:hover:text-danger-soft",
+  DANGER_OUTLINE,
 );
 
 export const TOOLBAR = cx(

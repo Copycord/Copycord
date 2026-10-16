@@ -417,7 +417,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
             >
               {running ? "Stop" : "Test All"}
             </button>
-            <button id="srv-proxy-clear" type="button" onClick={() => void clearAll()} className={GHOST_XS_RED}>
+            <button id="srv-proxy-clear" type="button" disabled={!proxies.length} onClick={() => void clearAll()} className={GHOST_XS_RED}>
               Clear
             </button>
           </HintRow>

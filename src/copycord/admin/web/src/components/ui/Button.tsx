@@ -14,7 +14,8 @@ export type ButtonVariant =
   | "outline"
   | "ghost-red"
   | "ghost-purple"
-  | "ghost-green";
+  | "ghost-green"
+  | "danger-outline";
 export type ButtonSize = "sm" | "md" | "lg" | "confirm";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -38,6 +39,11 @@ export const GHOST_TINT_FOCUS =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28";
 export const GHOST_RED_HOVER = "enabled:hover:border-danger enabled:hover:text-danger";
 export const GHOST_GREEN_HOVER = "enabled:hover:border-good enabled:hover:text-good";
+/** The danger outline for destructive triggers (delete, remove, clear, reset), first built for Delete N orphans:
+ *  danger text and border, no fill, the soft danger fill on hover. Important, so it wins over a base border and fill. */
+export const DANGER_OUTLINE =
+  "border-danger! bg-transparent! text-danger! enabled:hover:bg-danger-a10! enabled:active:bg-danger/18! " +
+  "enabled:hover:translate-y-0! enabled:hover:shadow-none! disabled:opacity-60";
 
 // The old .btn had no gap; only buttons with an icon get one.
 const BASE =
@@ -72,6 +78,7 @@ const VARIANT: Record<ButtonVariant, string> = {
     "enabled:hover:outline-2 enabled:hover:outline-offset-2 enabled:hover:outline-primary-600 " +
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 disabled:opacity-60",
   "ghost-green": `${GHOST_TINT} ${GHOST_TINT_FILL} ${GHOST_GREEN_HOVER} ${GHOST_TINT_FOCUS}`,
+  "danger-outline": `transition-colors duration-150 ${DANGER_OUTLINE} ${GHOST_TINT_FOCUS}`,
 };
 
 const LIFTS: Record<ButtonVariant, boolean> = {
@@ -83,6 +90,7 @@ const LIFTS: Record<ButtonVariant, boolean> = {
   "ghost-red": false,
   "ghost-purple": false,
   "ghost-green": false,
+  "danger-outline": false,
 };
 
 // sm is .btn.btn-xs, md is .btn, lg is .btn-wide height, confirm is

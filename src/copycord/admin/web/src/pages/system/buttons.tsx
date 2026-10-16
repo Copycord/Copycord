@@ -5,7 +5,7 @@
 
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes } from "react";
 import { BUSY_HOST, BusyContent, cx } from "../../components/ui";
-import { GHOST_RED_HOVER, GHOST_TINT_FILL } from "../../components/ui/Button";
+import { DANGER_OUTLINE } from "../../components/ui/Button";
 
 // The old .btn had no gap; only the loading spinner gets one.
 const BASE =
@@ -77,7 +77,7 @@ export function GhostButton({
         compact ? "text-[13px]" : "text-sm",
         "cursor-pointer disabled:cursor-not-allowed",
         danger
-          ? `${GHOST_RED_HOVER} ${GHOST_TINT_FILL}`
+          ? DANGER_OUTLINE
           : "enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-line-1 enabled:hover:shadow-soft " +
               "enabled:active:translate-y-0 enabled:active:scale-[0.97] disabled:opacity-55",
         loading && BUSY_HOST,
