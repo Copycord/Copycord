@@ -504,6 +504,85 @@ export function RunPager({ page, pages, onPage = noop }: { page: number; pages: 
   );
 }
 
+/** The quick status tabs over the runs frame: each label as text, its count from the server. */
+export const STATUS_TABS = "mb-3 flex flex-wrap items-center gap-1 text-sm";
+export const STATUS_TAB =
+  "inline-flex h-8 items-center gap-1.5 rounded-control px-3 text-text-2 transition-colors hover:bg-rail-hover hover:text-text " +
+  "focus-visible:outline-2 focus-visible:outline-accent/70";
+export const STATUS_TAB_ON = "bg-rail-active font-semibold text-text";
+export const STATUS_TAB_COUNT = "min-w-[1ch] text-muted tabular-nums";
+/** The tabs in order: the status filter value ("" for every run) and the word on the tab. */
+export const STATUS_TAB_LIST = [
+  { value: "", key: "all", label: "All" },
+  { value: "running", key: "running", label: "Running" },
+  { value: "success", key: "success", label: "Done" },
+  { value: "failed", key: "failed", label: "Failed" },
+  { value: "cancelled", key: "cancelled", label: "Cancelled" },
+] as const;
+
+export interface StatusTabsProps {
+  /** Runs per status; null while the first page loads, so the counts shimmer and the labels stay text. */
+  counts: Partial<Record<(typeof STATUS_TAB_LIST)[number]["key"], number>> | null;
+  /** The status filter in the URL, "" for All. */
+  value: string;
+  onSelect?: (value: string) => void;
+}
+
+/** "All (n) · Running (n) · Done (n) · Failed (n) · Cancelled (n)", wired to the status filter. */
+export function StatusTabs({ counts, value, onSelect = noop }: StatusTabsProps) {
+  return (
+    <div role="group" aria-label="Runs by status" className={STATUS_TABS}>
+      {STATUS_TAB_LIST.map((t) => {
+        const on = t.value === value;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onSelect(t.value)}
+            className={cx(STATUS_TAB, on && STATUS_TAB_ON)}
+          >
+            {t.label}
+            {counts ? (
+              <span data-testid={`tab-count-${t.key}`} className={cx(STATUS_TAB_COUNT, FADE_IN)}>
+                {counts[t.key] ?? 0}
+              </span>
+            ) : (
+              <Skeleton.Text className={STATUS_TAB_COUNT}>0</Skeleton.Text>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A rail entry's right side: a blue running badge when the type has active runs, then its run count. */
+export const RAIL_COUNTS = "ml-auto inline-flex shrink-0 items-center gap-2";
+export const RAIL_COUNT = "text-xs text-muted tabular-nums";
+export const RAIL_RUNNING = "inline-flex items-center gap-1 text-xs font-medium text-info tabular-nums";
+
+export function RailCounts({ total, active = 0 }: { total: number | null; active?: number }) {
+  return (
+    // Hidden from the link's name, which stays the type's title; the link's title says the counts.
+    <span aria-hidden="true" className={RAIL_COUNTS}>
+      {active > 0 ? (
+        <span className={RAIL_RUNNING}>
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-info motion-safe:animate-pulse" />
+          {active}
+        </span>
+      ) : null}
+      {total == null ? (
+        <Skeleton.Text className={RAIL_COUNT}>0</Skeleton.Text>
+      ) : (
+        <span data-testid="rail-count" className={cx(RAIL_COUNT, FADE_IN)}>
+          {total}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** The run count while the first page loads: a bar the size of the count text. */
 export function RunCountLoading() {
   return <Skeleton.Text className={cx(RUN_COUNT, "align-middle")}>{runCountText(0)}</Skeleton.Text>;
@@ -515,6 +594,7 @@ export function RailEntryLoading() {
     <li aria-hidden="true">
       <div className={RAIL_ITEM}>
         <TextBar width="60%" className="min-w-0 flex-1" />
+        <RailCounts total={null} />
       </div>
     </li>
   );
@@ -797,7 +877,10 @@ export function TasksSkeleton() {
       <div inert className={PAGE}>
         <nav className={RAIL}>
           {/* A run page lights All tasks, as the page's rail does. */}
-          <div className={cx(RAIL_ITEM, typeKey && !runPage ? null : RAIL_ACTIVE)}>All tasks</div>
+          <div className={cx(RAIL_ITEM, typeKey && !runPage ? null : RAIL_ACTIVE)}>
+            All tasks
+            <RailCounts total={null} />
+          </div>
           <div className={RAIL_HEADING}>Task types</div>
           <ul className={RAIL_LIST}>
             <RailEntryLoading />
@@ -826,6 +909,7 @@ export function TasksSkeleton() {
                   <SearchGlyph />
                 </Button>
               </form>
+              <StatusTabs counts={null} value={params.get("status") ?? ""} />
               <div className={LIST_FRAME}>
                 <div className={FRAME_HEAD}>
                   <div className={FRAME_HEAD_LEFT}>

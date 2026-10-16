@@ -73,9 +73,13 @@ export interface TaskTypesResponse {
   types: TaskType[];
 }
 
+/** Runs per status under every filter but the status itself, and all of them: the quick status tabs. */
+export type RunCounts = Record<RunStatus | "all", number>;
+
 export interface TaskRunsResponse {
   runs: TaskRun[];
   total: number;
+  counts?: RunCounts;
   page: number;
   actors: string[];
   contexts: TaskContext[];

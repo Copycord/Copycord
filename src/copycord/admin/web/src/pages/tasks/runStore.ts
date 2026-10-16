@@ -11,7 +11,7 @@ import { useWsMessages } from "../../hooks/useWsMessages";
 import { api } from "../../lib/api";
 import type { BusMessage } from "../../types/api";
 import { ACTIVE_STATUSES } from "../../types/tasks";
-import type { RunFilters, TaskContext, TaskRun, TaskRunResponse, TaskRunsResponse, TaskRunUpdated, TaskStep } from "../../types/tasks";
+import type { RunCounts, RunFilters, TaskContext, TaskRun, TaskRunResponse, TaskRunsResponse, TaskRunUpdated, TaskStep } from "../../types/tasks";
 import { PER_PAGE } from "./TasksSkeleton";
 
 export { PER_PAGE };
@@ -128,6 +128,8 @@ export interface TaskRunsState extends ListState {
   /** The /ws/out socket is open, so rows update live. */
   connected: boolean;
   reload: () => void;
+  /** Runs per status for the quick tabs, from the last page fetched; null before the first answer. */
+  counts: RunCounts | null;
   /** Actor and mapping choices for the filter dropdowns, from the last page fetched. */
   actors: string[];
   contexts: TaskContext[];
@@ -145,7 +147,11 @@ export interface TaskRunsState extends ListState {
 export function useTaskRuns(filters: RunFilters): TaskRunsState {
   const url = runsUrl(filters);
   const [state, setState] = useState<ListState>({ runs: [], total: 0 });
-  const [choices, setChoices] = useState<{ actors: string[]; contexts: TaskContext[] }>({ actors: [], contexts: [] });
+  const [choices, setChoices] = useState<{ actors: string[]; contexts: TaskContext[]; counts: RunCounts | null }>({
+    actors: [],
+    contexts: [],
+    counts: null,
+  });
   // The list URL the held page answers, null before the first answer.
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -162,7 +168,7 @@ export function useTaskRuns(filters: RunFilters): TaskRunsState {
       .then((d) => {
         if (ctl.signal.aborted) return;
         setState({ runs: (d.runs ?? []).map((r) => ({ ...r, id: String(r.id) })), total: d.total ?? 0 });
-        setChoices({ actors: d.actors ?? [], contexts: d.contexts ?? [] });
+        setChoices({ actors: d.actors ?? [], contexts: d.contexts ?? [], counts: d.counts ?? null });
         setError(undefined);
       })
       .catch((e: unknown) => {

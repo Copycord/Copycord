@@ -25,6 +25,7 @@ import {
   RUN_PAGES_KEY,
   RunPager,
   RunsEmptyIcon,
+  StatusTabs,
   TasksHeader,
   TasksHeading,
   readAutoRefresh,
@@ -148,7 +149,7 @@ interface RunsViewProps {
 
 function RunsView({ types, typeTitle, runType, onRun }: RunsViewProps) {
   const { filters, active, set, setPage, clear } = useRunFilters();
-  const { runs, total, loading, refreshing, settled, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
+  const { runs, total, counts, loading, refreshing, settled, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
   const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
   const navigate = useNavigate();
   const confirm = useConfirm();
@@ -253,6 +254,7 @@ function RunsView({ types, typeTitle, runType, onRun }: RunsViewProps) {
   return (
     <>
       <RunSearch value={filters.q ?? ""} onSearch={onSearch} />
+      <StatusTabs counts={loading ? null : (counts ?? { all: total })} value={filters.status ?? ""} onSelect={(v) => set("status", v)} />
       <RunList
         runs={runs}
         total={total}

@@ -31,6 +31,7 @@ import {
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
   PER_PAGE,
+  RAIL_COUNTS,
   RAIL_LIST,
   ROW_BOX,
   ROW_HEAD,
@@ -48,6 +49,7 @@ import {
   RUN_PAGES_KEY,
   RUNS_COUNT_KEY,
   RunRowsLoading,
+  StatusTabs,
   TasksHeader,
   TasksSkeleton,
 } from "./TasksSkeleton";
@@ -178,6 +180,10 @@ function chrome(root: HTMLElement) {
     search: within(root).queryAllByRole("searchbox", { hidden: true }).length,
     searchButton: within(root).queryAllByRole("button", { name: "Search", hidden: true }).length,
     railEntries: byClass(RAIL_LIST).children.length,
+    // A count on All tasks and on each entry: a bar while loading, the number once loaded.
+    railCounts: root.querySelectorAll(`[class="${RAIL_COUNTS}"]`).length,
+    // The quick status tabs: their words as text in both, the counts after them.
+    tabs: Array.from(root.querySelectorAll("[role=group][aria-label='Runs by status'] button")).map((b) => `${b.firstChild?.textContent} ${b.childNodes.length}`),
     frames: root.querySelectorAll(`[class="${LIST_FRAME}"]`).length,
     headGroups: Array.from(head.children).map((c) => c.className),
     headLeft: byClass(FRAME_HEAD_LEFT).children.length,
@@ -243,6 +249,8 @@ describe("page skeleton", () => {
       search: 1,
       searchButton: 1,
       railEntries: 1,
+      railCounts: 2,
+      tabs: ["All 2", "Running 2", "Done 2", "Failed 2", "Cancelled 2"],
       // The runs card does not clip, so an open filter list hangs past it.
       frames: 1,
       headLeft: 2,
@@ -514,5 +522,23 @@ describe("run page skeleton structure", () => {
     const empty = screen.getByText("No queued steps");
     expect(empty.className).toBe(STEP_EMPTY);
     expect(empty.style.minHeight).toBe(`${6 * STEP_ROW_PX}px`);
+  });
+});
+
+describe("status tabs", () => {
+  it("labels each tab as text with its count, presses the current status, and selects a status on click", async () => {
+    const onSelect = vi.fn();
+    const { rerender } = render(
+      <StatusTabs counts={{ all: 7, queued: 1, running: 2, success: 3, failed: 1, cancelled: 0 }} value="running" onSelect={onSelect} />,
+    );
+    const tabs = screen.getAllByRole("button");
+    expect(tabs.map((t) => t.textContent)).toEqual(["All7", "Running2", "Done3", "Failed1", "Cancelled0"]);
+    expect(tabs.map((t) => t.getAttribute("aria-pressed"))).toEqual(["false", "true", "false", "false", "false"]);
+    await userEvent.setup().click(screen.getByRole("button", { name: /^Failed/ }));
+    expect(onSelect).toHaveBeenCalledWith("failed");
+    // While the first page loads the words stay, only the counts shimmer.
+    rerender(<StatusTabs counts={null} value="" />);
+    for (const tab of screen.getAllByRole("button")) expect(tab.querySelector("[data-skeleton]")).not.toBeNull();
+    expect(screen.getAllByRole("button").map((t) => t.firstChild?.textContent)).toEqual(["All", "Running", "Done", "Failed", "Cancelled"]);
   });
 });

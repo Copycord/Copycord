@@ -137,7 +137,11 @@ describe("Tasks page", () => {
     const rail = screen.getByRole("navigation", { name: "Task types" });
     expect(within(rail).getByRole("link", { name: /All tasks/ })).toHaveAttribute("aria-current", "page");
     expect(within(rail).getByRole("link", { name: /Backfill channels/ })).toHaveAttribute("href", "/tasks?type=backfill_channels");
-    expect(within(rail).getByLabelText("1 active")).toBeInTheDocument();
+    // Each entry's run count and a running badge while it has active runs; All tasks adds them up.
+    const type = within(rail).getByRole("link", { name: /Backfill channels/ });
+    expect(type).toHaveAttribute("title", "2 runs, 1 running");
+    expect(within(type).getByTestId("rail-count")).toHaveTextContent("2");
+    expect(within(rail).getByRole("link", { name: /All tasks/ })).toHaveAttribute("title", "2 runs, 1 running");
     // All tasks has no Run task: the rail picks a type first.
     expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
   });
