@@ -49,8 +49,11 @@ export const PAGER = "flex items-center justify-between gap-3 border-t border-bo
 /** The box of a run row; ROW adds the hover tint. The skeleton row uses the box alone so both stand equally tall. */
 export const ROW_BOX = "relative flex min-h-16 items-center gap-3 border-b border-border px-4 py-2.5 last:rounded-b-card last:border-b-0";
 export const ROW = `${ROW_BOX} transition-colors duration-150 hover:bg-rail-hover`;
-/** A run row's left column: the task name over the meta line, as wide as its words; the outcome gives way first. */
-export const ROW_MAIN = "min-w-0 flex-auto";
+/**
+ * A run row's left column: the task name over the meta line. From 1024 px it keeps the width of its words up
+ * to 60% of the row and the outcome gives way instead; below that it shrinks, the outcome gone.
+ */
+export const ROW_MAIN = "min-w-0 flex-auto lg:max-w-[60%] lg:flex-none";
 /** The name line: the task name and number. */
 export const ROW_HEAD = "flex h-6 min-w-0 items-center gap-2";
 export const ROW_NAME = "min-w-0 truncate text-sm leading-5 font-semibold";
@@ -75,7 +78,7 @@ export const META_DOT = "text-muted/50";
 /** The mapping on the run page's meta line: a link-like name, so a subtle outlined chip rather than plain text. */
 export const MAPPING_CHIP = "inline-block max-w-[20ch] truncate rounded-full border border-line-2 px-1.5 text-xs leading-4 text-text-2";
 /** What the run did, one muted line right-aligned before the timing; it gives way first, and is gone below 1024 px. */
-export const ROW_OUTCOME = "h-[18px] min-w-0 shrink-[100] truncate text-right text-[13px] leading-[18px] text-muted tabular-nums max-lg:hidden";
+export const ROW_OUTCOME = "h-[18px] min-w-0 flex-1 truncate text-right text-[13px] leading-[18px] text-muted tabular-nums max-lg:hidden";
 /** Started (relative) over duration, each after a small glyph, 13 px muted with tabular numbers. */
 export const ROW_TIMING = "flex w-[80px] shrink-0 flex-col gap-1 text-[13px] leading-[18px] text-muted tabular-nums max-sm:hidden";
 export const ROW_TIME = "flex items-center gap-1.5 whitespace-nowrap";

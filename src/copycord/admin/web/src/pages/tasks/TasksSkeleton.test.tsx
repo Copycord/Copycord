@@ -130,7 +130,8 @@ describe("run row skeleton", () => {
     expect(real!.querySelector("[role=progressbar]")).toBeNull();
     expect(skeleton!.querySelector("[role=progressbar]")).toBeNull();
     expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]")).toHaveLength(1);
-    expect(ROW_OUTCOME.split(" ")).toEqual(expect.arrayContaining(["text-right", "truncate", "shrink-[100]", "max-lg:hidden"]));
+    expect(ROW_OUTCOME.split(" ")).toEqual(expect.arrayContaining(["text-right", "truncate", "max-lg:hidden"]));
+    expect(ROW_MAIN.split(" ")).toEqual(expect.arrayContaining(["lg:flex-none", "lg:max-w-[60%]"]));
     expect(ROW_OUTCOME).not.toMatch(/w-\[/);
     // Started over duration, each a glyph and its value; the skeleton draws the glyphs and bars the values.
     const timing = (li: Element) => Array.from(li.children[3]!.children).map((c) => `${c.className} ${c.querySelectorAll("svg").length}`);
