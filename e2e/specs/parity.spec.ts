@@ -118,7 +118,7 @@ test.describe("dashboard", () => {
     await expect(page.locator("#server-state")).toHaveText(/running/);
     await expect(page.locator("#client-uptime")).toHaveText(/^1h 1m \d+s$/);
     await expect(page.locator("#client-status")).toHaveText("e2e syncing");
-    await expect(page.locator("#server-status")).toHaveText("");
+    await expect(page.locator("#server-status")).toHaveText("Active");
     await page.locator("#toggle-btn").click();
     await expect.poll(() => posts.length).toBe(1);
     expect(posts[0]).toEqual({ method: "POST", csrf: "1" });

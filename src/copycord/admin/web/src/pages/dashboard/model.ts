@@ -99,10 +99,10 @@ export function formatUptime(sec: number | null | undefined): string {
   return parts.join(" ");
 }
 
-/** Only exceptions get a status chip (rule c): the normal "active", "ready" and "stopped" notes leave the cell empty. */
+/** The Status column text: the bot's note as sent; the bare "ready", "active" and "stopped" notes read capitalized. */
 export function displayStatus(status: string | undefined): string {
   const raw = (status ?? "").trim();
-  return /^(active|stopped|ready)$/i.test(raw) ? "" : raw;
+  return /^(active|stopped|ready)$/i.test(raw) ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : raw;
 }
 
 /** Lines carried by one /logs/stream message; non JSON data is one line. */

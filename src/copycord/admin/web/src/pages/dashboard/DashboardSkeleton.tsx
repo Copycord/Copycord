@@ -21,6 +21,7 @@ import {
   BOTS_CELL,
   BOTS_COL_COMPONENT,
   BOTS_COL_STATE,
+  BOTS_COL_STATUS,
   BOTS_COL_UPTIME,
   BOTS_HEAD,
   BOTS_TABLE,
@@ -275,6 +276,7 @@ export function DashboardSkeleton() {
                 <th className={cx(BOTS_HEAD, BOTS_COL_COMPONENT)}>Component</th>
                 <th className={cx(BOTS_HEAD, BOTS_COL_STATE)}>State</th>
                 <th className={cx(BOTS_HEAD, BOTS_COL_UPTIME)}>Uptime</th>
+                <th className={cx(BOTS_HEAD, BOTS_COL_STATUS)}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -285,6 +287,7 @@ export function DashboardSkeleton() {
                     <BotStatePending />
                   </td>
                   <td className={cx(BOTS_CELL, BOTS_COL_UPTIME)} />
+                  <td className={cx(BOTS_CELL, BOTS_COL_STATUS)} />
                 </tr>
               ))}
             </tbody>

@@ -83,10 +83,17 @@ describe("BotsPanel status poll", () => {
     expect(calls()).toBe(3);
     expect(document.getElementById("server-status")).toHaveTextContent("Cloning guild");
     expect(document.getElementById("server-uptime")).toHaveTextContent("1m 5s");
-    // No Status column: the exceptional status is a second line in the State cell, three columns throughout.
+    // Four columns: the status is muted text in its own last cell, nothing under the state chip.
     const headers = [...document.querySelectorAll("#runtime-body")[0]!.closest("table")!.querySelectorAll("th")];
-    expect(headers.map((th) => th.textContent)).toEqual(["Component", "State", "Uptime"]);
-    expect(document.getElementById("server-status")!.closest("td")).toBe(document.getElementById("server-state")!.closest("td"));
+    expect(headers.map((th) => th.textContent)).toEqual(["Component", "State", "Uptime", "Status"]);
+    const status = document.getElementById("server-status")!;
+    const row = status.closest("tr")!;
+    expect(status.closest("td")).toBe(row.lastElementChild);
+    expect(status.closest("td")).not.toBe(document.getElementById("server-state")!.closest("td"));
+    expect(document.getElementById("server-state")!.closest("td")!.children).toHaveLength(1);
+    expect(status).toHaveAttribute("title", "Cloning guild");
+    expect(status).toHaveClass("text-muted", "text-ellipsis", "whitespace-nowrap");
+    expect(status.className).not.toMatch(/rounded|bg-/);
   });
 
   it("slows to 8 s while a role reports an error", async () => {

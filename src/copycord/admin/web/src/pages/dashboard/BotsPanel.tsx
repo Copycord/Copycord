@@ -12,7 +12,7 @@ import { api, errorText } from "../../lib/api";
 import type { LogStream } from "../../types/api";
 import type { BotRole, BotStatuses, StatusResponse } from "../../types/dashboard";
 import { useNotify } from "../system/providers";
-import { BOT_ROLES, BotStatePending, BOTS_CARD, BOTS_CELL as CELL, BOTS_COL_COMPONENT, BOTS_COL_STATE, BOTS_COL_UPTIME, BOTS_HEAD as HEAD, BOTS_STATE as STATE, BOTS_TABLE, BOTS_TITLE, GHOST, GHOST_DISABLED } from "./parts";
+import { BOT_ROLES, BotStatePending, BOTS_CARD, BOTS_CELL as CELL, BOTS_COL_COMPONENT, BOTS_COL_STATE, BOTS_COL_STATUS, BOTS_COL_UPTIME, BOTS_HEAD as HEAD, BOTS_STATE as STATE, BOTS_TABLE, BOTS_TITLE, GHOST, GHOST_DISABLED } from "./parts";
 import {
   anyRunning,
   displayStatus,
@@ -156,6 +156,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
               <th className={cx(HEAD, BOTS_COL_COMPONENT)}>Component</th>
               <th className={cx(HEAD, BOTS_COL_STATE)}>State</th>
               <th className={cx(HEAD, BOTS_COL_UPTIME)}>Uptime</th>
+              <th className={cx(HEAD, BOTS_COL_STATUS)}>Status</th>
             </tr>
           </thead>
           <tbody id="runtime-body">
@@ -177,7 +178,12 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                     ) : (
                       <BotStatePending />
                     )}
-                    {/* Only an exceptional status shows (rule c), as a second muted line under the state chip. */}
+                  </td>
+                  <td id={`${role}-uptime`} className={cx(CELL, BOTS_COL_UPTIME)}>
+                    {s.running && s.uptime_sec != null && start != null ? <Uptime start={start} /> : ""}
+                  </td>
+                  <td className={cx(CELL, BOTS_COL_STATUS)}>
+                    {/* Muted plain text, cut with an ellipsis; a click shows the whole note. */}
                     <span
                       id={`${role}-status`}
                       title={note}
@@ -185,15 +191,12 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                       tabIndex={note ? 0 : -1}
                       onClick={() => setExpanded((x) => ({ ...x, [role]: !x[role] }))}
                       className={cx(
-                        "mt-1 block max-w-full cursor-pointer overflow-hidden text-[11px] font-medium text-ellipsis text-muted empty:hidden",
+                        "block max-w-full cursor-pointer overflow-hidden text-ellipsis text-muted",
                         expanded[role] ? "whitespace-normal" : "whitespace-nowrap",
                       )}
                     >
                       {note}
                     </span>
-                  </td>
-                  <td id={`${role}-uptime`} className={cx(CELL, BOTS_COL_UPTIME)}>
-                    {s.running && s.uptime_sec != null && start != null ? <Uptime start={start} /> : ""}
                   </td>
                 </tr>
               );

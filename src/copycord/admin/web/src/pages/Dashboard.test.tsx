@@ -115,8 +115,8 @@ describe("Dashboard bots panel", () => {
     expect(csrf(post!)).toBe("1");
     expect(document.getElementById("client-uptime")).toHaveTextContent("1h 1m 40s");
     expect(document.getElementById("client-status")).toHaveTextContent("Syncing guild 1 of 2");
-    // The plain "active" note is hidden like on the old page.
-    expect(document.getElementById("server-status")).toHaveTextContent("");
+    // The plain "active" note shows in the Status column, capitalized.
+    expect(document.getElementById("server-status")).toHaveTextContent(/^Active$/);
     expect(document.getElementById("toggle-form")).toHaveAttribute("action", "/stop");
   });
 
