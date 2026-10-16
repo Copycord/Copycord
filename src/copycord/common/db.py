@@ -2907,12 +2907,56 @@ class DBManager:
         ).fetchall()
         return [r["original_message_id"] if isinstance(r, dict) else r[0] for r in rows]
 
+    @staticmethod
+    def _old_messages_where(
+        older_than_seconds: int,
+        pair: Optional[tuple[int, int]] = None,
+        skip_pairs: Optional[list[tuple[int, int]]] = None,
+    ) -> tuple[str, list[int]]:
+        """WHERE clause and params for messages older than older_than_seconds, limited to the
+        (original_guild_id, cloned_guild_id) pair when given, else outside skip_pairs."""
+        where = "created_at < (CAST(strftime('%s','now') AS INTEGER) - ?)"
+        params: list[int] = [int(older_than_seconds)]
+        if pair is not None:
+            where += " AND original_guild_id = ? AND cloned_guild_id = ?"
+            params.extend([int(pair[0]), int(pair[1])])
+            return where, params
+        clauses = []
+        for orig_gid, clone_gid in skip_pairs or []:
+            try:
+                og, cg = int(orig_gid), int(clone_gid)
+            except Exception:
+                continue
+            clauses.append("(original_guild_id = ? AND cloned_guild_id = ?)")
+            params.extend([og, cg])
+        if clauses:
+            where += " AND NOT (" + " OR ".join(clauses) + ")"
+        return where, params
+
+    def count_old_messages(
+        self,
+        older_than_seconds: int,
+        pair: Optional[tuple[int, int]] = None,
+        skip_pairs: Optional[list[tuple[int, int]]] = None,
+    ) -> int:
+        """How many messages delete_old_messages would delete with the same arguments."""
+        where, params = self._old_messages_where(older_than_seconds, pair, skip_pairs)
+        with self.lock:
+            row = self.conn.execute(f"SELECT COUNT(*) FROM messages WHERE {where}", tuple(params)).fetchone()
+        return int(row[0] or 0)
+
     def delete_old_messages(
         self,
         older_than_seconds: int = 7 * 24 * 3600,
         skip_pairs: Optional[list[tuple[int, int]]] = None,
+        pair: Optional[tuple[int, int]] = None,
     ) -> int:
-        """Delete messages older than older_than_seconds, except for the (original_guild_id, cloned_guild_id) pairs in skip_pairs. Returns rows deleted."""
+        """Delete messages older than older_than_seconds: only the (original_guild_id, cloned_guild_id)
+        pair when given, else all but the pairs in skip_pairs. Returns rows deleted."""
+        if pair is not None:
+            where, params = self._old_messages_where(older_than_seconds, pair)
+            with self._tx():
+                return self.conn.execute(f"DELETE FROM messages WHERE {where}", tuple(params)).rowcount or 0
         with self._tx():
             before = self.conn.total_changes
 

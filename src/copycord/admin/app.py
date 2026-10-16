@@ -91,6 +91,7 @@ from copycord.admin.web_config import router as links_router
 from copycord.admin.web_config import startup_links, shutdown_links
 import copycord.admin.tasks  # noqa: F401  task types register at import
 from copycord.admin.tasks import backfill as task_backfill
+from copycord.admin.tasks import purge as task_purge
 from copycord.admin.tasks import routes as task_routes
 from copycord.admin.tasks.repo import SqliteTaskRepo
 from copycord.admin.tasks.service import TaskService
@@ -2067,6 +2068,7 @@ async def _startup_tasks():
     service = TaskService(SqliteTaskRepo(db), publish=_publish_task_event)
     task_routes.set_service(service)
     task_backfill.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame))
+    task_purge.configure(db=db)
     try:
         recovered = service.recover()
         if recovered:
