@@ -11,7 +11,7 @@ import { CHECK, CHECK_LABEL, PROXY_HINT } from "../parts";
 export const ROTATION_HINT = "m-0 mt-1.5 text-xs leading-normal text-muted";
 /** .input.srv-proxy-interval-input: the full width .input look at 34px, so it shrinks on phones like the old one. */
 export const NUM =
-  "h-[34px] w-full rounded-control border border-border bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] " +
+  "h-[34px] w-full rounded-control border border-border-input bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] " +
   "hover:border-accent/30 hover:bg-[linear-gradient(180deg,var(--color-secondary-top)_0%,var(--color-secondary-bottom)_100%)] focus:border-accent focus:bg-[linear-gradient(180deg,var(--color-secondary-top)_0%,var(--color-secondary-bottom)_100%)] disabled:opacity-50 " +
   "[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 /** .srv-proxy-rotation-section */

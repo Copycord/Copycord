@@ -24,7 +24,7 @@ const PILL: Record<string, { box: string; dot: string }> = {
     box: "bg-good-a8 text-good-soft",
     dot: "bg-good-soft shadow-[0_0_8px_var(--color-good-a50)]",
   },
-  done: { box: "bg-primary-a8 text-primary", dot: "bg-primary" },
+  done: { box: "bg-primary-a8 text-accent", dot: "bg-primary" },
   error: { box: "bg-danger-a8 text-danger-soft", dot: "bg-danger" },
 };
 

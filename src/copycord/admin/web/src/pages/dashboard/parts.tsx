@@ -89,7 +89,7 @@ export const PS_UNIT = "text-[11px] text-muted";
 
 /** .input.ps-input: .input padding, gradient and 14px text, .ps-input height and centered value. */
 export const PS_FIELD_INPUT =
-  "h-8 w-full rounded-control border border-border bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] hover:border-accent/30 hover:bg-[linear-gradient(180deg,var(--color-secondary-top)_0%,var(--color-secondary-bottom)_100%)] focus:border-accent focus:bg-[linear-gradient(180deg,var(--color-secondary-top)_0%,var(--color-secondary-bottom)_100%)] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+  "h-8 w-full rounded-control border border-border-input bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] hover:border-accent/30 hover:bg-[linear-gradient(180deg,var(--color-secondary-top)_0%,var(--color-secondary-bottom)_100%)] focus:border-accent focus:bg-[linear-gradient(180deg,var(--color-secondary-top)_0%,var(--color-secondary-bottom)_100%)] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
 /** .proxy-settings-field: a borderless 13px row, label on the left and the control on the right. */
 export const PS_FIELD =

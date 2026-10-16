@@ -217,7 +217,7 @@ export function TokenCount({ text, className }: { text: string | null; className
       0 tokens
     </Skeleton.Box>
   ) : (
-    <span id="sc-token-count" className={cx(COUNT_BOX, "bg-primary-a12 text-primary", className)}>
+    <span id="sc-token-count" className={cx(COUNT_BOX, "bg-primary-a12 text-accent", className)}>
       {text}
     </span>
   );

@@ -72,8 +72,8 @@ export function useFieldControl(props: { id?: string; "aria-describedby"?: strin
 // The old .input and select.input: 12px 14px padding, 12px radius, dark gradient, 14px text;
 // the select draws its own caret.
 const CONTROL_BASE =
-  "w-full rounded-control border border-border px-3.5 py-3 text-sm text-text " +
-  "placeholder:text-text-2/70 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/30 " +
+  "w-full rounded-control border border-border-input px-3.5 py-3 text-sm text-text " +
+  "placeholder:text-text-2/80 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/30 " +
   "disabled:cursor-not-allowed disabled:opacity-55 aria-invalid:border-danger";
 
 export const CONTROL_CLASS = `${CONTROL_BASE} bg-(image:--control-gradient)`;

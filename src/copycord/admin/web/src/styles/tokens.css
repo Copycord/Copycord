@@ -1,8 +1,8 @@
 /* Tailwind entry and design tokens. The palette: near-black surfaces barely
-   tinted toward the brand hue (base #0c0c14, surface #12121b, which the inputs,
+   tinted toward the brand hue (base #0c0c14, surface #181822, which the inputs,
    selects and raised cards share with the mapping cards), a near-neutral grey
    for secondary buttons (#1a1a1e, card hover #212126), hairline
-   borders (#262637, strong #34344a), three text steps (#ededf4, #a3a3b8, #6e6e86), the brand purple as the one accent,
+   borders (#262637, strong #34344a), input borders #64647f, two text steps (#ededf4, #a3a3b8), the brand purple as the one accent,
    and semantic status colours: success #3ecf8e, warning #f5a524 (cancelled and
    stopped too), danger #f0506e, info #4f9cf7, neutral #8b8b9e. */
 @import "tailwindcss";
@@ -10,10 +10,10 @@
 @theme {
   --color-page: #0c0c14;
   --color-bg2: #262637;
-  --color-bg-2: #12121b;
-  --color-bg-3: #12121b;
-  --color-card: #12121b;
-  --color-card-solid: #12121b;
+  --color-bg-2: #181822;
+  --color-bg-3: #181822;
+  --color-card: #181822;
+  --color-card-solid: #181822;
   --color-text: #ededf4;
   --color-text-1: #ededf4;
   --color-text-2: #a3a3b8;
@@ -34,7 +34,7 @@
   /* Warning: cancelled, stopped, degraded, customised. */
   --color-custom-ink: #f5a524;
   --color-progress: #a78bfa;
-  --color-control: #12121b;
+  --color-control: #181822;
   --color-rail-hover: rgba(255, 255, 255, 0.05);
   --color-rail-active: rgba(139, 92, 246, 0.16);
 
@@ -77,8 +77,10 @@
    ones only read through var() in inline styles are always emitted. */
 @theme static {
   --color-border-strong: #34344a;
-  --color-surface-deep: #12121b;
-  --color-control-top: #12121b;
+  /* The boundary of an input, select or text area: 3:1 on the surface it sits on (WCAG 1.4.11). */
+  --color-border-input: #64647f;
+  --color-surface-deep: #181822;
+  --color-control-top: #181822;
   --color-text-soft: #ededf4;
   --color-text-status: #a3a3b8;
   --color-accent-soft: #c4b5fd;
@@ -110,10 +112,10 @@
   --color-danger-a35: rgba(240, 80, 110, 0.35);
 
   /* Dashboard */
-  --color-field-readonly: #12121b;
+  --color-field-readonly: #181822;
   --color-card-hover: rgba(33, 33, 38, 0.6);
   --color-log-bg: #0c0c14;
-  --color-log-input-bg: #12121b;
+  --color-log-input-bg: #181822;
   --color-log-input-edge: #34344a;
   --color-log-input-focus: #8b5cf6;
   --color-table-rule: #34344a;
@@ -183,7 +185,7 @@
 
   /* Guilds */
   --color-dialog-text: #ededf4;
-  --color-dialog-small: #12121b;
+  --color-dialog-small: #181822;
   --color-accent-a6: rgba(167, 139, 250, 0.06);
   --color-accent-a22: rgba(167, 139, 250, 0.22);
   --color-good-a18: rgba(62, 207, 142, 0.18);
@@ -192,7 +194,7 @@
   --color-good-strong: #26a06b;
   --color-info-soft: #4f9cf7;
   --color-muted-a40: rgba(163, 163, 184, 0.4);
-  --color-surface-deep-a95: rgba(18, 18, 27, 0.95);
+  --color-surface-deep-a95: rgba(24, 24, 34, 0.95);
   --color-good-a40: rgba(62, 207, 142, 0.4);
   --color-danger-a12: rgba(240, 80, 110, 0.12);
   --color-primary-a12: rgba(139, 92, 246, 0.12);
@@ -237,10 +239,10 @@
   --color-kind-guild: #c084fc;
   --color-kind-permissions: #fdba74;
   --color-kind-metadata: #7dd3fc;
-  --color-card-a50: rgba(18, 18, 27, 0.5);
-  --color-panel-a40: rgba(18, 18, 27, 0.4);
-  --color-panel-a60: rgba(18, 18, 27, 0.6);
-  --color-panel-a95: rgba(18, 18, 27, 0.95);
+  --color-card-a50: rgba(24, 24, 34, 0.5);
+  --color-panel-a40: rgba(24, 24, 34, 0.4);
+  --color-panel-a60: rgba(24, 24, 34, 0.6);
+  --color-panel-a95: rgba(24, 24, 34, 0.95);
   --color-well-a50: rgba(12, 12, 20, 0.5);
   --color-well-a60: rgba(12, 12, 20, 0.6);
   --color-primary-a6: rgba(139, 92, 246, 0.06);
