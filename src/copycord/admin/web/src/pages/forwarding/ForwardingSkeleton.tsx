@@ -15,9 +15,9 @@ export const FWD_LIST =
 /** The toolbar over the rules (search, Total Forwarded, New Forward) and its search box, shared with the page. */
 export const FWD_TOOLBAR = "col-span-full mb-2 flex items-start justify-between gap-3";
 export const FWD_SEARCH = cx(
-  "w-[min(420px,100%)] min-w-[220px] rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5",
-  "text-[13px] text-[#e6e1ff] caret-[#7c5cff] outline-none transition-colors",
-  "placeholder:text-[#e6e1ff]/55 placeholder:opacity-75 focus:border-[#7c5cff]",
+  "w-[min(420px,100%)] min-w-[220px] rounded-input border border-log-input-edge bg-log-input-bg px-2.5 py-1.5",
+  "text-[13px] text-text-soft caret-log-input-focus outline-none transition-colors",
+  "placeholder:text-text-soft/55 placeholder:opacity-75 focus:border-log-input-focus",
 );
 
 /** The "no rules" block, shared with the page. */
@@ -25,8 +25,8 @@ export const FWD_EMPTY = "flex flex-col items-center justify-center gap-2 px-6 p
 
 // One rule tile (.fwd-card): the title, provider badge and status pill, then the footer buttons and count.
 export const RULE_CARD = cx(
-  "w-full self-start rounded-[14px] border border-border bg-[linear-gradient(180deg,#1f1237,#160b2a)]",
-  "px-[18px] pt-4 pb-3.5 [box-shadow:0_2px_8px_rgba(0,0,0,0.2)] transition duration-200 max-[480px]:p-3.5",
+  "w-full self-start rounded-[14px] border border-border bg-[linear-gradient(180deg,var(--color-secondary-top),var(--color-secondary-bottom))]",
+  "px-[18px] pt-4 pb-3.5 [box-shadow:0_2px_8px_var(--color-shadow-20)] transition duration-200 max-[480px]:p-3.5",
 );
 export const RULE_HEADER = "flex items-start justify-between gap-3 max-[640px]:flex-col max-[640px]:gap-2.5";
 export const RULE_TITLE_BOX = "flex min-h-7 min-w-0 flex-1 items-center";
@@ -42,7 +42,7 @@ export const RULE_STAT = "ml-auto flex items-center gap-2 text-xs leading-[1.2] 
 // The old .fwd-card-footer .btn: a 32px ghost button with a 12px label; it grows to fill the
 // wrapped row under 640px and takes the full width under 480px.
 const FOOTER_BUTTON =
-  "inline-flex min-h-8 cursor-pointer items-center justify-center rounded-control border border-border bg-[rgba(255,255,255,0.04)] " +
+  "inline-flex min-h-8 cursor-pointer items-center justify-center rounded-control border border-border bg-wash-4 " +
   "px-3 py-1.5 text-xs font-semibold leading-none select-none outline-none transition duration-200 " +
   "focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-55 " +
   "max-[640px]:flex-auto max-[480px]:w-full";
@@ -59,8 +59,8 @@ export function FooterButton({
       className={cx(
         FOOTER_BUTTON,
         danger
-          ? "text-accent enabled:hover:border-danger enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:hover:text-danger"
-          : "text-accent enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:hover:shadow-soft",
+          ? "text-accent enabled:hover:border-danger enabled:hover:bg-line-1 enabled:hover:text-danger"
+          : "text-accent enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-line-1 enabled:hover:shadow-soft",
         className,
       )}
       {...rest}

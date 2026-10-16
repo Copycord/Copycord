@@ -19,22 +19,22 @@ export const SC_LABEL = "text-xs font-medium tracking-[0.04em] text-muted upperc
 export const SC_CHECK = "flex cursor-pointer items-center gap-2 text-[13px] text-text select-none";
 export const CHECK_BOX =
   "m-0 flex size-[18px] shrink-0 cursor-pointer appearance-none items-center justify-center rounded-[5px] " +
-  "border-[1.5px] border-border bg-[rgba(20,11,38,0.5)] bg-center bg-no-repeat [background-size:10px_10px] [font-family:inherit] " +
+  "border-[1.5px] border-border bg-control-a50 bg-center bg-no-repeat [background-size:10px_10px] [font-family:inherit] " +
   "transition-[background,border-color] duration-150 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 " +
-  "focus-visible:outline-primary checked:border-primary checked:bg-[rgba(139,92,246,0.18)] " +
+  "focus-visible:outline-primary checked:border-primary checked:bg-brand-ghost " +
   "checked:bg-[image:linear-gradient(var(--color-primary),var(--color-primary))]";
 // The same box as a span after a visually hidden peer checkbox, as the old markup drew it.
 export const CHECK_SPAN =
   "inline-flex size-[18px] shrink-0 items-center justify-center rounded-[5px] border-[1.5px] border-border " +
-  "bg-[rgba(20,11,38,0.5)] transition-[background,border-color] duration-150 after:block after:size-2.5 " +
-  "after:rounded-[2px] after:content-[''] peer-checked:border-primary peer-checked:bg-[rgba(139,92,246,0.18)] " +
+  "bg-control-a50 transition-[background,border-color] duration-150 after:block after:size-2.5 " +
+  "after:rounded-[2px] after:content-[''] peer-checked:border-primary peer-checked:bg-brand-ghost " +
   "peer-checked:after:bg-primary peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary";
 
 // .scraper-status-pill and its idle look.
 export const PILL_BOX =
   "mt-1 inline-flex shrink-0 items-center gap-[7px] rounded-[20px] border px-3.5 py-1.5 text-xs font-semibold " +
   "tracking-[0.03em] whitespace-nowrap transition-all duration-[250ms]";
-export const IDLE_PILL = { box: "border-border bg-[rgba(255,255,255,0.04)] text-muted", dot: "bg-muted" };
+export const IDLE_PILL = { box: "border-border bg-wash-4 text-muted", dot: "bg-muted" };
 
 /** The status pill until the first status answer: the pill's box with a bar over it. */
 export function PillPending() {
@@ -70,7 +70,7 @@ export function ScraperTitle() {
 
 // .btn.btn-ghost.btn-xs holding a 14px icon.
 export const ICON_BUTTON =
-  "inline-flex min-h-7 cursor-pointer items-center justify-center rounded-btn border border-border bg-[rgba(255,255,255,0.04)] " +
+  "inline-flex min-h-7 cursor-pointer items-center justify-center rounded-btn border border-border bg-wash-4 " +
   "px-2.5 py-1.5 leading-none " +
   "text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60 " +
   "enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-55";
@@ -79,8 +79,8 @@ export const DELETE_BUTTON = cx(ICON_BUTTON, "enabled:hover:border-danger enable
 // One token row (.sc-token-item): the validity badge, name and masked value, then Re-validate and Delete.
 // TokensCard and the loading rows build from these, so both have the same boxes.
 export const TOKEN_ROW =
-  "mb-1.5 flex items-center justify-between gap-2.5 rounded-btn border border-border bg-[rgba(20,11,38,0.4)] px-3 py-2.5 " +
-  "transition-colors duration-200 last:mb-0 hover:border-[rgba(139,92,246,0.25)] hover:bg-[rgba(20,11,38,0.7)]";
+  "mb-1.5 flex items-center justify-between gap-2.5 rounded-btn border border-border bg-control-a40 px-3 py-2.5 " +
+  "transition-colors duration-200 last:mb-0 hover:border-primary-a25 hover:bg-control-a70";
 export const TOKEN_MAIN = "flex min-w-0 items-center gap-2.5";
 export const TOKEN_BADGE = "inline-flex size-7 shrink-0 items-center justify-center rounded-lg border";
 export const TOKEN_TEXT = "flex min-w-0 flex-col gap-0.5";
@@ -136,8 +136,8 @@ export function TokenListPlaceholder({ rows = readLastCount(TOKENS_COUNT_KEY, 0,
 // One saved scrape row (.sc-scrape-item): guild, member count line and date, then Download and Delete.
 export const SCRAPE_LIST = "flex flex-col gap-1.5";
 export const SCRAPE_ROW =
-  "flex items-center justify-between gap-3 rounded-btn border border-border bg-[rgba(20,11,38,0.4)] px-3 py-2.5 " +
-  "transition-colors duration-150 hover:border-[rgba(139,92,246,0.35)]";
+  "flex items-center justify-between gap-3 rounded-btn border border-border bg-control-a40 px-3 py-2.5 " +
+  "transition-colors duration-150 hover:border-primary-a35";
 export const SCRAPE_TEXT = "flex min-w-0 flex-col gap-0.5";
 export const SCRAPE_GUILD = "flex min-w-0 items-center gap-1.5 font-mono text-[13px] font-semibold text-text";
 export const SCRAPE_META = "text-xs text-muted";
@@ -216,7 +216,7 @@ export function TokenCount({ text, className }: { text: string | null; className
       0 tokens
     </Skeleton.Box>
   ) : (
-    <span id="sc-token-count" className={cx(COUNT_BOX, "border-[rgba(139,92,246,0.25)] bg-[rgba(139,92,246,0.12)] text-primary", className)}>
+    <span id="sc-token-count" className={cx(COUNT_BOX, "border-primary-a25 bg-primary-a12 text-primary", className)}>
       {text}
     </span>
   );
@@ -225,7 +225,7 @@ export function TokenCount({ text, className }: { text: string | null; className
 /** The Proxies card's expand button look. */
 export const PROXY_TOGGLE = cx(
   "flex size-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-btn border border-border text-sm leading-[14px] font-semibold",
-  "bg-[rgba(255,255,255,0.04)] text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60",
+  "bg-wash-4 text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60",
   "hover:-translate-y-0.5 hover:border-accent/30 hover:bg-white/8",
 );
 
@@ -256,7 +256,7 @@ export function readAutoclear(): boolean {
 /** The log card's hidden checkbox and the box drawn after it. */
 export const AUTOCLEAR_INPUT = "peer pointer-events-none absolute my-[3px] mr-[3px] ml-1 size-0 opacity-0";
 export const LOG_BODY =
-  "m-0 mt-3 h-[420px] overflow-y-auto overscroll-contain whitespace-pre-wrap rounded-b-2xl bg-[#0e0720] px-4 py-3 font-mono text-xs leading-normal text-[#e6e1ff]";
+  "m-0 mt-3 h-[420px] overflow-y-auto overscroll-contain whitespace-pre-wrap rounded-b-2xl bg-log-bg px-4 py-3 font-mono text-xs leading-normal text-text-soft";
 
 const noop = () => undefined;
 
@@ -275,7 +275,7 @@ export function ScraperSkeleton() {
             <h3 className={TITLE}>Tokens</h3>
             <TokenCount text={null} />
           </div>
-          <div className="mt-3.5 mb-2 rounded-control border border-border bg-[rgba(20,11,38,0.6)] p-3.5">
+          <div className="mt-3.5 mb-2 rounded-control border border-border bg-control-a60 p-3.5">
             <div className="flex items-center gap-2 max-[600px]:flex-col">
               <Input type="text" aria-label="Discord token" placeholder="Paste Discord token…" className="min-w-0 flex-[2]" />
               <Input aria-label="Token label" placeholder="Label (optional)" className="min-w-0 flex-1" />
@@ -298,7 +298,7 @@ export function ScraperSkeleton() {
               <span className={SC_LABEL}>Server (Guild) ID</span>
               <Input placeholder="e.g. 123456789012345678" autoComplete="off" inputMode="numeric" />
             </div>
-            <fieldset className="m-0 rounded-control border border-border bg-[rgba(20,11,38,0.35)] px-4 py-3.5">
+            <fieldset className="m-0 rounded-control border border-border bg-control-a35 px-4 py-3.5">
               <legend className={cx(SC_LABEL, "px-1.5")}>Include fields</legend>
               <div className="mt-2 grid grid-cols-2 gap-2.5">
                 {INCLUDE_OPTS.map((o) => (

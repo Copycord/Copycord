@@ -20,9 +20,9 @@ import {
 } from "./ForwardingSkeleton";
 
 const BADGE_TONE: Record<string, string> = {
-  pushover: "border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.12)] text-[#f87171]",
-  discord: "border-[rgba(139,92,246,0.35)] bg-[rgba(139,92,246,0.12)] text-accent",
-  telegram: "border-[rgba(59,130,246,0.35)] bg-[rgba(59,130,246,0.12)] text-[#60a5fa]",
+  pushover: "border-danger-a35 bg-danger-a12 text-danger-soft",
+  discord: "border-primary-a35 bg-primary-a12 text-accent",
+  telegram: "border-info-a35 bg-info-a12 text-info-soft",
 };
 
 const ICON = PROVIDER_ICON;
@@ -93,8 +93,8 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
             className={cx(
               STATUS_PILL,
               enabled
-                ? "border-[rgba(16,185,129,0.4)] bg-[rgba(16,185,129,0.12)] text-good"
-                : "border-[rgba(148,163,184,0.3)] bg-[rgba(148,163,184,0.1)] text-muted",
+                ? "border-good-a40 bg-good-a12 text-good"
+                : "border-slate-a30 bg-slate-a10 text-muted",
             )}
           >
             {enabled ? "Enabled" : "Disabled"}

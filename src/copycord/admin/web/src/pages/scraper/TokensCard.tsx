@@ -113,7 +113,7 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
 
       <form
         id="sc-add-form"
-        className="mt-3.5 mb-2 rounded-control border border-border bg-[rgba(20,11,38,0.6)] p-3.5"
+        className="mt-3.5 mb-2 rounded-control border border-border bg-control-a60 p-3.5"
         onSubmit={(e) => {
           e.preventDefault();
           void onAdd();
@@ -165,8 +165,8 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
                     className={cx(
                       TOKEN_BADGE,
                       t.is_valid
-                        ? "border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.15)] text-[#34d399]"
-                        : "border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.15)] text-[#f87171]",
+                        ? "border-good-a30 bg-good-a15 text-good-soft"
+                        : "border-danger-a30 bg-danger-a15 text-danger-soft",
                     )}
                   >
                     {t.is_valid ? <CheckIcon /> : <XIcon />}

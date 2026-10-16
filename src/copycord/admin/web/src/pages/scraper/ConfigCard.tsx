@@ -177,7 +177,7 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
           />
         </div>
 
-        <fieldset className="m-0 rounded-control border border-border bg-[rgba(20,11,38,0.35)] px-4 py-3.5">
+        <fieldset className="m-0 rounded-control border border-border bg-control-a35 px-4 py-3.5">
           <legend className={cx(SC_LABEL, "px-1.5")}>Include fields</legend>
           <div className="mt-2 grid grid-cols-2 gap-2.5">
             {INCLUDE_OPTS.map((o) => (
@@ -205,8 +205,8 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
             className={cx(
               "flex items-center gap-2 rounded-btn border px-3.5 py-2.5 text-[13px]",
               result.ok
-                ? "border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.1)] text-[#34d399]"
-                : "border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.1)] text-[#f87171]",
+                ? "border-good-a30 bg-good-a10 text-good-soft"
+                : "border-danger-a30 bg-danger-a10 text-danger-soft",
             )}
           >
             <span aria-hidden="true" className="text-base font-bold">
@@ -217,7 +217,7 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
               {result.warn ? (
                 <>
                   {" · "}
-                  <span className="text-[#fbbf24]">{result.warn}</span>
+                  <span className="text-caution">{result.warn}</span>
                 </>
               ) : null}
             </span>

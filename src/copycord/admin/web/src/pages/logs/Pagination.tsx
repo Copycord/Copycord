@@ -8,7 +8,7 @@ export const PAGINATION = "flex flex-wrap items-center justify-center gap-1 py-4
 const BTN =
   "cursor-pointer rounded-lg border px-3 py-1.5 text-[0.85rem] transition-colors " +
   "disabled:cursor-default disabled:opacity-30";
-const IDLE = "border-border bg-transparent text-text enabled:hover:border-accent enabled:hover:bg-[rgba(139,92,246,0.15)]";
+const IDLE = "border-border bg-transparent text-text enabled:hover:border-accent enabled:hover:bg-primary-a15";
 const ACTIVE = "border-accent bg-accent text-white";
 
 const NOOP = () => {};

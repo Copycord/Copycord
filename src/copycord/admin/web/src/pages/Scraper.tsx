@@ -21,11 +21,11 @@ import { useNotify, useSafeConfirm } from "./system/providers";
 const PILL: Record<string, { box: string; dot: string }> = {
   idle: IDLE_PILL,
   running: {
-    box: "border-[rgba(16,185,129,0.4)] bg-[rgba(16,185,129,0.08)] text-[#34d399]",
-    dot: "bg-[#34d399] shadow-[0_0_8px_rgba(16,185,129,0.5)]",
+    box: "border-good-a40 bg-good-a8 text-good-soft",
+    dot: "bg-good-soft shadow-[0_0_8px_var(--color-good-a50)]",
   },
-  done: { box: "border-[rgba(139,92,246,0.4)] bg-[rgba(139,92,246,0.08)] text-primary", dot: "bg-primary" },
-  error: { box: "border-[rgba(239,68,68,0.4)] bg-[rgba(239,68,68,0.08)] text-[#f87171]", dot: "bg-[#ef4444]" },
+  done: { box: "border-primary-a40 bg-primary-a8 text-primary", dot: "bg-primary" },
+  error: { box: "border-danger-a40 bg-danger-a8 text-danger-soft", dot: "bg-danger" },
 };
 
 export function Scraper() {

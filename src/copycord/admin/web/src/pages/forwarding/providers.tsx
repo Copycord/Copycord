@@ -203,7 +203,7 @@ function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: strin
       }}
       className={cx(
         "chip-input-wrap flex min-h-[46px] cursor-text flex-wrap items-center gap-1.5 rounded-control border border-border px-3 py-2",
-        "bg-linear-to-b from-[#1a1030] to-[#140b26] transition-[border-color,box-shadow] duration-200 hover:border-accent/30 focus-within:border-accent",
+        "bg-linear-to-b from-control-top to-control transition-[border-color,box-shadow] duration-200 hover:border-accent/30 focus-within:border-accent",
       )}
     >
       <ul className="contents" aria-label="Webhook URLs">
@@ -217,7 +217,7 @@ function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: strin
                 onChange(value.filter((v) => v !== url));
                 entryRef.current?.focus();
               }}
-              className="chip max-w-full cursor-pointer truncate rounded-[6px] border border-[rgba(139,92,246,0.3)] bg-[rgba(139,92,246,0.15)] py-1 pr-2 pl-2.5 text-[13px] leading-snug text-text outline-none hover:border-danger/50 hover:bg-danger/10 focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="chip max-w-full cursor-pointer truncate rounded-[6px] border border-primary-a30 bg-primary-a15 py-1 pr-2 pl-2.5 text-[13px] leading-snug text-text outline-none hover:border-danger/50 hover:bg-danger/10 focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {url}
             </button>
@@ -244,7 +244,7 @@ function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: strin
             onChange(value.slice(0, -1));
           }
         }}
-        className="chip-text-input min-w-[120px] flex-1 bg-transparent py-1 text-sm text-text outline-none placeholder:text-[rgba(200,184,232,0.4)]"
+        className="chip-text-input min-w-[120px] flex-1 bg-transparent py-1 text-sm text-text outline-none placeholder:text-muted-a40"
       />
     </div>
   );

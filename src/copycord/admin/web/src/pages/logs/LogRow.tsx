@@ -10,21 +10,21 @@ import { fmtTimestamp, guildText, hasMetadata, metadataRows, typeMeta } from "./
 import type { TypeTone } from "./model";
 
 const TONE: Record<TypeTone, string> = {
-  created: "border-[rgba(16,185,129,0.25)] bg-[rgba(16,185,129,0.15)] text-[#34d399]",
-  deleted: "border-[rgba(239,68,68,0.25)] bg-[rgba(239,68,68,0.15)] text-[#f87171]",
-  renamed: "border-[rgba(251,191,36,0.25)] bg-[rgba(251,191,36,0.15)] text-[#fbbf24]",
-  moved: "border-[rgba(96,165,250,0.25)] bg-[rgba(96,165,250,0.15)] text-[#60a5fa]",
-  converted: "border-[rgba(167,139,250,0.25)] bg-[rgba(167,139,250,0.15)] text-[#a78bfa]",
-  thread: "border-[rgba(244,114,182,0.25)] bg-[rgba(244,114,182,0.15)] text-[#f472b6]",
-  role: "border-[rgba(251,146,60,0.25)] bg-[rgba(251,146,60,0.15)] text-[#fb923c]",
-  emoji: "border-[rgba(34,211,238,0.25)] bg-[rgba(34,211,238,0.15)] text-[#22d3ee]",
-  sticker: "border-[rgba(232,121,249,0.25)] bg-[rgba(232,121,249,0.15)] text-[#e879f9]",
-  guild: "border-[rgba(192,132,252,0.25)] bg-[rgba(192,132,252,0.15)] text-[#c084fc]",
-  permissions: "border-[rgba(253,186,116,0.25)] bg-[rgba(253,186,116,0.15)] text-[#fdba74]",
-  metadata: "border-[rgba(56,189,248,0.25)] bg-[rgba(56,189,248,0.15)] text-[#7dd3fc]",
-  webhook: "border-[rgba(139,92,246,0.25)] bg-[rgba(139,92,246,0.15)] text-[#a78bfa]",
-  error: "border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.2)] text-[#fca5a5]",
-  default: "border-[rgba(148,163,184,0.25)] bg-[rgba(148,163,184,0.15)] text-[#94a3b8]",
+  created: "border-good-a25 bg-good-a15 text-good-soft",
+  deleted: "border-danger-a25 bg-danger-a15 text-danger-soft",
+  renamed: "border-caution-a25 bg-caution-a15 text-caution",
+  moved: "border-info-soft-a25 bg-info-soft-a15 text-info-soft",
+  converted: "border-accent-a25 bg-accent-a15 text-accent",
+  thread: "border-kind-thread-a25 bg-kind-thread-a15 text-kind-thread",
+  role: "border-kind-role-a25 bg-kind-role-a15 text-kind-role",
+  emoji: "border-kind-emoji-a25 bg-kind-emoji-a15 text-kind-emoji",
+  sticker: "border-kind-sticker-a25 bg-kind-sticker-a15 text-kind-sticker",
+  guild: "border-kind-guild-a25 bg-kind-guild-a15 text-kind-guild",
+  permissions: "border-kind-permissions-a25 bg-kind-permissions-a15 text-kind-permissions",
+  metadata: "border-kind-metadata-a25 bg-kind-metadata-a15 text-kind-metadata",
+  webhook: "border-primary-a25 bg-primary-a15 text-accent",
+  error: "border-danger-a35 bg-danger-a20 text-danger-light",
+  default: "border-slate-a25 bg-slate-a15 text-slate",
 };
 
 export function TypeBadge({ type }: { type: string }) {
@@ -60,7 +60,7 @@ export function LogRow({ log, expanded, deleting, onToggle, onDelete }: LogRowPr
     <>
       <tr
         data-log-id={log.log_id}
-        className={cx(ROW, expandable && "cursor-pointer outline-none focus-visible:bg-[rgba(139,92,246,0.06)]")}
+        className={cx(ROW, expandable && "cursor-pointer outline-none focus-visible:bg-primary-a6")}
         onClick={toggle}
         onKeyDown={toggle ? onKey : undefined}
         tabIndex={expandable ? 0 : undefined}
@@ -97,7 +97,7 @@ export function LogRow({ log, expanded, deleting, onToggle, onDelete }: LogRowPr
       {expandable && expanded ? (
         <tr data-detail-for={log.log_id}>
           <td colSpan={COLS} className="p-0">
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-6 gap-y-2 border-b border-border bg-[rgba(15,8,30,0.5)] px-5 pt-3 pb-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-6 gap-y-2 border-b border-border bg-well-a50 px-5 pt-3 pb-4">
               {metadataRows(log).map(([label, value], i) => (
                 <div key={`${label}-${i}`} className="flex flex-col gap-0.5">
                   <span className="text-[11px] tracking-[0.5px] text-muted uppercase">{label}</span>

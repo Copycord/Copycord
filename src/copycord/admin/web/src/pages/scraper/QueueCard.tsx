@@ -72,7 +72,7 @@ export function QueueCard({ queue, notify, confirm }: QueueCardProps) {
       <div className={TITLEBAR}>
         <h3 className={TITLE}>Queue</h3>
         <div className="flex shrink-0 items-center gap-2">
-          <span id="sc-queue-count" className="rounded-lg bg-[rgba(139,92,246,0.12)] px-2 py-0.5 text-xs text-muted">
+          <span id="sc-queue-count" className="rounded-lg bg-primary-a12 px-2 py-0.5 text-xs text-muted">
             {plural(queue.length, "item")}
           </span>
           <Button id="sc-queue-clear" size="sm" variant="ghost" title="Clear pending" disabled={busy !== null} onClick={onClear}>
@@ -103,13 +103,13 @@ export function QueueCard({ queue, notify, confirm }: QueueCardProps) {
               <div
                 key={id}
                 data-id={id}
-                className="sc-queue-item flex items-center justify-between gap-3 rounded-btn border border-border bg-[rgba(20,11,38,0.4)] px-3 py-2.5 transition-colors duration-150 hover:border-[rgba(139,92,246,0.25)] hover:bg-[rgba(20,11,38,0.7)]"
+                className="sc-queue-item flex items-center justify-between gap-3 rounded-btn border border-border bg-control-a40 px-3 py-2.5 transition-colors duration-150 hover:border-primary-a25 hover:bg-control-a70"
               >
                 <div className="flex min-w-0 items-center gap-2.5">
                   <span
                     className={cx(
                       "sc-queue-badge inline-flex size-7 shrink-0 items-center justify-center rounded-lg",
-                      isRunning ? "running bg-[rgba(59,130,246,0.15)] text-[#60a5fa]" : "pending bg-[rgba(139,92,246,0.12)] text-muted",
+                      isRunning ? "running bg-info-a15 text-info-soft" : "pending bg-primary-a12 text-muted",
                     )}
                   >
                     {isRunning ? <RefreshIcon className="animate-spin" /> : <ClockIcon />}

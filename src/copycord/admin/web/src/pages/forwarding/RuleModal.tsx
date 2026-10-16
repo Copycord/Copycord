@@ -43,8 +43,8 @@ const GROUP = "form-group mb-3 gap-1! [&>p]:my-3";
 /** .chip-input-wrap and .chip-text-input over the shared ChipInput. */
 const CHIP_WRAP =
   "[&>div]:transition-[border-color,box-shadow] [&>div]:duration-200 [&>div:hover]:border-accent/30 [&>div:focus-within]:border-accent [&>div:focus-within]:ring-0 " +
-  "[&_li>button]:border-[rgba(139,92,246,0.3)] [&_li>button]:bg-[rgba(139,92,246,0.15)] [&_li>button]:py-1 [&_li>button]:pr-2 [&_li>button]:pl-2.5 " +
-  "[&_input]:min-w-[120px] [&_input]:py-1 [&_input]:placeholder:text-[rgba(200,184,232,0.4)]";
+  "[&_li>button]:border-primary-a30 [&_li>button]:bg-primary-a15 [&_li>button]:py-1 [&_li>button]:pr-2 [&_li>button]:pl-2.5 " +
+  "[&_input]:min-w-[120px] [&_input]:py-1 [&_input]:placeholder:text-muted-a40";
 
 export interface RuleModalProps {
   /** null keeps the modal closed. */
@@ -90,7 +90,7 @@ function LabelToggle({ id, label, title, checked, enabled, onChange }: {
         className={cx(
           "toggle-track relative rounded-full border border-white/12 bg-white/8 transition duration-200 group-hover/tg:border-white/20 peer-checked:border-transparent peer-focus-visible:border-accent",
           enabled
-            ? "h-6 w-11 peer-checked:border-0 peer-checked:bg-[linear-gradient(135deg,var(--color-good)_0%,#059669_100%)]"
+            ? "h-6 w-11 peer-checked:border-0 peer-checked:bg-[linear-gradient(135deg,var(--color-good)_0%,var(--color-good-strong)_100%)]"
             : "h-[22px] w-[38px] peer-checked:bg-[linear-gradient(135deg,var(--color-primary)_0%,var(--color-primary-700)_100%)]",
         )}
       >
@@ -368,7 +368,7 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
                   </details>
                 </Section>
 
-                <div className="modal-form-footer -mx-4 -mb-3.5 flex items-center justify-between gap-3 rounded-b-panel border-t border-white/8 bg-[linear-gradient(180deg,rgba(15,8,32,0.95),rgba(15,8,32,1))] px-4 py-3.5 max-[480px]:flex-col max-[480px]:items-stretch">
+                <div className="modal-form-footer -mx-4 -mb-3.5 flex items-center justify-between gap-3 rounded-b-panel border-t border-white/8 bg-[linear-gradient(180deg,var(--color-surface-deep-a95),var(--color-surface-deep))] px-4 py-3.5 max-[480px]:flex-col max-[480px]:items-stretch">
                   <LabelToggle id="fwd_enabled" label="Rule enabled" enabled checked={form.enabled} onChange={(enabled) => patch({ enabled })} />
                   <div className="form-actions flex gap-2.5 max-[480px]:w-full max-[480px]:[&>button]:flex-1">
                     <Button id="fwdCancelBtn" variant="ghost" type="button" onClick={onClose}>

@@ -270,8 +270,8 @@ export function Logs() {
               title="Clear Filters"
               className={cx(
                 PILL_BTN,
-                "border-[rgba(139,92,246,0.3)] bg-[rgba(139,92,246,0.1)] text-[#c4b5fd]",
-                "hover:border-[rgba(139,92,246,0.5)] hover:bg-[rgba(139,92,246,0.2)]",
+                "border-primary-a30 bg-primary-a10 text-accent-soft",
+                "hover:border-primary-a50 hover:bg-primary-a20",
               )}
               onClick={clearFilters}
             >
