@@ -52,7 +52,7 @@ export function Kit() {
   const [gated, setGated] = useState(false);
 
   return (
-    <div className="flex flex-col gap-5 p-page">
+    <div className="flex flex-col gap-5 py-page">
       <h1 className="text-2xl font-semibold">Component kit</h1>
 
       <Card title="Buttons">
