@@ -2766,6 +2766,11 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
             return None
 
         HEARTBEAT_EVERY = 15.0
+        # Sent once, after the backlog (or straight away when there is no log
+        # file yet), so the log modal knows the tail is complete even when it is
+        # empty. Older pages read it as an empty batch.
+        READY = f"data: {json.dumps({'lines': [], 'ready': True})}\n\n"
+        sent_ready = False
 
         while not shutdown_event.is_set():
             if await request.is_disconnected():
@@ -2773,6 +2778,9 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
 
             path = pick_path()
             if not path:
+                if not sent_ready:
+                    sent_ready = True
+                    yield READY
                 yield ": keepalive\n\n"
                 await asyncio.sleep(0.2)
                 continue
@@ -2799,6 +2807,9 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
                             batch.clear()
                     if batch:
                         yield f"data: {json.dumps({'lines': batch})}\n\n"
+                    if not sent_ready:
+                        sent_ready = True
+                        yield READY
 
                     while not shutdown_event.is_set():
                         if await request.is_disconnected():

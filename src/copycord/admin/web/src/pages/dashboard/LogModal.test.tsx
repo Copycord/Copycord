@@ -97,6 +97,14 @@ describe("LogModal scroll position", () => {
     }
   });
 
+  it("drops the shimmer at the server's ready marker even when the log is empty", () => {
+    render(<LogModal which="server" onClose={() => {}} EventSourceImpl={EsImpl} />);
+    expect(document.querySelector("[data-testid=log-loading]")).not.toBeNull();
+    act(() => last().emit(JSON.stringify({ lines: [], ready: true })));
+    expect(document.querySelector("[data-testid=log-loading]")).toBeNull();
+    expect(document.getElementById("log-empty")?.textContent).toBe("No log lines yet.");
+  });
+
   it("follows new lines at the bottom and stays put once the reader scrolls up", () => {
     render(<LogModal which="server" onClose={() => {}} EventSourceImpl={EsImpl} />);
     act(() => last().emit(many(40)));

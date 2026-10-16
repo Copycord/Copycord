@@ -117,6 +117,16 @@ export function parseLogData(raw: string): string[] {
   }
 }
 
+/** True for the server's end-of-backlog marker ({"lines": [], "ready": true}). */
+export function isLogReady(raw: string): boolean {
+  try {
+    const obj = JSON.parse(raw) as { ready?: unknown } | null;
+    return obj?.ready === true;
+  } catch {
+    return false;
+  }
+}
+
 export function appendCapped(lines: string[], more: string[], max = MAX_LOG_LINES): string[] {
   const next = lines.concat(more);
   return next.length > max ? next.slice(next.length - max) : next;

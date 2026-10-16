@@ -13,14 +13,14 @@ import type { SseOptions } from "../../lib/sse";
 import type { LogStream } from "../../types/api";
 import { GhostButton } from "../system/buttons";
 import { useNotify, useSafeConfirm } from "../system/providers";
-import { appendCapped, clearLogs, filterLines, parseLogData } from "./model";
+import { appendCapped, clearLogs, filterLines, isLogReady, parseLogData } from "./model";
 
 const STICK_PX = 24;
 const RETRY_MS = 1500;
-// The server sends the backlog in 50-line batches; the body stays hidden until
-// they stop arriving (quiet for SETTLE_MS after a batch) so it appears once,
-// already at the bottom, instead of visibly scrolling down batch by batch. An
-// empty log sends no batch at all, so SETTLE_MAX_MS ends the wait regardless.
+// The server sends the backlog in 50-line batches, then a {"ready": true} marker
+// (also when the log is empty). The body stays hidden until the marker, or until
+// batches stop arriving (quiet for SETTLE_MS) from a server without the marker,
+// so it appears once, already at the bottom. SETTLE_MAX_MS ends the wait regardless.
 const SETTLE_MS = 150;
 const SETTLE_MAX_MS = 2500;
 // Log lines shimmer in the body while the backlog loads, one per 18 px log line (text-xs, leading-normal),
@@ -67,13 +67,18 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
       client = logStream(which, {
         EventSourceImpl,
         onMessage: (raw) => {
-          setLines((prev) => appendCapped(prev, parseLogData(raw)));
           if (quiet) clearTimeout(quiet);
+          if (isLogReady(raw)) {
+            settle();
+            return;
+          }
+          setLines((prev) => appendCapped(prev, parseLogData(raw)));
           quiet = setTimeout(settle, SETTLE_MS);
         },
         onError: () => {
           client?.close();
           if (closed) return;
+          settle();
           notifyRef.current("Log stream temporarily unavailable, retrying", "info");
           retry = setTimeout(start, RETRY_MS);
         },
@@ -182,6 +187,11 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
               </div>
             ))}
           </div>
+        )}
+        {settled && lines.length === 0 && (
+          <p id="log-empty" className="pointer-events-none absolute inset-x-0 top-0 m-0 px-4 py-3 font-mono text-xs leading-normal text-muted">
+            No log lines yet.
+          </p>
         )}
         <pre
           ref={bodyRef}
