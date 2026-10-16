@@ -78,7 +78,8 @@ function StepBar({ step }: { step: TaskStep }) {
       aria-valuenow={step.done}
       className={STEP_BAR}
     >
-      <div className="h-full rounded-full bg-info" style={{ width: `${pct}%` }} />
+      {/* The accent of the loading Spinner, like every progress fill in the app. */}
+      <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
     </div>
   );
 }

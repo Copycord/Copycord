@@ -20,9 +20,9 @@ import {
 } from "./ForwardingSkeleton";
 
 const BADGE_TONE: Record<string, string> = {
-  pushover: "border-danger-a35 bg-danger-a12 text-danger-soft",
-  discord: "border-primary-a35 bg-primary-a12 text-accent",
-  telegram: "border-info-a35 bg-info-a12 text-info-soft",
+  pushover: "bg-danger-a12 text-danger-soft",
+  discord: "bg-primary-a12 text-accent",
+  telegram: "bg-info-a12 text-info-soft",
 };
 
 const ICON = PROVIDER_ICON;
@@ -85,7 +85,7 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
           <h3 className={cx("fwd-card-title", RULE_TITLE)}>{rule.label}</h3>
         </div>
         <div className={RULE_BADGES}>
-          <span className={cx(PROVIDER_BADGE, BADGE_TONE[provider] ?? "border-border bg-white/4 text-text-2")}>
+          <span className={cx(PROVIDER_BADGE, BADGE_TONE[provider] ?? "bg-white/4 text-text-2")}>
             <ProviderIcon provider={provider} />
             <span>{describeProvider(provider)}</span>
           </span>
@@ -93,8 +93,8 @@ export function RuleCard({ rule, count, busy, onEdit, onToggle, onDuplicate, onD
             className={cx(
               STATUS_PILL,
               enabled
-                ? "border-good-a40 bg-good-a12 text-good"
-                : "border-slate-a30 bg-slate-a10 text-muted",
+                ? "bg-good-a12 text-good"
+                : "bg-slate-a10 text-muted",
             )}
           >
             {enabled ? "Enabled" : "Disabled"}

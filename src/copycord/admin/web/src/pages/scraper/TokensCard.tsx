@@ -165,8 +165,8 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
                     className={cx(
                       TOKEN_BADGE,
                       t.is_valid
-                        ? "border-good-a30 bg-good-a15 text-good-soft"
-                        : "border-danger-a30 bg-danger-a15 text-danger-soft",
+                        ? "bg-good-a15 text-good-soft"
+                        : "bg-danger-a15 text-danger-soft",
                     )}
                   >
                     {t.is_valid ? <CheckIcon /> : <XIcon />}

@@ -23,18 +23,20 @@ export const FWD_SEARCH = cx(
 /** The "no rules" block, shared with the page. */
 export const FWD_EMPTY = "flex flex-col items-center justify-center gap-2 px-6 py-10 text-center";
 
-// One rule tile (.fwd-card): the title, provider badge and status pill, then the footer buttons and count.
+// One rule tile (.fwd-card) on the mapping card surface (bg-card): the title, provider badge and status pill,
+// then the footer buttons and count.
 export const RULE_CARD = cx(
-  "w-full self-start rounded-[14px] border border-border bg-[linear-gradient(180deg,var(--color-secondary-top),var(--color-secondary-bottom))]",
+  "w-full self-start rounded-[14px] border border-border bg-card",
   "px-[18px] pt-4 pb-3.5 [box-shadow:0_2px_8px_var(--color-shadow-20)] transition duration-200 max-[480px]:p-3.5",
 );
 export const RULE_HEADER = "flex items-start justify-between gap-3 max-[640px]:flex-col max-[640px]:gap-2.5";
 export const RULE_TITLE_BOX = "flex min-h-7 min-w-0 flex-1 items-center";
 export const RULE_TITLE = "m-0 line-clamp-1 text-[15px] leading-[1.3] font-semibold text-text";
 export const RULE_BADGES = "flex shrink-0 items-center gap-2 max-[640px]:w-full max-[640px]:justify-start";
+// The provider badge and the status pill: fill and text only, the 1px border stays transparent.
 export const PROVIDER_BADGE =
-  "inline-flex items-center gap-[5px] rounded-[999px] border px-2.5 py-[3px] text-[11px] font-medium tracking-[0.03em] uppercase";
-export const STATUS_PILL = "inline-flex items-center rounded-[999px] border px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] uppercase";
+  "inline-flex items-center gap-[5px] rounded-[999px] border border-transparent px-2.5 py-[3px] text-[11px] font-medium tracking-[0.03em] uppercase";
+export const STATUS_PILL = "inline-flex items-center rounded-[999px] border border-transparent px-2 py-0.5 text-[11px] font-medium tracking-[0.02em] uppercase";
 export const PROVIDER_ICON = "block size-3.5 shrink-0";
 export const RULE_FOOTER = "mt-3 flex items-center gap-2 pt-3 max-[640px]:flex-wrap max-[480px]:flex-col";
 export const RULE_STAT = "ml-auto flex items-center gap-2 text-xs leading-[1.2] opacity-60";

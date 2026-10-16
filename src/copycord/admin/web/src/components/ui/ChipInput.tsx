@@ -166,7 +166,7 @@ export function ChipInput({
                     remove(chip);
                   }
                 }}
-                className="max-w-full cursor-pointer truncate rounded-[6px] border border-white/10 bg-white/5 px-2.5 py-1 text-[13px] leading-snug text-text hover:border-danger/50 hover:bg-danger/10 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none disabled:cursor-not-allowed"
+                className="max-w-full cursor-pointer truncate rounded-[6px] border border-transparent bg-white/5 px-2.5 py-1 text-[13px] leading-snug text-text hover:bg-danger/10 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none disabled:cursor-not-allowed"
               >
                 {chip}
               </button>

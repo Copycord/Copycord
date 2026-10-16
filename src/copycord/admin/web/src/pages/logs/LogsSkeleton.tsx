@@ -62,8 +62,9 @@ export function rowCells(expanded: boolean) {
   return { td, guild: cx(td, "max-md:hidden"), actions: cx(edge, "px-3.5 text-center") };
 }
 export const TIMESTAMP_TEXT = "whitespace-nowrap font-mono text-xs text-muted";
+// The event type badge: fill and text only, the 1px border stays transparent.
 export const BADGE =
-  "inline-block whitespace-nowrap rounded-md border px-2.5 py-[3px] text-[11px] font-semibold tracking-[0.2px] capitalize";
+  "inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-[3px] text-[11px] font-semibold tracking-[0.2px] capitalize";
 export const GUILD_TEXT = "text-xs font-medium text-muted";
 export const DETAILS_TEXT = "text-[13px] text-white/80";
 export const DELETE_BTN = cx(

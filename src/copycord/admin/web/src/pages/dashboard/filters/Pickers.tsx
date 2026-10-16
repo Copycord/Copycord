@@ -290,7 +290,11 @@ export function RolePicker({ mappingId, initial, onApply, onClose, onStatus }: R
                         />
                       </td>
                       <td className={TD}>
-                        <span className="role-pill inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs" style={{ borderColor: color, color }}>
+                        {/* The role colour as text on a soft fill of itself, no border. */}
+                        <span
+                          className="role-pill inline-flex items-center rounded-full border border-transparent px-2.5 py-0.5 text-xs"
+                          style={{ backgroundColor: `color-mix(in srgb, ${color} 14%, transparent)`, color }}
+                        >
                           <span className="role-pill-text">{r.name || ""}</span>
                         </span>
                       </td>

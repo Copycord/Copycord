@@ -217,7 +217,7 @@ function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: strin
                 onChange(value.filter((v) => v !== url));
                 entryRef.current?.focus();
               }}
-              className="chip max-w-full cursor-pointer truncate rounded-[6px] border border-primary-a30 bg-primary-a15 py-1 pr-2 pl-2.5 text-[13px] leading-snug text-text outline-none hover:border-danger/50 hover:bg-danger/10 focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="chip max-w-full cursor-pointer truncate rounded-[6px] border border-transparent bg-primary-a15 py-1 pr-2 pl-2.5 text-[13px] leading-snug text-text outline-none hover:bg-danger/10 focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               {url}
             </button>

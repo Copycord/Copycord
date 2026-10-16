@@ -25,7 +25,7 @@ const CHIPS =
   "[&>div]:px-2.5 [&>div]:pt-2.5 [&>div]:pb-1.5 " +
   "[&>div:focus-within]:shadow-none [&>div:focus-within]:ring-0 " +
   "[&_li>button]:rounded-input [&_li>button]:px-2.5 [&_li>button]:py-1.5 [&_li>button]:leading-[1.4] " +
-  "[&_li>button:hover]:border-white/15 [&_li>button:hover]:bg-white/8 " +
+  "[&_li>button:hover]:bg-white/8 " +
   "[&_input]:w-[178px] [&_input]:min-w-[140px] [&_input]:flex-none [&_input]:px-0.5 [&_input]:pt-1 [&_input]:pb-2 " +
   "[&_input]:font-sans [&_input]:text-sm [&_input]:leading-[1.4]";
 

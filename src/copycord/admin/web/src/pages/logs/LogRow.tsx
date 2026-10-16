@@ -10,21 +10,21 @@ import { fmtTimestamp, guildText, hasMetadata, metadataRows, typeMeta } from "./
 import type { TypeTone } from "./model";
 
 const TONE: Record<TypeTone, string> = {
-  created: "border-good-a25 bg-good-a15 text-good-soft",
-  deleted: "border-danger-a25 bg-danger-a15 text-danger-soft",
-  renamed: "border-caution-a25 bg-caution-a15 text-caution",
-  moved: "border-info-soft-a25 bg-info-soft-a15 text-info-soft",
-  converted: "border-accent-a25 bg-accent-a15 text-accent",
-  thread: "border-kind-thread-a25 bg-kind-thread-a15 text-kind-thread",
-  role: "border-kind-role-a25 bg-kind-role-a15 text-kind-role",
-  emoji: "border-kind-emoji-a25 bg-kind-emoji-a15 text-kind-emoji",
-  sticker: "border-kind-sticker-a25 bg-kind-sticker-a15 text-kind-sticker",
-  guild: "border-kind-guild-a25 bg-kind-guild-a15 text-kind-guild",
-  permissions: "border-kind-permissions-a25 bg-kind-permissions-a15 text-kind-permissions",
-  metadata: "border-kind-metadata-a25 bg-kind-metadata-a15 text-kind-metadata",
-  webhook: "border-primary-a25 bg-primary-a15 text-accent",
-  error: "border-danger-a35 bg-danger-a20 text-danger-light",
-  default: "border-slate-a25 bg-slate-a15 text-slate",
+  created: "bg-good-a15 text-good-soft",
+  deleted: "bg-danger-a15 text-danger-soft",
+  renamed: "bg-caution-a15 text-caution",
+  moved: "bg-info-soft-a15 text-info-soft",
+  converted: "bg-accent-a15 text-accent",
+  thread: "bg-kind-thread-a15 text-kind-thread",
+  role: "bg-kind-role-a15 text-kind-role",
+  emoji: "bg-kind-emoji-a15 text-kind-emoji",
+  sticker: "bg-kind-sticker-a15 text-kind-sticker",
+  guild: "bg-kind-guild-a15 text-kind-guild",
+  permissions: "bg-kind-permissions-a15 text-kind-permissions",
+  metadata: "bg-kind-metadata-a15 text-kind-metadata",
+  webhook: "bg-primary-a15 text-accent",
+  error: "bg-danger-a20 text-danger-light",
+  default: "bg-slate-a15 text-slate",
 };
 
 export function TypeBadge({ type }: { type: string }) {

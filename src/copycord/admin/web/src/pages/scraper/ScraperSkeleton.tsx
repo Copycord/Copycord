@@ -30,11 +30,11 @@ export const CHECK_SPAN =
   "after:rounded-[2px] after:content-[''] peer-checked:border-primary peer-checked:bg-brand-ghost " +
   "peer-checked:after:bg-primary peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary";
 
-// .scraper-status-pill and its idle look.
+// .scraper-status-pill and its idle look: fill and text only, the 1px border stays transparent.
 export const PILL_BOX =
-  "mt-1 inline-flex shrink-0 items-center gap-[7px] rounded-[20px] border px-3.5 py-1.5 text-xs font-semibold " +
+  "mt-1 inline-flex shrink-0 items-center gap-[7px] rounded-[20px] border border-transparent px-3.5 py-1.5 text-xs font-semibold " +
   "tracking-[0.03em] whitespace-nowrap transition-all duration-[250ms]";
-export const IDLE_PILL = { box: "border-border bg-wash-4 text-muted", dot: "bg-muted" };
+export const IDLE_PILL = { box: "bg-wash-4 text-muted", dot: "bg-muted" };
 
 /** The status pill until the first status answer: the pill's box with a bar over it. */
 export function PillPending() {
@@ -82,7 +82,8 @@ export const TOKEN_ROW =
   "mb-1.5 flex items-center justify-between gap-2.5 rounded-btn border border-border bg-control-a40 px-3 py-2.5 " +
   "transition-colors duration-200 last:mb-0 hover:border-primary-a25 hover:bg-control-a70";
 export const TOKEN_MAIN = "flex min-w-0 items-center gap-2.5";
-export const TOKEN_BADGE = "inline-flex size-7 shrink-0 items-center justify-center rounded-lg border";
+// The valid / invalid mark: fill and text only, the 1px border stays transparent.
+export const TOKEN_BADGE = "inline-flex size-7 shrink-0 items-center justify-center rounded-lg border border-transparent";
 export const TOKEN_TEXT = "flex min-w-0 flex-col gap-0.5";
 export const TOKEN_NAME = "truncate text-[13px] font-semibold text-text";
 export const TOKEN_MASK = "truncate font-mono text-[11px] text-muted";
@@ -207,7 +208,7 @@ export const INCLUDE_OPTS: Array<{ key: keyof IncludeOpts; id: string; label: st
   { key: "bio", id: "sc-opt-bio", label: "Bio" },
 ];
 
-const COUNT_BOX = "rounded-xl border px-2.5 py-[3px] text-[11px] font-semibold whitespace-nowrap";
+const COUNT_BOX = "rounded-xl border border-transparent px-2.5 py-[3px] text-[11px] font-semibold whitespace-nowrap";
 
 /** The token count badge; a bar the badge's size until the token list answers. */
 export function TokenCount({ text, className }: { text: string | null; className?: string }) {
@@ -216,7 +217,7 @@ export function TokenCount({ text, className }: { text: string | null; className
       0 tokens
     </Skeleton.Box>
   ) : (
-    <span id="sc-token-count" className={cx(COUNT_BOX, "border-primary-a25 bg-primary-a12 text-primary", className)}>
+    <span id="sc-token-count" className={cx(COUNT_BOX, "bg-primary-a12 text-primary", className)}>
       {text}
     </span>
   );

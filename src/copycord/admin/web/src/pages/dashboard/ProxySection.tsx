@@ -426,7 +426,7 @@ export function ProxySection({ WebSocketImpl, replayMs = REPLAY_MS }: ProxySecti
               <div className="srv-proxy-progress-bar h-1.5 flex-1 overflow-hidden rounded-[3px] bg-white/6">
                 <div
                   id="srv-proxy-progress-fill"
-                  className="h-full rounded-[3px] bg-[linear-gradient(90deg,var(--color-primary),var(--color-accent))] transition-[width] duration-300"
+                  className="h-full rounded-[3px] bg-accent transition-[width] duration-300"
                   style={{ width: `${progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0}%` }}
                 />
               </div>

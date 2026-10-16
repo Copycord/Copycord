@@ -1,6 +1,7 @@
 /* Tailwind entry and design tokens. The palette: near-black surfaces barely
-   tinted toward the brand hue (base #0c0c14, surface #12121b), a near-neutral
-   grey for inputs and raised cards (elevated #1a1a1e, hover #212126), hairline
+   tinted toward the brand hue (base #0c0c14, surface #12121b, which the inputs,
+   selects and raised cards share with the mapping cards), a near-neutral grey
+   for secondary buttons (#1a1a1e, card hover #212126), hairline
    borders (#262637, strong #34344a), three text steps (#ededf4, #a3a3b8, #6e6e86), the brand purple as the one accent,
    and semantic status colours: success #3ecf8e, warning #f5a524 (cancelled and
    stopped too), danger #f0506e, info #4f9cf7, neutral #8b8b9e. */
@@ -10,7 +11,7 @@
   --color-page: #0c0c14;
   --color-bg2: #262637;
   --color-bg-2: #12121b;
-  --color-bg-3: #1a1a1e;
+  --color-bg-3: #12121b;
   --color-card: #12121b;
   --color-card-solid: #12121b;
   --color-text: #ededf4;
@@ -32,8 +33,8 @@
   --color-info: #4f9cf7;
   /* Warning: cancelled, stopped, degraded, customised. */
   --color-custom-ink: #f5a524;
-  --color-progress: #3ecf8e;
-  --color-control: #1a1a1e;
+  --color-progress: #a78bfa;
+  --color-control: #12121b;
   --color-rail-hover: rgba(255, 255, 255, 0.05);
   --color-rail-active: rgba(139, 92, 246, 0.16);
 
@@ -77,7 +78,7 @@
 @theme static {
   --color-border-strong: #34344a;
   --color-surface-deep: #12121b;
-  --color-control-top: #1a1a1e;
+  --color-control-top: #12121b;
   --color-text-soft: #ededf4;
   --color-text-status: #a3a3b8;
   --color-accent-soft: #c4b5fd;
@@ -112,7 +113,7 @@
   --color-field-readonly: #12121b;
   --color-card-hover: rgba(33, 33, 38, 0.6);
   --color-log-bg: #0c0c14;
-  --color-log-input-bg: #1a1a1e;
+  --color-log-input-bg: #12121b;
   --color-log-input-edge: #34344a;
   --color-log-input-focus: #8b5cf6;
   --color-table-rule: #34344a;
@@ -277,7 +278,7 @@
   /* .card and .side-menu background: a flat surface (no purple wash), kept as
      an image because the components set it through bg-(image:...). */
   --card-gradient: linear-gradient(var(--color-card-solid), var(--color-card-solid));
-  /* .input and select.input background: flat elevated. */
+  /* .input and select.input background: flat, the mapping card surface. */
   --control-gradient: linear-gradient(var(--color-control-top), var(--color-control));
   --select-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23a3a3b8' d='M1.41 0L6 4.58 10.59 0 12 1.41l-6 6-6-6z'/%3E%3C/svg%3E")
       no-repeat right 14px center,

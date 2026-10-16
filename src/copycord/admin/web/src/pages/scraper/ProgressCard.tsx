@@ -34,13 +34,13 @@ export function ProgressCard({ progress }: { progress: ProgressState }) {
         <div className="flex shrink-0 items-center gap-2">
           <span
             id="sc-elapsed"
-            className="rounded-md border border-border bg-control-a50 px-2 py-0.5 font-mono text-xs text-muted"
+            className="rounded-md border border-transparent bg-control-a50 px-2 py-0.5 font-mono text-xs text-muted"
           >
             {elapsed}
           </span>
           <span
             id="sc-eta"
-            className="rounded-md border border-good-soft-a25 bg-good-soft-a10 px-2 py-0.5 font-mono text-xs text-good-soft empty:hidden"
+            className="rounded-md border border-transparent bg-good-soft-a10 px-2 py-0.5 font-mono text-xs text-good-soft empty:hidden"
           >
             {eta}
           </span>
@@ -60,7 +60,7 @@ export function ProgressCard({ progress }: { progress: ProgressState }) {
         >
           <div
             id="sc-progress-fill"
-            className="h-full rounded-lg bg-linear-to-r from-primary to-good-soft transition-[width] duration-[400ms]"
+            className="h-full rounded-lg bg-accent transition-[width] duration-[400ms]"
             style={{ width: `${pct ?? 0}%` }}
           />
         </div>

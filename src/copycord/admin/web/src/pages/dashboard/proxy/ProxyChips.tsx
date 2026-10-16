@@ -20,11 +20,12 @@ export interface ProxyChipsProps {
   onToggleFavorite: (proxy: string) => void;
 }
 
+// A tested chip says its result with its fill (no border): pass green, slow amber, fail red.
 const TONE: Record<string, string> = {
-  loading: "border-accent/50 opacity-80",
-  pass: "border-good/60",
-  slow: "border-warn/70",
-  fail: "border-danger/70",
+  loading: "bg-accent/12 opacity-80",
+  pass: "bg-good/14",
+  slow: "bg-warn/14",
+  fail: "bg-danger/14",
 };
 
 function Star() {
@@ -75,9 +76,9 @@ export function ProxyChips({ proxies, favorites, results, onAdd, onRemove, onRem
             key={p}
             data-proxy={p}
             className={cx(
-              "srv-proxy-chip-item inline-flex max-w-full items-center gap-1.5 self-start rounded-md border bg-white/6 py-1 pr-2 pl-2.5 font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace] text-xs leading-[1.3] text-text",
+              "srv-proxy-chip-item inline-flex max-w-full items-center gap-1.5 self-start rounded-md border border-transparent py-1 pr-2 pl-2.5 font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace] text-xs leading-[1.3] text-text",
               res ? `test-${res.state}` : "",
-              res ? TONE[res.state] : "border-white/10",
+              (res && TONE[res.state]) || "bg-white/6",
               fav && "is-favorite",
             )}
           >
