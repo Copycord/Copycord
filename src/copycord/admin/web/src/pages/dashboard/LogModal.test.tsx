@@ -1,5 +1,5 @@
 import { act, fireEvent, render } from "@testing-library/react";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LogModal } from "./LogModal";
 
 class FakeSource {
@@ -74,6 +74,22 @@ describe("LogModal scroll position", () => {
     expect(body().textContent).toBe("");
     act(() => last().emit(many(40, "again")));
     expect(atBottom(body())).toBe(true);
+  });
+
+  it("keeps the body hidden while backlog batches arrive, then shows it once at the bottom", () => {
+    vi.useFakeTimers();
+    try {
+      render(<LogModal which="server" onClose={() => {}} EventSourceImpl={EsImpl} />);
+      act(() => last().emit(many(50)));
+      act(() => vi.advanceTimersByTime(100));
+      act(() => last().emit(many(50, "batch2")));
+      expect(body().className).toContain("invisible");
+      act(() => vi.advanceTimersByTime(200));
+      expect(body().className).not.toContain("invisible");
+      expect(atBottom(body())).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("follows new lines at the bottom and stays put once the reader scrolls up", () => {
