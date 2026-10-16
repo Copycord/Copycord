@@ -105,24 +105,6 @@ All settings are saved to the database. Suspend duration takes effect on next cl
 
 The member scraper shares the same proxy list. When proxies are configured, the scraper automatically uses them to distribute requests across different IPs.
 
-## Message retention
-
-By default, Copycord keeps message mapping records indefinitely. To automatically clean up old records:
-
-### Via slash command
-
-```
-/env msg_cleanup days:30
-```
-
-This sets the retention period to 30 days. Message records older than this are automatically cleaned up.
-
-### Via environment variable
-
-```
-MESSAGE_RETENTION_DAYS=30
-```
-
 ## Internal ports
 
 The dashboard, server bot and client talk to each other directly, so there are no WebSocket URLs to configure. Only the dashboard port (`ADMIN_PORT`, default `8080`) needs to be reachable.

@@ -214,6 +214,50 @@ class TestGuildMappingsAPI:
         assert resp.json()["mappings"] == []
 
     @pytest.mark.asyncio
+    async def test_retired_setting_key_loads_and_saves(self, client):
+        """A mapping stored with the removed DB_CLEANUP_MSG setting still lists, resolves and saves."""
+        from types import SimpleNamespace
+
+        from copycord.common.common_helpers import resolve_mapping_settings
+        from copycord.common.config import Config
+
+        mid = db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name="Legacy",
+            original_guild_id=555,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=666,
+            cloned_guild_name="",
+            settings={"DB_CLEANUP_MSG": False, "CLONE_EMOJI": False},
+        )
+
+        resp = await client.get("/api/guild-mappings")
+        assert resp.status_code == 200
+        (row,) = resp.json()["mappings"]
+        assert row["settings"]["CLONE_EMOJI"] is False
+
+        cfg = SimpleNamespace(default_mapping_settings=lambda: Config.default_mapping_settings(None))
+        assert "DB_CLEANUP_MSG" not in cfg.default_mapping_settings()
+        eff = resolve_mapping_settings(db, cfg, mapping_id=mid)
+        assert eff["CLONE_EMOJI"] is False
+
+        # Same host and clone pair as stored, so the save skips the Discord membership checks.
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}",
+            json={
+                "mapping_name": "Legacy",
+                "original_guild_id": "555",
+                "cloned_guild_id": "666",
+                "settings": dict(row["settings"], CLONE_EMOJI=True),
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        assert db.get_mapping_by_id(mid)["mapping_name"] == "Legacy"
+        assert resolve_mapping_settings(db, cfg, mapping_id=mid)["CLONE_EMOJI"] is True
+
+    @pytest.mark.asyncio
     async def test_toggle_status(self, client):
         mid = db.upsert_guild_mapping(
             mapping_id=None,

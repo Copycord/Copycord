@@ -26,7 +26,7 @@ import {
 } from "./logic";
 
 export const IGNORE_CLONED_TIP =
-  "Filters out already-cloned messages using the local DB. Disable DB_CLEANUP_MSG in mapping settings to keep records intact.";
+  "Filters out already-cloned messages using the message records in the local DB.";
 
 const RANGE_OPTIONS: { value: RangeMode; label: string }[] = [
   { value: "all", label: "All history" },

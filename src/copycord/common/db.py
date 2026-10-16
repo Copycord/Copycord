@@ -2912,7 +2912,7 @@ class DBManager:
         older_than_seconds: int = 7 * 24 * 3600,
         skip_pairs: Optional[list[tuple[int, int]]] = None,
     ) -> int:
-        """Delete messages older than older_than_seconds, except for the (original_guild_id, cloned_guild_id) pairs in skip_pairs (per-mapping DB_CLEANUP_MSG=False). Returns rows deleted."""
+        """Delete messages older than older_than_seconds, except for the (original_guild_id, cloned_guild_id) pairs in skip_pairs. Returns rows deleted."""
         with self._tx():
             before = self.conn.total_changes
 

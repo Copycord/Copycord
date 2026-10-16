@@ -52,7 +52,6 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
   TAG_REPLY_MSG: false,
   APPEND_TIMESTAMP: false,
   APPEND_AUTHOR: false,
-  DB_CLEANUP_MSG: true,
   ON_DEMAND_WEBHOOKS: true,
   USE_USER_TOKENS: false,
   USER_TOKEN_STRATEGY: "round_robin",
@@ -71,7 +70,6 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   ENABLE_CLONING: "Enable Cloning",
   CLONE_MESSAGES: "Clone Messages",
   ON_DEMAND_WEBHOOKS: "On-Demand Webhooks",
-  DB_CLEANUP_MSG: "Auto-Clean Message DB",
   DELETE_CHANNELS: "Delete Removed Channels",
   DELETE_THREADS: "Delete Removed Threads",
   REPOSITION_CHANNELS: "Reposition Channels",
@@ -106,7 +104,7 @@ export const FRIENDLY_NAMES: Record<string, string> = {
 };
 
 export const SECTIONS: ReadonlyArray<{ name: string; keys: readonly string[] }> = [
-  { name: "General", keys: ["ENABLE_CLONING", "CLONE_MESSAGES", "ON_DEMAND_WEBHOOKS", "DB_CLEANUP_MSG"] },
+  { name: "General", keys: ["ENABLE_CLONING", "CLONE_MESSAGES", "ON_DEMAND_WEBHOOKS"] },
   {
     name: "Channels",
     keys: [
@@ -184,7 +182,6 @@ export const SETTING_TIPS: Record<string, string> = {
     "When enabled, role icons (custom images and unicode emoji) will be cloned from the host to the clone. Requires the clone server to have Boost Level 2+.",
   CLONE_ROLE_STYLES:
     "When enabled, role color styles will be cloned from the host to the clone. Requires the clone server to have Boost Level 2+.",
-  DB_CLEANUP_MSG: "Automatically clean up message records older than 7 days from the database.",
   ON_DEMAND_WEBHOOKS:
     "When enabled, webhooks are only created when a channel receives its first message, instead of during sync. This makes server cloning much faster by skipping upfront webhook creation.",
 };

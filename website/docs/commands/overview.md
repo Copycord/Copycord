@@ -56,6 +56,5 @@ All commands at a glance:
 /channel_webhook set_all|clear_all        — Bulk webhook identity
 /export_dms <user_id>                     — Export DM history
 /mapping_debug                            — Debug guild mapping
-/env msg_cleanup days:<n>                 — Set message retention
 /rewrite add|list|remove                  — Word/phrase rewrites
 ```

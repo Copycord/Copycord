@@ -41,23 +41,3 @@ Show a debug view of the current clone's guild mapping. Displays internal mappin
 ```
 /mapping_debug
 ```
-
----
-
-## `/env msg_cleanup`
-
-Set how many days stored messages are kept in the database before automatic cleanup.
-
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `days` | Yes | Number of days to retain messages (minimum: 1) |
-
-**Usage:**
-```
-/env msg_cleanup days:7
-/env msg_cleanup days:30
-```
-
-This controls when old message records are automatically pruned from the database.

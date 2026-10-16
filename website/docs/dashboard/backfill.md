@@ -59,8 +59,8 @@ This is useful when:
 - You need to re-run a backfill but don't want to duplicate messages that were already cloned
 - A previous backfill was partially completed and you want to fill in the gaps without duplicates
 
-:::caution DB_CLEANUP_MSG and message records
-This feature relies on cloned message records stored in the database. If `DB_CLEANUP_MSG` is enabled in your [mapping settings](/docs/configuration/cloning-options#database-maintenance), old message records are periodically purged — which means previously cloned messages may no longer be detected. Consider disabling `DB_CLEANUP_MSG` for mappings where you plan to use this feature, so that message records are retained.
+:::caution Message records
+This feature relies on cloned message records stored in the database. Messages whose records were deleted are no longer detected as cloned.
 :::
 
 ## How it works

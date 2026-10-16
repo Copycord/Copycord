@@ -923,7 +923,6 @@ class ServerReceiver:
         if not self._processor_started:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
             self._processor_started = True
-            self._prune_old_messages_loop()
             self._reap_idle_tls_sessions_loop()
 
     async def on_member_join(self, member: discord.Member):
@@ -12468,158 +12467,6 @@ class ServerReceiver:
 
         await self.forward_thread_message(forced)
 
-    def _prune_old_messages_loop(
-        self, retention_seconds: int | None = None
-    ) -> asyncio.Task:
-        """Start an hourly task that deletes old rows from the messages table.
-
-        Retention order: app_config MESSAGE_RETENTION_DAYS, app_config MESSAGE_RETENTION_SECONDS,
-        the same two env vars, then a 7 day default.
-        """
-
-        if getattr(self, "_prune_task", None) and not self._prune_task.done():
-            return self._prune_task
-
-        if retention_seconds is None:
-            retention_seconds = 7 * 24 * 3600
-
-        def _resolve_retention_seconds() -> int:
-            """Effective retention window, preferring app_config days."""
-            cfg_sec = cfg_days = ""
-            try:
-                cfg_sec = (
-                    self.db.get_config("MESSAGE_RETENTION_SECONDS", "") or ""
-                ).strip()
-                cfg_days = (
-                    self.db.get_config("MESSAGE_RETENTION_DAYS", "") or ""
-                ).strip()
-            except Exception:
-                cfg_sec = cfg_days = ""
-
-            if cfg_days.isdigit():
-                return int(cfg_days) * 24 * 3600
-
-            if cfg_sec.isdigit():
-                return int(cfg_sec)
-
-            env_days = os.getenv("MESSAGE_RETENTION_DAYS")
-            env_sec = os.getenv("MESSAGE_RETENTION_SECONDS")
-            if env_days and env_days.isdigit():
-                return int(env_days) * 24 * 3600
-            if env_sec and env_sec.isdigit():
-                return int(env_sec)
-
-            return int(retention_seconds)
-
-        async def _runner():
-            try:
-                while True:
-                    try:
-                        effective_retention = max(_resolve_retention_seconds(), 0)
-
-                        if effective_retention <= 0:
-                            logger.debug(
-                                "[🧹] DB cleanup disabled (effective retention <= 0)."
-                            )
-                            skip_pairs: list[tuple[int, int]] = []
-                        else:
-                            logger.debug(
-                                "[🧹] running DB cleanup "
-                                "(retention=%d seconds ~= %.2f days)",
-                                effective_retention,
-                                effective_retention / 86400.0,
-                            )
-                            skip_pairs: list[tuple[int, int]] = []
-                            skip_labels: list[str] = []
-
-                            try:
-                                with self.db.lock, self.db.conn:
-                                    rows = self.db.conn.execute(
-                                        """
-                                        SELECT DISTINCT
-                                            original_guild_id,
-                                            cloned_guild_id,
-                                            mapping_name
-                                        FROM guild_mappings
-                                        WHERE cloned_guild_id IS NOT NULL
-                                        AND cloned_guild_id != 0
-                                        """
-                                    ).fetchall()
-                            except Exception:
-                                rows = []
-
-                            for row in rows:
-
-                                if isinstance(row, dict):
-                                    r = row
-                                else:
-                                    try:
-                                        r = {k: row[k] for k in row.keys()}
-                                    except Exception:
-                                        try:
-                                            orig_gid, clone_gid, mapping_name = row
-                                        except Exception:
-                                            continue
-                                        r = {
-                                            "original_guild_id": orig_gid,
-                                            "cloned_guild_id": clone_gid,
-                                            "mapping_name": mapping_name,
-                                        }
-
-                                orig_gid = r.get("original_guild_id")
-                                clone_gid = r.get("cloned_guild_id")
-                                mapping_name = (r.get("mapping_name") or "").strip()
-
-                                try:
-                                    orig_int = int(orig_gid or 0)
-                                    clone_int = int(clone_gid or 0)
-                                except Exception:
-                                    continue
-
-                                try:
-                                    settings = resolve_mapping_settings(
-                                        self.db,
-                                        self.config,
-                                        original_guild_id=orig_int,
-                                        cloned_guild_id=clone_int,
-                                    )
-                                except Exception:
-                                    settings = self.config.default_mapping_settings()
-
-                                if settings.get("DB_CLEANUP_MSG", True) is False:
-                                    skip_pairs.append((orig_int, clone_int))
-                                    label = mapping_name or f"{orig_int}->{clone_int}"
-                                    skip_labels.append(label)
-
-                            if skip_pairs:
-                                logger.debug(
-                                    "[🧹] skipping DB cleanup for %d mappings "
-                                    "(DB_CLEANUP_MSG=False): %s",
-                                    len(skip_pairs),
-                                    ", ".join(skip_labels),
-                                )
-
-                            if effective_retention > 0:
-                                deleted = self.db.delete_old_messages(
-                                    effective_retention,
-                                    skip_pairs=skip_pairs or None,
-                                )
-                                if deleted:
-                                    logger.info(
-                                        "[🧹] Deleted %d old message mappings from db.",
-                                        deleted,
-                                    )
-
-                    except Exception:
-                        logger.exception("[🧹] delete_old_messages failed")
-
-                    await asyncio.sleep(60 * 60)
-            except asyncio.CancelledError:
-                raise
-
-        self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
-        return self._prune_task
-
     def _reap_idle_tls_sessions_loop(self) -> asyncio.Task:
         """Periodically close idle user-token curl_cffi sessions and their token sender bookkeeping.
 
@@ -13553,7 +13400,6 @@ class ServerReceiver:
         await _cancel_and_wait(getattr(self, "_flush_bg_task", None), "flush")
         await _cancel_and_wait(getattr(self, "_sitemap_task", None), "sitemap")
         await _cancel_and_wait(getattr(self, "_ws_task", None), "ws")
-        await _cancel_and_wait(getattr(self, "_prune_task", None), "prune-old-messages")
         await _cancel_and_wait(
             getattr(self, "_tls_reap_task", None), "reap-idle-tls-sessions"
         )

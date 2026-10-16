@@ -84,12 +84,6 @@ These options are configured via the **Optional Message Features** popup in the 
 | Append Timestamp | Off | Append the original message timestamp below the cloned message |
 | Append Author | Off | Append the original author's username below the cloned message |
 
-## Database Maintenance
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| Auto-Clean Message DB | On | Automatically clean up message records older than 7 days |
-
 ---
 
 :::tip Recommended starting configuration

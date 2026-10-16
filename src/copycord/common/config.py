@@ -143,7 +143,6 @@ class Config:
             "TAG_REPLY_MSG": False,
             "APPEND_TIMESTAMP": False,
             "APPEND_AUTHOR": False,
-            "DB_CLEANUP_MSG": True,
             "ON_DEMAND_WEBHOOKS": True,
             "USE_USER_TOKENS": False,
             "USER_TOKEN_STRATEGY": "round_robin",

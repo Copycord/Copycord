@@ -264,7 +264,6 @@ BOOL_KEYS = [
     "CLONE_GUILD_DISCOVERY_SPLASH",
     "CLONE_SERVER_TAG",
     "SYNC_GUILD_DESCRIPTION",
-    "DB_CLEANUP_MSG",
 ]
 
 MSG_FEATURE_KEYS = [
@@ -317,7 +316,6 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "TAG_REPLY_MSG": False,
     "APPEND_TIMESTAMP": False,
     "APPEND_AUTHOR": False,
-    "DB_CLEANUP_MSG": True,
     "ON_DEMAND_WEBHOOKS": True,
     "USE_USER_TOKENS": False,
     "USER_TOKEN_FALLBACK_WEBHOOK": True,
