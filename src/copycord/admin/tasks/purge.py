@@ -187,7 +187,8 @@ async def run(ctx: Any, inputs: PurgeInputs) -> None:
         raise RuntimeError("Database not configured")
     seconds = inputs.seconds
     age = age_words(inputs.older_than, inputs.unit)
-    scopes = _scopes(db, inputs)
+    # The records under no mapping get a step only when there are some.
+    scopes = [s for s in _scopes(db, inputs) if s["mapping_id"] is not None or _count(db, seconds, s)]
     await ctx.log(f"{'Counting' if inputs.dry_run else 'Purging'} message records older than {age}"
                   f"{' (dry run, nothing is deleted)' if inputs.dry_run else ''}")
 

@@ -109,6 +109,15 @@ async def test_delete_all_mappings(svc, db, maps):
 
 
 @pytest.mark.asyncio
+async def test_no_unmapped_step_when_there_are_none(svc, db, maps):
+    db.conn.execute("DELETE FROM messages WHERE original_guild_id = ?", (STRAY[0],))
+    db.conn.commit()
+    run = await svc.start("purge_messages", {"older_than": 30})
+    done = await _settled(svc, run.id)
+    assert [s["title"] for s in done.steps] == ["Alpha", "Beta"]
+
+
+@pytest.mark.asyncio
 async def test_scope_to_one_mapping(svc, db, maps):
     run = await svc.start("purge_messages", {"older_than": 6, "unit": "weeks", "mapping_id": maps["Beta"]})
     done = await _settled(svc, run.id)
@@ -161,7 +170,7 @@ async def test_cancel_stops_before_the_next_mapping(svc, db, maps, monkeypatch):
     done = await _settled(svc, run.id)
     assert done.status == "cancelled"
     states = [s["state"] for s in done.steps]
-    assert states == ["success", "cancelled", "cancelled"]
+    assert states == ["success", "cancelled", "cancelled"]  # Alpha, Beta, the stray record
     assert done.summary["deleted"] == 3 and _left(db, B) == 3
 
 

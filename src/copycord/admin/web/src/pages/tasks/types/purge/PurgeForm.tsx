@@ -144,16 +144,17 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
             Delete message records older than
           </span>
           <div role="group" aria-labelledby="purge-age-label" className="flex flex-wrap items-center gap-2">
-            <Input
-              type="number"
-              min={1}
-              step={1}
-              aria-label="Older than"
-              className="w-28"
-              value={olderThan}
-              aria-invalid={errors.older_than ? true : undefined}
-              onChange={(e) => changed(() => setOlderThan(e.target.value))}
-            />
+            <div className="w-28">
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                aria-label="Older than"
+                value={olderThan}
+                aria-invalid={errors.older_than ? true : undefined}
+                onChange={(e) => changed(() => setOlderThan(e.target.value))}
+              />
+            </div>
             <div className="w-32">
               <label htmlFor="purge-unit" className="sr-only">
                 Unit
