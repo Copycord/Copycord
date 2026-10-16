@@ -6,24 +6,24 @@ import { cx } from "../../../components/ui";
 import { PROMO_LINKS } from "./model";
 
 const CARD =
-  "group relative flex cursor-pointer items-center gap-3.5 overflow-hidden rounded-[14px] border border-[rgba(255,255,255,0.08)] " +
-  "bg-[linear-gradient(rgba(255,255,255,0.04),rgba(255,255,255,0.02))] px-[18px] py-4 text-inherit no-underline " +
-  "[box-shadow:0_8px_24px_rgba(0,0,0,0.25)] transition-[translate,box-shadow,border-color] duration-180 ease-[ease] outline-none " +
-  "hover:-translate-y-0.5 hover:border-[rgba(214,188,250,0.35)] hover:[box-shadow:0_12px_28px_rgba(0,0,0,0.32)] " +
-  "focus-visible:-translate-y-0.5 focus-visible:border-[rgba(214,188,250,0.35)] focus-visible:[box-shadow:0_12px_28px_rgba(0,0,0,0.32)] " +
+  "group relative flex cursor-pointer items-center gap-3.5 overflow-hidden rounded-[14px] border border-line-1 " +
+  "bg-[linear-gradient(var(--color-wash-4),var(--color-wash-2))] px-[18px] py-4 text-inherit no-underline " +
+  "[box-shadow:0_8px_24px_var(--color-shadow-25)] transition-[translate,box-shadow,border-color] duration-180 ease-[ease] outline-none " +
+  "hover:-translate-y-0.5 hover:border-promo-edge hover:[box-shadow:0_12px_28px_var(--color-shadow-32)] " +
+  "focus-visible:-translate-y-0.5 focus-visible:border-promo-edge focus-visible:[box-shadow:0_12px_28px_var(--color-shadow-32)] " +
   // .promo-card::after: the soft light that sweeps across on hover
   "after:pointer-events-none after:absolute after:-inset-x-[30%] after:-inset-y-[20%] " +
-  "after:bg-[radial-gradient(160px_280px_at_50%_50%,rgba(255,255,255,0.08)_0%,rgba(255,255,255,0.02)_36%,rgba(255,255,255,0)_72%)] " +
+  "after:bg-[radial-gradient(160px_280px_at_50%_50%,var(--color-line-1)_0%,var(--color-wash-2)_36%,var(--color-wash-0)_72%)] " +
   "after:mix-blend-screen after:blur-[1px] after:[transform:translateX(-60%)] after:[transition:transform_0.45s_linear_0s] after:will-change-transform " +
   "hover:after:[transform:translateX(70%)] focus-visible:after:[transform:translateX(70%)]";
 
 const ICON =
-  "relative grid size-[46px] flex-none place-items-center rounded-[9999px] text-white [box-shadow:inset_0_0_1px_rgba(255,255,255,0.35)] " +
+  "relative grid size-[46px] flex-none place-items-center rounded-[9999px] text-white [box-shadow:inset_0_0_1px_var(--color-wash-35)] " +
   "[transition:box-shadow_0.18s_ease,transform_0.18s_ease] " +
   // .promo-card:hover .promo-icon: lifts 1 px and glows in the card's --icon-glow-rgb
-  "group-hover:[box-shadow:inset_0_0_1px_rgba(255,255,255,0.35),0_0_0_2px_rgba(var(--icon-glow-rgb),0.18),0_0_10px_rgba(var(--icon-glow-rgb),0.5),0_0_22px_rgba(var(--icon-glow-rgb),0.32),0_0_36px_rgba(var(--icon-glow-rgb),0.2)] " +
+  "group-hover:[box-shadow:inset_0_0_1px_var(--color-wash-35),0_0_0_2px_rgba(var(--icon-glow-rgb),0.18),0_0_10px_rgba(var(--icon-glow-rgb),0.5),0_0_22px_rgba(var(--icon-glow-rgb),0.32),0_0_36px_rgba(var(--icon-glow-rgb),0.2)] " +
   "group-hover:[transform:translateY(-1px)] " +
-  "group-focus-visible:[box-shadow:inset_0_0_1px_rgba(255,255,255,0.35),0_0_0_2px_rgba(var(--icon-glow-rgb),0.18),0_0_10px_rgba(var(--icon-glow-rgb),0.5),0_0_22px_rgba(var(--icon-glow-rgb),0.32),0_0_36px_rgba(var(--icon-glow-rgb),0.2)] " +
+  "group-focus-visible:[box-shadow:inset_0_0_1px_var(--color-wash-35),0_0_0_2px_rgba(var(--icon-glow-rgb),0.18),0_0_10px_rgba(var(--icon-glow-rgb),0.5),0_0_22px_rgba(var(--icon-glow-rgb),0.32),0_0_36px_rgba(var(--icon-glow-rgb),0.2)] " +
   "group-focus-visible:[transform:translateY(-1px)]";
 
 interface PromoProps {
@@ -72,7 +72,7 @@ export function PromoCards() {
         href={PROMO_LINKS.github}
         title="Star on GitHub"
         sub="Support development & features"
-        iconClass="bg-[radial-gradient(105%_105%_at_20%_20%,#24292f,#0d1117)]"
+        iconClass="bg-[radial-gradient(105%_105%_at_20%_20%,var(--color-github-top),var(--color-github-bottom))]"
         icon={
           <>
             {svg(22, GITHUB)}
@@ -82,7 +82,7 @@ export function PromoCards() {
                 width="16"
                 height="16"
                 aria-hidden="true"
-                className="block origin-center animate-[cc-star-wobble_2.6s_ease-in-out_infinite] overflow-visible text-[#ffd54f] drop-shadow-[0_0_6px_rgba(255,213,79,0.55)] group-hover:animate-[cc-spin-360_650ms_linear_1_forwards]"
+                className="block origin-center animate-[cc-star-wobble_2.6s_ease-in-out_infinite] overflow-visible text-star drop-shadow-[0_0_6px_var(--color-star-a55)] group-hover:animate-[cc-spin-360_650ms_linear_1_forwards]"
               >
                 <path d={STAR} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
               </svg>
@@ -96,7 +96,7 @@ export function PromoCards() {
         title="Join the Discord"
         sub="Chat with the community"
         ariaLabel="Join the Discord"
-        iconClass="bg-[radial-gradient(130%_130%_at_25%_20%,#8ea1f2_0%,#5865f2_55%,#404eed_100%)] group-hover:bg-[radial-gradient(140%_140%_at_30%_15%,#a9b7ff_0%,#6d7ef7_50%,#5865f2_100%)] group-focus-visible:bg-[radial-gradient(140%_140%_at_30%_15%,#a9b7ff_0%,#6d7ef7_50%,#5865f2_100%)]"
+        iconClass="bg-[radial-gradient(130%_130%_at_25%_20%,var(--color-discord-light)_0%,var(--color-discord)_55%,var(--color-discord-deep)_100%)] group-hover:bg-[radial-gradient(140%_140%_at_30%_15%,var(--color-discord-glow-light)_0%,var(--color-discord-glow-mid)_50%,var(--color-discord)_100%)] group-focus-visible:bg-[radial-gradient(140%_140%_at_30%_15%,var(--color-discord-glow-light)_0%,var(--color-discord-glow-mid)_50%,var(--color-discord)_100%)]"
         icon={svg(22, DISCORD)}
       />
       <Promo
@@ -104,7 +104,7 @@ export function PromoCards() {
         href={PROMO_LINKS.kofi}
         title="Donate"
         sub="Thank you for your support!"
-        iconClass="bg-[radial-gradient(105%_105%_at_20%_20%,#fca5a5,#ec4899)]"
+        iconClass="bg-[radial-gradient(105%_105%_at_20%_20%,var(--color-kofi-top),var(--color-kofi-bottom))]"
         icon={svg(24, HEART, "origin-center group-hover:animate-[cc-heartbeat_1.2s_ease-in-out_infinite] group-hover:will-change-transform")}
       />
     </section>

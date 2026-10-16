@@ -269,7 +269,7 @@ export function RolePicker({ mappingId, initial, onApply, onClose, onStatus }: R
               ) : (
                 shown.map((r) => {
                   const id = String(r.id);
-                  const color = (r.color_hex || "").trim() || "#99AAB5";
+                  const color = (r.color_hex || "").trim() || "var(--color-role-default)";
                   return (
                     <tr
                       key={id}

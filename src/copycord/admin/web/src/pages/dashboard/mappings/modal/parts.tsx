@@ -91,7 +91,7 @@ export function ToggleRow({ id, name, desc, note, checked, disabled, onChange, s
         </span>
         {desc ? <span className={DESC}>{desc}</span> : null}
         {note ? (
-          <span className={cx(DESC, "mapping-toggle-disabled-note text-[#e0a44b]! italic opacity-90!")}>{note}</span>
+          <span className={cx(DESC, "mapping-toggle-disabled-note text-note! italic opacity-90!")}>{note}</span>
         ) : null}
       </div>
       <Switch id={id} labelledBy={`${id}-name`} checked={checked} disabled={disabled} onChange={onChange} />

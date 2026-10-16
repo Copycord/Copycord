@@ -21,7 +21,7 @@ const LEGEND = "mb-2.5 px-1 text-[13px] leading-[1.3] font-semibold text-accent"
 const COL = "mx-0.5 min-w-0 rounded-panel border border-border bg-control px-[18px] pt-4 pb-5";
 // #filters-modal .chips, .chip and .chip-input over the shared ChipInput.
 const CHIPS =
-  "[&>div]:max-h-24 [&>div]:min-h-12 [&>div]:items-start [&>div]:gap-1.5 [&>div]:overflow-y-auto [&>div]:bg-[#0f0820] [&>div]:bg-none " +
+  "[&>div]:max-h-24 [&>div]:min-h-12 [&>div]:items-start [&>div]:gap-1.5 [&>div]:overflow-y-auto [&>div]:bg-surface-deep [&>div]:bg-none " +
   "[&>div]:px-2.5 [&>div]:pt-2.5 [&>div]:pb-1.5 " +
   "[&>div:focus-within]:shadow-none [&>div:focus-within]:ring-0 " +
   "[&_li>button]:rounded-input [&_li>button]:px-2.5 [&_li>button]:py-1.5 [&_li>button]:leading-[1.4] " +
@@ -66,7 +66,7 @@ function FetchButton({
       )}
       {...data}
     >
-      <span className="role-fetch-circle relative -mt-0.5 ml-[3px] inline-flex size-4 items-center justify-center rounded-full border border-primary bg-primary text-[0px] text-white transition duration-150 group-hover/rf:-translate-y-[0.5px] group-hover/rf:border-accent group-hover/rf:bg-accent group-hover/rf:shadow-[0_0_0_1px_rgba(0,0,0,0.35)] group-focus-visible/rf:-translate-y-[0.5px] group-focus-visible/rf:border-accent group-focus-visible/rf:bg-accent">
+      <span className="role-fetch-circle relative -mt-0.5 ml-[3px] inline-flex size-4 items-center justify-center rounded-full border border-primary bg-primary text-[0px] text-white transition duration-150 group-hover/rf:-translate-y-[0.5px] group-hover/rf:border-accent group-hover/rf:bg-accent group-hover/rf:shadow-[0_0_0_1px_var(--color-shadow-35)] group-focus-visible/rf:-translate-y-[0.5px] group-focus-visible/rf:border-accent group-focus-visible/rf:bg-accent">
         <SearchIcon />
       </span>
     </button>

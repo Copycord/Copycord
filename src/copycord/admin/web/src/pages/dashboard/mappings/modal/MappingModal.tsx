@@ -45,7 +45,7 @@ export interface MappingModalProps {
 const INPUT =
   "w-full rounded-control border border-border bg-control p-3 text-text outline-0 transition-[border] duration-200 focus:border-accent aria-invalid:border-danger";
 const READONLY =
-  "field-readonly cursor-not-allowed border-white/6! bg-[#1a102d]! text-muted opacity-60 transition-none focus:border-white/6!";
+  "field-readonly cursor-not-allowed border-white/6! bg-field-readonly! text-muted opacity-60 transition-none focus:border-white/6!";
 const SEARCH_ICON =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239e95b7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E\")";
 
@@ -256,7 +256,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
             </div>
           </div>
 
-          <div className="mapping-toolbar sticky top-0 z-[2] -mx-5 flex items-center gap-2 bg-[#0f0820] px-5 py-2.5">
+          <div className="mapping-toolbar sticky top-0 z-[2] -mx-5 flex items-center gap-2 bg-surface-deep px-5 py-2.5">
             <div className="mapping-search-row min-w-0 flex-1">
               <input
                 id="mappingSettingsSearch"
@@ -337,7 +337,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
             search={search}
           />
 
-          <div className="mapping-form-footer sticky bottom-0 z-[3] -mx-5 -mb-5 flex justify-end gap-2 rounded-b-panel bg-[#0f0820] px-5 py-3.5">
+          <div className="mapping-form-footer sticky bottom-0 z-[3] -mx-5 -mb-5 flex justify-end gap-2 rounded-b-panel bg-surface-deep px-5 py-3.5">
             {dirty ? (
               <GhostButton type="button" id="mapping-cancel-btn" className="gap-[normal]!" onClick={() => setForm(baseline)}>
                 Cancel

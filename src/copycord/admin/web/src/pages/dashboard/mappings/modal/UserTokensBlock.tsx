@@ -78,9 +78,9 @@ function StatusText({ id, status }: { id: string; status: Status }) {
       className={cx(
         "user-token-status min-w-0 flex-auto text-[11px] leading-[1.4]",
         status.kind === "error"
-          ? "is-error text-[#f4a3a3]"
+          ? "is-error text-danger-pale"
           : status.kind === "ok"
-            ? "is-ok text-[#86efac]"
+            ? "is-ok text-good-pale"
             : "text-muted opacity-85",
       )}
     >
@@ -89,13 +89,13 @@ function StatusText({ id, status }: { id: string; status: Status }) {
   );
 }
 
-const BSTATUS: Record<string, string> = { added: "text-[#86efac]", duplicate: "text-muted" };
+const BSTATUS: Record<string, string> = { added: "text-good-pale", duplicate: "text-muted" };
 
 function ResultRow({ label, status, cls }: { label: string; status: string; cls: string }) {
   return (
     <div className="user-token-bulk-row flex items-center gap-2 px-0.5 py-1 text-xs">
       <span className="btok truncate font-mono text-muted">{label}</span>
-      <span className={cx("bstatus ml-auto shrink-0 font-semibold", cls, BSTATUS[cls] ?? "text-[#f4a3a3]")}>{status}</span>
+      <span className={cx("bstatus ml-auto shrink-0 font-semibold", cls, BSTATUS[cls] ?? "text-danger-pale")}>{status}</span>
     </div>
   );
 }
@@ -346,9 +346,9 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     const body: ReactNode = (
       <div id="user-token-verify-results">
         <div className="user-token-verify-summary mb-2.5 flex items-center gap-2 text-xs font-semibold">
-          <span className="uv-ok text-[#86efac]">{j.working} working</span>
+          <span className="uv-ok text-good-pale">{j.working} working</span>
           <span className="uv-sep font-normal text-muted">·</span>
-          <span className="uv-bad text-[#f4a3a3]">{j.broken} not working</span>
+          <span className="uv-bad text-danger-pale">{j.broken} not working</span>
         </div>
         <div className={cx(RESULTS, "user-token-verify-list mt-0! max-h-[260px]! pr-1")}>
           {orderVerify(j.results ?? []).map((r) => (
@@ -412,8 +412,8 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     <details id="user-tokens-section" className={SECTION}>
       <SectionSummary>Token Message Cloning</SectionSummary>
       <div className="mapping-section-body pt-1">
-        <div className="user-token-disclaimer mb-3 rounded-input border border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.08)] px-3 py-2.5 text-xs leading-normal text-text">
-          <strong className="text-[#f4a3a3]">Warning:</strong> This feature uses user tokens. Discord may rate limit your
+        <div className="user-token-disclaimer mb-3 rounded-input border border-danger-a35 bg-danger-a8 px-3 py-2.5 text-xs leading-normal text-text">
+          <strong className="text-danger-pale">Warning:</strong> This feature uses user tokens. Discord may rate limit your
           accounts or permanently ban them at any time. Only use accounts you are willing to lose.
         </div>
 
@@ -650,7 +650,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                         <div
                           id="user-token-settings-menu"
                           role="menu"
-                          className="user-token-settings-menu absolute top-[calc(100%+6px)] right-0 z-40 flex min-w-[184px] flex-col gap-0.5 rounded-btn border border-border bg-card-solid p-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.45)]"
+                          className="user-token-settings-menu absolute top-[calc(100%+6px)] right-0 z-40 flex min-w-[184px] flex-col gap-0.5 rounded-btn border border-border bg-card-solid p-1.5 shadow-[0_10px_30px_var(--color-shadow-45)]"
                         >
                           <button
                             type="button"
@@ -669,7 +669,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                             type="button"
                             id="user-token-delete-all"
                             role="menuitem"
-                            className={cx(MENU_ITEM, "is-danger text-[#f4a3a3] hover:bg-[rgba(244,163,163,0.12)]")}
+                            className={cx(MENU_ITEM, "is-danger text-danger-pale hover:bg-danger-pale-a12")}
                             onClick={() => void deleteAll()}
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="flex-none opacity-85">

@@ -209,7 +209,7 @@ export function BackupTokensModal({ open, onClose }: BackupTokensModalProps) {
                     aria-label="Remove backup token"
                     title="Remove"
                     onClick={() => void remove(t.token_id)}
-                    className="delete-token-btn inline-flex min-h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-btn border border-border bg-transparent p-0 text-muted outline-none hover:border-danger hover:bg-[rgba(255,76,76,0.1)] hover:text-danger focus:border-danger focus:bg-[rgba(255,76,76,0.1)] focus:text-danger"
+                    className="delete-token-btn inline-flex min-h-8 w-8 flex-none cursor-pointer items-center justify-center rounded-btn border border-border bg-transparent p-0 text-muted outline-none hover:border-danger hover:bg-delete-a10 hover:text-danger focus:border-danger focus:bg-delete-a10 focus:text-danger"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />

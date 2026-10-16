@@ -35,7 +35,7 @@ export function EyeIcon({ shown = false }: { shown?: boolean }) {
 }
 
 export const FIELD_INPUT =
-  "inline-block w-full rounded-control border bg-[#140b26] py-3 pr-9 pl-3 text-[13.3333px] text-text outline-none " +
+  "inline-block w-full rounded-control border bg-control py-3 pr-9 pl-3 text-[13.3333px] text-text outline-none " +
   "transition-[border-color] duration-200 focus:border-accent";
 export const FIELD_REVEAL =
   "absolute top-1/2 right-3 m-0 flex -translate-y-1/2 cursor-pointer items-center justify-center border-0 bg-transparent p-0 " +

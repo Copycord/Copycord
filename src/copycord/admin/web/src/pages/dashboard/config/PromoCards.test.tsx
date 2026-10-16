@@ -11,8 +11,8 @@ describe("PromoCards", () => {
       expect(card).toHaveClass(
         "group",
         "hover:-translate-y-0.5",
-        "hover:border-[rgba(214,188,250,0.35)]",
-        "hover:[box-shadow:0_12px_28px_rgba(0,0,0,0.32)]",
+        "hover:border-promo-edge",
+        "hover:[box-shadow:0_12px_28px_var(--color-shadow-32)]",
         "duration-180",
         "hover:after:[transform:translateX(70%)]",
       );

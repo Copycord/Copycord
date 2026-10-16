@@ -99,6 +99,67 @@
   --color-accent-a30: rgba(167, 139, 250, 0.3);
   --color-danger-a10: rgba(239, 68, 68, 0.1);
   --color-danger-a35: rgba(239, 68, 68, 0.35);
+
+  /* Dashboard */
+  --color-field-readonly: #1a102d;
+  --color-card-hover: rgba(27, 16, 48, 0.6);
+  --color-log-bg: #0e0720;
+  --color-log-input-bg: #1c1830;
+  --color-log-input-edge: #3b365a;
+  --color-log-input-focus: #7c5cff;
+  --color-table-rule: #808080;
+  --color-role-default: #99AAB5;
+  --color-run-bg: #183a2e;
+  --color-run-text: #baf7d0;
+  --color-stop-bg: #3a1c20;
+  --color-stop-text: #ffc5cf;
+  --color-ok: #4caf50;
+  --color-warn: #ff9800;
+  --color-fail: #ff6b6b;
+  --color-favorite: #ffc83d;
+  --color-update: #e53935;
+  --color-good-pale: #86efac;
+  --color-danger-pale: #f4a3a3;
+  --color-note: #e0a44b;
+  --color-star: #ffd54f;
+  --color-promo-edge: rgba(214, 188, 250, 0.35);
+  --color-github-top: #24292f;
+  --color-github-bottom: #0d1117;
+  --color-discord: #5865f2;
+  --color-discord-light: #8ea1f2;
+  --color-discord-deep: #404eed;
+  --color-discord-glow-light: #a9b7ff;
+  --color-discord-glow-mid: #6d7ef7;
+  --color-discord-bg: #2b2d31;
+  --color-discord-text: #dbdee1;
+  --color-discord-mention: #c9cdfb;
+  --color-discord-a30: rgba(88, 101, 242, 0.3);
+  --color-kofi-top: #fca5a5;
+  --color-kofi-bottom: #ec4899;
+  --color-wash-0: rgba(255, 255, 255, 0);
+  --color-wash-2: rgba(255, 255, 255, 0.02);
+  --color-wash-6: rgba(255, 255, 255, 0.06);
+  --color-wash-12: rgba(255, 255, 255, 0.12);
+  --color-wash-18: rgba(255, 255, 255, 0.18);
+  --color-wash-20: rgba(255, 255, 255, 0.2);
+  --color-wash-35: rgba(255, 255, 255, 0.35);
+  --color-shadow-20: rgba(0, 0, 0, 0.2);
+  --color-shadow-25: rgba(0, 0, 0, 0.25);
+  --color-shadow-32: rgba(0, 0, 0, 0.32);
+  --color-shadow-35: rgba(0, 0, 0, 0.35);
+  --color-shadow-40: rgba(0, 0, 0, 0.4);
+  --color-accent-a12: rgba(167, 139, 250, 0.12);
+  --color-danger-a8: rgba(239, 68, 68, 0.08);
+  --color-delete-a10: rgba(255, 76, 76, 0.1);
+  --color-fail-a10: rgba(255, 80, 80, 0.1);
+  --color-ok-a10: rgba(76, 175, 80, 0.1);
+  --color-ok-a12: rgba(76, 175, 80, 0.12);
+  --color-warn-a10: rgba(255, 152, 0, 0.1);
+  --color-warn-a12: rgba(255, 152, 0, 0.12);
+  --color-favorite-a10: rgba(255, 200, 61, 0.1);
+  --color-favorite-a40: rgba(255, 200, 61, 0.4);
+  --color-danger-pale-a12: rgba(244, 163, 163, 0.12);
+  --color-star-a55: rgba(255, 213, 79, 0.55);
 }
 
 :root {

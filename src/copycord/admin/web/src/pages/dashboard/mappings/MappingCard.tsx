@@ -48,7 +48,7 @@ export function MappingCard({ mapping: m, locked, busy, onEdit, onFilters, onTog
         MAPPING_CARD,
         paused
           ? "is-paused border-transparent bg-slate-400/24 hover:bg-slate-400/30"
-          : "is-active border-border bg-card hover:-translate-y-0.5 hover:border-accent hover:bg-[rgba(27,16,48,0.6)] hover:[box-shadow:0_8px_20px_rgba(0,0,0,0.6)]",
+          : "is-active border-border bg-card hover:-translate-y-0.5 hover:border-accent hover:bg-card-hover hover:[box-shadow:0_8px_20px_var(--color-shadow-60)]",
         locked && "locked cursor-not-allowed opacity-50 grayscale-[0.4]",
         className,
       )}

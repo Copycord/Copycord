@@ -16,8 +16,8 @@ interface Props {
 }
 
 // .msg-mention and .msg-mention-plain
-const MENTION = "cursor-default rounded-[3px] bg-[rgba(88,101,242,0.3)] px-[3px] font-medium text-[#c9cdfb]";
-const PLAIN = "text-[#dbdee1]";
+const MENTION = "cursor-default rounded-[3px] bg-discord-a30 px-[3px] font-medium text-discord-mention";
+const PLAIN = "text-discord-text";
 
 export function MsgFeaturesModal({ settings, onToggle, onClose }: Props) {
   useScrollLock(true);
@@ -84,7 +84,7 @@ export function MsgFeaturesModal({ settings, onToggle, onClose }: Props) {
             <div className="msg-features-preview-label mb-1.5 text-[11px] font-semibold tracking-[0.5px] text-muted uppercase">
               Preview
             </div>
-            <div className="msg-features-preview-box rounded-btn border border-white/6 bg-[#2b2d31] px-3.5 py-3 leading-normal">
+            <div className="msg-features-preview-box rounded-btn border border-white/6 bg-discord-bg px-3.5 py-3 leading-normal">
               <div className="msg-preview-msg flex items-start gap-3">
                 <img
                   src="/static/logo.png"
@@ -95,7 +95,7 @@ export function MsgFeaturesModal({ settings, onToggle, onClose }: Props) {
                 <div className="msg-preview-body min-w-0 flex-1">
                   <div className="msg-preview-header mb-0.5 flex items-baseline gap-2">
                     <span className="msg-preview-username text-sm font-semibold text-text">{name}</span>
-                    <span className="msg-preview-bot-tag rounded-[3px] bg-[#5865f2] px-[5px] py-px align-middle text-[9px] leading-[1.4] font-semibold tracking-[0.3px] text-white uppercase">
+                    <span className="msg-preview-bot-tag rounded-[3px] bg-discord px-[5px] py-px align-middle text-[9px] leading-[1.4] font-semibold tracking-[0.3px] text-white uppercase">
                       APP
                     </span>
                     <span className="msg-preview-time text-[11px] text-muted opacity-60">Today at 3:42 PM</span>
@@ -111,7 +111,7 @@ export function MsgFeaturesModal({ settings, onToggle, onClose }: Props) {
                   ) : (
                     <div id="msg-features-preview-reply" className="msg-preview-reply hidden" />
                   )}
-                  <div id="msg-features-preview-content" className="msg-preview-content text-sm leading-[1.4] text-[#dbdee1]">
+                  <div id="msg-features-preview-content" className="msg-preview-content text-sm leading-[1.4] text-discord-text">
                     Hey <span className={on("DISABLE_EVERYONE_MENTIONS") ? PLAIN : MENTION}>@everyone</span> check this
                     out <span className={on("DISABLE_ROLE_MENTIONS") ? PLAIN : MENTION}>@Moderator</span>
                   </div>
