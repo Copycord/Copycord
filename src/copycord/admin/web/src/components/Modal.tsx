@@ -15,7 +15,7 @@ export const MODAL_BACKDROP = "absolute inset-0 bg-black/[0.68]";
 export const MODAL_CARD =
   "relative z-[1] mt-[6vh] flex max-h-[80vh] flex-col rounded-panel border border-border bg-surface-deep text-text shadow-[0_20px_56px_var(--color-shadow-50)] outline-none";
 export const MODAL_HEADER = "flex items-center justify-between px-4 py-3";
-export const MODAL_TITLE = "m-0 text-base font-bold text-accent";
+export const MODAL_TITLE = "m-0 text-base font-bold text-text";
 /** The old .icon-btn.verify-close square close button. */
 export const MODAL_CLOSE =
   "ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-btn border border-border bg-control px-2 py-0.5 text-base leading-none text-text outline-none transition-colors hover:border-danger hover:text-danger focus-visible:border-danger focus-visible:text-danger active:border-danger-strong active:text-danger-strong";

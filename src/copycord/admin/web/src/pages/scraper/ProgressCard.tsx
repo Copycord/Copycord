@@ -44,7 +44,7 @@ export function ProgressCard({ progress }: { progress: ProgressState }) {
           >
             {eta}
           </span>
-          <span id="sc-member-count" className="text-xs font-semibold text-primary empty:hidden">
+          <span id="sc-member-count" className="text-xs font-semibold text-text-2 empty:hidden">
             {members}
           </span>
         </div>

@@ -122,7 +122,7 @@ export function Sidebar({ onNavigate, hide = [], footer = "version", version }: 
               </svg>
               GitHub
             </a>
-            <span className="text-accent tabular-nums opacity-90">{version || "dev"}</span>
+            <span className="text-text-2 tabular-nums opacity-90">{version || "dev"}</span>
           </>
         )}
       </footer>

@@ -57,7 +57,7 @@ export interface RuleModalProps {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="form-section mb-5 pb-4">
-      <h4 className="form-section-title mt-0 mr-0 mb-3.5 ml-0 flex items-center gap-2 text-[13px] font-semibold tracking-[0.04em] text-accent uppercase before:h-3.5 before:w-[3px] before:rounded-[2px] before:bg-[linear-gradient(180deg,var(--color-primary),var(--color-primary-700))] before:content-['']">
+      <h4 className="form-section-title mt-0 mr-0 mb-3.5 ml-0 flex items-center gap-2 text-[13px] font-semibold tracking-[0.04em] text-text-2 uppercase before:h-3.5 before:w-[3px] before:rounded-[2px] before:bg-[linear-gradient(180deg,var(--color-primary),var(--color-primary-700))] before:content-['']">
         {title}
       </h4>
       {children}

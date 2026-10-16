@@ -160,7 +160,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
               className={cx(FWD_EMPTY, reveal)}
             >
               <svg
-                className="size-12 text-accent"
+                className="size-12 text-text-2"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"

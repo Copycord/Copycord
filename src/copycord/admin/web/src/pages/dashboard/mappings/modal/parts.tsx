@@ -12,7 +12,7 @@ export const SECTION =
 
 export function SectionSummary({ children }: { children: ReactNode }) {
   return (
-    <summary className="mapping-section-header group/sum flex cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 text-[11px] font-bold tracking-[0.6px] text-accent uppercase transition-colors duration-100 select-none hover:bg-white/[0.03] [&::-webkit-details-marker]:hidden">
+    <summary className="mapping-section-header group/sum flex cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 text-[11px] font-bold tracking-[0.6px] text-text-2 uppercase transition-colors duration-100 select-none hover:bg-white/[0.03] [&::-webkit-details-marker]:hidden">
       <span
         aria-hidden="true"
         className="mapping-section-chev inline-flex size-6 shrink-0 -rotate-90 items-center justify-center rounded-input border border-border bg-white/4 text-xs text-accent transition duration-200 group-open/sec:rotate-0 group-hover/sum:border-accent/30 group-hover/sum:bg-white/8"

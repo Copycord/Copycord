@@ -8,7 +8,7 @@ import { readLastCount } from "../../components/ui/lastCount";
 import { DownloadIcon, PlayIcon, QueueIcon, RefreshIcon, TrashIcon, UsersIcon } from "./icons";
 
 // .scraper-card .card-titlebar h3 and the .card-titlebar row; every scraper card sits 18px below the last.
-export const TITLE = "m-0 text-[15px] font-bold whitespace-nowrap text-accent";
+export const TITLE = "m-0 text-[15px] font-bold whitespace-nowrap text-text";
 export const TITLEBAR = "mb-1.5 flex items-center justify-between gap-2.5";
 export const SC_CARD = "mt-[18px] max-w-full";
 
@@ -59,8 +59,8 @@ export function SearchIcon({ className }: { className?: string }) {
 export function ScraperTitle() {
   return (
     <div className="min-w-0">
-      <h2 className="m-0 flex items-center gap-2.5 text-[22px] font-bold whitespace-nowrap text-accent">
-        <SearchIcon className="shrink-0 text-primary" />
+      <h2 className="m-0 flex items-center gap-2.5 text-[22px] font-bold whitespace-nowrap text-text">
+        <SearchIcon className="shrink-0 text-text" />
         Member Scraper
       </h2>
       <p className="m-0 mt-1 text-[13px] text-muted">Scrape Discord server members</p>
@@ -157,7 +157,7 @@ export function ScrapesPlaceholder({ rows = readLastCount(SCRAPES_COUNT_KEY, 0, 
           <div key={i} aria-hidden="true" data-skeleton-row="" className={SCRAPE_ROW}>
             <div className={SCRAPE_TEXT}>
               <span className={SCRAPE_GUILD}>
-                <UsersIcon className="shrink-0 text-accent" />
+                <UsersIcon className="shrink-0 text-text-2" />
                 <Skeleton.Text className="truncate" width={NAME_WIDTHS[i % NAME_WIDTHS.length]!} />
               </span>
               <Skeleton.Text className={SCRAPE_META} width={190} />

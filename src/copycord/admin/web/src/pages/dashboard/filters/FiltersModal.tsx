@@ -17,7 +17,7 @@ import { ObjectPicker, RolePicker } from "./Pickers";
 import { Shell } from "./Shell";
 
 // #filters-modal fieldset.filters-col and its legend.
-const LEGEND = "mb-2.5 px-1 text-[13px] leading-[1.3] font-semibold text-accent";
+const LEGEND = "mb-2.5 px-1 text-[13px] leading-[1.3] font-semibold text-text-2";
 const COL = "mx-0.5 min-w-0 rounded-panel border border-border bg-control px-[18px] pt-4 pb-5";
 // #filters-modal .chips, .chip and .chip-input over the shared ChipInput.
 const CHIPS =
@@ -198,7 +198,7 @@ export function FiltersModal({ mapping, onClosed }: FiltersModalProps) {
         onClose={requestClose}
         cardClass="my-[5vh] max-h-[85vh] w-[min(960px,94vw)] rounded-[20px]"
         headerClass="flex items-center justify-between px-5 py-4"
-        titleClass="m-0 text-[15px] leading-[1.3] font-semibold text-accent"
+        titleClass="m-0 text-[15px] leading-[1.3] font-semibold text-text"
         layer={30}
       >
         <form

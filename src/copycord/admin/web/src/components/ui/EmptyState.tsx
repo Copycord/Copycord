@@ -20,7 +20,7 @@ export function EmptyState({ title, description, icon, action, plain = false, cl
         className,
       )}
     >
-      {icon ? <div className="text-accent">{icon}</div> : null}
+      {icon ? <div className="text-text-2">{icon}</div> : null}
       <p className={cx("font-semibold text-text-1", plain ? "text-sm" : "text-base")}>{title}</p>
       {description ? <p className={cx("max-w-md text-sm", plain ? "text-muted" : "text-text-2")}>{description}</p> : null}
       {action ? <div className="mt-2">{action}</div> : null}

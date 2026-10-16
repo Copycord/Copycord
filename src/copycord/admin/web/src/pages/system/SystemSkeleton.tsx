@@ -16,7 +16,7 @@ export const ARCHIVES_WRAP = "overflow-auto [scrollbar-width:none] [&::-webkit-s
 export const ARCHIVES_TABLE = "mt-2 w-full border-separate border-spacing-0 text-left md:table-fixed";
 
 // Narrow screens let the columns size to their content and stack the row buttons.
-const HEAD = "px-1.5 py-2.5 font-semibold text-accent md:px-2";
+const HEAD = "px-1.5 py-2.5 font-semibold text-text-2 md:px-2";
 export const CELL = "border-b border-border px-1.5 py-2.5 md:px-2";
 export const NAME_CODE = "font-mono text-[13px] break-all";
 export const NOWRAP_CELL = cx(CELL, "whitespace-nowrap");
