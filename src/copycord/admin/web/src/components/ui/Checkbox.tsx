@@ -11,7 +11,7 @@ type MarkProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & { ref?: R
 
 const MARK_BASE =
   "m-0 size-[18px] shrink-0 cursor-pointer appearance-none border border-border bg-white/4 bg-center bg-no-repeat " +
-  "[background-size:100%_100%] outline-none transition hover:border-accent focus-visible:shadow-[0_0_0_4px_rgba(167,139,250,0.18)] " +
+  "[background-size:100%_100%] outline-none transition hover:border-accent focus-visible:shadow-[0_0_0_4px_var(--color-accent-a18)] " +
   "checked:border-primary-600 checked:bg-primary disabled:cursor-not-allowed disabled:opacity-60";
 
 const CHECKBOX_CLASS =

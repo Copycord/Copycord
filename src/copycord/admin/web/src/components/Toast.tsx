@@ -27,14 +27,14 @@ const LEAVE_MS = 200;
 
 // .toast-info / .toast-success / .toast-error .toast-bar
 const BAR_CLASS: Record<ToastKind, string> = {
-  info: "bg-[linear-gradient(180deg,var(--color-accent),#5a27c9_80%)]",
-  success: "bg-[linear-gradient(180deg,var(--color-good),#0b8a69_80%)]",
-  error: "bg-[linear-gradient(180deg,#ef4444,#b91c1c_80%)]",
+  info: "bg-[linear-gradient(180deg,var(--color-accent),var(--color-accent-deep)_80%)]",
+  success: "bg-[linear-gradient(180deg,var(--color-good),var(--color-good-deep)_80%)]",
+  error: "bg-[linear-gradient(180deg,var(--color-danger),var(--color-danger-deep)_80%)]",
 };
 
 const TOAST =
   "toast pointer-events-auto relative w-auto min-w-[280px] max-w-[440px] cursor-pointer overflow-hidden " +
-  "rounded-[8px] border border-border border-l-transparent bg-[#1a1030] px-4 py-3.5 text-text " +
+  "rounded-[8px] border border-border border-l-transparent bg-control-top px-4 py-3.5 text-text " +
   "[transition:transform_0.18s_ease,opacity_0.18s_ease,box-shadow_0.18s_ease,border-color_0.18s_ease] " +
   "max-[520px]:w-[calc(100vw-32px)] max-[520px]:min-w-0 max-[520px]:max-w-none";
 const HIDDEN = "[transform:translateY(-10px)_scale(0.96)] opacity-0";

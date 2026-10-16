@@ -13,12 +13,12 @@ export const MODAL_OVERLAY = "fixed inset-x-0 top-header bottom-0 z-40 flex item
 export const MODAL_BACKDROP = "absolute inset-0 bg-black/[0.68]";
 /** The old .modal-content without its width (min(900px, 92vw) unless a dialog sets its own). */
 export const MODAL_CARD =
-  "relative z-[1] mt-[6vh] flex max-h-[80vh] flex-col rounded-panel border border-border bg-[#0f0820] text-text shadow-[0_20px_56px_rgba(0,0,0,0.5)] outline-none";
+  "relative z-[1] mt-[6vh] flex max-h-[80vh] flex-col rounded-panel border border-border bg-surface-deep text-text shadow-[0_20px_56px_var(--color-shadow-50)] outline-none";
 export const MODAL_HEADER = "flex items-center justify-between px-4 py-3";
 export const MODAL_TITLE = "m-0 text-base font-bold text-accent";
 /** The old .icon-btn.verify-close square close button. */
 export const MODAL_CLOSE =
-  "ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-btn border border-border bg-control px-2 py-0.5 text-base leading-none text-text outline-none transition-colors hover:border-danger hover:text-danger focus-visible:border-danger focus-visible:text-danger active:border-[#dc2626] active:text-[#dc2626]";
+  "ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-btn border border-border bg-control px-2 py-0.5 text-base leading-none text-text outline-none transition-colors hover:border-danger hover:text-danger focus-visible:border-danger focus-visible:text-danger active:border-danger-strong active:text-danger-strong";
 
 export interface ModalProps {
   open: boolean;
@@ -179,10 +179,10 @@ const BUBBLE_ALIGN = {
 const BUBBLE_PLACEMENT = {
   below:
     "top-[calc(100%+8px)] -translate-y-1 data-[open=true]:translate-y-0 " +
-    "after:-top-1.5 after:border-b-[#0f0820]",
+    "after:-top-1.5 after:border-b-surface-deep",
   above:
     "bottom-[calc(100%+8px)] translate-y-1 data-[open=true]:translate-y-0 " +
-    "after:-bottom-1.5 after:border-t-[#0f0820]",
+    "after:-bottom-1.5 after:border-t-surface-deep",
 } as const;
 
 export type TipPlacement = keyof typeof BUBBLE_PLACEMENT;
@@ -274,7 +274,7 @@ export function TipLabel({ htmlFor, text, tip, tipLabel, tipId, align = "start",
         aria-hidden={!open}
         data-open={open}
         data-placement={placement}
-        className={`tip-bubble pointer-events-none absolute z-[60] w-max scale-[0.98] rounded-control border border-border bg-[#0f0820] px-3 py-2.5 text-[12.5px] leading-[1.45] text-text opacity-0 shadow-[0_12px_40px_rgba(0,0,0,0.45)] transition-[opacity,translate,scale] duration-150 after:absolute after:border-[6px] after:border-solid after:border-transparent after:content-[''] data-[open=true]:pointer-events-auto data-[open=true]:scale-100 data-[open=true]:opacity-100 ${BUBBLE_PLACEMENT[placement]} ${BUBBLE_ALIGN[align]}`}
+        className={`tip-bubble pointer-events-none absolute z-[60] w-max scale-[0.98] rounded-control border border-border bg-surface-deep px-3 py-2.5 text-[12.5px] leading-[1.45] text-text opacity-0 shadow-[0_12px_40px_var(--color-shadow-45)] transition-[opacity,translate,scale] duration-150 after:absolute after:border-[6px] after:border-solid after:border-transparent after:content-[''] data-[open=true]:pointer-events-auto data-[open=true]:scale-100 data-[open=true]:opacity-100 ${BUBBLE_PLACEMENT[placement]} ${BUBBLE_ALIGN[align]}`}
       >
         {tip}
       </span>

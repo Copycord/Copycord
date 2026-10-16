@@ -41,7 +41,7 @@ describe("Button", () => {
 
   it("applies variant classes", () => {
     render(<Button variant="danger">Delete</Button>);
-    expect(screen.getByRole("button").className).toContain("bg-[linear-gradient(180deg,#ef4444,#b91c1c)]");
+    expect(screen.getByRole("button").className).toContain("bg-[linear-gradient(180deg,var(--color-danger),var(--color-danger-deep))]");
   });
 
   it("holds an attached button still on hover and press, other buttons keep the lift", () => {

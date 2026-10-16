@@ -133,7 +133,7 @@ describe("TipLabel placement", () => {
     expect(bubble).toHaveAttribute("data-open", "true");
     expect(bubble).toHaveAttribute("data-placement", "below");
     expect(bubble.className).toContain("top-[calc(100%+8px)]");
-    expect(bubble.className).toContain("after:border-b-[#0f0820]");
+    expect(bubble.className).toContain("after:border-b-surface-deep");
   });
 
   it("flips above the label, arrow underneath, in the lower half", async () => {
@@ -143,7 +143,7 @@ describe("TipLabel placement", () => {
     expect(bubble).toHaveAttribute("data-open", "true");
     expect(bubble).toHaveAttribute("data-placement", "above");
     expect(bubble.className).toContain("bottom-[calc(100%+8px)]");
-    expect(bubble.className).toContain("after:border-t-[#0f0820]");
-    expect(bubble.className).not.toContain("after:border-b-[#0f0820]");
+    expect(bubble.className).toContain("after:border-t-surface-deep");
+    expect(bubble.className).not.toContain("after:border-b-surface-deep");
   });
 });

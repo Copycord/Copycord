@@ -33,7 +33,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 // border turn red or green on hover, a white outline on keyboard focus.
 // pages/system/buttons.tsx and pages/dashboard/parts.tsx build on these.
 export const GHOST_TINT_FILL =
-  "enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:active:bg-[rgba(255,255,255,0.1)] disabled:opacity-60";
+  "enabled:hover:bg-line-1 enabled:active:bg-wash-10 disabled:opacity-60";
 export const GHOST_TINT_FOCUS =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28";
 export const GHOST_RED_HOVER = "enabled:hover:border-danger enabled:hover:text-danger";
@@ -50,25 +50,25 @@ const LIFT =
   "disabled:opacity-55";
 
 const GHOST_TINT =
-  "border-border bg-[rgba(255,255,255,0.04)] text-accent transition-[background-color,border-color,color,outline-color] " +
+  "border-border bg-wash-4 text-accent transition-[background-color,border-color,color,outline-color] " +
   "duration-150 motion-reduce:transition-none";
 
 const VARIANT: Record<ButtonVariant, string> = {
   primary:
     "border-border bg-[linear-gradient(180deg,var(--color-primary),var(--color-primary-700))] text-white " +
-    "enabled:hover:bg-[linear-gradient(180deg,#9366f9,var(--color-primary))] enabled:hover:border-[#4c2d7a]",
-  secondary: "border-border bg-[linear-gradient(180deg,#1f1237,#160b2a)] text-text",
+    "enabled:hover:bg-[linear-gradient(180deg,var(--color-primary-hover),var(--color-primary))] enabled:hover:border-primary-edge",
+  secondary: "border-border bg-[linear-gradient(180deg,var(--color-secondary-top),var(--color-secondary-bottom))] text-text",
   danger:
-    "border-[#7f1d1d] bg-[linear-gradient(180deg,#ef4444,#b91c1c)] text-white " +
-    "enabled:hover:bg-[linear-gradient(180deg,#f87171,#dc2626)] enabled:hover:shadow-danger",
+    "border-danger-edge bg-[linear-gradient(180deg,var(--color-danger),var(--color-danger-deep))] text-white " +
+    "enabled:hover:bg-[linear-gradient(180deg,var(--color-danger-soft),var(--color-danger-strong))] enabled:hover:shadow-danger",
   ghost:
-    "border-border bg-[rgba(255,255,255,0.04)] text-accent " +
-    "enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:hover:border-[rgba(167,139,250,0.3)] enabled:hover:shadow-soft",
+    "border-border bg-wash-4 text-accent " +
+    "enabled:hover:bg-line-1 enabled:hover:border-accent-a30 enabled:hover:shadow-soft",
   outline:
-    "border-accent bg-transparent text-accent enabled:hover:bg-[rgba(167,139,250,0.1)] enabled:hover:shadow-accent",
+    "border-accent bg-transparent text-accent enabled:hover:bg-accent-a10 enabled:hover:shadow-accent",
   "ghost-red": `${GHOST_TINT} ${GHOST_TINT_FILL} ${GHOST_RED_HOVER} ${GHOST_TINT_FOCUS}`,
   "ghost-purple":
-    `${GHOST_TINT} enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:hover:border-primary-600 ` +
+    `${GHOST_TINT} enabled:hover:bg-line-1enabled:hover:border-primary-600 ` +
     "enabled:hover:outline-2 enabled:hover:outline-offset-2 enabled:hover:outline-primary-600 " +
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 disabled:opacity-60",
   "ghost-green": `${GHOST_TINT} ${GHOST_TINT_FILL} ${GHOST_GREEN_HOVER} ${GHOST_TINT_FOCUS}`,

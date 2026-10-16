@@ -110,7 +110,7 @@ export function Select({
   return (
     <select ref={ref} {...rest} {...aria} className={cx(SELECT_CLASS, className)}>
       {options?.map((o) => (
-        <option key={o.value} value={o.value} disabled={o.disabled} className="bg-[#0f0820]">
+        <option key={o.value} value={o.value} disabled={o.disabled} className="bg-surface-deep">
           {o.label}
         </option>
       ))}

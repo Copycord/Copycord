@@ -43,12 +43,12 @@ describe("Toast", () => {
     act(() => screen.getByText("bad").click());
     const toastOf = (text: string) => screen.getByText(text).closest(".toast") as HTMLElement;
     const barOf = (text: string) => toastOf(text).querySelector(".toast-bar") as HTMLElement;
-    expect(toastOf("Saved")).toHaveClass("toast-info", "rounded-[8px]", "border-l-transparent", "bg-[#1a1030]", "min-w-[280px]", "max-w-[440px]");
-    expect(barOf("Saved")).toHaveClass("bg-[linear-gradient(180deg,var(--color-accent),#5a27c9_80%)]");
+    expect(toastOf("Saved")).toHaveClass("toast-info", "rounded-[8px]", "border-l-transparent", "bg-control-top", "min-w-[280px]", "max-w-[440px]");
+    expect(barOf("Saved")).toHaveClass("bg-[linear-gradient(180deg,var(--color-accent),var(--color-accent-deep)_80%)]");
     expect(toastOf("Done")).toHaveClass("toast-success");
-    expect(barOf("Done")).toHaveClass("bg-[linear-gradient(180deg,var(--color-good),#0b8a69_80%)]");
+    expect(barOf("Done")).toHaveClass("bg-[linear-gradient(180deg,var(--color-good),var(--color-good-deep)_80%)]");
     expect(toastOf("Failed")).toHaveClass("toast-error");
-    expect(barOf("Failed")).toHaveClass("bg-[linear-gradient(180deg,#ef4444,#b91c1c_80%)]");
+    expect(barOf("Failed")).toHaveClass("bg-[linear-gradient(180deg,var(--color-danger),var(--color-danger-deep)_80%)]");
     expect(screen.queryByLabelText("Dismiss")).toBeNull();
   });
 

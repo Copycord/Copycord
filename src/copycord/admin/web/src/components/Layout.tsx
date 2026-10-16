@@ -93,7 +93,7 @@ export function Layout() {
       >
         <button
           type="button"
-          className="group inline-flex size-menu-btn shrink-0 cursor-pointer flex-col items-center justify-center gap-[5px] rounded-btn border border-border bg-[rgba(255,255,255,0.04)] px-1.5 py-px text-text transition duration-200 hover:bg-border hover:text-white"
+          className="group inline-flex size-menu-btn shrink-0 cursor-pointer flex-col items-center justify-center gap-[5px] rounded-btn border border-border bg-wash-4 px-1.5 py-px text-text transition duration-200 hover:bg-border hover:text-white"
           id="menu-toggle"
           aria-haspopup="true"
           aria-label="Open menu"
@@ -126,7 +126,7 @@ export function Layout() {
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Documentation"
-            className="inline-flex items-center gap-1.5 rounded-input bg-[rgba(139,92,246,0.15)] px-3.5 py-1.5 text-[0.82rem] font-semibold text-accent no-underline transition-colors hover:bg-[rgba(139,92,246,0.28)] hover:text-[#c4b5fd]"
+            className="inline-flex items-center gap-1.5 rounded-input bg-primary-a15 px-3.5 py-1.5 text-[0.82rem] font-semibold text-accent no-underline transition-colors hover:bg-primary-a28 hover:text-accent-soft"
           >
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
               <path d={DOCS_PATH} />
@@ -141,7 +141,7 @@ export function Layout() {
         data-testid="menu-backdrop"
         aria-hidden="true"
         hidden={!drawerOpen}
-        className={`fixed inset-x-0 top-header bottom-0 ${Z.drawer} bg-[rgba(0,0,0,0.6)]`}
+        className={`fixed inset-x-0 top-header bottom-0 ${Z.drawer} bg-shadow-60`}
         onClick={() => setDrawerOpen(false)}
       />
 

@@ -23,7 +23,7 @@ export function StatusGate({ gate, children }: { gate: StatusGateState; children
           className={cx("fixed inset-x-0 top-header bottom-0 flex flex-col items-center justify-center gap-3 bg-black/40 px-4", Z.gate)}
         >
           <Spinner size="lg" label="Waiting for the bot" />
-          <p role="status" aria-live="polite" className="text-center text-sm font-semibold text-[#cfd3ff]">
+          <p role="status" aria-live="polite" className="text-center text-sm font-semibold text-text-status">
             {gate.message}
           </p>
         </div>

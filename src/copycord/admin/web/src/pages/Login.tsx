@@ -44,14 +44,14 @@ export function Login() {
             draggable={false}
             className="pointer-events-none mb-[18px] size-[86px] select-none"
           />
-          <section className="w-full max-w-[420px] rounded-[14px] border border-border bg-card px-6 pt-[26px] pb-[22px] text-text shadow-[0_18px_30px_rgba(0,0,0,0.55)]">
+          <section className="w-full max-w-[420px] rounded-[14px] border border-border bg-card px-6 pt-[26px] pb-[22px] text-text shadow-[0_18px_30px_var(--color-shadow-55)]">
             <h1 className="m-0 mb-1 text-[1.3rem] font-semibold text-text">Copycord</h1>
             <p className="m-0 mb-5 text-[0.9rem] text-muted">Enter the password to continue.</p>
 
             {error ? (
               <div
                 role="alert"
-                className="login-error mb-3.5 rounded-btn border border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.1)] px-2.5 py-2 text-[0.85rem] text-[#fecaca]"
+                className="login-error mb-3.5 rounded-btn border border-danger-a35 bg-danger-a10 px-2.5 py-2 text-[0.85rem] text-danger-text"
               >
                 {error}
               </div>
@@ -114,7 +114,7 @@ export function Login() {
               <button
                 type="submit"
                 disabled={empty}
-                className="mt-4 inline-block w-full cursor-pointer rounded-full border-0 bg-primary py-2.5 text-[0.95rem] font-semibold text-white shadow-[0_10px_18px_rgba(0,0,0,0.45)] transition duration-150 enabled:hover:bg-primary-600 enabled:hover:shadow-[0_12px_22px_rgba(0,0,0,0.5)] enabled:active:translate-y-px enabled:active:bg-primary-700 disabled:cursor-default disabled:opacity-50 disabled:shadow-none"
+                className="mt-4 inline-block w-full cursor-pointer rounded-full border-0 bg-primary py-2.5 text-[0.95rem] font-semibold text-white shadow-[0_10px_18px_var(--color-shadow-45)] transition duration-150 enabled:hover:bg-primary-600 enabled:hover:shadow-[0_12px_22px_var(--color-shadow-50)] enabled:active:translate-y-px enabled:active:bg-primary-700 disabled:cursor-default disabled:opacity-50 disabled:shadow-none"
               >
                 Sign in
               </button>

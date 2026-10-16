@@ -66,6 +66,41 @@
   --spacing-drawer: min(320px, 86vw);
 }
 
+/* Role tokens for colours the components used to hardcode. Static so the
+   ones only read through var() in inline styles are always emitted. */
+@theme static {
+  --color-surface-deep: #0f0820;
+  --color-control-top: #1a1030;
+  --color-text-soft: #e6e1ff;
+  --color-text-status: #cfd3ff;
+  --color-accent-soft: #c4b5fd;
+  --color-accent-deep: #5a27c9;
+  --color-good-deep: #0b8a69;
+  --color-primary-hover: #9366f9;
+  --color-primary-edge: #4c2d7a;
+  --color-secondary-top: #1f1237;
+  --color-secondary-bottom: #160b2a;
+  --color-danger-soft: #f87171;
+  --color-danger-strong: #dc2626;
+  --color-danger-deep: #b91c1c;
+  --color-danger-edge: #7f1d1d;
+  --color-danger-text: #fecaca;
+  --color-wash-4: rgba(255, 255, 255, 0.04);
+  --color-wash-10: rgba(255, 255, 255, 0.1);
+  --color-shadow-18: rgba(0, 0, 0, 0.18);
+  --color-shadow-45: rgba(0, 0, 0, 0.45);
+  --color-shadow-50: rgba(0, 0, 0, 0.5);
+  --color-shadow-55: rgba(0, 0, 0, 0.55);
+  --color-shadow-60: rgba(0, 0, 0, 0.6);
+  --color-primary-a15: rgba(139, 92, 246, 0.15);
+  --color-primary-a28: rgba(139, 92, 246, 0.28);
+  --color-accent-a10: rgba(167, 139, 250, 0.1);
+  --color-accent-a18: rgba(167, 139, 250, 0.18);
+  --color-accent-a30: rgba(167, 139, 250, 0.3);
+  --color-danger-a10: rgba(239, 68, 68, 0.1);
+  --color-danger-a35: rgba(239, 68, 68, 0.35);
+}
+
 :root {
   /* .card and .side-menu background, plain sRGB like the old stylesheet. */
   --card-gradient: linear-gradient(180deg, #1b1030aa 0, rgba(20, 10, 40, 0.45) 100%);

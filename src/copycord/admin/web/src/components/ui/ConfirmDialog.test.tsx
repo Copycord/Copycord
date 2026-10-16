@@ -69,9 +69,9 @@ describe("useConfirm", () => {
     const ok = screen.getByRole("button", { name: "Delete" });
     expect(cancel.compareDocumentPosition(ok) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(ok.className).toContain("enabled:hover:text-danger");
-    expect(ok.className).not.toContain("#ef4444");
+    expect(ok.className).not.toContain("var(--color-danger-deep)");
     expect(ok.className).toContain("ring-0!");
-    expect(cancel.className).toContain("bg-[rgba(255,255,255,0.04)]");
+    expect(cancel.className).toContain("bg-wash-4");
   });
 
   it("defaults to an OK ghost button and honours confirmVariant and cancelVariant", async () => {
@@ -96,7 +96,7 @@ describe("useConfirm", () => {
     );
     await user.click(screen.getByText("Plain"));
     const ok = screen.getByRole("button", { name: "OK" });
-    expect(ok.className).toContain("enabled:hover:border-[rgba(167,139,250,0.3)]");
+    expect(ok.className).toContain("enabled:hover:border-accent-a30");
     expect(ok.className).not.toContain("hover:text-danger");
     await user.keyboard("{Escape}");
     await user.click(screen.getByText("Primary"));

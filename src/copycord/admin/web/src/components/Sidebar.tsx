@@ -97,7 +97,7 @@ export function Sidebar({ onNavigate, hide = [], footer = "version", version }: 
       <footer
         role="contentinfo"
         aria-label="About"
-        className="mt-auto flex items-center justify-between gap-3 border-t border-t-border bg-[linear-gradient(180deg,transparent,rgba(0,0,0,0.18))] px-3 py-2.5"
+        className="mt-auto flex items-center justify-between gap-3 border-t border-t-border bg-[linear-gradient(180deg,transparent,var(--color-shadow-18))] px-3 py-2.5"
       >
         {footer === "social" ? (
           <>

@@ -7,7 +7,7 @@ import { cx } from "./cx";
 export type BadgeTone = "neutral" | "good" | "warn" | "bad" | "accent" | "info";
 
 const TONE: Record<BadgeTone, string> = {
-  neutral: "border-border bg-bg2 text-[#e6e1ff]",
+  neutral: "border-border bg-bg2 text-text-soft",
   good: "border-good/35 bg-good/12 text-good",
   warn: "border-custom-ink/35 bg-custom-ink/12 text-custom-ink",
   bad: "border-danger/35 bg-danger/12 text-danger",
