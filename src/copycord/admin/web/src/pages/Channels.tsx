@@ -102,7 +102,7 @@ export function Channels() {
   return (
     <StatusGate gate={gate}>
       <section className={CHANNELS_CARD}>
-        <header className="mb-1.5 block gap-3">
+        <header className="mb-4 block gap-3">
           <ChannelsTitle />
           <span className={CONTROLS}>
             <ToolbarSelect

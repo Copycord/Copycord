@@ -122,7 +122,7 @@ export function ChannelsSkeleton() {
   return (
     <StatusGate gate={gate}>
       <section className={CHANNELS_CARD} data-testid="card-skeleton">
-        <header className="mb-1.5 block gap-3">
+        <header className="mb-4 block gap-3">
           <ChannelsTitle />
           {/* As at the page's first paint: the mapping list is still empty (disabled). */}
           <span inert className={CONTROLS}>

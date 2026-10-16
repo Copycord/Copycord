@@ -30,7 +30,8 @@ export const CARD_HEAD = "flex items-center justify-between";
 export const CARD_NAME = "flex min-w-0 flex-1 items-center gap-1.5 font-semibold text-text max-[520px]:text-[13px]";
 export const CARD_ACTIONS = "relative ml-2 flex shrink-0 items-center gap-1.5";
 // The badges sit in the name row after the name: only the exceptions (Orphan, Not cloned, Custom) have one.
-export const BADGE_ROW = "ml-1 flex shrink-0 gap-1.5";
+// -my-1 keeps a badged name row as tall as a plain one (the 25.6px badge over the 24px name line).
+export const BADGE_ROW = "-my-1 ml-1 flex shrink-0 gap-1.5";
 export const TYPE_ICON = "size-4 shrink-0 text-muted";
 export const ID_ROW =
   "mt-1.5 flex gap-1.5 text-[12px] text-muted max-sm:flex-wrap max-[520px]:gap-1 " +
