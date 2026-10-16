@@ -111,6 +111,8 @@ class TaskRun:
             "finished_at": self.finished_at,
             "error": self.error,
             "summary": _ids_to_str(self.summary),
+            # List rows and events leave the steps out; the count still says how many the run has.
+            "step_count": len(self.steps),
             "log_count": self.log_count,
             "seq": self.seq,
         }

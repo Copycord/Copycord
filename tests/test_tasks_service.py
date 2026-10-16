@@ -351,6 +351,7 @@ async def test_to_wire_ids_are_strings(svc):
     assert total == 1
     listed = runs[0].to_wire(include_steps=False)
     assert "steps" not in listed and listed["id"] == str(run.id)
+    assert listed["step_count"] == len(done.steps) == 1 and wire["step_count"] == 1
 
 
 @pytest.mark.asyncio
