@@ -174,7 +174,11 @@ describe("row actions", () => {
     expect(del.className).toMatch(/\bml-auto\b/);
     expect(del.className).toMatch(/\btext-danger\b/);
     expect(del.className).toMatch(/\bborder-danger\b/);
-    expect(del.className).toMatch(/\bdisabled:opacity-60\b/);
+    // Disabled drops the red for the neutral border and muted text, with a reason on hover.
+    expect(del.className).toMatch(/\bdisabled:border-border\b/);
+    expect(del.className).toMatch(/\bdisabled:text-muted\b/);
+    expect(del).toHaveAttribute("aria-disabled", "true");
+    expect(del).toHaveAttribute("title", "No orphans to delete");
     expect(del.className).not.toMatch(/\btext-accent\b/);
   });
 

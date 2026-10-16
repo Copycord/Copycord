@@ -197,7 +197,10 @@ describe("Logs page", () => {
     expect(mutations().map((c) => `${c.method} ${c.url.pathname}`)).toEqual(["DELETE /api/event-logs"]);
     expect(mutations()[0]!.csrf).toBe("1");
     expect(screen.getByText("All logs cleared")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear all logs" })).toBeDisabled();
+    const clear = screen.getByRole("button", { name: "Clear all logs" });
+    expect(clear).toBeDisabled();
+    expect(clear).toHaveAttribute("aria-disabled", "true");
+    expect(clear).toHaveAttribute("title", "Nothing to clear");
   });
 
   it("deletes one row only after confirming", async () => {
