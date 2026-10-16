@@ -50,6 +50,26 @@ export function channelBadges(c: { orphan: boolean; clonedId: string; customized
   return out;
 }
 
+/** A category header's badge: the same words as the cards (an orphan category, else a customized name), or none. */
+export function categoryBadge(s: { orphanCategory: boolean; customized: boolean }): "orphan" | "custom" | null {
+  if (s.orphanCategory) return "orphan";
+  return s.customized ? "custom" : null;
+}
+
+/**
+ * The two sides of a card's id row, host id → clone id. A side that does not exist is null and shows a dash:
+ * an orphan has only its clone channel (its id is the clone's), a not cloned channel only its host channel.
+ */
+export function idSides(c: { orphan: boolean; id: string; clonedId: string }): { original: string | null; cloned: string | null } {
+  if (c.orphan) return { original: null, cloned: c.id };
+  return { original: c.id, cloned: c.clonedId || null };
+}
+
+/** The Delete orphans button: the live count of orphan categories and channels. */
+export function deleteOrphansLabel(n: number): string {
+  return `Delete ${n} ${n === 1 ? "orphan" : "orphans"}`;
+}
+
 /** Option text of #mapping-select, as the Jinja template rendered it. */
 export function mappingLabel(m: GuildMapping): string {
   const name = (m.mapping_name ?? "").trim();

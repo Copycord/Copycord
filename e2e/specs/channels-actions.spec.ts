@@ -176,6 +176,6 @@ test.describe("channels actions", () => {
     await stubActions(page);
     await openChannels(page);
     await expect(page.locator("#orph-delall")).toBeDisabled();
-    await expect(page.locator("#orph-delall")).toHaveText("Delete all orphans");
+    await expect(page.locator("#orph-delall")).toHaveText("Delete 0 orphans");
   });
 });

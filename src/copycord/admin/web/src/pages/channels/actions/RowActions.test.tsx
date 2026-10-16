@@ -167,7 +167,15 @@ describe("row actions", () => {
     serve();
     page();
     await waitFor(() => expect(document.querySelector("#channels-root article")).not.toBeNull());
-    expect(document.getElementById("orph-delall")).toBeDisabled();
+    const del = document.getElementById("orph-delall")!;
+    expect(del).toBeDisabled();
+    expect(del).toHaveTextContent("Delete 0 orphans");
+    // A danger outline at the right end of the controls, not an accent control among the filters.
+    expect(del.className).toMatch(/\bml-auto\b/);
+    expect(del.className).toMatch(/\btext-danger\b/);
+    expect(del.className).toMatch(/\bborder-danger\b/);
+    expect(del.className).toMatch(/\bdisabled:opacity-60\b/);
+    expect(del.className).not.toMatch(/\btext-accent\b/);
   });
 
   it("toasts each result of Delete all orphans from the server's verify frame", async () => {
@@ -191,6 +199,7 @@ describe("row actions", () => {
       },
     });
     await waitFor(() => expect(document.getElementById("orph-delall")).toBeEnabled());
+    expect(document.getElementById("orph-delall")).toHaveTextContent("Delete 2 orphans");
     await userEvent.click(document.getElementById("orph-delall")!);
     await userEvent.click(await screen.findByRole("button", { name: "Delete all" }));
     FakeWs.emit("/ws/out", {

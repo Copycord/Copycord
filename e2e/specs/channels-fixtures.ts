@@ -29,6 +29,10 @@ export const CHANNELS = [
   row("444444444444444409", "café", "Uncategorized", 0, "555555555555555509", "", ""),
 ];
 
+/** A not cloned channel whose name is wider than a card: the name ellipsizes, the badge and the menu stay put.
+ *  Kept out of CHANNELS so the specs' card counts hold; review shots add it. */
+export const LONG_CHANNEL = row("444444444444444410", "release-announcements-and-community-updates-archive", "Support", 0);
+
 /** Category chips in API order, as both pages show them before any category sort. */
 export const CATEGORIES = ["Information", "Chat Zone", "Support", "Uncategorized"];
 

@@ -255,6 +255,7 @@ test.describe("channels verify and backfill", () => {
     );
     await expect(card(page, "911")).toHaveAttribute("data-orphan", "1");
     await expect(page.locator("#orph-delall")).toBeEnabled();
+    await expect(page.locator("#orph-delall")).toHaveText("Delete 2 orphans");
 
     stub.out({ type: "orphans", mapping_id: mid, categories: [], channels: [] }, "verify");
     await expect(page.locator("#orph-delall")).toBeDisabled();

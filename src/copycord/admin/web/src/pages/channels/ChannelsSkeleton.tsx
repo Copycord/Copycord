@@ -7,7 +7,7 @@ import { Skeleton, cx } from "../../components/ui";
 import { readLastShape } from "../../components/ui/lastCount";
 import { StatusGate } from "../../components/ui/StatusGate";
 import { useStatusGate } from "../../hooks/useStatusGate";
-import { FILTER_OPTIONS, SORT_OPTIONS } from "./model";
+import { deleteOrphansLabel, FILTER_OPTIONS, SORT_OPTIONS } from "./model";
 import { ToolbarSelect } from "./ToolbarSelect";
 import {
   CARD,
@@ -41,13 +41,14 @@ export const SEARCH_INPUT =
   "placeholder:text-[color-mix(in_srgb,var(--color-text-soft)_55%,transparent)] placeholder:opacity-75 " +
   "hover:border-log-input-focus hover:[box-shadow:0_0_0_1px_var(--color-log-input-focus)] focus:border-log-input-focus focus:[box-shadow:0_0_0_1px_var(--color-log-input-focus)]";
 
-/** .btn.btn-ghost-red */
+/** Delete orphans: a danger outline (danger text and border, no fill, the soft danger fill on hover) at the right end
+ *  of the control row, apart from the filters. Disabled with the standard look (60%, not-allowed) while there are none. */
 export const DELETE_ALL_BTN =
-  "flex h-[34px] cursor-pointer items-center justify-center rounded-input border border-border bg-wash-4 px-2.5 " +
-  "text-[13px] leading-8 font-semibold text-accent transition-colors duration-150 " +
-  "hover:border-[color-mix(in_oklab,var(--color-border)_20%,var(--color-danger)_80%)] hover:bg-line-1 hover:text-danger active:bg-wash-10 " +
+  "ml-auto flex h-[34px] cursor-pointer items-center justify-center rounded-input border border-danger bg-transparent px-2.5 " +
+  "text-[13px] leading-8 font-semibold text-danger transition-colors duration-150 " +
+  "enabled:hover:bg-danger-a10 enabled:active:bg-danger/18 " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28 " +
-  "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-wash-4 disabled:hover:text-accent";
+  "disabled:cursor-not-allowed disabled:opacity-60";
 
 /** .card-titlebar: the h2, then one wrapping row of controls (.titlebar-actions). The old visible h2 is the page's top heading. */
 export function ChannelsTitle() {
@@ -140,8 +141,9 @@ export function ChannelsSkeleton() {
             <input type="text" placeholder="Search channels…" aria-label="Search channels" readOnly className={SEARCH_INPUT} />
             <ToolbarSelect id="ch-filter-skel" nativeHidden label="Filter" value="all" options={FILTER_OPTIONS} onChange={noop} />
             <ToolbarSelect id="ch-sort-skel" nativeHidden label="Sort" value="name" options={SORT_OPTIONS} onChange={noop} />
+            {/* The page opens with no orphans until the verify scan reports some. */}
             <button type="button" disabled className={DELETE_ALL_BTN}>
-              Delete all orphans
+              {deleteOrphansLabel(0)}
             </button>
           </span>
         </header>

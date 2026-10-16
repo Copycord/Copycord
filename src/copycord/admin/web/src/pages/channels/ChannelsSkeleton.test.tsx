@@ -80,7 +80,7 @@ describe("Channels skeleton", () => {
       "input:text Search channels",
       "button Filter: All channels",
       "button Sort: Name",
-      "button Delete all orphans",
+      "button Delete 0 orphans",
     ]);
   });
 

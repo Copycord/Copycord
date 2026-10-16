@@ -6,7 +6,7 @@ import { memo } from "react";
 import type { ReactNode } from "react";
 import { ChannelTypeIcon } from "../../components/icons";
 import { cx } from "../../components/ui";
-import { channelBadges, chTypeIcon } from "./model";
+import { categoryBadge, channelBadges, chTypeIcon, idSides } from "./model";
 import type { ChannelBadge, ChannelTree as Tree, TreeChannel } from "./model";
 import type { ChannelTreeSlots } from "./slots";
 import {
@@ -19,12 +19,11 @@ import {
   CARD_GRID,
   CARD_HEAD,
   CARD_NAME,
+  CAT_BADGE,
   CAT_COUNT,
-  CAT_DOT,
-  CAT_DOT_CUSTOM,
-  CAT_DOT_ORPHAN,
   CAT_LABEL,
   CUSTOM,
+  ID_DASH,
   ID_ROW,
   SECTION,
   SECTION_HEAD,
@@ -46,39 +45,43 @@ export interface ChannelTreeProps extends ChannelTreeSlots {
 export function ChannelTree({ tree, hidden, busy, className, channelActions, categoryActions }: ChannelTreeProps) {
   return (
     <div id="channels-root" aria-live="polite" aria-busy={busy || undefined} hidden={hidden} className={cx(TREE, className)}>
-      {tree.sections.map((s) => (
-        <section key={s.key} className={cx("ch-section", SECTION)}>
-          <div className={SECTION_HEAD}>
-            <h3 className={SECTION_TITLE}>
-              {s.orphanCategory || s.customized ? (
+      {tree.sections.map((s) => {
+        const badge = categoryBadge(s);
+        return (
+          <section key={s.key} className={cx("ch-section", SECTION)}>
+            <div className={SECTION_HEAD}>
+              <h3 className={SECTION_TITLE}>
                 <span
-                  role="img"
-                  aria-label={s.orphanCategory ? "Orphan category" : "Customized category"}
-                  title={s.orphanCategory ? "Orphan category" : "Customized category"}
-                  className={cx(CAT_DOT, s.orphanCategory ? CAT_DOT_ORPHAN : CAT_DOT_CUSTOM)}
-                />
-              ) : null}
-              <span
-                data-cat-name={s.originalName}
-                title={s.tooltip || undefined}
-                data-orphan-cat-id={s.orphanCategoryId ?? undefined}
-                className={CAT_LABEL}
-              >
-                {s.displayName}
-                <span title={`${s.channels.length} ${s.channels.length === 1 ? "channel" : "channels"}`} className={CAT_COUNT}>
-                  {s.channels.length}
+                  data-cat-name={s.originalName}
+                  title={s.tooltip || undefined}
+                  data-orphan-cat-id={s.orphanCategoryId ?? undefined}
+                  className={CAT_LABEL}
+                >
+                  {s.displayName}
+                  {badge ? (
+                    <span
+                      data-cat-badge={badge}
+                      title={CAT_BADGE_TITLE[badge]}
+                      className={cx(BADGE, BADGE_VIEW[badge].className, CAT_BADGE)}
+                    >
+                      {BADGE_VIEW[badge].label}
+                    </span>
+                  ) : null}
+                  <span title={`${s.channels.length} ${s.channels.length === 1 ? "channel" : "channels"}`} className={CAT_COUNT}>
+                    {s.channels.length}
+                  </span>
+                  {!s.uncategorized ? categoryActions?.(s) : null}
                 </span>
-                {!s.uncategorized ? categoryActions?.(s) : null}
-              </span>
-            </h3>
-          </div>
-          <div className={CARD_GRID}>
-            {s.channels.map((c) => (
-              <ChannelCard key={c.id} channel={c} actions={channelActions?.(c, s)} />
-            ))}
-          </div>
-        </section>
-      ))}
+              </h3>
+            </div>
+            <div className={CARD_GRID}>
+              {s.channels.map((c) => (
+                <ChannelCard key={c.id} channel={c} actions={channelActions?.(c, s)} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -94,9 +97,24 @@ const BADGE_VIEW: Record<ChannelBadge, { label: string; title: string; className
   custom: { label: "Custom", title: "Customized channel", className: CUSTOM },
 };
 
+const CAT_BADGE_TITLE: Record<"orphan" | "custom", string> = {
+  orphan: "Category in the clone but no longer in the host server",
+  custom: "Category renamed in the clone",
+};
+
+// The side of the id row a channel does not have: a muted dash, so the arrow always reads host → clone.
+function NoId({ title }: { title: string }) {
+  return (
+    <span data-id-dash="" title={title} className={ID_DASH}>
+      —
+    </span>
+  );
+}
+
 // The card is not clickable (only its ⋯ menu is), so it has no hover state.
 const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCardProps) {
   const badges = channelBadges(c);
+  const ids = idSides(c);
   return (
     <article
       data-cid={c.id}
@@ -122,13 +140,11 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCa
         {actions ? <div className={CARD_ACTIONS}>{actions}</div> : null}
       </div>
       <div className={ID_ROW}>
-        <span title="Original channel ID">{c.id}</span>
+        <span title="Original channel ID">{ids.original ?? <NoId title="No channel in the host server" />}</span>
         {/* .muted: 0.9em at 80% opacity, as the old clone id. */}
-        {c.clonedId ? (
-          <span title="Cloned channel ID" className="text-[0.9em] opacity-80">
-            → {c.clonedId}
-          </span>
-        ) : null}
+        <span title="Cloned channel ID" className="text-[0.9em] opacity-80">
+          → {ids.cloned ?? <NoId title="Not cloned yet" />}
+        </span>
       </div>
     </article>
   );

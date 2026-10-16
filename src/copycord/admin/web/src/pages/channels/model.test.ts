@@ -3,10 +3,13 @@ import type { ChannelRow, Orphans } from "../../types/channels";
 import {
   buildCategoryPins,
   buildTree,
+  categoryBadge,
   channelBadges,
   channelsUrl,
   chTypeIcon,
   chTypeLabel,
+  deleteOrphansLabel,
+  idSides,
   mappingLabel,
   NO_ORPHANS,
   nextSort,
@@ -164,5 +167,24 @@ describe("channel type icons and badges", () => {
     expect(c(false, "110", true)).toEqual(["custom"]);
     expect(c(false, "", true)).toEqual(["notcloned", "custom"]);
     expect(c(true, "", false)).toEqual(["orphan"]);
+  });
+
+  it("badges an orphan category before a customized one, and a plain one not at all", () => {
+    expect(categoryBadge({ orphanCategory: false, customized: false })).toBeNull();
+    expect(categoryBadge({ orphanCategory: false, customized: true })).toBe("custom");
+    expect(categoryBadge({ orphanCategory: true, customized: false })).toBe("orphan");
+    expect(categoryBadge({ orphanCategory: true, customized: true })).toBe("orphan");
+  });
+
+  it("dashes the missing side of the id row", () => {
+    expect(idSides({ orphan: false, id: "444", clonedId: "555" })).toEqual({ original: "444", cloned: "555" });
+    expect(idSides({ orphan: false, id: "444", clonedId: "" })).toEqual({ original: "444", cloned: null });
+    expect(idSides({ orphan: true, id: "912", clonedId: "" })).toEqual({ original: null, cloned: "912" });
+  });
+
+  it("labels Delete orphans with the live count", () => {
+    expect(deleteOrphansLabel(0)).toBe("Delete 0 orphans");
+    expect(deleteOrphansLabel(1)).toBe("Delete 1 orphan");
+    expect(deleteOrphansLabel(3)).toBe("Delete 3 orphans");
   });
 });

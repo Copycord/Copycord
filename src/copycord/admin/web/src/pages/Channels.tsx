@@ -33,6 +33,7 @@ import {
   buildCategoryPins,
   buildTree,
   channelsUrl,
+  deleteOrphansLabel,
   FILTER_OPTIONS,
   mappingLabel,
   NO_ORPHANS,
@@ -61,6 +62,7 @@ export function Channels() {
   const [sort, setSort] = useState<{ sort: SortMode; dir: SortDir }>({ sort: "name", dir: "asc" });
   // Filled by the verify scan (verify/orphanStore); a mapping switch clears it.
   const orphans = useOrphans();
+  const orphanCount = orphans.categories.length + orphans.channels.length;
   const setOrphans = orphanStore.set;
   // Asks the client for the orphan list on load, as the old page did.
   useVerify(mappingId);
@@ -152,7 +154,7 @@ export function Channels() {
               onClick={actions.deleteAll.onClick}
               className={DELETE_ALL_BTN}
             >
-              Delete all orphans
+              {deleteOrphansLabel(orphanCount)}
             </button>
           </span>
         </header>

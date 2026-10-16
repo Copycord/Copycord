@@ -5,21 +5,20 @@
 export const TREE = "grid gap-6 xl:gap-7";
 export const SECTION = "grid gap-3";
 // The category header: one neutral treatment for every category (label, channel count, the ⋯ menu) over
-// a divider. Only an orphan or customized category adds a dot before its label.
+// a divider. Only an orphan or customized category adds a badge after its label, in the words of the card badges.
 export const SECTION_HEAD = "flex items-center border-b border-border pb-1.5";
 export const SECTION_TITLE =
   "m-0 flex min-h-6 items-center gap-2 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold tracking-[0.04em] text-muted uppercase";
 export const CAT_LABEL = "inline-flex items-center gap-2";
 export const CAT_COUNT = "font-normal tabular-nums opacity-80";
-export const CAT_DOT = "inline-block size-2 shrink-0 rounded-full";
-export const CAT_DOT_ORPHAN = "bg-stop-text";
-export const CAT_DOT_CUSTOM = "bg-custom-ink";
+// The card badge in the header: not uppercase nor tracked as the label, and -my-1 so the header keeps its height.
+export const CAT_BADGE = "-my-1 shrink-0 tracking-normal normal-case";
 // .badge.badge-custom
 export const CUSTOM =
   "bg-[color-mix(in_srgb,var(--color-custom-ink)_12%,var(--color-wash-4-5))] text-custom-ink";
 
 export const CARD_GRID =
-  "grid grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] gap-3 xl:gap-4 max-[520px]:gap-2.5";
+  "grid grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))] gap-3 xl:gap-4 max-[520px]:gap-2.5";
 // The card surface of the dashboard mapping cards (bg-card).
 export const CARD = "block min-w-0 rounded-panel border bg-card p-3 max-[520px]:p-2.5";
 // .ch-head: the name (.ch-name) and the menu button (.ch-top-right)
@@ -33,6 +32,8 @@ export const TYPE_ICON = "size-4 shrink-0 text-muted";
 export const ID_ROW =
   "mt-1.5 flex gap-1.5 text-[12px] text-muted max-sm:flex-wrap max-[520px]:gap-1 " +
   "max-sm:*:min-w-0 max-sm:*:[overflow-wrap:anywhere] max-[520px]:*:max-w-full max-[520px]:*:flex-[1_1_100%] max-[520px]:*:truncate";
+// The missing side of the id row (an orphan's host id, a not cloned channel's clone id).
+export const ID_DASH = "opacity-60";
 
 // .badge inside a card: 600 12px/1.8 system-ui, 2px 8px; fill and text only, the border stays transparent.
 export const BADGE =
