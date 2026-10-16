@@ -47,7 +47,7 @@ export interface UserTokensBlockProps {
 
 // The old .dd toggle the strategy <select> was turned into: 34px, 13px, purple caret; the field dropdown adds the caret room.
 const STRATEGY_TOGGLE =
-  "user-token-select dd-toggle min-h-[34px] rounded-btn border border-border bg-control py-2 pl-2.5 font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus:border-accent";
+  "user-token-select dd-toggle min-h-[34px] rounded-btn border border-border-input bg-control py-2 pl-2.5 font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus:border-accent";
 const STRATEGIES = [
   { value: "round_robin", label: "Rotate evenly" },
   { value: "sticky_author", label: "Sticky per author" },
@@ -55,7 +55,7 @@ const STRATEGIES = [
 
 // .user-token-num, .user-token-menu-item and .user-token-bulk-results.
 const NUM =
-  "user-token-num w-[72px] rounded-btn border border-border bg-control px-2.5 py-2 text-[13px] text-text outline-0 focus:border-accent";
+  "user-token-num w-[72px] rounded-btn border border-border-input bg-control px-2.5 py-2 text-[13px] text-text outline-0 focus:border-accent";
 const MENU_ITEM =
   "user-token-menu-item flex w-full cursor-pointer items-center gap-[9px] rounded-input border-0 bg-transparent px-2.5 py-2 text-left text-[13px] font-medium text-text hover:bg-white/6";
 const RESULTS =
@@ -165,7 +165,7 @@ function BulkModal({ mappingId, onClose, onChanged }: { mappingId: string; onClo
         <div className="user-token-bulk-body min-h-0 overflow-y-auto px-4 pt-3 pb-4">
           <textarea
             id="user_token_bulk_input"
-            className="user-token-bulk-textarea h-[132px] w-full resize-none overflow-auto rounded-btn border border-border bg-control px-3 py-2.5 font-mono text-xs leading-[1.6] whitespace-pre text-text outline-0 focus:border-accent"
+            className="user-token-bulk-textarea h-[132px] w-full resize-none overflow-auto rounded-btn border border-border-input bg-control px-3 py-2.5 font-mono text-xs leading-[1.6] whitespace-pre text-text outline-0 focus:border-accent"
             rows={6}
             spellCheck={false}
             autoComplete="off"
@@ -553,7 +553,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                       id="user_token_value"
                       autoComplete="off"
                       spellCheck={false}
-                      className="token-input w-full rounded-control border border-border bg-control py-3 pr-9 pl-3 text-[13px] text-text outline-0 transition-[border,box-shadow] duration-200 focus:border-accent"
+                      className="token-input w-full rounded-control border border-border-input bg-control py-3 pr-9 pl-3 text-[13px] text-text outline-0 transition-[border,box-shadow] duration-200 focus:border-accent"
                       placeholder="Paste a user (self-bot) token"
                       value={value}
                       onChange={(e) => setValue(e.target.value)}
@@ -614,7 +614,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                     type="text"
                     id="user_tokens_search"
                     style={{ backgroundImage: SEARCH_ICON }}
-                    className="mapping-search-input user-tokens-search mt-3 w-full rounded-input border border-border bg-control bg-[position:10px_center] bg-no-repeat py-[7px] pr-3 pl-8 text-[13px] text-text outline-0 transition-[border-color] duration-150 placeholder:text-muted placeholder:opacity-50 focus:border-accent"
+                    className="mapping-search-input user-tokens-search mt-3 w-full rounded-input border border-border-input bg-control bg-[position:10px_center] bg-no-repeat py-[7px] pr-3 pl-8 text-[13px] text-text outline-0 transition-[border-color] duration-150 placeholder:text-muted placeholder:opacity-50 focus:border-accent"
                     placeholder="Search tokens…"
                     autoComplete="off"
                     value={query}

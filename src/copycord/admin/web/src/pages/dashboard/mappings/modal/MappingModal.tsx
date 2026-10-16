@@ -43,7 +43,7 @@ export interface MappingModalProps {
 
 // .field > input, .field-readonly and the red flash of a missing field.
 const INPUT =
-  "w-full rounded-control border border-border bg-control p-3 text-text outline-0 transition-[border] duration-200 focus:border-accent aria-invalid:border-danger";
+  "w-full rounded-control border border-border-input bg-control p-3 text-text outline-0 transition-[border] duration-200 focus:border-accent aria-invalid:border-danger";
 const READONLY =
   "field-readonly cursor-not-allowed border-white/6! bg-field-readonly! text-muted opacity-60 transition-none focus:border-white/6!";
 const SEARCH_ICON =
@@ -267,7 +267,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 style={{ backgroundImage: SEARCH_ICON }}
-                className="mapping-search-input w-full rounded-input border border-border bg-control bg-[position:10px_center] bg-no-repeat py-[7px] pr-3 pl-8 text-[13px] text-text outline-0 transition-[border-color] duration-150 placeholder:text-muted placeholder:opacity-50 focus:border-accent"
+                className="mapping-search-input w-full rounded-input border border-border-input bg-control bg-[position:10px_center] bg-no-repeat py-[7px] pr-3 pl-8 text-[13px] text-text outline-0 transition-[border-color] duration-150 placeholder:text-muted placeholder:opacity-50 focus:border-accent"
               />
             </div>
             <button

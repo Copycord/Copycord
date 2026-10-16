@@ -60,7 +60,7 @@ export function TokenInput({ id, value, onChange, invalid, placeholder, field = 
   return (
     <div className="relative w-full">
       {field ? (
-        <input {...common} className={cx(FIELD_INPUT, invalid ? "border-danger" : "border-border")} />
+        <input {...common} className={cx(FIELD_INPUT, invalid ? "border-danger" : "border-border-input")} />
       ) : (
         <Input {...common} className={cx("pr-11", invalid && "border-danger")} />
       )}

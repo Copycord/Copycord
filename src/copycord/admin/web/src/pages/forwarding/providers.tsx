@@ -70,7 +70,7 @@ export function ProviderPicker({ value, onChange }: { value: string; onChange: (
           }
         }}
         className={cx(
-          "provider-select-btn input flex w-full max-w-[240px] min-w-[160px] cursor-pointer items-center gap-2.5 rounded-btn border border-border bg-control px-2.5 py-2 text-left font-sans text-[13px] text-text",
+          "provider-select-btn input flex w-full max-w-[240px] min-w-[160px] cursor-pointer items-center gap-2.5 rounded-btn border border-border-input bg-control px-2.5 py-2 text-left font-sans text-[13px] text-text",
           "outline-none focus:border-accent",
         )}
       >
@@ -202,7 +202,7 @@ function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: strin
         if (e.target === e.currentTarget) entryRef.current?.focus();
       }}
       className={cx(
-        "chip-input-wrap flex min-h-[46px] cursor-text flex-wrap items-center gap-1.5 rounded-control border border-border px-3 py-2",
+        "chip-input-wrap flex min-h-[46px] cursor-text flex-wrap items-center gap-1.5 rounded-control border border-border-input px-3 py-2",
         "bg-linear-to-b from-control-top to-control transition-[border-color,box-shadow] duration-200 hover:border-accent/30 focus-within:border-accent",
       )}
     >

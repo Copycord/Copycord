@@ -99,7 +99,7 @@ export const LOG_LEVEL_BOX = "ml-auto w-[100px] shrink-0";
 function TokenBox() {
   return (
     <div className="relative w-full">
-      <input type="password" className={cx(FIELD_INPUT, "border-border")} />
+      <input type="password" className={cx(FIELD_INPUT, "border-border-input")} />
       <button type="button" className={FIELD_REVEAL}>
         <EyeIcon />
       </button>
@@ -134,7 +134,7 @@ export function GlobalConfigLoading() {
                 <span className={SETTING_SUB}>{FIELD_TIPS.COMMAND_USERS}</span>
               </div>
               <div className="mt-1.5">
-                <div className="flex min-h-[42px] items-center rounded-control border border-border bg-control px-3 py-2" />
+                <div className="flex min-h-[42px] items-center rounded-control border border-border-input bg-control px-3 py-2" />
               </div>
             </div>
           </div>

@@ -10,7 +10,7 @@ import type { SortColumn } from "./model";
 import { Pagination } from "./Pagination";
 
 export const CONTROL =
-  "rounded-lg border border-border bg-panel-a60 text-[13px] text-text outline-none transition-colors focus:border-accent";
+  "rounded-lg border border-border-input bg-panel-a60 text-[13px] text-text outline-none transition-colors focus:border-accent";
 export const SEARCH_INPUT = cx(CONTROL, "w-[200px] py-[7px] pr-3 pl-[30px] placeholder:text-muted/60 max-md:w-full");
 export const TYPE_BOX = "w-[300px] min-w-[300px] [&_select]:w-[300px] [&_select]:max-w-[300px] [&>span]:block";
 export const ICON_BTN =

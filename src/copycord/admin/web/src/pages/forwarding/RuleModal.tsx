@@ -109,7 +109,7 @@ function LabelToggle({ id, label, title, checked, enabled, onChange }: {
 
 /** The old .dd toggle the guild <select> was turned into: 34px, 13px, purple caret; FieldSelect adds the caret room. */
 const GUILD_TOGGLE =
-  "input dd-toggle min-h-[34px] rounded-btn border border-border bg-control py-2 pl-2.5 font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus-visible:border-accent";
+  "input dd-toggle min-h-[34px] rounded-btn border border-border-input bg-control py-2 pl-2.5 font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus-visible:border-accent";
 
 export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
   const open = request !== null;

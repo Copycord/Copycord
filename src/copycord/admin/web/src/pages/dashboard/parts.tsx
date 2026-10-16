@@ -80,7 +80,7 @@ export const SETTING_ROW =
 
 /** .ps-input, the small centered number box */
 export const PS_INPUT =
-  "h-8 w-16 rounded-lg border border-border bg-control px-2 text-center text-[13px] text-text outline-none " +
+  "h-8 w-16 rounded-lg border border-border-input bg-control px-2 text-center text-[13px] text-text outline-none " +
   "transition-colors [appearance:textfield] focus:border-accent disabled:opacity-50 " +
   "[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
@@ -100,7 +100,7 @@ export const SECTION_HINT = "m-0 mb-2.5 text-xs leading-normal text-muted";
 
 /** .notif-webhook-input: 13px monospace on the dark control fill. */
 export const WEBHOOK_INPUT =
-  "flex-1 rounded-input border border-border bg-control px-3 py-[7px] font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace] text-[13px] text-text " +
+  "flex-1 rounded-input border border-border-input bg-control px-3 py-[7px] font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace] text-[13px] text-text " +
   "outline-0 transition-colors duration-150 placeholder:text-muted/40 focus:border-accent";
 
 /** .notif-event-row */
@@ -121,7 +121,7 @@ export const PROXY_HINT =
 
 /** .srv-proxy-chips, the bordered proxy list box. */
 export const PROXY_CHIPS =
-  "srv-proxy-chips flex max-h-[220px] min-h-[44px] flex-col gap-1 overflow-y-auto rounded-btn border border-border bg-control px-2.5 py-2 transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-a12)]";
+  "srv-proxy-chips flex max-h-[220px] min-h-[44px] flex-col gap-1 overflow-y-auto rounded-btn border border-border-input bg-control px-2.5 py-2 transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-a12)]";
 
 /** .btn.btn-xs with .btn-ghost-green or .btn-ghost-red: 28px, 12px accent label that turns green or red on hover. */
 const GHOST_XS =

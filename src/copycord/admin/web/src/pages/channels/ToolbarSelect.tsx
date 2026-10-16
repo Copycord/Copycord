@@ -44,7 +44,7 @@ export interface ToolbarSelectProps {
 }
 
 const TOOLBAR_TOGGLE =
-  "inline-block min-h-[34px] rounded-btn border border-border bg-control py-2 pr-9 pl-2.5 " +
+  "inline-block min-h-[34px] rounded-btn border border-border-input bg-control py-2 pr-9 pl-2.5 " +
   "font-sans text-[13px] text-text outline-none transition-[border,box-shadow,background] duration-200 " +
   "focus-visible:border-accent focus-visible:shadow-[0_20px_56px_var(--color-shadow-50)] disabled:cursor-not-allowed disabled:opacity-60";
 

@@ -90,7 +90,7 @@ export function Login() {
                     setPassword(stripSpace(el.value.slice(0, start) + text + el.value.slice(end)));
                   }}
                   onChange={(e) => setPassword(stripSpace(e.target.value))}
-                  className="w-full rounded-btn border border-border bg-bg-3 py-2.5 pr-10 pl-3 text-[0.95rem] text-text outline-none transition-[border-color,background-color] duration-150 focus:border-primary focus:bg-bg-2"
+                  className="w-full rounded-btn border border-border-input bg-bg-3 py-2.5 pr-10 pl-3 text-[0.95rem] text-text outline-none transition-[border-color,background-color] duration-150 focus:border-primary focus:bg-bg-2"
                 />
                 <button
                   type="button"

@@ -25,7 +25,7 @@ import { Shell } from "./Shell";
 const TH = "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted";
 const TD = "px-3 py-2 text-sm";
 const SEARCH =
-  "log-search-input w-full rounded-control border border-border bg-bg-2 px-3 py-2 text-sm text-text outline-none focus:border-accent";
+  "log-search-input w-full rounded-control border border-border-input bg-bg-2 px-3 py-2 text-sm text-text outline-none focus:border-accent";
 
 function SelectAll({ id, state, onChange, label }: { id: string; state: "none" | "some" | "all"; onChange: (on: boolean) => void; label: string }) {
   return (

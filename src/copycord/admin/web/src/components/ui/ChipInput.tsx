@@ -145,7 +145,7 @@ export function ChipInput({
           if (!locked && e.target === e.currentTarget) entryRef.current?.focus();
         }}
         className={cx(
-          "flex min-h-[46px] cursor-text flex-wrap items-center gap-1.5 rounded-control border border-border px-3 py-2",
+          "flex min-h-[46px] cursor-text flex-wrap items-center gap-1.5 rounded-control border border-border-input px-3 py-2",
           "bg-linear-to-b from-control-top to-control focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30",
           locked && "cursor-not-allowed opacity-60",
           (aria["aria-invalid"] || error) && "border-danger",

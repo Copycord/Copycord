@@ -19,7 +19,7 @@ const BOX =
   "disabled:cursor-not-allowed disabled:opacity-60";
 
 const INPUT =
-  "h-9 w-full rounded-lg border border-white/8 bg-white/4 px-2.5 text-sm leading-9 text-inherit outline-none [color-scheme:dark] " +
+  "h-9 w-full rounded-lg border border-border-input bg-white/4 px-2.5 text-sm leading-9 text-inherit outline-none [color-scheme:dark] " +
   "placeholder:text-text-2/70 focus:border-accent disabled:cursor-not-allowed disabled:opacity-55";
 
 // label.form-field around span.label and the .input; SMALL is the 28px .input of the word and metric rows.

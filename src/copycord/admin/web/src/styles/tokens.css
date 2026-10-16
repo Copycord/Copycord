@@ -116,7 +116,7 @@
   --color-card-hover: rgba(33, 33, 38, 0.6);
   --color-log-bg: #0c0c14;
   --color-log-input-bg: #181822;
-  --color-log-input-edge: #34344a;
+  --color-log-input-edge: var(--color-border-input);
   --color-log-input-focus: #8b5cf6;
   --color-table-rule: #34344a;
   --color-role-default: #99AAB5;
