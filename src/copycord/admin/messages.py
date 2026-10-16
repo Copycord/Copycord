@@ -19,7 +19,7 @@ LIMIT_DEFAULT = 50
 LIMIT_MAX = 200
 CONTENT_TTL = 300.0
 CONTENT_CACHE_MAX = 500
-SORTS = ("created_at", "author", "channel")
+SORTS = ("created_at", "author", "channel", "username", "guild")
 
 _state: dict = {"db": None, "send": None}
 # (original_message_id, cloned_guild_id) -> (expires_at, payload)
@@ -56,10 +56,12 @@ def _row_json(r: dict) -> dict:
     return {
         "original_message_id": _sid(r["original_message_id"]),
         "original_guild_id": _sid(r["original_guild_id"]),
+        "original_guild_name": r.get("original_guild_name"),
         "original_channel_id": _sid(r["original_channel_id"]),
         "original_channel_name": r.get("original_channel_name"),
         "cloned_message_id": _sid(r["cloned_message_id"]),
         "cloned_guild_id": _sid(r["cloned_guild_id"]),
+        "cloned_guild_name": r.get("cloned_guild_name"),
         "cloned_channel_id": _sid(r["cloned_channel_id"]),
         "cloned_channel_name": r.get("cloned_channel_name"),
         "mapping_id": r.get("mapping_id"),

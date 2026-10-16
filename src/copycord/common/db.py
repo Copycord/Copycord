@@ -2942,6 +2942,8 @@ class DBManager:
         "created_at": "COALESCE(m.message_ts, 0)",
         "author": "LOWER(COALESCE(m.author_name, m.author_username, ''))",
         "channel": "LOWER(COALESCE(cm.original_channel_name, t.original_thread_name, ''))",
+        "username": "LOWER(COALESCE(m.author_username, ''))",
+        "guild": "LOWER(COALESCE(gm.original_guild_name, ''))",
     }
 
     _MESSAGE_FROM = """
@@ -2950,6 +2952,8 @@ class DBManager:
           ON cm.original_channel_id = m.original_channel_id AND cm.cloned_guild_id = m.cloned_guild_id
         LEFT JOIN threads t
           ON t.original_thread_id = m.original_channel_id AND t.cloned_guild_id = m.cloned_guild_id
+        LEFT JOIN guild_mappings gm
+          ON gm.original_guild_id = m.original_guild_id AND gm.cloned_guild_id = m.cloned_guild_id
     """
 
     _MESSAGE_COLUMNS = """
@@ -2959,12 +2963,9 @@ class DBManager:
         m.attachment_count, m.embed_count, m.message_ts, m.created_at,
         COALESCE(cm.original_channel_name, t.original_thread_name) AS original_channel_name,
         COALESCE(cm.clone_channel_name, t.original_thread_name) AS cloned_channel_name,
-        (SELECT gm.mapping_id FROM guild_mappings gm
-          WHERE gm.original_guild_id = m.original_guild_id AND gm.cloned_guild_id = m.cloned_guild_id
-          LIMIT 1) AS mapping_id,
-        (SELECT gm.mapping_name FROM guild_mappings gm
-          WHERE gm.original_guild_id = m.original_guild_id AND gm.cloned_guild_id = m.cloned_guild_id
-          LIMIT 1) AS mapping_name
+        gm.mapping_id, gm.mapping_name,
+        NULLIF(gm.original_guild_name, '') AS original_guild_name,
+        NULLIF(gm.cloned_guild_name, '') AS cloned_guild_name
     """
 
     def _message_filters(

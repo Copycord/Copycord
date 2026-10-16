@@ -163,6 +163,10 @@ def test_list_default_sort_and_row_shape(client):
     assert it["mapping_name"] == "Alpha" and it["mapping_id"]
     assert it["original_channel_name"] == "general" and it["cloned_channel_name"] == "general-clone"
     assert it["author_id"] == "1" and it["author_name"] == "Zed" and it["author_username"] == "zed"
+    assert it["original_guild_name"] == "Orig" and it["cloned_guild_name"] == "Clone"
+    assert it["original_guild_id"] == str(OG) and it["cloned_guild_id"] == str(CG)
+    other = next(x for x in body["items"] if x["original_message_id"] == str(_mid(11)))
+    assert other["original_guild_name"] == "Orig2" and other["cloned_guild_name"] == "Clone2"
     assert it["attachment_count"] == 2 and it["embed_count"] == 1
     assert it["created_at"] == snowflake_ts(_mid(0))
     assert it["original_url"] == f"https://discord.com/channels/{OG}/10/{_mid(0)}"
@@ -203,13 +207,19 @@ def test_sorts(client):
     items = client.get("/api/messages", params={"sort": "channel", "order": "desc"}).json()["items"]
     chans = [(it["original_channel_name"] or "").lower() for it in items]
     assert chans == sorted(chans, reverse=True)
+    items = client.get("/api/messages", params={"sort": "username", "order": "asc"}).json()["items"]
+    users = [(it["author_username"] or "").lower() for it in items]
+    assert users == sorted(users)
+    items = client.get("/api/messages", params={"sort": "guild", "order": "desc"}).json()["items"]
+    assert items[0]["original_guild_name"] == "Orig2"
     assert _ids(client.get("/api/messages", params={"order": "asc"})) == [str(_mid(i)) for i in range(12)]
     assert client.get("/api/messages", params={"sort": "content"}).status_code == 400
     assert client.get("/api/messages", params={"order": "up"}).status_code == 400
 
 
 @pytest.mark.parametrize("sort,order", [("created_at", "desc"), ("created_at", "asc"),
-                                        ("author", "asc"), ("author", "desc"), ("channel", "asc")])
+                                        ("author", "asc"), ("author", "desc"), ("channel", "asc"),
+                                        ("username", "asc"), ("guild", "desc")])
 def test_cursor_pagination_no_gaps_or_duplicates(client, sort, order):
     full = _ids(client.get("/api/messages", params={"sort": sort, "order": order, "limit": 200}))
     seen, cursor, pages = [], None, 0

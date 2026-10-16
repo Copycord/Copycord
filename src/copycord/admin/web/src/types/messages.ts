@@ -4,10 +4,12 @@
 export interface MessageRow {
   original_message_id: string;
   original_guild_id: string | null;
+  original_guild_name: string | null;
   original_channel_id: string | null;
   original_channel_name: string | null;
   cloned_message_id: string | null;
   cloned_guild_id: string | null;
+  cloned_guild_name: string | null;
   cloned_channel_id: string | null;
   cloned_channel_name: string | null;
   mapping_id: string | null;
