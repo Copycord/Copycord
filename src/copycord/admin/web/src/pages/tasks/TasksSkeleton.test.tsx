@@ -35,14 +35,11 @@ import {
   RAIL_LIST,
   ROW_BOX,
   ROW_HEAD,
-  ROW_ID,
   ROW_LINK,
   ROW_META,
-  ROW_META_ITEM,
   ROW_OUTCOME,
   ROW_TIME,
   ROW_MAIN,
-  ROW_MAPPING,
   ROW_MENU,
   ROW_NAME,
   ROW_TIMING,
@@ -115,15 +112,10 @@ describe("run row skeleton", () => {
     expect(skeleton!.children[1]!.children[0]!.children).toHaveLength(1);
     expect(real!.querySelector(`[class="${ROW_LINK}"]`)).toHaveTextContent("Backfill channels #1");
     expect(skeleton!.querySelector(`[class="${ROW_NAME}"], [class="block ${ROW_NAME}"]`)).not.toBeNull();
-    // The meta line: run ID, mapping as plain text (no chip), trigger and actor; each dot leads its item in
-    // one box, so a line cut at its end never ends on a dot.
+    // The meta line: plain muted text naming who started the run, no glyphs, no run ID, no mapping.
     const meta = real!.children[1]!.children[1]!;
-    expect(meta.textContent).toBe("1·Main mapping·Manual·admin");
-    expect(real!.querySelector(`[class="${ROW_ID}"]`)).toHaveAttribute("title", "Run ID 1");
-    expect(meta.querySelector('[title="Mapping"]')!.className).toBe(ROW_MAPPING);
-    expect(ROW_MAPPING).not.toMatch(/border|rounded/);
-    expect(Array.from(meta.children).map((c) => c.className)).toEqual([ROW_ID, ROW_META_ITEM, ROW_META_ITEM, ROW_META_ITEM]);
-    for (const item of Array.from(meta.children).slice(1)) expect(item.firstElementChild!.textContent).toBe("·");
+    expect(meta.textContent).toBe("Triggered by admin");
+    expect(meta.children).toHaveLength(0);
     expect(ROW_META.split(" ")).toContain("truncate");
     // The outcome as one line with no bar; the skeleton bars it.
     expect(within(real!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");

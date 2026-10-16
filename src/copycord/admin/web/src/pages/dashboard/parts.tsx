@@ -38,9 +38,10 @@ export const BOTS_TABLE = "mt-2 w-full table-fixed border-collapse border-table-
 export const BOTS_HEAD = "border-b border-b-border px-3 py-2 align-middle text-[0.9rem] font-medium whitespace-nowrap text-muted";
 export const BOTS_CELL = "border-b border-b-border px-3 py-2 align-middle text-[0.95rem] whitespace-nowrap";
 
-// The old .runtime-table .badge with .badge-ok / .badge-stop.
+// The old .runtime-table .badge with .badge-ok / .badge-stop: fill and text only,
+// the 1px border stays transparent so the chip keeps its box.
 export const BOTS_STATE =
-  "inline-block rounded-[12px] border border-border px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
+  "inline-block rounded-[12px] border border-transparent px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
 
 /** The Bots state badge until the first status lands: the badge box with a bar over it. */
 export function BotStatePending() {

@@ -121,12 +121,10 @@ describe("Tasks page", () => {
     expect(within(rows[1]!).getByRole("img", { name: "Failed" })).toHaveAttribute("title", "Failed");
     expect(within(rows[1]!).queryByTitle("Status: Failed")).toBeNull();
     expect(rows[1]).not.toHaveTextContent("Failed");
-    // The run ID line: the first 8 characters in mono, the full id in its title.
-    const id = within(rows[0]!).getByText("4f2a9c1e");
-    expect(id).toHaveClass("font-mono");
-    expect(id).toHaveAttribute("title", "Run ID 4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
-    // The meta line: the run ID, the mapping as plain text, the trigger and the actor.
-    expect(id.parentElement).toHaveTextContent("4f2a9c1e·Main mapping·Manual·admin");
+    // The meta line says only who started the run: no run ID, no mapping, no trigger.
+    expect(within(rows[0]!).getByText("Triggered by admin").textContent).toBe("Triggered by admin");
+    expect(within(rows[0]!).queryByText("4f2a9c1e")).toBeNull();
+    expect(rows[0]).not.toHaveTextContent("Main mapping");
     // What the run did, from its summary, one line with no bar; a run with nothing to count says nothing.
     expect(within(rows[0]!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");
     expect(within(rows[1]!).getByTestId("run-outcome").textContent).toBe("");

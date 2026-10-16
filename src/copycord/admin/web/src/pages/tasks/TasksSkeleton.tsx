@@ -61,12 +61,9 @@ export const ROW_LINK =
   `${ROW_NAME} text-text no-underline outline-none hover:underline before:absolute before:inset-0 before:content-[''] ` +
   "focus-visible:before:outline-2 focus-visible:before:-outline-offset-2 focus-visible:before:outline-accent";
 /**
- * "0d88ac5a · Clone-1 · Manual · admin": one line of 13 px muted text with 12 px glyphs, the items 6 px
- * apart, cut with an ellipsis at its end when the row is narrow.
+ * "Triggered by admin": one line of 13 px muted text, cut with an ellipsis at its end when the row is narrow.
  */
 export const ROW_META = "mt-1 h-[18px] min-w-0 truncate text-[13px] leading-[18px] text-muted [&>*+*]:ml-1.5";
-/** A dot and the item after it on a row's meta line, one box top-aligned so its glyph sits centred on the 18 px line. */
-export const ROW_META_ITEM = "inline-flex items-center gap-1.5 align-top";
 /** The mapping on a row's meta line: plain text like the trigger and actor, a long name cut at 24 characters. */
 export const ROW_MAPPING = "min-w-0 max-w-[24ch] truncate";
 /** A run ID in mono, the list row and the run page alike. */
@@ -567,7 +564,7 @@ function RunRowLoading({ nameWidth }: { nameWidth: number }) {
           <TextBar width={nameWidth} className={ROW_NAME} />
         </div>
         <div className={ROW_META}>
-          <Skeleton.Text width={nameWidth + 160} className="align-top" />
+          <Skeleton.Text className="align-top">Triggered by admin</Skeleton.Text>
         </div>
       </div>
       <span className={ROW_OUTCOME}>

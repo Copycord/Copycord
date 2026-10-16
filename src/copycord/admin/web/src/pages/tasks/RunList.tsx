@@ -20,18 +20,13 @@ import {
   FRAME_HEAD_FILTERS,
   FRAME_HEAD_LEFT,
   LIST_FRAME,
-  META_ITEM,
-  MetaDot,
   MetaGlyph,
   ROW,
   ROW_HEAD,
-  ROW_ID,
   ROW_LINK,
   ROW_MAIN,
-  ROW_MAPPING,
   ROW_MENU,
   ROW_META,
-  ROW_META_ITEM,
   ROW_OUTCOME,
   ROW_TIME,
   ROW_TIMING,
@@ -112,6 +107,15 @@ export function triggeredText(run: Pick<TaskRun, "trigger" | "actor">): string {
   return run.actor ? `${how} · ${run.actor}` : how;
 }
 
+// A run with no actor names how it started instead: "Triggered manually", "Triggered by API".
+const TRIGGERED_BY: Record<string, string> = { manual: "Triggered manually", rerun: "Triggered by re-run", api: "Triggered by API" };
+
+/** "Triggered by admin": who started the run, or how when no one is recorded, for the list row's meta line. */
+export function triggeredByText(run: Pick<TaskRun, "trigger" | "actor">): string {
+  if (run.actor) return `Triggered by ${run.actor}`;
+  return TRIGGERED_BY[run.trigger] ?? "Triggered by other";
+}
+
 /** The row's right side: started as relative time over the duration, each after a small glyph; the date in the titles. */
 export function RunTiming({ run }: { run: TaskRun }) {
   const now = useNow(run.status === "running");
@@ -140,11 +144,10 @@ export interface RunRowProps {
 
 /**
  * One run, the whole row a link: the status glyph centred on the row (it alone carries the status), the
- * task name and number over the meta line (run ID in mono, mapping, trigger and actor after 12 px glyphs,
- * cut with an ellipsis at its end); the outcome line, right-aligned; the timing; the menu.
+ * task name and number over the meta line (plain muted "Triggered by admin", cut with an ellipsis at its
+ * end); the outcome line, right-aligned; the timing; the menu.
  */
 export function RunRow({ run, typeTitle, actions }: RunRowProps) {
-  const mapping = run.context?.label;
   const outcome = outcomeText(stepCounts(run), deliveredOf(run));
   const started = formatWhen(run.started_at ?? run.created_at);
   return (
@@ -160,36 +163,7 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
             {typeTitle} #{run.number}
           </Link>
         </div>
-        {/* Each dot leads its item in one box, so a cut line ends on a whole item, never on a dot. */}
-        <div className={ROW_META}>
-          <span className={ROW_ID} title={`Run ID ${run.id}`}>
-            {run.id.slice(0, 8)}
-          </span>
-          {mapping ? (
-            <span className={ROW_META_ITEM}>
-              <MetaDot />
-              <span title="Mapping" className={ROW_MAPPING}>
-                {mapping}
-              </span>
-            </span>
-          ) : null}
-          <span className={ROW_META_ITEM}>
-            <MetaDot />
-            <span className={META_ITEM}>
-              <MetaGlyph name="trigger" />
-              {triggerLabel(run)}
-            </span>
-          </span>
-          {run.actor ? (
-            <span className={ROW_META_ITEM}>
-              <MetaDot />
-              <span className={META_ITEM}>
-                <MetaGlyph name="actor" />
-                {run.actor}
-              </span>
-            </span>
-          ) : null}
-        </div>
+        <div className={ROW_META}>{triggeredByText(run)}</div>
       </div>
       <span data-testid="run-outcome" title={outcome || undefined} className={ROW_OUTCOME}>
         {outcome}
