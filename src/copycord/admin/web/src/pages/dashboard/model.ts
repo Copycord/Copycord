@@ -99,10 +99,12 @@ export function formatUptime(sec: number | null | undefined): string {
   return parts.join(" ");
 }
 
-/** The Status column text: the bot's note as sent; the bare "ready", "active" and "stopped" notes read capitalized. */
+/** The Status column text: the bot's note as sent; the bare "ready" and "active" notes read capitalized, and a bare
+ * "stopped" note is blank since the State chip already says so. */
 export function displayStatus(status: string | undefined): string {
   const raw = (status ?? "").trim();
-  return /^(active|stopped|ready)$/i.test(raw) ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : raw;
+  if (/^stopped$/i.test(raw)) return "";
+  return /^(active|ready)$/i.test(raw) ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : raw;
 }
 
 /** Lines carried by one /logs/stream message; non JSON data is one line. */

@@ -239,6 +239,8 @@ describe("BotsPanel uptime", () => {
     act(() => FakeSocket.last!.emit({ kind: "status", role: "server", payload: { running: false, status: "Stopped" } }));
     expect(document.getElementById("server-state")).toHaveTextContent("stopped");
     expect(uptime()).toBe("");
+    // The State chip already says stopped, so the Status cell stays empty.
+    expect(document.getElementById("server-status")?.textContent ?? "").toBe("");
     vi.useRealTimers();
   });
 });
