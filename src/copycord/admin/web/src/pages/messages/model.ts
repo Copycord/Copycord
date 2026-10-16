@@ -39,7 +39,7 @@ export interface ColumnDef {
   defaultOn: boolean;
 }
 
-/** In table order. Preview is not here: it is always the last, sticky column. */
+/** In table order. Preview is not here: it is always the last column. */
 export const COLUMNS: readonly ColumnDef[] = [
   { key: "time", label: "Time", width: 96, group: "Message", defaultOn: true },
   { key: "created", label: "Created", width: 190, group: "Message", defaultOn: false },

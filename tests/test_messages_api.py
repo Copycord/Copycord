@@ -174,6 +174,18 @@ def test_list_default_sort_and_row_shape(client):
     assert "content" not in it
 
 
+def test_list_channel_ids_and_names(client):
+    """Each row carries both channel ids under the names the SPA columns read; a channel with no
+    channel mapping (deleted or a thread) still shows its ids, only the names are null."""
+    items = {x["original_message_id"]: x for x in client.get("/api/messages").json()["items"]}
+    mapped, unmapped = items[str(_mid(0))], items[str(_mid(11))]
+    assert (mapped["original_channel_id"], mapped["cloned_channel_id"]) == ("10", "20")
+    assert (mapped["original_channel_name"], mapped["cloned_channel_name"]) == ("general", "general-clone")
+    assert (unmapped["original_channel_id"], unmapped["cloned_channel_id"]) == ("12", "22")
+    assert unmapped["original_channel_name"] is None and unmapped["cloned_channel_name"] is None
+    assert (unmapped["original_guild_id"], unmapped["cloned_guild_id"]) == (str(OG2), str(CG2))
+
+
 def test_search_by_name_username_and_ids(client):
     assert len(_ids(client.get("/api/messages", params={"q": "AMY"}))) == 4
     assert len(_ids(client.get("/api/messages", params={"q": "bobb"}))) == 4

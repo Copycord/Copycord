@@ -359,6 +359,26 @@
   }
 }
 
+/* A wide table's scroller (Messages): the bars stay visible on a faint track so a sideways scroll is
+   obvious without hovering. Outside the base layer so it wins over the clear-track default above. */
+.cc-hscroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-input) var(--color-line-1);
+}
+.cc-hscroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.cc-hscroll::-webkit-scrollbar-track,
+.cc-hscroll::-webkit-scrollbar-corner {
+  background: var(--color-line-1);
+}
+.cc-hscroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background: var(--color-border-input) padding-box;
+}
+
 /* Skeleton placeholders (components/ui/Skeleton.tsx): a soft light sweep over
    a faint surface block; reduced motion keeps the block and drops the sweep. */
 @keyframes cc-shimmer {

@@ -106,7 +106,7 @@ function Cell({ k, r, now }: { k: ColumnKey; r: Row; now: number }) {
     case "author_name":
       return <Name text={authorDisplayName(r)} className="font-medium" />;
     case "username":
-      return <Name text={r.author_username ? `@${r.author_username}` : null} className="text-text-2" />;
+      return <Name text={r.author_username} className="text-text-2" />;
     case "author_id":
       return <CopyId id={r.author_id} label="author ID" />;
     case "original_channel":

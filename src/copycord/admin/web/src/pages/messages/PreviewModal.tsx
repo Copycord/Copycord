@@ -68,7 +68,7 @@ export function PreviewModal({ row, onClose }: { row: MessageRow | null; onClose
 
   if (!row) return null;
   const { name, username } = authorText(row);
-  const title = name ? (username && username !== name ? `${name} (@${username})` : name) : "Unknown author";
+  const title = name ? (username && username !== name ? `${name} (${username})` : name) : "Unknown author";
 
   return (
     <Modal

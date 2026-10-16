@@ -245,7 +245,7 @@ describe("Messages page", () => {
     );
     const [first, second] = screen.getAllByRole("row").filter((r) => r.hasAttribute("data-message-row"));
     const cells = within(first!).getAllByRole("cell").map((c) => c.textContent);
-    expect(cells).toEqual(["Mac", "@xmacj", "4242", "#general", "10", "#general-clone", "20", "Source Server", "111", "Clone Server", "222", "2", "Preview"]);
+    expect(cells).toEqual(["Mac", "xmacj", "4242", "#general", "10", "#general-clone", "20", "Source Server", "111", "Clone Server", "222", "2", "Preview"]);
     expect(within(first!).getByTitle("Mac")).toBeInTheDocument();
     expect(within(first!).getByRole("button", { name: "Copy original guild ID" })).toBeInTheDocument();
     const cells2 = within(second!).getAllByRole("cell").map((c) => c.textContent);
@@ -275,7 +275,7 @@ describe("Preview modal", () => {
     let done!: (r: Response) => void;
     const dialog = await openPreview(() => new Promise((r) => (done = r)));
     expect(within(dialog).getByRole("status", { name: "Loading message" })).toBeInTheDocument();
-    expect(within(dialog).getByText("Ann 1 (@ann)")).toBeInTheDocument();
+    expect(within(dialog).getByText("Ann 1 (ann)")).toBeInTheDocument();
     await act(async () =>
       done(
         json({

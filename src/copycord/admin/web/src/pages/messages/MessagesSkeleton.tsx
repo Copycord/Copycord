@@ -32,9 +32,10 @@ export const RESET_BTN = cx(
 );
 
 // The wrap scrolls the rows under a sticky head; its height leaves room for the header and the
-// two toolbar rows so the page fits the screen.
+// two toolbar rows so the page fits the screen, which keeps its sideways scrollbar (cc-hscroll) at
+// the bottom of the visible table instead of after the last loaded row.
 export const TABLE_WRAP = cx(
-  "relative h-[calc(100vh-318px)] min-h-[360px] overflow-auto rounded-xl border border-border",
+  "cc-hscroll relative h-[calc(100vh-318px)] min-h-[360px] overflow-auto rounded-xl border border-border",
   "bg-linear-to-b from-card-a50 to-well-a60 transition-opacity max-md:h-[calc(100vh-260px)]",
 );
 export const TABLE = "w-full table-fixed border-collapse";
@@ -43,14 +44,9 @@ export const TD = "overflow-hidden border-b border-b-white/4 px-3 py-2 align-mid
 export const CELL_TEXT = "block truncate";
 export const MUTED = "text-xs text-muted";
 export const MONO = "font-mono text-xs";
-// Preview stays pinned to the right edge while the other columns scroll under it; a solid fill
-// hides them and a soft shadow marks the edge.
-const PINNED = "sticky right-0 shadow-[-10px_0_12px_-10px_rgba(0,0,0,0.6)]";
-export const PREVIEW_TH = cx(TH.replace("relative ", ""), PINNED, "z-[1] bg-card-solid px-3 text-right");
-export const PREVIEW_TD = cx(
-  PINNED,
-  "bg-card-solid text-right group-hover:bg-[linear-gradient(var(--color-primary-a6),var(--color-primary-a6))]",
-);
+// Preview is a plain last column: it scrolls with the others and takes the row's background and hover.
+export const PREVIEW_TH = cx(TH, "px-3 text-right");
+export const PREVIEW_TD = "text-right";
 
 const ALL_MAPPINGS: ToolbarOption[] = [{ value: "", label: "All mappings" }];
 const ALL_CHANNELS: ToolbarOption[] = [{ value: "", label: "All channels" }];
