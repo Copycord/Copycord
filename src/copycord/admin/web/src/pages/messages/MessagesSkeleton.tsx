@@ -152,6 +152,7 @@ export function MessagesToolbar({
           label="Filter by attachments"
           value={filters.attachments}
           options={ATTACHMENT_OPTIONS}
+          className="max-md:col-span-2"
           onChange={(v) => onFilter({ attachments: v })}
         />
         <label className="flex items-center gap-1.5 text-xs text-muted max-md:flex-col max-md:items-stretch">
