@@ -106,7 +106,7 @@ def _name(m: dict) -> str:
 
 
 def _scopes(db: Any, inputs: PurgeInputs) -> list[dict]:
-    """[{key, name, mapping_id, pair, skip}]: one per mapping in scope, then the unmapped rows
+    """[{key, name, mapping_id, pair, skip}]: one per mapping in scope by name, then the unmapped rows
     when every mapping is. pair limits a scope to a mapping; skip leaves out every mapping."""
     if inputs.mapping_id:
         m = db.get_mapping_by_id(inputs.mapping_id)
@@ -114,7 +114,7 @@ def _scopes(db: Any, inputs: PurgeInputs) -> list[dict]:
             raise RuntimeError(f"Unknown mapping {inputs.mapping_id}")
         maps = [dict(m)]
     else:
-        maps = [dict(m) for m in db.list_guild_mappings()]
+        maps = sorted((dict(m) for m in db.list_guild_mappings()), key=lambda m: _name(m).casefold())
     out: list[dict] = []
     for m in maps:
         pair = _pair(m)

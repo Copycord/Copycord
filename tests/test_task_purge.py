@@ -40,7 +40,7 @@ def maps(db, monkeypatch):
             original_guild_name=f"{name} host", original_guild_icon_url=None,
             cloned_guild_id=pair[1], cloned_guild_name=f"{name} clone",
         )
-    # Alpha: 3 old (40, 50, 60 days), 1 new; Beta: 2 old, 1 new; a stray pair: 1 old.
+    # 8 records. Alpha: 3 old (40, 50, 60 days), 1 new; Beta: 2 old, 1 new; a stray pair: 1 old.
     n = 1
     for pair, ages in ((A, (40, 50, 60, 1)), (B, (35, 90, 2)), (STRAY, (100,))):
         for age in ages:
@@ -88,7 +88,7 @@ async def test_dry_run_counts_and_deletes_nothing(svc, db, maps):
     assert done.status == "success"
     assert done.title == "Count messages older than 30 days"
     assert done.summary == {"matched": 6, "deleted": 0}
-    assert _left(db) == 9
+    assert _left(db) == 8
     by = {r["name"]: r for r in done.report["mappings"]}
     assert by["Alpha"]["matched"] == 3 and by["Beta"]["matched"] == 2
     assert by["Not under a mapping"]["matched"] == 1
@@ -104,7 +104,7 @@ async def test_delete_all_mappings(svc, db, maps):
     assert done.title == "Purge messages older than 30 days"
     assert done.context["label"] == "All mappings"
     assert done.summary == {"matched": 6, "deleted": 6}
-    assert _left(db) == 3 and _left(db, STRAY) == 0
+    assert _left(db) == 2 and _left(db, STRAY) == 0
     assert [r["deleted"] for r in done.report["mappings"]] == [3, 2, 1]
 
 
@@ -123,7 +123,8 @@ async def test_scope_to_one_mapping(svc, db, maps):
 async def test_hours_unit(svc, db, maps):
     run = await svc.start("purge_messages", {"older_than": 36, "unit": "hours", "mapping_id": maps["Alpha"]})
     done = await _settled(svc, run.id)
-    assert done.summary == {"matched": 4, "deleted": 4} and _left(db, A) == 0
+    # 40, 50 and 60 days are past 36 hours; the 1 day old record is not.
+    assert done.summary == {"matched": 3, "deleted": 3} and _left(db, A) == 1
 
 
 @pytest.mark.asyncio
@@ -142,7 +143,7 @@ async def test_rejects_bad_inputs(svc, maps, raw):
 async def test_unknown_mapping_fails_the_run(svc, db, maps):
     run = await svc.start("purge_messages", {"older_than": 1, "mapping_id": "nope"})
     done = await _settled(svc, run.id)
-    assert done.status == "failed" and _left(db) == 9
+    assert done.status == "failed" and _left(db) == 8
 
 
 @pytest.mark.asyncio
