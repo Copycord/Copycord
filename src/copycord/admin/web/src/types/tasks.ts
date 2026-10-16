@@ -130,6 +130,14 @@ export interface BackfillOptionsResponse {
   error?: string;
 }
 
+/** GET /api/tasks/types/purge_messages/options: what a purge with these inputs would delete. */
+export interface PurgePreviewResponse {
+  matched: number;
+  mappings: { mapping_id: string | null; name: string; matched: number }[];
+  errors?: Record<string, string>;
+  error?: string;
+}
+
 /** A 422 from POST /api/tasks/runs: one message per input field. */
 export interface TaskInputErrors {
   errors: Record<string, string>;

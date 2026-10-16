@@ -12,6 +12,7 @@ import { Field, FieldSelect, Input } from "../../../components/ui/Field";
 import type { TaskRun, TaskStep } from "../../../types/tasks";
 import { formatCount } from "../StepList";
 import { BackfillForm } from "./backfill/BackfillForm";
+import { PurgeForm } from "./purge/PurgeForm";
 import { useStartRun, type TaskFormProps } from "./start";
 
 export type { TaskFormProps } from "./start";
@@ -141,6 +142,35 @@ export function backfillStepNote(step: TaskStep): string | null {
   return null;
 }
 
+const PURGE_UNIT: Record<string, [string, string]> = { hours: ["hour", "hours"], days: ["day", "days"], weeks: ["week", "weeks"] };
+
+/** "30 days", "1 week"; an unknown unit is shown as sent. */
+export function ageWords(n: unknown, unit: unknown): string {
+  const num = typeof n === "number" ? n : Number(n);
+  const words = typeof unit === "string" ? PURGE_UNIT[unit] : undefined;
+  if (!Number.isFinite(num) || !words) return `${formatValue(n)} ${formatValue(unit)}`.trim();
+  return `${formatCount(num)} ${num === 1 ? words[0] : words[1]}`;
+}
+
+function describePurge(inputs: Record<string, unknown>, run?: InputsRun): InputRow[] {
+  return [
+    { label: "Older than", value: ageWords(inputs.older_than, inputs.unit) },
+    { label: "Mapping", value: inputs.mapping_id ? run?.context?.label || formatValue(inputs.mapping_id) : "All mappings" },
+    { label: "Dry run", value: inputs.dry_run ? "Yes, nothing deleted" : "No" },
+  ];
+}
+
+const PURGE_SUMMARY: Record<string, string> = { matched: "Records matched", deleted: "Records deleted" };
+
+const PurgeIcon = (
+  <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <path d="M4 7h16" />
+    <path d="M10 11v6M14 11v6" />
+    <path d="M6 7l1 13h10l1-13" />
+    <path d="M9 7V4h6v3" />
+  </svg>
+);
+
 const BackfillIcon = (
   <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
     <path d="M3 12a9 9 0 1 0 3-6.7" />
@@ -163,6 +193,13 @@ export const TASK_TYPES: Record<string, TaskTypeEntry> = {
     summaryLabels: BACKFILL_SUMMARY,
     hero: BACKFILL_HERO,
     stepNote: backfillStepNote,
+  },
+  purge_messages: {
+    icon: PurgeIcon,
+    Form: PurgeForm,
+    describeInputs: describePurge,
+    summaryLabels: PURGE_SUMMARY,
+    hero: { key: "deleted", label: "message records deleted" },
   },
 };
 
