@@ -515,7 +515,7 @@ export function RailCounts({ total, active = 0 }: { total: number | null; active
     <span aria-hidden="true" className={RAIL_COUNTS}>
       {active > 0 ? (
         <span className={RAIL_RUNNING}>
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-info motion-safe:animate-pulse" />
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-info animate-pulse" />
           {active}
         </span>
       ) : null}

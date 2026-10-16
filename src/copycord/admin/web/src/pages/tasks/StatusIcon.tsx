@@ -54,7 +54,7 @@ export function StatusIcon({
         height={size}
         aria-hidden="true"
         focusable="false"
-        className={status === "running" ? "animate-spin motion-reduce:animate-none" : undefined}
+        className={status === "running" ? "animate-spin" : undefined}
       >
         <Glyph status={status} />
       </svg>
