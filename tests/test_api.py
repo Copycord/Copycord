@@ -239,7 +239,7 @@ class TestGuildMappingsAPI:
 
         cfg = SimpleNamespace(default_mapping_settings=lambda: Config.default_mapping_settings(None))
         assert "DB_CLEANUP_MSG" not in cfg.default_mapping_settings()
-        eff = resolve_mapping_settings(db, cfg, mapping_id=mid)
+        eff = resolve_mapping_settings(db, cfg, original_guild_id=555, cloned_guild_id=666)
         assert eff["CLONE_EMOJI"] is False
 
         # Same host and clone pair as stored, so the save skips the Discord membership checks.
@@ -255,7 +255,8 @@ class TestGuildMappingsAPI:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         assert db.get_mapping_by_id(mid)["mapping_name"] == "Legacy"
-        assert resolve_mapping_settings(db, cfg, mapping_id=mid)["CLONE_EMOJI"] is True
+        eff = resolve_mapping_settings(db, cfg, original_guild_id=555, cloned_guild_id=666)
+        assert eff["CLONE_EMOJI"] is True
 
     @pytest.mark.asyncio
     async def test_toggle_status(self, client):
