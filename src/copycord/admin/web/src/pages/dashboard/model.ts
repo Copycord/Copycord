@@ -99,10 +99,10 @@ export function formatUptime(sec: number | null | undefined): string {
   return parts.join(" ");
 }
 
-/** The old page hides the plain "active" and "stopped" notes. */
+/** Only exceptions get a status chip (rule c): the normal "active", "ready" and "stopped" notes leave the cell empty. */
 export function displayStatus(status: string | undefined): string {
   const raw = (status ?? "").trim();
-  return /^(active|stopped)$/i.test(raw) ? "" : raw;
+  return /^(active|stopped|ready)$/i.test(raw) ? "" : raw;
 }
 
 /** Lines carried by one /logs/stream message; non JSON data is one line. */
