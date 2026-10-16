@@ -1,4 +1,7 @@
 """Messages page backend (lane L60a): message metadata columns, /api/messages list, facets and live preview."""
+import importlib
+import logging
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -123,8 +126,23 @@ def test_upsert_fills_and_keeps_new_columns(db):
     assert r["message_ts"] == snowflake_ts(_mid(1))
 
 
-def test_server_message_meta():
-    from copycord.server.server import ServerReceiver
+@pytest.fixture
+def ServerReceiver():
+    # importing the server module retunes library log levels; put them back (as test_server_backfill_jobs does)
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    levels = {n: lg.level for n, lg in logging.root.manager.loggerDict.items() if isinstance(lg, logging.Logger)}
+    try:
+        yield importlib.import_module("copycord.server.server").ServerReceiver
+    finally:
+        root.handlers[:] = handlers
+        root.setLevel(level)
+        for n, lg in list(logging.root.manager.loggerDict.items()):
+            if isinstance(lg, logging.Logger):
+                lg.setLevel(levels.get(n, logging.NOTSET))
+
+
+def test_server_message_meta(ServerReceiver):
     meta = ServerReceiver._message_meta({
         "author": "ann", "author_id": "77", "author_display_name": "Ann",
         "attachments": [{}, {}], "embeds": [{}], "content": "secret",
