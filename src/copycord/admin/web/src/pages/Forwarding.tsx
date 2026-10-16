@@ -11,9 +11,9 @@ import { StatusGate } from "../components/ui/StatusGate";
 import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
 import type { StatusGateState } from "../hooks/useStatusGate";
-import { ApiError, errorText } from "../lib/api";
+import { errorText } from "../lib/api";
+import type { GlobalConfig } from "../types/dashboard-config";
 import type {
-  ClientGuildsResponse,
   ForwardingCountByRuleResponse,
   ForwardingCountResponse,
   ForwardingListResponse,
@@ -34,28 +34,20 @@ import { FWD_EMPTY, FWD_LIST, FWD_SEARCH, FWD_TOOLBAR, RULES_COUNT_KEY, RuleSkel
 import { RuleModal } from "./forwarding/RuleModal";
 
 export { ForwardingSkeleton } from "./forwarding/ForwardingSkeleton";
-import { CLIENT_GUILDS_URL } from "./forwarding/ruleForm";
+import { CLIENT_TOKEN_MESSAGE } from "./forwarding/ruleForm";
 import { useNotify, useSafeConfirm } from "./system/providers";
 
 const NO_VALUE = "—";
+const CONFIG_URL = "/api/config";
 
-// The old loadGuilds: without a working client token /api/client-guilds fails and the page
-// stays in its loading state with this message (the old warning toast).
-export const CLIENT_TOKEN_MESSAGE =
-  "We couldn’t load any guilds yet. It looks like your Discord client token isn’t configured. Open the Configuration page, add your tokens, then come back here.";
+export { CLIENT_TOKEN_MESSAGE };
 
-function clientTokenGate(error: unknown): StatusGateState {
-  let message = "";
-  if (error instanceof ApiError) {
-    const detail = String((error.body as { detail?: unknown } | null)?.detail ?? "");
-    message =
-      error.status === 400 || error.status === 404 || detail.startsWith("client-token")
-        ? CLIENT_TOKEN_MESSAGE
-        : `Failed to load guilds (${error.status}). Please check your configuration and try again.`;
-  } else if (error) {
-    message = "Failed to load guild list. Check your connection and token configuration, then try reloading.";
-  }
-  return { gated: message !== "", ready: !message, serverReady: false, clientReady: !message, message };
+// The old loadGuilds gate, without asking Discord: the page is dimmed with the old warning while
+// the saved config has no client token. The guild list itself is fetched when the rule modal opens.
+function clientTokenGate(config: Pick<GlobalConfig, "CLIENT_TOKEN"> | undefined): StatusGateState {
+  const missing = config !== undefined && String(config.CLIENT_TOKEN ?? "").trim() === "";
+  const message = missing ? CLIENT_TOKEN_MESSAGE : "";
+  return { gated: missing, ready: !missing, serverReady: false, clientReady: !missing, message };
 }
 
 interface RowBusy {
@@ -76,8 +68,8 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
   const rules = useApi<ForwardingListResponse>(RULES_URL);
   const total = useApi<ForwardingCountResponse>(COUNT_URL);
   const byRule = useApi<ForwardingCountByRuleResponse>(COUNT_BY_RULE_URL);
-  const clientGuilds = useApi<ClientGuildsResponse>(CLIENT_GUILDS_URL);
-  const tokenGate = clientTokenGate(clientGuilds.error);
+  const config = useApi<Pick<GlobalConfig, "CLIENT_TOKEN">>(CONFIG_URL);
+  const tokenGate = clientTokenGate(config.data);
   const notify = useNotify();
   const confirm = useSafeConfirm();
 

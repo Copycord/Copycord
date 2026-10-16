@@ -16,6 +16,23 @@ import { RULES_URL, toList } from "./forwardingApi";
 export const VALIDATE_URL = "/api/forwarding/validate";
 export const CLIENT_GUILDS_URL = "/api/client-guilds";
 
+// The old loadGuilds warning toast, shown when there is no working client token.
+export const CLIENT_TOKEN_MESSAGE =
+  "We couldn’t load any guilds yet. It looks like your Discord client token isn’t configured. Open the Configuration page, add your tokens, then come back here.";
+export const GUILDS_RATE_LIMITED_MESSAGE = "Discord is rate limiting guild lookups. Try again in a few seconds.";
+export const GUILDS_FAILED_MESSAGE = "Could not load the guild list; the rule can still apply to all guilds.";
+
+/** What the rule modal says when GET /api/client-guilds fails. */
+export function guildsErrorMessage(error: unknown): string {
+  if (!error) return "";
+  if (error instanceof ApiError) {
+    const detail = String((error.body as { detail?: unknown } | null)?.detail ?? "");
+    if (error.status === 429 || detail === "discord-rate-limited") return GUILDS_RATE_LIMITED_MESSAGE;
+    if (error.status === 400 || detail.startsWith("client-token")) return CLIENT_TOKEN_MESSAGE;
+  }
+  return GUILDS_FAILED_MESSAGE;
+}
+
 export const PROVIDERS = [
   { value: "pushover", label: "Pushover" },
   { value: "telegram", label: "Telegram" },

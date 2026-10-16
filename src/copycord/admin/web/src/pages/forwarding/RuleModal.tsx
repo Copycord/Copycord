@@ -24,6 +24,7 @@ import {
   CLIENT_GUILDS_URL,
   EMPTY_FORM,
   formFromRequest,
+  guildsErrorMessage,
   hasAdvancedFilters,
   localProblem,
   modalTitle,
@@ -262,7 +263,7 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
                   </Field>
                   {guilds.error ? (
                     <p role="alert" className="text-xs text-danger">
-                      Could not load the guild list; the rule can still apply to all guilds.
+                      {guildsErrorMessage(guilds.error)}
                     </p>
                   ) : null}
                 </Section>
