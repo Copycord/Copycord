@@ -93,6 +93,7 @@ import copycord.admin.tasks  # noqa: F401  task types register at import
 from copycord.admin.tasks import backfill as task_backfill
 from copycord.admin.tasks import purge as task_purge
 from copycord.admin.tasks import routes as task_routes
+from copycord.admin import messages as messages_api
 from copycord.admin.tasks.repo import SqliteTaskRepo
 from copycord.admin.tasks.service import TaskService
 from contextlib import suppress
@@ -361,7 +362,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
 # Dashboard pages, all rendered by the SPA (router basename "/").
-SPA_PAGES = ("/", "/channels", "/guilds", "/forwarding", "/scraper", "/system", "/logs", "/tasks")
+SPA_PAGES = ("/", "/channels", "/messages", "/guilds", "/forwarding", "/scraper", "/system", "/logs", "/tasks")
 # First path segments that are never SPA pages: an unknown path under one is a plain 404.
 NON_PAGE_SEGMENTS = frozenset(
     {"api", "ws", "bus", "logs", "static", "assets", "version", "health", "filters", "login", "logout"}
@@ -412,6 +413,10 @@ async def app_redirect(request: Request, path: str = ""):
 
 app.include_router(links_router)
 app.include_router(task_routes.router)
+app.include_router(messages_api.router)
+messages_api.configure(
+    db=db, send=lambda payload, timeout: _ws_cmd(SERVER_AGENT_URL, payload, timeout=timeout)
+)
 shutdown_event = asyncio.Event()
 init_admin_auth(app, DATA_DIR)
 

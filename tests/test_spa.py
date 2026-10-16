@@ -36,7 +36,7 @@ def test_requires_login(tc, spa, path):
     assert resp.headers["location"] == "/login"
 
 
-@pytest.mark.parametrize("path", ["/", "/channels", "/logs"])
+@pytest.mark.parametrize("path", ["/", "/channels", "/messages", "/logs"])
 def test_client_routes_get_index(tc, spa, path):
     resp = tc.get(path, headers=_cookie(), follow_redirects=False)
     assert resp.status_code == 200

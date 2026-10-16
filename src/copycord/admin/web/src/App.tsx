@@ -8,6 +8,7 @@ import { DashboardSkeleton } from "./pages/dashboard/DashboardSkeleton";
 import { ForwardingSkeleton } from "./pages/forwarding/ForwardingSkeleton";
 import { GuildsSkeleton } from "./pages/guilds/GuildsSkeleton";
 import { LogsSkeleton } from "./pages/logs/LogsSkeleton";
+import { MessagesSkeleton } from "./pages/messages/MessagesSkeleton";
 import { ScraperSkeleton } from "./pages/scraper/ScraperSkeleton";
 import { SystemSkeleton } from "./pages/system/SystemSkeleton";
 import { TasksSkeleton } from "./pages/tasks/TasksSkeleton";
@@ -59,6 +60,7 @@ const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds), Gu
 const Forwarding = lazyPage(() => import("./pages/Forwarding").then((m) => m.Forwarding), ForwardingSkeleton);
 const Scraper = lazyPage(() => import("./pages/Scraper").then((m) => m.Scraper), ScraperSkeleton);
 const System = lazyPage(() => import("./pages/System").then((m) => m.System), SystemSkeleton);
+const Messages = lazyPage(() => import("./pages/Messages").then((m) => m.Messages), MessagesSkeleton);
 const Logs = lazyPage(() => import("./pages/Logs").then((m) => m.Logs), LogsSkeleton);
 const Kit = lazyPage(() => import("./pages/Kit").then((m) => m.Kit));
 
@@ -66,6 +68,7 @@ const Kit = lazyPage(() => import("./pages/Kit").then((m) => m.Kit));
 export const PAGES = [
   { path: "/", title: "Configuration" },
   { path: "/channels", title: "Channels" },
+  { path: "/messages", title: "Messages" },
   { path: "/guilds", title: "Guilds" },
   { path: "/tasks", title: "Tasks" },
   { path: "/forwarding", title: "Forwarding" },
@@ -90,6 +93,7 @@ function PageSkeleton() {
 const PAGE_ELEMENTS: Record<(typeof PAGES)[number]["path"], ReactNode> = {
   "/": <Dashboard />,
   "/channels": <Channels />,
+  "/messages": <Messages />,
   "/guilds": <Guilds />,
   "/tasks": <Tasks />,
   "/forwarding": <Forwarding />,

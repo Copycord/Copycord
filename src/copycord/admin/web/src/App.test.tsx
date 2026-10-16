@@ -35,6 +35,7 @@ describe("App shell", () => {
     expect(labels).toEqual([
       "Configuration",
       "Channels",
+      "Messages",
       "Guilds",
       "Tasks",
       "Forwarding",

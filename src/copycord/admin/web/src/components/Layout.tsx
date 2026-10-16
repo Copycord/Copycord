@@ -35,6 +35,7 @@ const FRAMES: Record<string, Frame> = {
   "/tasks": TASKS_FRAME,
   "/scraper": { main: `${PAGE_COLUMN} pb-20`, sidebarFooter: "social" },
   "/system": { main: PAGE_COLUMN },
+  "/messages": { main: PAGE_COLUMN },
   "/logs": { main: PAGE_COLUMN },
   "/_kit": { main: PAGE_COLUMN },
 };

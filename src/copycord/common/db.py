@@ -254,6 +254,17 @@ def _task_run_value(col: str, value):
 _OPEN: "weakref.WeakSet[DBManager]" = weakref.WeakSet()
 
 
+DISCORD_EPOCH_MS = 1420070400000
+
+
+def snowflake_ts(snowflake) -> int | None:
+    """Unix seconds encoded in a Discord snowflake, None when it is not one."""
+    try:
+        return ((int(snowflake) >> 22) + DISCORD_EPOCH_MS) // 1000
+    except (TypeError, ValueError):
+        return None
+
+
 def close_all() -> None:
     """Close every DBManager still open (cogs, module-level configs); SQLite removes
     data.db-wal and data.db-shm when the last connection closes. Call once every role is down."""
@@ -930,6 +941,12 @@ class DBManager:
                 cloned_message_id    INTEGER,
                 webhook_url          TEXT,
                 sent_token_id        TEXT,
+                author_id            INTEGER,
+                author_name          TEXT,
+                author_username      TEXT,
+                attachment_count     INTEGER,
+                embed_count          INTEGER,
+                message_ts           INTEGER,
                 created_at           INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
                 updated_at           INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
                 PRIMARY KEY (original_message_id, cloned_guild_id)
@@ -944,6 +961,12 @@ class DBManager:
                 "cloned_message_id",
                 "webhook_url",
                 "sent_token_id",
+                "author_id",
+                "author_name",
+                "author_username",
+                "attachment_count",
+                "embed_count",
+                "message_ts",
                 "created_at",
                 "updated_at",
             },
@@ -958,11 +981,23 @@ class DBManager:
                 "webhook_url": "webhook_url",
                 # absent on older tables; _ensure_table turns an unknown identifier into NULL
                 "sent_token_id": "sent_token_id",
+                # small metadata for the Messages page (no content); NULL on rows cloned before it existed
+                "author_id": "author_id",
+                "author_name": "author_name",
+                "author_username": "author_username",
+                "attachment_count": "attachment_count",
+                "embed_count": "embed_count",
+                "message_ts": "message_ts",
                 "created_at": "created_at",
                 "updated_at": "updated_at",
             },
             post_sql=[
                 "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);",
+                "CREATE INDEX IF NOT EXISTS idx_messages_message_ts ON messages(message_ts, original_message_id);",
+                "CREATE INDEX IF NOT EXISTS idx_messages_author ON messages(author_id);",
+                "CREATE INDEX IF NOT EXISTS idx_messages_author_name ON messages(author_name COLLATE NOCASE);",
+                # the original timestamp is in the snowflake, so older rows get it too (seconds since the Unix epoch)
+                "UPDATE messages SET message_ts = ((original_message_id >> 22) + 1420070400000) / 1000 WHERE message_ts IS NULL;",
                 "CREATE INDEX IF NOT EXISTS idx_messages_orig_chan ON messages(original_channel_id);",
                 "CREATE INDEX IF NOT EXISTS idx_messages_clone_msg ON messages(cloned_message_id);",
                 "CREATE INDEX IF NOT EXISTS idx_messages_orig_guild ON messages(original_guild_id);",
@@ -2834,7 +2869,15 @@ class DBManager:
         *,
         cloned_guild_id: int | None = None,
         sent_token_id: str | None = None,
+        author_id: int | None = None,
+        author_name: str | None = None,
+        author_username: str | None = None,
+        attachment_count: int | None = None,
+        embed_count: int | None = None,
+        message_ts: int | None = None,
     ) -> None:
+        if message_ts is None:
+            message_ts = snowflake_ts(original_message_id)
         with self._tx():
             self.conn.execute(
                 """
@@ -2847,10 +2890,16 @@ class DBManager:
                     cloned_message_id,
                     webhook_url,
                     sent_token_id,
+                    author_id,
+                    author_name,
+                    author_username,
+                    attachment_count,
+                    embed_count,
+                    message_ts,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
                 ON CONFLICT(original_message_id, cloned_guild_id) DO UPDATE SET
                     -- never overwrite with NULL; keep existing when excluded is NULL
                     original_guild_id   = COALESCE(excluded.original_guild_id, messages.original_guild_id),
@@ -2860,6 +2909,12 @@ class DBManager:
                     cloned_message_id   = COALESCE(excluded.cloned_message_id,   messages.cloned_message_id),
                     webhook_url         = COALESCE(excluded.webhook_url,         messages.webhook_url),
                     sent_token_id       = COALESCE(excluded.sent_token_id,       messages.sent_token_id),
+                    author_id           = COALESCE(excluded.author_id,           messages.author_id),
+                    author_name         = COALESCE(excluded.author_name,         messages.author_name),
+                    author_username     = COALESCE(excluded.author_username,     messages.author_username),
+                    attachment_count    = COALESCE(excluded.attachment_count,    messages.attachment_count),
+                    embed_count         = COALESCE(excluded.embed_count,         messages.embed_count),
+                    message_ts          = COALESCE(excluded.message_ts,          messages.message_ts),
                     -- preserve created_at from first insert
                     created_at          = messages.created_at,
                     updated_at          = strftime('%s','now')
@@ -2873,8 +2928,194 @@ class DBManager:
                     int(cloned_message_id) if cloned_message_id is not None else None,
                     str(webhook_url) if webhook_url else None,
                     str(sent_token_id) if sent_token_id else None,
+                    int(author_id) if author_id is not None else None,
+                    str(author_name) if author_name else None,
+                    str(author_username) if author_username else None,
+                    int(attachment_count) if attachment_count is not None else None,
+                    int(embed_count) if embed_count is not None else None,
+                    int(message_ts) if message_ts is not None else None,
                 ),
             )
+
+    # Messages page: sort name -> SQL key expression (each paired with original_message_id, cloned_guild_id for ties)
+    _MESSAGE_SORT_KEYS = {
+        "created_at": "COALESCE(m.message_ts, 0)",
+        "author": "LOWER(COALESCE(m.author_name, m.author_username, ''))",
+        "channel": "LOWER(COALESCE(cm.original_channel_name, t.original_thread_name, ''))",
+    }
+
+    _MESSAGE_FROM = """
+        FROM messages m
+        LEFT JOIN channel_mappings cm
+          ON cm.original_channel_id = m.original_channel_id AND cm.cloned_guild_id = m.cloned_guild_id
+        LEFT JOIN threads t
+          ON t.original_thread_id = m.original_channel_id AND t.cloned_guild_id = m.cloned_guild_id
+    """
+
+    _MESSAGE_COLUMNS = """
+        m.original_message_id, m.original_guild_id, m.original_channel_id,
+        m.cloned_guild_id, m.cloned_channel_id, m.cloned_message_id,
+        m.author_id, m.author_name, m.author_username,
+        m.attachment_count, m.embed_count, m.message_ts, m.created_at,
+        COALESCE(cm.original_channel_name, t.original_thread_name) AS original_channel_name,
+        COALESCE(cm.clone_channel_name, t.original_thread_name) AS cloned_channel_name,
+        (SELECT gm.mapping_id FROM guild_mappings gm
+          WHERE gm.original_guild_id = m.original_guild_id AND gm.cloned_guild_id = m.cloned_guild_id
+          LIMIT 1) AS mapping_id,
+        (SELECT gm.mapping_name FROM guild_mappings gm
+          WHERE gm.original_guild_id = m.original_guild_id AND gm.cloned_guild_id = m.cloned_guild_id
+          LIMIT 1) AS mapping_name
+    """
+
+    def _message_filters(
+        self,
+        *,
+        q: str | None = None,
+        mapping_id: str | None = None,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
+        channel_id: int | None = None,
+        author_id: int | None = None,
+        created_from: int | None = None,
+        created_to: int | None = None,
+        has_attachments: bool | None = None,
+    ) -> tuple[list[str], list]:
+        where: list[str] = []
+        params: list = []
+        if mapping_id:
+            row = self.conn.execute(
+                "SELECT original_guild_id, cloned_guild_id FROM guild_mappings WHERE mapping_id = ?",
+                (str(mapping_id),),
+            ).fetchone()
+            if row is None:
+                where.append("0")
+            else:
+                where.append("m.original_guild_id = ? AND m.cloned_guild_id = ?")
+                params += [int(row[0]), int(row[1])]
+        if original_guild_id is not None:
+            where.append("m.original_guild_id = ?")
+            params.append(int(original_guild_id))
+        if cloned_guild_id is not None:
+            where.append("m.cloned_guild_id = ?")
+            params.append(int(cloned_guild_id))
+        if channel_id is not None:
+            where.append("m.original_channel_id = ?")
+            params.append(int(channel_id))
+        if author_id is not None:
+            where.append("m.author_id = ?")
+            params.append(int(author_id))
+        if created_from is not None:
+            where.append("m.message_ts >= ?")
+            params.append(int(created_from))
+        if created_to is not None:
+            where.append("m.message_ts <= ?")
+            params.append(int(created_to))
+        if has_attachments is True:
+            where.append("m.attachment_count > 0")
+        elif has_attachments is False:
+            where.append("COALESCE(m.attachment_count, 0) = 0")
+        q = (q or "").strip()
+        if q:
+            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            ors = [
+                "m.author_name LIKE ? ESCAPE '\\'",
+                "m.author_username LIKE ? ESCAPE '\\'",
+            ]
+            params_q: list = [like, like]
+            if q.isdigit() and len(q) <= 20:
+                n = int(q)
+                if n < 2**63:
+                    ors += [
+                        "m.original_message_id = ?",
+                        "m.cloned_message_id = ?",
+                        "m.author_id = ?",
+                        "m.original_channel_id = ?",
+                        "m.cloned_channel_id = ?",
+                    ]
+                    params_q += [n] * 5
+            where.append("(" + " OR ".join(ors) + ")")
+            params += params_q
+        return where, params
+
+    def list_messages(
+        self,
+        *,
+        sort: str = "created_at",
+        order: str = "desc",
+        limit: int = 50,
+        after: tuple | None = None,
+        **filters,
+    ) -> list[dict]:
+        """One keyset page of cloned messages. `after` is the (key, original_message_id,
+        cloned_guild_id) of the last row of the previous page; ties break on the ids."""
+        key = self._MESSAGE_SORT_KEYS.get(sort)
+        if key is None:
+            raise ValueError(f"unknown sort: {sort}")
+        desc = str(order).lower() != "asc"
+        where, params = self._message_filters(**filters)
+        if after is not None:
+            op = "<" if desc else ">"
+            where.append(f"({key}, m.original_message_id, COALESCE(m.cloned_guild_id, 0)) {op} (?, ?, ?)")
+            params += [after[0], int(after[1]), int(after[2])]
+        direction = "DESC" if desc else "ASC"
+        sql = (
+            f"SELECT {self._MESSAGE_COLUMNS}, {key} AS sort_key {self._MESSAGE_FROM}"
+            + (" WHERE " + " AND ".join(where) if where else "")
+            + f" ORDER BY {key} {direction}, m.original_message_id {direction},"
+            f" COALESCE(m.cloned_guild_id, 0) {direction} LIMIT ?"
+        )
+        params.append(int(limit))
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def get_message_row(self, original_message_id: int, cloned_guild_id: int | None = None) -> dict | None:
+        sql = f"SELECT {self._MESSAGE_COLUMNS} {self._MESSAGE_FROM} WHERE m.original_message_id = ?"
+        params: list = [int(original_message_id)]
+        if cloned_guild_id is not None:
+            sql += " AND m.cloned_guild_id = ?"
+            params.append(int(cloned_guild_id))
+        row = self.conn.execute(sql + " LIMIT 1", params).fetchone()
+        return dict(row) if row else None
+
+    def message_facets(self) -> dict:
+        """Filter dropdown values: mappings and the original channels that have messages."""
+        mappings = [
+            {
+                "mapping_id": r["mapping_id"],
+                "mapping_name": r["mapping_name"] or "",
+                "original_guild_id": str(r["original_guild_id"]),
+                "cloned_guild_id": str(r["cloned_guild_id"]),
+            }
+            for r in self.conn.execute(
+                "SELECT mapping_id, mapping_name, original_guild_id, cloned_guild_id"
+                " FROM guild_mappings ORDER BY LOWER(mapping_name), mapping_id"
+            ).fetchall()
+        ]
+        channels = [
+            {
+                "original_channel_id": str(r["original_channel_id"]),
+                "original_guild_id": str(r["original_guild_id"]) if r["original_guild_id"] is not None else None,
+                "cloned_guild_id": str(r["cloned_guild_id"]) if r["cloned_guild_id"] is not None else None,
+                "name": r["name"],
+                "count": int(r["n"]),
+            }
+            for r in self.conn.execute(
+                """
+                SELECT g.original_channel_id, g.original_guild_id, g.cloned_guild_id, g.n,
+                       COALESCE(cm.original_channel_name, t.original_thread_name) AS name
+                FROM (
+                    SELECT original_channel_id, original_guild_id, cloned_guild_id, COUNT(*) AS n
+                    FROM messages WHERE original_channel_id IS NOT NULL
+                    GROUP BY original_channel_id, cloned_guild_id
+                ) g
+                LEFT JOIN channel_mappings cm
+                  ON cm.original_channel_id = g.original_channel_id AND cm.cloned_guild_id = g.cloned_guild_id
+                LEFT JOIN threads t
+                  ON t.original_thread_id = g.original_channel_id AND t.cloned_guild_id = g.cloned_guild_id
+                ORDER BY LOWER(COALESCE(name, '')), g.original_channel_id
+                """
+            ).fetchall()
+        ]
+        return {"mappings": mappings, "channels": channels}
 
     def get_mapping_by_cloned(self, cloned_message_id: int):
         return self.conn.execute(
