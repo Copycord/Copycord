@@ -108,7 +108,7 @@ export function StepList({ run, noteOf }: { run: TaskRun; noteOf?: StepNote }) {
             return (
               <li key={s.key} className={STEP_ROW}>
                 <StatusIcon status={s.state} size={14} />
-                <span className={STEP_TITLE}>{s.title}</span>
+                <span title={s.title} className={STEP_TITLE}>{s.title}</span>
                 {s.state === "running" ? <StepBar step={s} /> : null}
                 <span title={note || undefined} className={cx(STEP_NOTE, s.state === "failed" ? "text-danger" : "text-muted")}>
                   {note}

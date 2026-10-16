@@ -50,7 +50,7 @@ export function TypeRail({ types, selected, loading = false }: TypeRailProps) {
               aria-current={selected === t.key ? "page" : undefined}
               title={railTitle(t.total ?? 0, t.active)}
             >
-              <span className="min-w-0 truncate">{t.title}</span>
+              <span title={t.title} className="min-w-0 truncate">{t.title}</span>
               <RailCounts total={t.total ?? 0} active={t.active} />
             </Link>
           </li>

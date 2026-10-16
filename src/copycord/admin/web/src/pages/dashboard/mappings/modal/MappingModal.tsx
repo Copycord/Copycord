@@ -188,6 +188,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
             {isEdit && mapping ? (
               <div
                 id="mapping-id-subtle"
+                title={mapping.mapping_id}
                 className="modal-title-subtle mt-[3px] max-w-[220px] overflow-hidden text-[11px] font-normal text-ellipsis whitespace-nowrap text-text opacity-40 select-text"
               >
                 {mapping.mapping_id}

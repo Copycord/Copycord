@@ -155,7 +155,7 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
             {typeTitle} #{run.number}
           </Link>
         </div>
-        <div className={ROW_META}>{triggeredByText(run)}</div>
+        <div title={triggeredByText(run)} className={ROW_META}>{triggeredByText(run)}</div>
       </div>
       <RunTiming run={run} />
       {actions}

@@ -65,7 +65,7 @@ export function ProgressCard({ progress }: { progress: ProgressState }) {
           />
         </div>
         <div className="mt-2 flex items-center justify-between gap-3 text-[13px] text-muted">
-          <span id="sc-progress-text" className="min-w-0 truncate">
+          <span id="sc-progress-text" title={text || undefined} className="min-w-0 truncate">
             {text}
           </span>
           <span id="sc-progress-pct">{pct == null ? "—" : `${pct}%`}</span>

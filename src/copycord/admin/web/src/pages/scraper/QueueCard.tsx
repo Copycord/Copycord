@@ -115,7 +115,7 @@ export function QueueCard({ queue, notify, confirm }: QueueCardProps) {
                     {isRunning ? <RefreshIcon className="animate-spin" /> : <ClockIcon />}
                   </span>
                   <div className="flex min-w-0 flex-col gap-px">
-                    <span className="sc-queue-guild truncate font-mono text-[13px] font-semibold text-text">{String(item.guild_id)}</span>
+                    <span title={String(item.guild_id)} className="sc-queue-guild truncate font-mono text-[13px] font-semibold text-text">{String(item.guild_id)}</span>
                     <span className="sc-queue-status text-[11px] text-muted">{isRunning ? "Scraping…" : "Pending"}</span>
                   </div>
                 </div>

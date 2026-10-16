@@ -153,7 +153,7 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
           hero ? (
             <>
               <span className={cx(HERO_VALUE, FADE_IN)}>{formatCount(hero.value)}</span>
-              <span className={cx(HERO_LABEL, FADE_IN)}>{hero.label}</span>
+              <span title={hero.label} className={cx(HERO_LABEL, FADE_IN)}>{hero.label}</span>
             </>
           ) : null
         }

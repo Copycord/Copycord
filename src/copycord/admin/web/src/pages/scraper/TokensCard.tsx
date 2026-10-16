@@ -172,7 +172,7 @@ export function TokensCard({ tokens, reload, notify, confirm, loading = false }:
                     {t.is_valid ? <CheckIcon /> : <XIcon />}
                   </span>
                   <div className={TOKEN_TEXT}>
-                    <span className={cx("sc-token-name", TOKEN_NAME)}>{t.username || t.label || "Unlabeled"}</span>
+                    <span title={t.username || t.label || "Unlabeled"} className={cx("sc-token-name", TOKEN_NAME)}>{t.username || t.label || "Unlabeled"}</span>
                     <span className={cx("sc-token-masked", TOKEN_MASK)}>{displayMask(t.masked)}</span>
                   </div>
                 </div>

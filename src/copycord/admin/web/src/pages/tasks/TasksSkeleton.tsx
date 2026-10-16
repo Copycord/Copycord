@@ -488,6 +488,7 @@ export const RAIL_COUNTS = "ml-auto inline-flex shrink-0 items-center gap-2";
 export const RAIL_COUNT = "text-xs text-muted tabular-nums";
 export const RAIL_RUNNING = "inline-flex items-center gap-1 text-xs font-medium text-accent tabular-nums";
 export const RAIL_RUNNING_DOT = "size-1.5 rounded-full bg-accent animate-pulse";
+// The active count says "running" in words too (rule a): the pulsing accent dot alone was a colour-only signal.
 
 export function RailCounts({ total, active = 0 }: { total: number | null; active?: number }) {
   return (
@@ -496,7 +497,7 @@ export function RailCounts({ total, active = 0 }: { total: number | null; active
       {active > 0 ? (
         <span className={RAIL_RUNNING}>
           <span aria-hidden="true" className={RAIL_RUNNING_DOT} />
-          {active}
+          {active} running
         </span>
       ) : null}
       {total == null ? (

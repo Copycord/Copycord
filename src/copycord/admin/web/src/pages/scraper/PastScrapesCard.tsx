@@ -106,7 +106,7 @@ export function PastScrapesCard({ data, reload, notify, confirm, loading = false
                     title={`Guild ID: ${s.guild_id != null ? String(s.guild_id) : "?"}`}
                   >
                     <UsersIcon className="shrink-0 text-text-2" />
-                    <span className="truncate">{name}</span>
+                    <span title={name} className="truncate">{name}</span>
                   </span>
                   <span className={cx("sc-scrape-meta", SCRAPE_META)}>
                     {`${s.total_count ?? 0} members · ${method} · ${fmtBytes(s.file_size || 0)}`}
