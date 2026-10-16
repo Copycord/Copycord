@@ -48,7 +48,6 @@ import {
   RunIdValue,
   RunMetaLine,
   RunOverview,
-  SummaryHead,
   typeUrl,
 } from "./TasksSkeleton";
 import { rememberRunTypes, runTypeOf, typeLabel } from "./typeLabels";
@@ -149,7 +148,6 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
   const line = countsText(run, hero?.key);
   return (
     <section aria-label="Summary" className={RUN_CARD}>
-      <SummaryHead />
       <RunOverview
         hero={
           hero ? (

@@ -325,7 +325,7 @@ describe("Run page structure", () => {
       cards: [
         {
           name: "Summary",
-          title: "Summary",
+          title: "",
           hero: "1,234messages delivered",
           bar: "0 of 2 steps finished",
           counts: "1 running · 1 queued",
@@ -573,11 +573,12 @@ describe("RunSummary", () => {
     });
     const { container } = render(<RunSummary run={run} />);
     const overview = container.querySelector(`[class="${OVERVIEW}"]`)!;
-    // The Summary card: head, the overview, then the closed Inputs; nothing else, no tiles.
+    // The Summary card opens on the overview, then the closed Inputs; no head and no tiles.
     const card = container.querySelector("section")!;
-    expect(card.children[1]).toBe(overview);
-    expect(card.children[2]).toBe(screen.getByTestId("run-inputs"));
-    expect(card.children).toHaveLength(3);
+    expect(card.children[0]).toBe(overview);
+    expect(card.children[1]).toBe(screen.getByTestId("run-inputs"));
+    expect(card.children).toHaveLength(2);
+    expect(card.querySelector("h3")).toBeNull();
     expect(card.querySelector("dl[aria-label=Counts]")).toBeNull();
     const hero = screen.getByTestId("run-hero");
     expect(text(hero)).toBe("92messages delivered");

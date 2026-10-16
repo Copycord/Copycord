@@ -249,7 +249,7 @@ export function RunOverview({ hero, bar, counts }: { hero: ReactNode; bar: React
 export const RUN_BODY = "flex flex-col gap-4";
 /** The cards of the run page: FRAME without the clip, so the Steps filter's list can open over the next card. */
 export const RUN_CARD = "rounded-card border border-border bg-card";
-/** One head for the Summary and Steps cards: 48 px, the title on the left, controls on the right. */
+/** A card head (the Steps card; the Summary card opens on its hero instead): 48 px, the title on the left, controls on the right. */
 export const CARD_HEAD = "flex min-h-12 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b border-border px-4 py-1.5 text-sm";
 export const CARD_TITLE = "m-0 text-sm font-semibold text-text";
 /** The Inputs list inside its opened disclosure: labels in a column at least 110 px wide, then the values. */
@@ -310,15 +310,6 @@ export function StepsHead({ filter, onFilter, id }: StepsHeadProps) {
         options={STEP_FILTER_OPTIONS}
         onChange={(v) => onFilter(v as StepFilter)}
       />
-    </div>
-  );
-}
-
-/** The Summary card's head: its title alone, in the same box as the other cards' heads. */
-export function SummaryHead() {
-  return (
-    <div className={CARD_HEAD}>
-      <h3 className={CARD_TITLE}>Summary</h3>
     </div>
   );
 }
@@ -725,7 +716,6 @@ export function RunDetailSkeleton({
         </header>
         <div className={RUN_BODY}>
           <section aria-label="Summary" className={RUN_CARD}>
-            <SummaryHead />
             <RunOverview
               hero={
                 <>

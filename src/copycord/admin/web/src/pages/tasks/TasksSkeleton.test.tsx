@@ -529,7 +529,8 @@ describe("run page skeleton structure", () => {
       copy: 1,
       menu: 1,
       headerLines: 1,
-      cardHeads: 2,
+      // The Steps card's head; the Summary card opens on its hero.
+      cardHeads: 1,
       // The hero, the segmented bar, the counts line.
       overview: ["run-hero", "bar", "run-counts"],
       details: [
