@@ -14,7 +14,6 @@ import { rememberRunTypes, rememberTypes } from "./typeLabels";
 import {
   ALL_TASKS_DESCRIPTION,
   CARD_HEAD,
-  RUN_META,
   STAT_TILE,
   STEP_EMPTY,
   STEP_ROW_PX,
@@ -27,7 +26,6 @@ import {
   STEP_LIST,
   BUSY,
   FADE_IN,
-  LIST_BODY,
   LIST_FRAME,
   FRAME_HEAD,
   FRAME_HEAD_FILTERS,
@@ -35,9 +33,10 @@ import {
   PER_PAGE,
   RAIL_LIST,
   ROW_BOX,
-  ROW_CHIPS,
-  ROW_CHIPS_EXTRA,
   ROW_ID,
+  ROW_META,
+  ROW_TIME,
+  RUN_FACTS,
   ROW_MAIN,
   ROW_MENU,
   ROW_NAME,
@@ -88,33 +87,30 @@ describe("run row skeleton", () => {
     expect(real!.className.startsWith(ROW_BOX)).toBe(true);
     const cols = (li: Element) => Array.from(li.children).map(layout);
     expect(cols(skeleton!)).toEqual(cols(real!));
-    // Glyph, name and ID, chips, timing, menu.
-    expect(real!.children).toHaveLength(5);
-    expect(Array.from(real!.children).slice(1).map((c) => c.className)).toEqual([ROW_MAIN, ROW_CHIPS, ROW_TIMING, ROW_MENU]);
-    expect(Array.from(skeleton!.children).slice(1).map((c) => c.className)).toEqual([ROW_MAIN, ROW_CHIPS, ROW_TIMING, ROW_MENU]);
-    // The name line over the run ID line, in the same type and gap; the skeleton has bars in both.
+    // Glyph, name and meta line, timing, menu; no status pill or chips in the row.
+    expect(real!.children).toHaveLength(4);
+    expect(Array.from(real!.children).slice(1).map((c) => c.className)).toEqual([ROW_MAIN, ROW_TIMING, ROW_MENU]);
+    expect(Array.from(skeleton!.children).slice(1).map((c) => c.className)).toEqual([ROW_MAIN, ROW_TIMING, ROW_MENU]);
+    expect(real!.querySelector("[class*=rounded-full]")).toBeNull();
+    // The name line over the plain meta line, in the same type and gap; the skeleton has bars in both.
     const lines = (li: Element) => Array.from(li.children[1]!.children).map((c) => c.className.replace(/^block /, ""));
-    expect(lines(real!)).toEqual([ROW_NAME, ROW_ID]);
+    expect(lines(real!)).toEqual([ROW_NAME, ROW_META]);
     expect(lines(skeleton!)).toEqual(lines(real!));
     expect(skeleton!.children[1]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
-    // The chips: the status pill, then mapping, trigger and actor, each a Badge box; bars for the values.
-    const chips = (li: Element) => {
-      const box = li.children[2]!;
-      return { pill: box.children[0]!.className, extra: box.children[1]!.className, chips: box.children[1]!.children.length };
-    };
-    expect(chips(real!)).toEqual({ pill: "inline-flex", extra: ROW_CHIPS_EXTRA, chips: 3 });
-    expect(chips(skeleton!)).toEqual(chips(real!));
-    expect(real!.children[2]!.textContent).toBe("SuccessMain mappingManualadmin");
-    expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]").length).toBeGreaterThanOrEqual(4);
-    // Started over duration.
-    expect(real!.children[3]!.children).toHaveLength(2);
-    expect(skeleton!.children[3]!.children).toHaveLength(2);
+    expect(real!.children[1]!.children[1]!.textContent).toBe("1 · Manual run by admin · Main mapping");
+    expect(real!.querySelector(`[class="${ROW_ID}"]`)).toHaveAttribute("title", "Run ID 1");
+    // Started over duration, each a glyph and its value; the skeleton draws the glyphs and bars the values.
+    const timing = (li: Element) => Array.from(li.children[2]!.children).map((c) => `${c.className} ${c.querySelectorAll("svg").length}`);
+    expect(timing(real!)).toEqual([`${ROW_TIME} 1`, `${ROW_TIME} 1`]);
+    expect(timing(skeleton!)).toEqual(timing(real!));
+    expect(real!.children[2]!.children[1]!.textContent).toBe("48s");
+    expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
   });
 
-  it("keeps the runs card unclipped and at least as tall as the tallest filter list under its head", () => {
+  it("keeps the runs card unclipped with no empty minimum body under one row", () => {
     expect(LIST_FRAME.split(" ")).not.toContain("overflow-hidden");
-    // ToolbarSelect's list: max-h-[180px], 4 px under its toggle.
-    expect(Number(/min-h-\[(\d+)px\]/.exec(LIST_BODY)?.[1])).toBeGreaterThanOrEqual(184);
+    expect(LIST_FRAME).not.toMatch(/min-h-/);
+    expect(ROW_BOX).toMatch(/min-h-14/);
   });
 
   it("draws as many rows as the list had last time, at most a page, one on a first visit, and the empty state with none", () => {
@@ -161,7 +157,6 @@ function chrome(root: HTMLElement) {
     searchButton: within(root).queryAllByRole("button", { name: "Search", hidden: true }).length,
     railEntries: byClass(RAIL_LIST).children.length,
     frames: root.querySelectorAll(`[class="${LIST_FRAME}"]`).length,
-    bodies: root.querySelectorAll(`[class="${LIST_BODY}"]`).length,
     headGroups: Array.from(head.children).map((c) => c.className),
     headLeft: byClass(FRAME_HEAD_LEFT).children.length,
     dropdowns: Array.from(byClass(FRAME_HEAD_FILTERS).querySelectorAll("button[aria-haspopup=listbox]")).map(label),
@@ -224,9 +219,8 @@ describe("page skeleton", () => {
       search: 1,
       searchButton: 1,
       railEntries: 1,
-      // The runs card does not clip, and its body keeps the height an open filter list needs.
+      // The runs card does not clip, so an open filter list hangs past it.
       frames: 1,
-      bodies: 1,
       headLeft: 2,
       autoRefresh: "Auto-refresh: Off",
       dropdowns: ["Task type: All", "Status: All", "Mapping: All", "Actor: All"],
@@ -427,9 +421,11 @@ describe("run page skeleton structure", () => {
       ],
     };
     const blocks = (root: Element) => ({
-      metaRows: root.querySelectorAll(`header [class^="${RUN_META}"]`).length,
-      // The chips of the meta row, each a Badge box; the pill beside the number; the actions button.
-      chips: root.querySelector(`header [class^="${RUN_META}"]`)?.children.length,
+      // No chip strip under the title; the facts grid in the Summary card, labels as text; the badge beside the number; the actions button.
+      chipRows: root.querySelectorAll("header .flex-wrap").length,
+      facts: Array.from(root.querySelectorAll(`section[aria-label=Summary] [class="${RUN_FACTS}"] > div > dt`)).map((d) => d.textContent),
+      factValues: root.querySelectorAll(`section[aria-label=Summary] [class="${RUN_FACTS}"] > div > dd`).length,
+      copy: root.querySelectorAll("section[aria-label=Summary] button[aria-label='Copy run ID']").length,
       pill: root.querySelectorAll("header [data-testid=run-status] > span").length,
       menu: root.querySelectorAll("header button[aria-label='Run actions']").length,
       headerLines: root.querySelectorAll("header p").length,
@@ -451,7 +447,7 @@ describe("run page skeleton structure", () => {
       </MemoryRouter>,
     );
     const skel = blocks(container);
-    expect(real).toMatchObject({ metaRows: 1, chips: 6, pill: 1, menu: 1, cardHeads: 2, tiles: 3, steps: 6 });
+    expect(real).toMatchObject({ chipRows: 0, facts: ["Triggered", "Mapping", "Started", "Duration", "Run ID"], factValues: 5, copy: 1, pill: 1, menu: 1, cardHeads: 2, tiles: 3, steps: 6 });
     expect(real.inputs).toBeGreaterThan(0);
     // The error sits on the title line, so the header has no line the skeleton lacks.
     expect(skel).toEqual(real);

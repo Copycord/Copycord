@@ -6,7 +6,7 @@ import { RunHeader } from "./RunDetail";
 import { RunRow } from "./RunList";
 import { StatusIcon } from "./StatusIcon";
 import { StepList } from "./StepList";
-import { FADE_IN, ROW_BOX, RUN_HEAD_MAIN, RUN_META, RunDetailSkeleton, RunRowsLoading, STATUS_BOX, STEP_ROW } from "./TasksSkeleton";
+import { FADE_IN, ROW_BOX, RUN_HEAD_MAIN, RunDetailSkeleton, RunRowsLoading, STATUS_BOX, STEP_ROW } from "./TasksSkeleton";
 
 const RUN: TaskRun = {
   id: "1",
@@ -54,24 +54,23 @@ describe("status glyph alignment", () => {
       </MemoryRouter>,
     );
     const glyphs = Array.from(container.querySelectorAll("[data-status]"));
-    // The run row's glyph, then the small glyph in its status pill. Running steps sort first in the step list.
-    // The last is the small glyph inside the header's status pill.
-    expect(glyphs.map((g) => g.getAttribute("data-status"))).toEqual(["success", "success", "running", "success", "success", "success"]);
+    // The run row's glyph alone (no status pill in the row). Running steps sort first in the step list.
+    // The last is the small glyph inside the header's status badge.
+    expect(glyphs.map((g) => g.getAttribute("data-status"))).toEqual(["success", "running", "success", "success", "success"]);
     // Colours and the header glyph's fade in aside.
     const fade = FADE_IN.split(" ");
     const boxes = glyphs.map((g) => classes(g).filter((c) => !c.startsWith("text-") && !fade.includes(c)).sort().join(" "));
     expect(new Set(boxes)).toEqual(new Set([[...BOX].sort().join(" ")]));
-    const [row, , , , header] = glyphs.map((g) => g.parentElement!);
-    // The run row centres its columns; the glyph, a direct child, centres on the name and run ID lines.
+    const [row, , , header] = glyphs.map((g) => g.parentElement!);
+    // The run row centres its columns; the glyph, a direct child, centres on the name and meta lines.
     expect(row!.tagName).toBe("LI");
     expect(row!.className).toContain("items-center");
-    expect(Array.from(row!.children[1]!.children).map((c) => c.textContent)).toEqual(["Backfill channels #1", "1"]);
-    // The pill's glyph sits inside the row's status pill, not on the row.
-    expect(glyphs[1]!.closest("li")).toBe(row);
-    expect(glyphs[1]!.parentElement).not.toBe(row);
+    expect(row!.children[1]!.children[0]!.textContent).toBe("Backfill channels #1");
+    expect(row!.children[1]!.children[1]!.textContent).toMatch(/^1 · Manual run by admin/);
+    expect(row!.querySelectorAll("[data-status]")).toHaveLength(1);
     // A step row is the glyph's parent.
-    expect(glyphs[2]!.parentElement!.className).toBe(STEP_ROW);
-    // The header centres the glyph beside its title line (title, number, status pill).
+    expect(glyphs[1]!.parentElement!.className).toBe(STEP_ROW);
+    // The header centres the glyph beside its title line (title, number, status badge).
     expect(header!.className).toBe(RUN_HEAD_MAIN);
     expect(header!.children[1]!.querySelector("h2")).not.toBeNull();
     expect(within(header!.children[1] as HTMLElement).getByTestId("run-status")).toBeInTheDocument();
@@ -89,8 +88,8 @@ describe("status glyph alignment", () => {
     expect(boxes).toHaveLength(4);
     for (const box of boxes) expect(box.querySelector("[data-skeleton]")).not.toBeNull();
     expect(boxes.map((b) => b.parentElement!.className)).toEqual([ROW_BOX, RUN_HEAD_MAIN, STEP_ROW, STEP_ROW]);
-    // The header's glyph sits beside the title line there too; the meta chips row is under it, on the header's left edge.
+    // The header's glyph sits beside the title line there too; no chip row under it.
     expect(boxes[1]!.nextElementSibling!.querySelector("h2")).not.toBeNull();
-    expect(boxes[1]!.closest("header")!.querySelector(`:scope > [class="${RUN_META}"]`)).not.toBeNull();
+    expect(boxes[1]!.closest("header")!.children).toHaveLength(2);
   });
 });

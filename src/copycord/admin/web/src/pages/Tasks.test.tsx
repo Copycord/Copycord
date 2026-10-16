@@ -101,7 +101,7 @@ beforeEach(() => {
 });
 
 describe("Tasks page", () => {
-  it("lists runs by task name and number over the run ID, with the status pill, mapping, trigger and actor chips", async () => {
+  it("lists runs by task name and number over a plain line of run ID, trigger, actor and mapping, with started over duration", async () => {
     serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 }), run({ id: "9e8d7c6b5a4f4e3d8c2b1a0f9e8d7c6b", number: 11, title: "Backfill 3 channels", status: "failed" })]);
     renderAt("/tasks");
     const list = await screen.findByRole("list", { name: "Task runs" });
@@ -119,13 +119,12 @@ describe("Tasks page", () => {
     const id = within(rows[0]!).getByText("4f2a9c1e");
     expect(id).toHaveClass("font-mono");
     expect(id).toHaveAttribute("title", "Run ID 4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
-    // The chips read as on the run page: status pill, mapping, trigger, actor.
-    expect(within(rows[0]!).getByText("Success")).toBeInTheDocument();
-    expect(within(rows[1]!).getByText("Failed")).toBeInTheDocument();
-    expect(within(rows[0]!).getByText("Main mapping")).toBeInTheDocument();
-    expect(within(rows[0]!).getByText("Manual")).toBeInTheDocument();
-    expect(within(rows[0]!).getByText("admin")).toBeInTheDocument();
-    expect(within(rows[0]!).getByText("48s")).toBeInTheDocument();
+    // The plain meta line: the run ID, how it started and by whom, the mapping; no status pill or chips.
+    expect(id.parentElement).toHaveTextContent("4f2a9c1e · Manual run by admin · Main mapping");
+    expect(within(rows[0]!).queryByText("Success")).toBeNull();
+    // Started (relative, the date in the title) over the duration.
+    expect(within(rows[0]!).getByTitle("Duration")).toHaveTextContent("48s");
+    expect(within(rows[0]!).getByTitle(/^Started /)).toBeInTheDocument();
 
     const rail = screen.getByRole("navigation", { name: "Task types" });
     expect(within(rail).getByRole("link", { name: /All tasks/ })).toHaveAttribute("aria-current", "page");

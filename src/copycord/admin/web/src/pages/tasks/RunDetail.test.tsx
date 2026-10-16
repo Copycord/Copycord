@@ -8,7 +8,7 @@ import { ReportPanel } from "./ReportPanel";
 import { RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
 import { formatWhen, runConfirm } from "./RunList";
 import { StepList, orderSteps, overallProgress, stepLabel, stepSummary } from "./StepList";
-import { BUSY, FADE_IN, INPUTS_LIST, RUN_HEAD_MAIN, RUN_META, RunDetailSkeleton, STATS_LIST, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
+import { BUSY, FADE_IN, INPUTS_LIST, RUN_HEAD_MAIN, RUN_HEAD_ROW, RunDetailSkeleton, STATS_LIST, STEP_LIST, STEP_ROW, STEP_ROWS_MAX } from "./TasksSkeleton";
 import { backfillStepNote, channelNames, describeRunInputs, rangeWords } from "./types";
 
 const BACKFILL: TaskType = { key: "backfill_channels", title: "Backfill channels", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -87,12 +87,16 @@ function outline(root: HTMLElement) {
       number: text(header.querySelector("h2 + span")),
       status: text(within(header).getByTestId("run-status")),
       actions: within(header).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? text(b)),
-      chips: Array.from(header.querySelector(`[class^="${RUN_META} "]`)?.children ?? []).map(text),
     },
     cards: Array.from(root.querySelectorAll("section[aria-label]")).map((s) => {
       const name = s.getAttribute("aria-label");
       if (name === "Summary") {
-        return { name, counts: pairs(s.querySelector("dl[aria-label=Counts]")), inputs: pairs(s.querySelector("dl[aria-label=Inputs]")) };
+        return {
+          name,
+          facts: pairs(s.querySelector("dl[aria-label='Run details']")),
+          counts: pairs(s.querySelector("dl[aria-label=Counts]")),
+          inputs: pairs(s.querySelector("dl[aria-label=Inputs]")),
+        };
       }
       if (name === "Steps") {
         return {
@@ -125,25 +129,42 @@ describe("RunHeader", () => {
     return within(screen.getByRole("menu")).getAllByRole("menuitem").map((b) => b.textContent);
   };
 
-  it("shows the breadcrumb, title, number, status pill and meta chips, the actions in one menu", () => {
+  it("shows the breadcrumb, title, number, status badge and the actions in one menu on one line, no chips", () => {
     renderHeader(makeRun());
     expect(screen.getByRole("link", { name: "All tasks" })).toHaveAttribute("href", "/tasks");
     expect(screen.getByRole("link", { name: "Backfill channels" })).toHaveAttribute("href", "/tasks?type=backfill_channels");
     expect(screen.getByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
     expect(screen.getByText("#12")).toBeInTheDocument();
-    expect(screen.getByText("Manual")).toBeInTheDocument();
-    expect(screen.getByText("admin")).toBeInTheDocument();
-    expect(screen.getByText("Main mapping")).toBeInTheDocument();
-    expect(screen.getByTitle("Duration")).toHaveTextContent("48s");
-    expect(screen.getByTestId("run-started").firstElementChild).toHaveAttribute("title", `Started ${formatWhen("2026-10-14T18:00:01Z")}`);
     expect(screen.getByTestId("run-status")).toHaveTextContent("Success");
-    // The run ID chip: the first 8 characters in mono, the whole id in its title.
+    // The menu button sits on the title's row.
+    const row = screen.getByRole("heading", { level: 2 }).closest(`[class^="${RUN_HEAD_ROW}"]`)!;
+    expect(within(row as HTMLElement).getByRole("button", { name: "Run actions" })).toBeInTheDocument();
+    // No chip strip: the trigger, actor and run ID are in the Summary card, not the header.
+    expect(screen.queryByText("Manual")).toBeNull();
+    expect(screen.queryByTestId("run-id")).toBeNull();
+    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Run actions"]);
+  });
+
+  it("lists the run's facts label over value at the top of the Summary card", () => {
+    renderView(makeRun());
+    const facts = screen.getByRole("region", { name: "Summary" }).querySelector("dl[aria-label='Run details']")!;
+    expect(pairs(facts)).toEqual([
+      ["Triggered", "Manual run by admin"],
+      ["Mapping", "Main mapping"],
+      ["Started", formatWhen("2026-10-14T18:00:01Z")],
+      ["Duration", "48s"],
+      ["Run ID", "4f2a9c1e"],
+    ]);
+    expect(screen.getByTestId("run-started").firstElementChild).toHaveAttribute("title");
+    expect(screen.getByTestId("run-duration")).toHaveTextContent("48s");
+    // The Run ID: the first 8 characters in mono, the whole id in its title, a copy button beside it.
     const id = screen.getByTestId("run-id");
-    expect(id).toHaveTextContent("ID4f2a9c1e");
-    expect(id.firstElementChild).toHaveAttribute("title", "Run ID 4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     expect(within(id).getByText("4f2a9c1e")).toHaveClass("font-mono");
-    // No standalone Cancel or Delete: the menu button and the chip's copy button are the only buttons.
-    expect(screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Run actions", "Copy run ID"]);
+    expect(within(id).getByText("4f2a9c1e")).toHaveAttribute("title", "Run ID 4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
+    expect(within(id).getByRole("button", { name: "Copy run ID" })).toBeInTheDocument();
+    // The Summary card: head, facts, then the counts.
+    const section = screen.getByRole("region", { name: "Summary" });
+    expect(section.children[1]).toBe(facts);
   });
 
   it("a finished run's menu: Copy run ID, Download report when there is one, then Delete apart, never Cancel run", async () => {
@@ -164,11 +185,17 @@ describe("RunHeader", () => {
     }
   });
 
-  it("copies the full run id from the menu and from the chip", async () => {
+  it("copies the full run id from the menu and from the Run ID cell", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-    renderHeader(makeRun());
+    render(
+      <ToastProvider>
+        <MemoryRouter>
+          <RunView run={makeRun()} type={BACKFILL} />
+        </MemoryRouter>
+      </ToastProvider>,
+    );
     await user.click(screen.getByRole("button", { name: "Run actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Copy run ID" }));
     expect(writeText).toHaveBeenLastCalledWith("4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
@@ -257,12 +284,18 @@ describe("Run page structure", () => {
         title: "Backfill channels",
         number: "#12",
         status: "Running",
-        actions: ["Run actions", "Copy run ID"],
-        chips: ["Main mapping", "Manual", "admin", expect.any(String), expect.any(String), "ID4f2a9c1e"],
+        actions: ["Run actions"],
       },
       cards: [
         {
           name: "Summary",
+          facts: [
+            ["Triggered", "Manual run by admin"],
+            ["Mapping", "Main mapping"],
+            ["Started", formatWhen("2026-10-14T18:00:01Z")],
+            ["Duration", expect.any(String)],
+            ["Run ID", "4f2a9c1e"],
+          ],
           counts: [
             ["Done", "2"],
             ["Failed", "0"],
@@ -306,7 +339,7 @@ describe("Run page structure", () => {
     const header = container.querySelector("header")!;
     expect(fades(header.querySelector("[data-status]"))).toBe(true);
     expect(fades(header.querySelector("h2 + span"))).toBe(true);
-    expect(fades(header.querySelector(`[class^="${RUN_META} "]`))).toBe(true);
+    expect(fades(container.querySelector("[data-testid=run-started] > span"))).toBe(true);
     expect(fades(container.querySelector("dl[aria-label=Counts]"))).toBe(true);
     expect(fades(container.querySelector("dl[aria-label=Inputs]"))).toBe(true);
     expect(fades(within(screen.getByRole("region", { name: "Steps" })).getByRole("list"))).toBe(true);
