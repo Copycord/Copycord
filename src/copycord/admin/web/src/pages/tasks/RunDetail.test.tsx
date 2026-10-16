@@ -571,7 +571,9 @@ describe("Run skeleton after a finished run", () => {
     expect(real.tiles.map((t) => t[1])).toEqual(["Done", "Failed", "Skipped", "Cancelled", "Delivered"]);
     expect(shape(skel.container)).toEqual(real);
     expect(skel.container.querySelectorAll("section[aria-label=Summary] dt [data-skeleton]")).toHaveLength(0);
-    expect(skel.container.querySelectorAll("section[aria-label=Summary] dd [data-skeleton]")).toHaveLength(5 + 6);
+    expect(skel.container.querySelectorAll("section[aria-label=Summary] dl:not([aria-label='Run details']) dd [data-skeleton]")).toHaveLength(5 + 6);
+    // The facts: labels as text, a bar for each value.
+    expect(skel.container.querySelectorAll("section[aria-label=Summary] dl[aria-label='Run details'] dd [data-skeleton]")).toHaveLength(5);
   });
 });
 
