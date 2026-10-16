@@ -7,12 +7,13 @@ import { PROMO_LINKS } from "../pages/dashboard/config/model";
 import type { SidebarItem } from "../types/api";
 import { DISCORD_PATH, MenuIcon } from "./icons";
 
-/** A menu entry; Tasks is a v4 page the old sidebar never had, so its key sits outside SidebarItem. */
-export type MenuItem = Omit<SidebarItem, "key"> & { key: SidebarItem["key"] | "tasks" };
+/** A menu entry; Tasks and Messages are v4 pages the old sidebar never had, so their keys sit outside SidebarItem. */
+export type MenuItem = Omit<SidebarItem, "key"> & { key: SidebarItem["key"] | "tasks" | "messages" };
 
 export const SIDEBAR_ITEMS: MenuItem[] = [
   { key: "config", label: "Configuration", to: "/" },
   { key: "channels", label: "Channels", to: "/channels" },
+  { key: "messages", label: "Messages", to: "/messages" },
   { key: "guilds", label: "Guilds", to: "/guilds" },
   { key: "tasks", label: "Tasks", to: "/tasks" },
   { key: "forwarding", label: "Forwarding", to: "/forwarding" },
