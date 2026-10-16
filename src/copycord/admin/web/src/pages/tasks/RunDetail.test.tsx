@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
 import type { TaskRun, TaskStep, TaskType } from "../../types/tasks";
 import { ReportPanel } from "./ReportPanel";
-import { RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
+import { countsText, RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
 import { formatAgo, formatWhen, runConfirm } from "./RunList";
-import { finishedText, outcomeText, stepCounts } from "./Outcome";
-import { StepList, orderSteps, stepLabel, stepSummary } from "./StepList";
+import { outcomeText, stepCounts } from "./Outcome";
+import { StepList, orderSteps, stepLabel } from "./StepList";
 import {
   BUSY,
   FADE_IN,
@@ -17,8 +17,6 @@ import {
   RUN_HEAD_ROW,
   RUN_TITLE_ROW,
   RunDetailSkeleton,
-  STATS_LIST,
-  STAT_ZERO,
   STEP_LIST,
   STEP_ROW,
   STEP_ROWS_MAX,
@@ -98,32 +96,32 @@ function outline(root: HTMLElement) {
       crumbs: Array.from(header.querySelectorAll("nav a")).map(text),
       title: text(header.querySelector("h2")),
       number: text(header.querySelector("h2 + span")),
-      status: text(within(header).getByTestId("run-status")),
+      status: within(header).getByTestId("run-status").getAttribute("aria-label"),
       meta: text(within(header).getByTestId("run-meta")),
       actions: within(header).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? text(b)),
     },
     cards: Array.from(root.querySelectorAll("section[aria-label]")).map((s) => {
       const name = s.getAttribute("aria-label");
       if (name === "Summary") {
+        const inputs = s.querySelector("details")!;
         return {
           name,
+          title: text(s.querySelector("h3")),
           hero: text(s.querySelector("[data-testid=run-hero]")),
-          finished: text(s.querySelector("[data-testid=run-finished]")),
           bar: s.querySelector("[role=progressbar]")?.getAttribute("aria-label") ?? null,
-          counts: pairs(s.querySelector("dl[aria-label=Counts]")),
-          inputs: pairs(s.querySelector("dl[aria-label=Inputs]")),
+          counts: text(s.querySelector("[data-testid=run-counts]")),
+          inputs: { summary: text(inputs.querySelector("summary")), open: inputs.open, rows: pairs(inputs.querySelector("dl[aria-label=Inputs]")) },
         };
       }
       if (name === "Steps") {
         return {
           name,
           title: text(s.querySelector("h3")),
-          summary: text(s.querySelector("[data-testid=steps-summary]")),
           filter: text(s.querySelector("button[aria-haspopup=listbox]")?.firstElementChild),
+          headParts: s.firstElementChild!.children.length,
           rows: Array.from(s.querySelectorAll("li")).map((li) => [
             li.querySelector("[role=img]")?.getAttribute("aria-label"),
             text(li.querySelector(".font-medium")),
-            text(li.querySelector("[title]:not([role])")),
             li.querySelector("[role=progressbar]") ? "bar" : "",
             text(li.lastElementChild),
           ]),
@@ -146,38 +144,41 @@ describe("RunHeader", () => {
     return within(screen.getByRole("menu")).getAllByRole("menuitem").map((b) => b.textContent);
   };
 
-  it("shows the breadcrumb, title, number, the one status badge and the actions menu on one line, the meta line under it", () => {
+  it("shows the breadcrumb, the status glyph, title, number and the actions menu on one line, the meta line under it", () => {
     renderHeader(makeRun());
     expect(screen.getByRole("link", { name: "All tasks" })).toHaveAttribute("href", "/tasks");
     expect(screen.getByRole("link", { name: "Backfill channels" })).toHaveAttribute("href", "/tasks?type=backfill_channels");
     expect(screen.getByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
     expect(screen.getByText("#12")).toBeInTheDocument();
-    expect(screen.getByTestId("run-status")).toHaveTextContent("Success");
-    // The badge sits beside the number, the word alone; the one glyph stands before the title.
-    expect(screen.getByTestId("run-status").parentElement!.className).toBe(RUN_TITLE_ROW);
+    // The one glyph stands before the title and alone carries the status, its word in its label and title; no badge.
     const glyphs = screen.getAllByRole("img", { hidden: true }).filter((g) => g.hasAttribute("data-status"));
-    expect(glyphs).toHaveLength(1);
+    expect(glyphs).toEqual([screen.getByTestId("run-status")]);
+    expect(glyphs[0]).toHaveAccessibleName("Success");
+    expect(glyphs[0]).toHaveAttribute("title", "Success");
+    expect(glyphs[0]!.parentElement!.className).toBe(RUN_TITLE_ROW);
     expect(glyphs[0]!.nextElementSibling).toBe(screen.getByRole("heading", { level: 2 }));
-    expect(screen.getByTestId("run-status").querySelector("svg")).toBeNull();
+    expect(screen.queryByText("Success")).toBeNull();
     // The menu button sits on the title's row; a finished run has no Cancel run.
     const row = screen.getByRole("heading", { level: 2 }).closest(`[class^="${RUN_HEAD_ROW}"]`)!;
     expect(within(row as HTMLElement).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? text(b))).toEqual(["Run actions"]);
   });
 
-  it("says how, when, how long, the mapping and the ID on one muted line under the title", () => {
+  it("says how, when, how long, the mapping and the ID as plain muted values under the title, no word labels", () => {
     renderHeader(makeRun());
     const started = "2026-10-14T18:00:01Z";
     const meta = screen.getByTestId("run-meta");
-    expect(text(meta)).toBe(
-      `Manual · admin·started ${formatAgo(started, Date.now())}·ran 48s·mapping Main mapping·ID 4f2a9c1e`,
-    );
+    expect(text(meta)).toBe(`Manual · admin·${formatAgo(started, Date.now())}·48s·Main mapping·4f2a9c1e`);
     expect(meta.tagName).toBe("P");
-    // Relative time on the line, the date in its title, as on the list rows.
-    expect(screen.getByTestId("run-started")).toHaveAttribute("title", formatWhen(started));
-    // 12 px glyphs before trigger, started, duration and mapping, and on the copy button.
-    expect(Array.from(meta.querySelectorAll("svg")).map((s) => s.getAttribute("width"))).toEqual(["12", "12", "12", "12", "12"]);
-    // The mapping is a quiet outlined chip; the ID is mono with the whole id in its title and a copy button.
-    expect(within(meta).getByText("Main mapping")).toHaveClass("rounded-full", "border");
+    // Relative time on the line, the date in its title; the duration says what it is in its title.
+    expect(screen.getByTestId("run-started")).toHaveAttribute("title", `Started ${formatWhen(started)}`);
+    expect(screen.getByTestId("run-duration")).toHaveAttribute("title", "Ran for 48s");
+    // The copy button's glyph is the line's only one.
+    expect(Array.from(meta.querySelectorAll("svg")).map((s) => s.getAttribute("width"))).toEqual(["12"]);
+    // The mapping is plain text, no chip, cut at 24 characters; the ID is mono with the whole id in its title and a copy button.
+    const mapping = within(meta).getByText("Main mapping");
+    expect(mapping).not.toHaveClass("border");
+    expect(mapping).toHaveClass("max-w-[24ch]", "truncate");
+    expect(mapping).toHaveAttribute("title", "Mapping Main mapping");
     const id = screen.getByTestId("run-id");
     expect(id).toHaveTextContent("4f2a9c1e");
     expect(id).toHaveClass("font-mono");
@@ -186,8 +187,9 @@ describe("RunHeader", () => {
     // Other triggers, no actor, and a run still going.
     const { unmount } = renderHeader(makeRun({ trigger: "api", actor: "", status: "running", finished_at: null }));
     const live = screen.getAllByTestId("run-meta")[1]!;
-    expect(text(live)).toMatch(/^API·started /);
-    expect(within(live).getByTestId("run-duration")).toHaveTextContent(/^running \d/);
+    expect(text(live)).toMatch(/^API·\S/);
+    expect(within(live).getByTestId("run-duration")).toHaveTextContent(/^\d/);
+    expect(within(live).getByTestId("run-duration").getAttribute("title")).toMatch(/^Running for \d/);
     unmount();
   });
 
@@ -238,10 +240,13 @@ describe("RunHeader", () => {
     expect(writeText).toHaveBeenLastCalledWith("4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
   });
 
-  it("shows the error text when failed", () => {
+  it("shows the error text when failed, and only then", () => {
     renderHeader(makeRun({ status: "failed", error: "1 of 2 channels failed" }));
-    expect(screen.getByText("1 of 2 channels failed")).toBeInTheDocument();
-    expect(screen.getByTestId("run-status")).toHaveTextContent("Failed");
+    expect(screen.getByTestId("run-error")).toHaveTextContent("1 of 2 channels failed");
+    expect(screen.getByTestId("run-status")).toHaveAccessibleName("Failed");
+    const { unmount } = renderHeader(makeRun({ status: "cancelled", error: "1 of 2 channels failed" }));
+    expect(screen.getAllByTestId("run-error")).toHaveLength(1);
+    unmount();
   });
 
   it("cancels an active run after the confirm", async () => {
@@ -314,36 +319,38 @@ describe("Run page structure", () => {
         title: "Backfill channels",
         number: "#12",
         status: "Running",
-        meta: expect.stringMatching(/^Manual · admin·started .+·running .+·mapping Main mapping·ID 4f2a9c1e$/),
+        meta: expect.stringMatching(/^Manual · admin·[^·]+·\d[^·]*·Main mapping·4f2a9c1e$/),
         actions: ["Cancel run", "Run actions", "Copy run ID"],
       },
       cards: [
         {
           name: "Summary",
+          title: "Summary",
           hero: "1,234messages delivered",
-          finished: "0/2 steps finished",
           bar: "0 of 2 steps finished",
-          counts: [
-            ["Steps done", "2"],
-            ["Steps failed", "0"],
-          ],
-          inputs: [
-            ["Mapping", "Main mapping"],
-            ["Channels", "#general#news"],
-            ["Categories", "0 categories"],
-            ["Range", "Last 500 messages"],
-            ["Ignore cloned", "No"],
-            ["Mode", "Resume previous"],
-          ],
+          counts: "1 running · 1 queued",
+          inputs: {
+            summary: "›Inputs",
+            open: false,
+            rows: [
+              ["Mapping", "Main mapping"],
+              ["Channels", "#general#news"],
+              ["Categories", "0 categories"],
+              ["Range", "Last 500 messages"],
+              ["Ignore cloned", "No"],
+              ["Mode", "Resume previous"],
+            ],
+          },
         },
         {
           name: "Steps",
           title: "Steps",
-          summary: "1 running, 1 queued",
           filter: "Status: All",
+          headParts: 2,
+          // The glyph's label, the title, the running bar, the note last: no state word.
           rows: [
-            ["Running", "#general", "1,234 / 5,000", "bar", "Running"],
-            ["Queued", "#news", "Queued #3", "", "Queued"],
+            ["Running", "#general", "bar", "1,234 / 5,000"],
+            ["Queued", "#news", "", "Queued #3"],
           ],
         },
         { name: "Report", summary: "›Report (JSON)", open: false },
@@ -368,19 +375,17 @@ describe("Run page structure", () => {
     expect(fades(screen.getByTestId("run-started"))).toBe(true);
     expect(fades(screen.getByTestId("run-duration"))).toBe(true);
     expect(fades(screen.getByTestId("run-hero").firstElementChild)).toBe(true);
-    expect(fades(screen.getByTestId("run-finished").firstElementChild)).toBe(true);
     expect(fades(screen.getByRole("progressbar", { name: "0 of 2 steps finished" }))).toBe(true);
-    expect(fades(container.querySelector("dl[aria-label=Counts]"))).toBe(true);
-    expect(fades(container.querySelector("dl[aria-label=Inputs]"))).toBe(true);
+    expect(fades(screen.getByTestId("run-counts").firstElementChild)).toBe(true);
     expect(fades(within(screen.getByRole("region", { name: "Steps" })).getByRole("list"))).toBe(true);
-    expect(fades(screen.getByTestId("steps-summary").firstElementChild)).toBe(true);
-    // The static text the skeleton already showed does not blink, the type's title and the meta words included.
+    // The static text the skeleton already showed does not blink, the type's title, the meta line and the closed Inputs row included.
     expect(fades(screen.getByRole("link", { name: "All tasks" }))).toBe(false);
     expect(fades(screen.getByRole("link", { name: "Backfill channels" }))).toBe(false);
     expect(fades(header.querySelector(`[class="${RUN_TITLE_ROW}"]`))).toBe(false);
     expect(fades(screen.getByTestId("run-meta"))).toBe(false);
     expect(fades(screen.getByRole("heading", { level: 2 }))).toBe(false);
     expect(fades(screen.getByRole("heading", { name: "Steps" }))).toBe(false);
+    expect(fades(screen.getByTestId("run-inputs"))).toBe(false);
     const view = container.firstElementChild!;
     expect(view.className).not.toContain(BUSY);
     rerender(
@@ -409,12 +414,13 @@ describe("StepList", () => {
     expect(screen.getByText("1,234 / 5,000")).toBeInTheDocument();
     expect(screen.getByText("40 messages")).toBeInTheDocument();
     expect(screen.getByText("Missing access")).toHaveClass("text-danger");
-    // Each row ends on its state in words, coloured like its glyph.
-    expect(rows.map((li) => [text(li.lastElementChild), li.lastElementChild!.className.split(" ").at(-1)])).toEqual([
-      ["Running", "text-info"],
-      ["Failed", "text-danger"],
-      ["Done", "text-good"],
+    // Each row ends on its note; the glyph alone says the state, no word at the edge.
+    expect(rows.map((li) => [li.querySelector("[role=img]")!.getAttribute("aria-label"), text(li.lastElementChild)])).toEqual([
+      ["Running", "1,234 / 5,000"],
+      ["Failed", "Missing access"],
+      ["Success", "40 messages"],
     ]);
+    for (const li of rows) expect(li).not.toHaveTextContent(/Running|Failed|Done|Success/);
     expect(screen.getAllByRole("progressbar").map((b) => b.getAttribute("aria-label"))).toEqual(["#general progress"]);
     expect(screen.getByRole("progressbar", { name: "#general progress" })).toHaveAttribute("aria-valuenow", "1234");
     // The row bar sits on the step's own line, not under it.
@@ -422,22 +428,12 @@ describe("StepList", () => {
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Status: All▾"]);
   });
 
-  it("counts the steps by state in the head, with no percent bar of its own", () => {
-    const steps: TaskStep[] = [
-      ...Array.from({ length: 94 }, (_, i): TaskStep => ({ key: `d${i}`, title: `#done-${i}`, state: "success", note: "3 messages" })),
-      { key: "r1", title: "#r1", state: "running", done: 25, total: 100 },
-      { key: "r2", title: "#r2", state: "running", done: 0, total: 10 },
-      { key: "r3", title: "#r3", state: "running" },
-      { key: "q1", title: "#q1", state: "queued", queue_position: 1 },
-      { key: "q2", title: "#q2", state: "queued", queue_position: 2 },
-      { key: "f1", title: "#f1", state: "failed", note: "delivery timed out" },
-    ];
-    expect(stepSummary(steps)).toBe("3 running, 2 queued, 94 done, 1 failed");
-    expect(stepSummary([{ key: "s", title: "#s", state: "skipped" }, { key: "c", title: "#c", state: "cancelled" }])).toBe("1 skipped, 1 cancelled");
-    expect(stepSummary([])).toBe("");
-    render(<StepList run={makeRun({ steps })} />);
-    expect(screen.getByTestId("steps-summary")).toHaveTextContent("3 running, 2 queued, 94 done, 1 failed");
-    expect(screen.getByTestId("steps-summary").parentElement!.querySelector("[role=progressbar]")).toBeNull();
+  it("has only the title and the filter in its head: no counts and no percent bar (the Summary has them)", () => {
+    render(<StepList run={makeRun()} />);
+    const head = screen.getByRole("heading", { name: "Steps" }).parentElement!;
+    expect(head.children).toHaveLength(2);
+    expect(head.querySelector("[role=progressbar]")).toBeNull();
+    expect(screen.queryByText(/\d+ (running|queued)/)).toBeNull();
   });
 
   it("leaves out a note that only repeats the state", () => {
@@ -447,10 +443,10 @@ describe("StepList", () => {
     ];
     render(<StepList run={makeRun({ steps })} />);
     const [a, b] = screen.getAllByRole("listitem");
-    expect(Array.from(a!.children).map(text)).toEqual(["", "#a", "", "Cancelled"]);
-    expect(a!.lastElementChild).toHaveClass("text-custom-ink");
-    expect(Array.from(b!.children).map(text)).toEqual(["", "#b", "Already running in #12", "Skipped"]);
-    expect(b!.lastElementChild).toHaveClass("text-text-2");
+    expect(Array.from(a!.children).map(text)).toEqual(["", "#a", ""]);
+    expect(a!.firstElementChild).toHaveAccessibleName("Cancelled");
+    expect(Array.from(b!.children).map(text)).toEqual(["", "#b", "Already running in #12"]);
+    expect(b!.firstElementChild).toHaveAccessibleName("Skipped");
   });
 
   it("puts running and failed steps first, then queued in queue order, then the finished ones in run order", () => {
@@ -489,8 +485,6 @@ describe("StepList", () => {
     await pick("Running");
     expect(titles()).toEqual([]);
     expect(screen.getByText("No running steps")).toBeInTheDocument();
-    // The head still counts every step.
-    expect(screen.getByTestId("steps-summary")).toHaveTextContent("2 done, 1 failed");
     await pick("All");
     expect(titles()).toEqual(["#b", "#a", "#c"]);
   });
@@ -534,22 +528,42 @@ describe("RunSummary", () => {
   const summaryOf = (run: TaskRun, schema?: Record<string, unknown>) => {
     const { container } = render(<RunSummary run={run} schema={schema} />);
     return {
-      counts: pairs(container.querySelector("dl[aria-label=Counts]")),
+      counts: text(container.querySelector("[data-testid=run-counts]")),
       inputs: pairs(container.querySelector("dl[aria-label=Inputs]")),
     };
   };
 
-  it("has no tiles until the run reports counts", () => {
-    expect(summaryOf(makeRun({ status: "running", summary: null })).counts).toEqual([]);
-    expect(screen.getByRole("heading", { name: "Inputs" })).toBeInTheDocument();
+  it("holds the counts line empty until the run has steps or counts", () => {
+    expect(summaryOf(makeRun({ status: "running", summary: null, steps: [] })).counts).toBe("");
+    expect(screen.getByTestId("run-counts")).toBeInTheDocument();
+    expect(screen.getByText("Inputs")).toBeInTheDocument();
   });
 
-  it("falls back to the report's summary", () => {
-    expect(summaryOf(makeRun({ summary: null, report: { summary: { delivered: 7, failed: 1, note: "x" } } })).counts).toEqual([["Steps failed", "1"]]);
+  it("counts from the summary, else the report's, when the run holds no steps", () => {
+    expect(summaryOf(makeRun({ steps: [], summary: null, report: { summary: { delivered: 7, failed: 1, note: "x" } } })).counts).toBe("1 failed");
     expect(screen.getByTestId("run-hero")).toHaveTextContent("7messages delivered");
   });
 
-  it("makes messages delivered the hero, the step counts tiles with their unit, coloured by state and dimmed at zero", () => {
+  it("keeps the Inputs closed behind their row until it is opened, every row inside", async () => {
+    const user = userEvent.setup();
+    render(<RunSummary run={makeRun()} />);
+    const details = screen.getByTestId("run-inputs") as HTMLDetailsElement;
+    expect(details.tagName).toBe("DETAILS");
+    expect(details.open).toBe(false);
+    expect(text(details.querySelector("summary"))).toBe("›Inputs");
+    await user.click(screen.getByText("Inputs"));
+    expect(details.open).toBe(true);
+    expect(pairs(details.querySelector("dl[aria-label=Inputs]")).map(([label]) => label)).toEqual([
+      "Mapping",
+      "Channels",
+      "Categories",
+      "Range",
+      "Ignore cloned",
+      "Mode",
+    ]);
+  });
+
+  it("makes messages delivered the hero over the segmented bar, the step counts in one muted line under it, zeros left out", () => {
     const run = makeRun({
       summary: { success: 2, failed: 0, skipped: 0, cancelled: 4, delivered: 92 },
       steps: [
@@ -559,38 +573,45 @@ describe("RunSummary", () => {
     });
     const { container } = render(<RunSummary run={run} />);
     const overview = container.querySelector(`[class="${OVERVIEW}"]`)!;
-    // The Summary card: head, the overview, then the tiles.
-    expect(container.querySelector("section")!.children[1]).toBe(overview);
+    // The Summary card: head, the overview, then the closed Inputs; nothing else, no tiles.
+    const card = container.querySelector("section")!;
+    expect(card.children[1]).toBe(overview);
+    expect(card.children[2]).toBe(screen.getByTestId("run-inputs"));
+    expect(card.children).toHaveLength(3);
+    expect(card.querySelector("dl[aria-label=Counts]")).toBeNull();
     const hero = screen.getByTestId("run-hero");
     expect(text(hero)).toBe("92messages delivered");
     expect(hero.firstElementChild).toHaveClass("text-accent", "text-[32px]");
     // A cancelled run is never a full bar: 6 of 6 finished, green for the 2 done, amber for the 4 cancelled.
-    expect(screen.getByTestId("run-finished")).toHaveTextContent("6/6 steps finished");
     const bar = within(overview as HTMLElement).getByRole("progressbar", { name: "6 of 6 steps finished" });
     expect(Array.from(bar.children).map((s) => [s.getAttribute("data-segment"), (s as HTMLElement).style.width])).toEqual([
       ["success", `${(2 / 6) * 100}%`],
       ["cancelled", `${(4 / 6) * 100}%`],
     ]);
-    const tiles = Array.from(container.querySelectorAll("dl[aria-label=Counts] dd"));
-    expect(pairs(container.querySelector("dl[aria-label=Counts]"))).toEqual([
-      ["Steps done", "2"],
-      ["Steps failed", "0"],
-      ["Steps skipped", "0"],
-      ["Steps cancelled", "4"],
-    ]);
-    expect(tiles[0]).toHaveClass("text-good");
-    expect(tiles[3]).toHaveClass("text-custom-ink");
-    for (const zero of [tiles[1], tiles[2]]) expect(zero!.className).toContain(STAT_ZERO);
+    // Under the bar, in that order: one muted line, the zero counts left out, no "steps finished".
+    const counts = screen.getByTestId("run-counts");
+    expect(counts.previousElementSibling).toBe(bar);
+    expect(text(counts)).toBe("2 done · 4 cancelled");
+    expect(counts).toHaveClass("text-muted");
+    expect(screen.queryByText(/steps finished/)).toBeNull();
+  });
+
+  it("words the counts line: the steps by state in a fixed order, then the summary's other counts but the hero", () => {
+    const steps = (states: TaskStep["state"][]) => states.map((state, i): TaskStep => ({ key: `s${i}`, title: `#s${i}`, state }));
+    const run = makeRun({ steps: steps(["failed", "success", "cancelled", "running", "success", "queued", "skipped"]) });
+    expect(countsText(run, "delivered")).toBe("1 running · 1 queued · 2 done · 1 failed · 1 cancelled · 1 skipped");
+    expect(countsText(makeRun({ steps: steps(["success", "success"]) }), "delivered")).toBe("2 done");
+    // Without the hero key the delivered count is just another count.
+    expect(countsText(makeRun({ steps: steps(["success"]) }))).toBe("1 done · 1,234 messages delivered");
+    expect(countsText(makeRun({ steps: [], summary: null }))).toBe("");
   });
 
   it("words the outcome the same for a list row: steps by outcome, then the messages delivered", () => {
     const counts = stepCounts({ summary: { success: 2, failed: 0, skipped: 0, cancelled: 4, delivered: 92 }, step_count: 6 });
     expect(counts).toEqual({ total: 6, success: 2, failed: 0, skipped: 0, cancelled: 4 });
     expect(outcomeText(counts, 92)).toBe("6 steps · 2 done · 4 cancelled · 92 delivered");
-    expect(finishedText(counts!)).toBe("6/6 steps finished");
     // A running run: steps still to go leave the track bare.
     const live = stepCounts({ summary: { success: 1, failed: 0, skipped: 0, cancelled: 0, delivered: 9 }, step_count: 3 })!;
-    expect(finishedText(live)).toBe("1/3 steps finished");
     expect(outcomeText(live, 9)).toBe("3 steps · 1 done · 9 delivered");
     // No steps and no counts: nothing to say.
     expect(stepCounts({ summary: null })).toBeNull();
@@ -598,13 +619,10 @@ describe("RunSummary", () => {
   });
 
   it("a type without a registry entry: counts in words, inputs by schema title in schema order", () => {
-    const run = makeRun({ type: "prune", summary: { pruned: 3, kept_rows: 1200 }, inputs: { extra: "x", dry_run: true, limit: 5 } });
+    const run = makeRun({ type: "prune", steps: [], summary: { pruned: 3, kept_rows: 1200 }, inputs: { extra: "x", dry_run: true, limit: 5 } });
     const schema = { properties: { limit: { type: "integer", title: "Row limit" }, dry_run: { type: "boolean" } } };
     expect(summaryOf(run, schema)).toEqual({
-      counts: [
-        ["Pruned", "3"],
-        ["Kept rows", "1,200"],
-      ],
+      counts: "3 pruned · 1,200 kept rows",
       inputs: [
         ["Row limit", "5"],
         ["Dry run", "Yes"],
@@ -632,45 +650,28 @@ describe("RunSummary", () => {
   });
 });
 
-describe("Run skeleton after a finished run", () => {
-  it("prints the last page's tile and Inputs labels in the same boxes, bars only for the values", () => {
-    localStorage.clear();
+describe("Run skeleton", () => {
+  it("draws the Summary card as the loaded one: bars for the hero, the bar and the counts line, the Inputs row closed as itself", () => {
     const shape = (root: Element) => {
       const summary = root.querySelector("section[aria-label=Summary]")!;
-      const tiles = summary.querySelector(`dl[class^="${STATS_LIST}"]`);
-      const inputs = summary.querySelector(`dl[class^="${INPUTS_LIST}"]`);
       return {
-        tiles: tiles ? Array.from(tiles.querySelectorAll("dt")).map((dt) => [dt.className, dt.textContent, dt.nextElementSibling!.className]) : [],
-        inputs: inputs ? Array.from(inputs.querySelectorAll("dt")).map((dt) => [dt.className, dt.textContent]) : [],
+        parts: Array.from(summary.children).map((c) => `${c.tagName} ${c.getAttribute("class")}`),
+        overview: Array.from(summary.querySelector(`[class="${OVERVIEW}"]`)!.children).map((c) => c.getAttribute("class")?.split(" ").filter((k) => /^(h-|mt-|w-full$)/.test(k)).join(" ")),
+        inputs: text(summary.querySelector("details summary")),
       };
     };
-    // A first visit: a backfill run's five tiles and six inputs, bars for every label.
-    const cold = render(
-      <MemoryRouter>
-        <RunDetailSkeleton />
-      </MemoryRouter>,
-    );
-    expect(shape(cold.container).tiles).toHaveLength(4);
-    expect(shape(cold.container).inputs).toHaveLength(6);
-    expect(cold.container.querySelectorAll("section[aria-label=Summary] dt [data-skeleton]")).toHaveLength(4 + 6);
-    cold.unmount();
-
-    const loaded = renderView(makeRun({ summary: { success: 1, failed: 0, skipped: 0, cancelled: 0, delivered: 36 } }));
-    const real = shape(loaded.container);
-    loaded.unmount();
+    const real = shape(renderView(makeRun()).container);
     const skel = render(
       <MemoryRouter>
         <RunDetailSkeleton />
       </MemoryRouter>,
     );
-    expect(real.tiles.map((t) => t[1])).toEqual(["Steps done", "Steps failed", "Steps skipped", "Steps cancelled"]);
-    // The tiles' value class without the state colour: the skeleton bars them in the same box.
-    const plain = (s: ReturnType<typeof shape>) => ({ ...s, tiles: s.tiles.map(([dt, label, dd]) => [dt, label, dd!.split(" ").filter((c) => c.startsWith("m") || c.startsWith("text-xl") || c.startsWith("leading") || c === "tabular-nums").join(" ")]) });
-    expect(plain(shape(skel.container))).toEqual(plain(real));
-    expect(skel.container.querySelectorAll("section[aria-label=Summary] dt [data-skeleton]")).toHaveLength(0);
-    expect(skel.container.querySelectorAll("section[aria-label=Summary] dl dd [data-skeleton]")).toHaveLength(4 + 6);
-    // The overview: bars for the hero count and its words, the finished line and the segmented bar.
+    expect(shape(skel.container)).toEqual(real);
+    expect(real.inputs).toBe("›Inputs");
+    // Bars for the hero count and its words, the segmented bar and the counts line; none in the Inputs row.
     expect(skel.container.querySelectorAll(`section[aria-label=Summary] [class="${OVERVIEW}"] [data-skeleton]`)).toHaveLength(4);
+    expect(skel.container.querySelectorAll("section[aria-label=Summary] details [data-skeleton]")).toHaveLength(0);
+    expect(skel.container.querySelector(`section[aria-label=Summary] [class^="${INPUTS_LIST}"]`)).toBeNull();
   });
 });
 
@@ -773,7 +774,7 @@ describe("RunDetail live", () => {
     expect(screen.getByRole("status", { name: "Loading run" })).toBeInTheDocument();
     await screen.findByText("1,234 / 5,000");
     expect(screen.queryByRole("status", { name: "Loading run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Summary" }).querySelector("dl[aria-label=Counts]")).toBeNull();
+    expect(screen.getByTestId("run-counts")).toHaveTextContent("1 running · 1 queued");
 
     const ws = FakeWs.all[0]!;
     act(() => ws.open());
@@ -797,19 +798,14 @@ describe("RunDetail live", () => {
         },
       }),
     );
-    expect(screen.getByTestId("run-status")).toHaveTextContent("Success");
+    expect(screen.getByTestId("run-status")).toHaveAccessibleName("Success");
     // The server's "36 messages" reads in the running label's words once the channel ends.
     expect(screen.getByText("36 delivered")).toBeInTheDocument();
     expect(screen.queryByText("36 messages")).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar", { name: "#general progress" })).not.toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "2 of 2 steps finished" })).toHaveAttribute("aria-valuenow", "2");
-    expect(screen.getByTestId("run-finished")).toHaveTextContent("2/2 steps finished");
     expect(screen.getByTestId("run-hero")).toHaveTextContent("36messages delivered");
-    const counts = screen.getByRole("region", { name: "Summary" }).querySelector("dl[aria-label=Counts]");
-    expect(pairs(counts)).toEqual([
-      ["Steps done", "1"],
-      ["Steps failed", "0"],
-    ]);
+    expect(screen.getByTestId("run-counts")).toHaveTextContent("1 done · 1 skipped");
     // The inputs are not in frames; the held ones stay.
     expect(screen.getByText("Last 500 messages")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading run" })).not.toBeInTheDocument();

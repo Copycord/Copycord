@@ -29,26 +29,6 @@ export function readLastShape(key: string, fallback: number[], maxGroups: number
   }
 }
 
-/**
- * The labels a list showed last time (field names, tile names), at most max, so its skeleton prints them
- * as text with bars only for the values; null on a first visit.
- */
-export function readLastLabels(key: string, max: number): string[] | null {
-  try {
-    const raw = localStorage.getItem(PREFIX + key);
-    if (raw === null) return null;
-    const v: unknown = JSON.parse(raw);
-    return Array.isArray(v) && v.every((s) => typeof s === "string") ? (v as string[]).slice(0, max) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Stores `labels` once they are known (undefined while the list loads). */
-export function useLastLabels(key: string, labels: string[] | undefined): void {
-  useLastStored(key, labels === undefined ? undefined : JSON.stringify(labels));
-}
-
 /** Stores `shape` once it is known (undefined while the list loads). */
 export function useLastShape(key: string, shape: number[] | undefined): void {
   useLastStored(key, shape?.join(","));

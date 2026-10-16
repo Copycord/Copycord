@@ -62,11 +62,6 @@ export function outcomeText(counts: StepCounts | null, delivered: number | null)
   return parts.join(" · ");
 }
 
-/** "6/6 steps finished". */
-export function finishedText(counts: StepCounts): string {
-  return `${formatCount(finishedOf(counts))}/${formatCount(counts.total)} ${counts.total === 1 ? "step" : "steps"} finished`;
-}
-
 /** The segments in the order they fill the track, each in its state's colour. */
 const SEGMENTS: [keyof Omit<StepCounts, "total">, string][] = [
   ["success", "bg-good"],

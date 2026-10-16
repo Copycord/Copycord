@@ -8,7 +8,7 @@ import { Tasks } from "../Tasks";
 import { RunList, RunRow } from "./RunList";
 import { REVEAL } from "../../components/ui/Skeleton";
 import userEvent from "@testing-library/user-event";
-import { RunView } from "./RunDetail";
+import { countsText, RunView } from "./RunDetail";
 import { StepList } from "./StepList";
 import { rememberRunTypes, rememberTypes } from "./typeLabels";
 import {
@@ -16,8 +16,8 @@ import {
   CARD_HEAD,
   OVERVIEW,
   PAGE,
-  STAT_TILE,
   STEP_EMPTY,
+  STEP_ROW,
   STEP_ROW_PX,
   RunDetailSkeleton,
   STEPS_COUNT_KEY,
@@ -48,6 +48,7 @@ import {
   ROW_TIMING,
   STATUS_BOX,
   RUN_PAGES_KEY,
+  RUN_TITLE_ROW,
   RUNS_COUNT_KEY,
   RunRowsLoading,
   StatusTabs,
@@ -306,9 +307,12 @@ describe("page skeleton", () => {
     const run = within(container).getByRole("status", { name: "Loading run", hidden: true });
     expect(within(run).getByRole("link", { name: "All tasks", hidden: true })).toHaveAttribute("href", "/tasks");
     expect(Array.from(run.querySelectorAll("section[aria-label]")).map((s) => s.getAttribute("aria-label"))).toEqual(["Summary", "Steps", "Report"]);
-    expect(within(run).getByRole("heading", { name: "Inputs", hidden: true })).toBeInTheDocument();
     expect(within(run).getByRole("heading", { name: "Steps", hidden: true })).toBeInTheDocument();
-    expect(run.querySelector("summary")).toHaveTextContent("Report (JSON)");
+    // The Inputs and the Report stand as their closed disclosure rows.
+    expect(Array.from(run.querySelectorAll("details")).map((d) => [d.open, d.querySelector("summary")?.textContent])).toEqual([
+      [false, "›Inputs"],
+      [false, "›Report (JSON)"],
+    ]);
     // The controls render as themselves, inert: the Run actions menu button, the run ID chip's copy button
     // (both disabled until the run lands) and the Steps filter.
     const buttons = within(run).queryAllByRole("button", { hidden: true });
@@ -320,7 +324,7 @@ describe("page skeleton", () => {
     expect(within(container).queryAllByRole("searchbox", { hidden: true })).toHaveLength(0);
   });
 
-  it("draws the Steps card with the loaded card's head and rows, bars only for the counts and the rows", () => {
+  it("draws the Steps card with the loaded card's head and rows, bars only for the rows", () => {
     localStorage.setItem(`skel:${STEPS_COUNT_KEY}`, "3");
     const steps: TaskStep[] = [
       { key: "a", title: "#a", state: "running", done: 1, total: 4 },
@@ -344,17 +348,26 @@ describe("page skeleton", () => {
     };
     const skelHead = head(skel!);
     const realHead = head(real!);
-    // Title, counts line and the filter, in the same boxes; no percent bar (the run's bar is in the Summary).
-    expect(skelHead.parts).toHaveLength(3);
+    // The title and the filter, in the same boxes; no counts (the Summary has them) and no percent bar.
+    expect(skelHead.parts).toHaveLength(2);
     expect(skelHead.parts).toEqual(realHead.parts);
     expect(real!.querySelector(`[class="${STEPS_HEAD}"] [role=progressbar]`)).toBeNull();
     expect(skelHead).toMatchObject({ title: "Steps", filter: "Status: All" });
     expect(realHead).toMatchObject({ title: "Steps", filter: "Status: All" });
-    // Bars only where the run's data lands: the counts line, not the title or the filter.
-    expect(skel!.querySelector("h3 [data-skeleton]")).toBeNull();
-    expect(skel!.querySelector(`[data-testid=steps-summary] [data-skeleton]`)).not.toBeNull();
-    const rows = (s: Element) => Array.from(s.querySelectorAll("li")).map((li) => li.className);
-    expect(rows(skel!)).toEqual(rows(real!));
+    expect(skel!.querySelector(`[class="${STEPS_HEAD}"] [data-skeleton]`)).toBeNull();
+    // Each row as the loaded one: the glyph's box, the title and the note, no state word at the edge.
+    const rows = (s: Element) => Array.from(s.querySelectorAll("li")).map((li) => [li.className, li.children.length]);
+    expect(rows(skel!)).toEqual([
+      [STEP_ROW, 3],
+      [STEP_ROW, 3],
+      [STEP_ROW, 3],
+    ]);
+    // The running row also holds its thin bar.
+    expect(rows(real!)).toEqual([
+      [STEP_ROW, 4],
+      [STEP_ROW, 3],
+      [STEP_ROW, 3],
+    ]);
     expect(skel!.querySelector("ul")!.className).toBe(STEP_LIST);
     expect(real!.querySelector("ul")!.className.startsWith(STEP_LIST)).toBe(true);
   });
@@ -463,7 +476,7 @@ describe("placeholder to content", () => {
 describe("run page skeleton structure", () => {
   beforeEach(() => localStorage.clear());
 
-  it("draws as many blocks as the loaded page in the header, tiles, inputs and steps", () => {
+  it("draws as many blocks as the loaded page in the header, the summary and the steps", () => {
     const run: TaskRun = {
       ...RUN,
       status: "failed",
@@ -480,7 +493,7 @@ describe("run page skeleton structure", () => {
       ],
     };
     const blocks = (root: Element) => ({
-      // The meta line under the title, its static words as text in both; the badge beside the number; the actions button.
+      // The meta line under the title: values between dots, no static words, the copy button its one glyph; the actions button.
       meta: Array.from(root.querySelectorAll(`header [data-testid=run-meta] > [class="${META_ITEM}"]`)).map((s) =>
         Array.from(s.childNodes)
           .filter((n) => n.nodeType === 3)
@@ -489,13 +502,12 @@ describe("run page skeleton structure", () => {
       ),
       metaGlyphs: root.querySelectorAll("header [data-testid=run-meta] svg").length,
       copy: root.querySelectorAll("header button[aria-label='Copy run ID']").length,
-      pill: root.querySelectorAll("header [data-testid=run-status] > span").length,
+      titleParts: root.querySelectorAll(`header [class="${RUN_TITLE_ROW}"] > *`).length,
       menu: root.querySelectorAll("header button[aria-label='Run actions']").length,
       headerLines: root.querySelectorAll("header p").length,
       cardHeads: root.querySelectorAll(`[class="${CARD_HEAD}"]`).length,
-      overview: root.querySelectorAll(`section[aria-label=Summary] > [class="${OVERVIEW}"]`).length,
-      tiles: root.querySelectorAll(`section[aria-label=Summary] dl > [class="${STAT_TILE}"]`).length,
-      inputs: root.querySelectorAll("section[aria-label=Summary] dl > .contents").length,
+      overview: Array.from(root.querySelectorAll(`section[aria-label=Summary] > [class="${OVERVIEW}"] > *`)).map((c) => c.getAttribute("data-testid") ?? "bar"),
+      details: Array.from(root.querySelectorAll("section details")).map((d) => [d.open, d.querySelector("summary")?.textContent]),
       steps: root.querySelectorAll("section[aria-label=Steps] li").length,
     });
     const loaded = render(
@@ -512,21 +524,27 @@ describe("run page skeleton structure", () => {
     );
     const skel = blocks(container);
     expect(real).toMatchObject({
-      meta: ["", "started", "", "mapping", "ID"],
-      metaGlyphs: 5,
+      meta: ["", "", "", "", ""],
+      metaGlyphs: 1,
       copy: 1,
-      pill: 1,
       menu: 1,
       headerLines: 1,
       cardHeads: 2,
-      overview: 1,
-      // delivered is the hero; channels and failed stay tiles.
-      tiles: 2,
+      // The hero, the segmented bar, the counts line.
+      overview: ["run-hero", "bar", "run-counts"],
+      details: [
+        [false, "›Inputs"],
+        [false, "›Report (JSON)"],
+      ],
       steps: 6,
     });
-    expect(real.inputs).toBeGreaterThan(0);
+    // The glyph, title, number and the failed run's error on the title line; the skeleton has no error.
+    expect(real.titleParts).toBe(4);
+    expect(skel.titleParts).toBe(3);
     // The error sits on the title line, so the header has no line the skeleton lacks.
-    expect(skel).toEqual(real);
+    expect({ ...skel, titleParts: 0 }).toEqual({ ...real, titleParts: 0 });
+    // The counts line: the steps by state, then the summary's other counts but the hero.
+    expect(countsText(run, "delivered")).toBe("4 done · 1 failed · 1 cancelled · 6 channels");
   });
 
   it("keeps the Steps list's height when the filter matches nothing", async () => {

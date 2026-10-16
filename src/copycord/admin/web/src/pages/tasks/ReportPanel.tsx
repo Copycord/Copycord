@@ -8,7 +8,7 @@ import { cx } from "../../components/ui/cx";
 import { ACTIVE_STATUSES } from "../../types/tasks";
 import type { TaskRun } from "../../types/tasks";
 import { runUrl } from "./runStore";
-import { FRAME, REPORT_SUMMARY, ReportSummaryText } from "./TasksSkeleton";
+import { DISCLOSURE_BODY, DISCLOSURE_SUMMARY, DisclosureTitle, FRAME } from "./TasksSkeleton";
 
 export function reportUrl(id: string): string {
   return `${runUrl(id)}/report.json`;
@@ -47,10 +47,10 @@ export function ReportPanel({ run }: { run: TaskRun }) {
   return (
     <section aria-label="Report">
       <details className={cx(FRAME, "group")}>
-        <summary className={REPORT_SUMMARY}>
-          <ReportSummaryText />
+        <summary className={DISCLOSURE_SUMMARY}>
+          <DisclosureTitle title="Report (JSON)" />
         </summary>
-        <div className="border-t border-border px-4 py-3">
+        <div className={DISCLOSURE_BODY}>
           {text == null ? (
             <p className="m-0 text-sm text-muted">{active ? "The report appears when the run finishes" : "This run has no report"}</p>
           ) : (

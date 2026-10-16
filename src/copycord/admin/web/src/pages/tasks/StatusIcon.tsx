@@ -1,13 +1,12 @@
 // Run and step status glyphs in one colour per state, the same on every surface: success green
 // check-circle, failed red x-circle, cancelled amber slashed circle, running a blue spinning ring, queued
 // a blue hollow dot, skipped a neutral arrow. Each is an img with the status word as its label and title
-// (on a run row it alone carries the status; the run page adds the badge), so colour is never the only signal.
+// (on a run row, the run title and a step row it alone carries the status), so colour is never the only signal.
 // The glyph's box centres itself on the row that holds it (STATUS_BOX).
 
-import { Badge, type BadgeTone } from "../../components/ui/Badge";
 import { cx } from "../../components/ui/cx";
 import type { RunStatus, StepState } from "../../types/tasks";
-import { RUN_PILL_BADGE, STATUS_BOX } from "./TasksSkeleton";
+import { STATUS_BOX } from "./TasksSkeleton";
 
 export const STATUS_LABEL: Record<RunStatus | StepState, string> = {
   queued: "Queued",
@@ -28,10 +27,27 @@ export const COLOUR: Record<RunStatus | StepState, string> = {
   skipped: "text-text-2",
 };
 
-export function StatusIcon({ status, size = 16, className }: { status: RunStatus | StepState; size?: number; className?: string }) {
+export function StatusIcon({
+  status,
+  size = 16,
+  className,
+  testId,
+}: {
+  status: RunStatus | StepState;
+  size?: number;
+  className?: string;
+  testId?: string;
+}) {
   const label = STATUS_LABEL[status] ?? status;
   return (
-    <span role="img" aria-label={label} title={label} data-status={status} className={cx(STATUS_BOX, COLOUR[status], className)}>
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      data-status={status}
+      data-testid={testId}
+      className={cx(STATUS_BOX, COLOUR[status], className)}
+    >
       <svg
         viewBox="0 0 16 16"
         width={size}
@@ -42,30 +58,6 @@ export function StatusIcon({ status, size = 16, className }: { status: RunStatus
       >
         <Glyph status={status} />
       </svg>
-    </span>
-  );
-}
-
-/** The status badge's tint: the state's colour as a Badge tone; queued is the blue outline alone. */
-const PILL_TONE: Record<RunStatus, BadgeTone> = {
-  queued: "info",
-  running: "info",
-  success: "good",
-  failed: "bad",
-  cancelled: "warn",
-};
-
-/**
- * A run's status as the one coloured badge on its row or header: 24 px, 12 px text, the status word
- * alone, tinted by state; the glyph stands at the start of the row or before the title (StatusIcon).
- */
-export function RunStatusPill({ status, testId, className }: { status: RunStatus; testId?: string; className?: string }) {
-  const label = STATUS_LABEL[status] ?? status;
-  return (
-    <span data-testid={testId} title={`Status: ${label}`} className={cx("inline-flex", className)}>
-      <Badge tone={PILL_TONE[status] ?? "neutral"} className={cx(RUN_PILL_BADGE, status === "queued" && "bg-transparent")}>
-        {label}
-      </Badge>
     </span>
   );
 }

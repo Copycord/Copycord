@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import type { RunStatus, StepState, TaskRun } from "../../types/tasks";
 import { RunHeader } from "./RunDetail";
 import { RunRow } from "./RunList";
-import { COLOUR, RunStatusPill, StatusIcon } from "./StatusIcon";
+import { COLOUR, StatusIcon } from "./StatusIcon";
 import { StepList } from "./StepList";
-import { FADE_IN, ROW_BOX, RUN_TITLE_ROW, RunDetailSkeleton, RunRowsLoading, STATUS_BOX, STEP_ROW, STEP_STATE } from "./TasksSkeleton";
+import { FADE_IN, ROW_BOX, RUN_TITLE_ROW, RunDetailSkeleton, RunRowsLoading, STATUS_BOX, STEP_ROW } from "./TasksSkeleton";
 
 const RUN: TaskRun = {
   id: "1",
@@ -54,25 +54,10 @@ describe("status colours", () => {
     }
   });
 
-  it("tints the status badge by state, its word alone with no glyph inside", () => {
-    const tone: Record<RunStatus, string> = {
-      queued: "text-info",
-      running: "text-info",
-      success: "text-good",
-      failed: "text-danger",
-      cancelled: "text-custom-ink",
-    };
-    for (const [status, text] of Object.entries(tone) as [RunStatus, string][]) {
-      const { unmount } = render(<RunStatusPill status={status} testId="pill" />);
-      const pill = screen.getByTestId("pill");
-      const badge = pill.firstElementChild!;
-      expect(badge).toHaveClass(text);
-      expect(pill).toHaveAttribute("title", `Status: ${pill.textContent}`);
-      expect(badge.querySelector("svg")).toBeNull();
-      // Queued is the blue outline alone.
-      expect(badge.classList.contains("bg-transparent")).toBe(status === "queued");
-      unmount();
-    }
+  it("says the status in its title and label, the word the filters use", () => {
+    render(<StatusIcon status="cancelled" testId="glyph" />);
+    expect(screen.getByTestId("glyph")).toHaveAttribute("title", "Cancelled");
+    expect(screen.getByRole("img", { name: "Cancelled" })).toBe(screen.getByTestId("glyph"));
   });
 });
 
@@ -85,7 +70,7 @@ describe("status glyph alignment", () => {
     expect(classes(glyph).filter((c) => c !== "self-center" && NUDGE.test(c))).toEqual([]);
   });
 
-  it("leads a run row and the run title, and a step row, never inside the badge", () => {
+  it("leads a run row, the run title and a step row, alone carrying the status on each", () => {
     const { container } = render(
       <MemoryRouter>
         <ul>
@@ -106,17 +91,19 @@ describe("status glyph alignment", () => {
     expect(row.querySelectorAll("[data-status]")).toHaveLength(1);
     expect(row.firstElementChild).toBe(row.querySelector("[data-status]"));
     expect(row.querySelector("[title^='Status:']")).toBeNull();
-    // A step row is the glyph's parent, and says its state in words in the same colour.
-    expect(glyphs[1]!.parentElement!.className).toBe(STEP_ROW);
-    const state = glyphs[1]!.parentElement!.lastElementChild!;
-    expect(state.className).toBe(`${STEP_STATE} text-info`);
-    expect(state).toHaveTextContent("Running");
-    // The header's one glyph stands right before the title.
+    // A step row is the glyph's parent and has no state word: the glyph's label says it.
+    const step = glyphs[1]!.parentElement!;
+    expect(step.className).toBe(STEP_ROW);
+    expect(glyphs[1]).toHaveAccessibleName("Running");
+    expect(within(step as HTMLElement).queryByText("Running")).toBeNull();
+    // The header's one glyph stands right before the title, and it is the run's status; no badge.
     const header = container.querySelector("header")!;
     expect(header.querySelectorAll("[data-status]")).toHaveLength(1);
     expect(header.querySelector("[data-status]")!.nextElementSibling!.tagName).toBe("H2");
-    expect(header.querySelector("[data-testid=run-status] svg")).toBeNull();
-    expect(within(header.querySelector(`[class="${RUN_TITLE_ROW}"]`) as HTMLElement).getByTestId("run-status")).toHaveTextContent("Success");
+    const status = within(header.querySelector(`[class="${RUN_TITLE_ROW}"]`) as HTMLElement).getByTestId("run-status");
+    expect(status).toBe(header.querySelector("[data-status]"));
+    expect(status).toHaveAttribute("title", "Success");
+    expect(header.querySelector("[title^='Status:']")).toBeNull();
   });
 
   it("keeps every glyph box, in the same place, in the loading rows and header", () => {
@@ -132,6 +119,6 @@ describe("status glyph alignment", () => {
     for (const box of boxes) expect(box.querySelector("[data-skeleton]")).not.toBeNull();
     expect(boxes.map((b) => b.parentElement!.className)).toEqual([ROW_BOX, RUN_TITLE_ROW, STEP_ROW, STEP_ROW]);
     expect(boxes[1]!.nextElementSibling!.tagName).toBe("H2");
-    expect(container.querySelectorAll("[data-testid=run-status]")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-testid=run-status]")).toHaveLength(0);
   });
 });
