@@ -122,8 +122,8 @@ export function GuildDialog({
           // export dialogs are the old .export-modal card.
           top
             ? "top-[calc(var(--spacing-header)+8vh)] mt-[18px] max-h-[80vh] rounded-panel text-text"
-            : "top-1/2 max-h-[min(84vh,860px)] -translate-y-1/2 rounded-[14px] text-[#e7eaf0] shadow-[0_20px_56px_rgba(0,0,0,0.5),inset_0_0_0_1px_rgba(167,139,250,0.06)]",
-          width === "md" ? "w-[min(720px,92vw)] bg-[#0f0820]" : "w-[min(480px,92vw)] bg-[#160c30]",
+            : "top-1/2 max-h-[min(84vh,860px)] -translate-y-1/2 rounded-[14px] text-dialog-text shadow-[0_20px_56px_var(--color-shadow-50),inset_0_0_0_1px_var(--color-accent-a6)]",
+          width === "md" ? "w-[min(720px,92vw)] bg-surface-deep" : "w-[min(480px,92vw)] bg-dialog-small",
         )}
       >
         <header

@@ -160,6 +160,20 @@
   --color-favorite-a40: rgba(255, 200, 61, 0.4);
   --color-danger-pale-a12: rgba(244, 163, 163, 0.12);
   --color-star-a55: rgba(255, 213, 79, 0.55);
+
+  /* Channels */
+  --color-menu-hover: #8b8b8b;
+  --color-native-select: #efefef;
+  --color-wash-4-5: rgba(255, 255, 255, 0.045);
+  --color-good-a12: rgba(16, 185, 129, 0.12);
+  --color-good-a35: rgba(16, 185, 129, 0.35);
+
+  /* Guilds */
+  --color-dialog-text: #e7eaf0;
+  --color-dialog-small: #160c30;
+  --color-accent-a6: rgba(167, 139, 250, 0.06);
+  --color-accent-a22: rgba(167, 139, 250, 0.22);
+  --color-good-a18: rgba(16, 185, 129, 0.18);
 }
 
 :root {

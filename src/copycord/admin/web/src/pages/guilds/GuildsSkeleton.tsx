@@ -15,18 +15,18 @@ export { CONTROLS, SEARCH_INPUT };
 /** .btn.btn-select */
 export const SORT_BTN =
   "flex min-h-[34px] cursor-pointer items-center justify-center rounded-btn border border-border bg-control px-2.5 py-2 " +
-  "text-[13px] leading-none font-semibold text-text outline-none hover:border-[#7c5cff] hover:shadow-[0_0_0_0.25px_#7c5cff] " +
-  "focus-visible:border-accent focus-visible:shadow-[0_0_0_4px_rgba(167,139,250,0.18)]";
+  "text-[13px] leading-none font-semibold text-text outline-none hover:border-log-input-focus hover:shadow-[0_0_0_0.25px_var(--color-log-input-focus)] " +
+  "focus-visible:border-accent focus-visible:shadow-[0_0_0_4px_var(--color-accent-a18)]";
 
 export const GUILD_GRID = "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4";
 
 // One tile (.guild-card): the 96 px icon frame, then the name line. GuildCard and the loading tiles share these.
 export const GUILD_CARD =
   "relative flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-border bg-card p-3 text-left text-text " +
-  "[box-shadow:0_4px_12px_rgba(0,0,0,0.4)]";
+  "[box-shadow:0_4px_12px_var(--color-shadow-40)]";
 export const GUILD_BODY = "block w-full min-w-0 border-0 bg-transparent p-0 text-left font-sans text-base text-text";
 export const ICON_FRAME =
-  "mx-auto mt-1.5 mb-2.5 grid size-24 place-items-center rounded-[20px] border border-[rgba(255,255,255,0.06)]";
+  "mx-auto mt-1.5 mb-2.5 grid size-24 place-items-center rounded-[20px] border border-wash-6";
 export const GUILD_NAME = "mb-2.5 flow-root max-w-full truncate font-semibold";
 
 /** The old visible h2, still the page's top heading. */

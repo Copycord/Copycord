@@ -15,7 +15,7 @@ import type { ExportForm } from "./model";
 
 const BOX =
   "relative m-[3px_3px_3px_4px] size-[18px] shrink-0 cursor-pointer appearance-none rounded-md border border-border bg-white/4 outline-none transition " +
-  "hover:border-accent focus-visible:shadow-[0_0_0_4px_rgba(167,139,250,0.18)] checked:border-primary-600 checked:bg-primary " +
+  "hover:border-accent focus-visible:shadow-[0_0_0_4px_var(--color-accent-a18)] checked:border-primary-600 checked:bg-primary " +
   "disabled:cursor-not-allowed disabled:opacity-60";
 
 const INPUT =
@@ -232,7 +232,7 @@ export function ExportDialog({ guild, onClose }: { guild: GuildSummary; onClose:
                   className={
                     "ml-1.5 grid size-4 cursor-pointer place-items-center rounded border border-accent/28 bg-accent/14 " +
                     "text-[11px] leading-none font-semibold text-accent outline-none hover:border-accent/42 hover:bg-accent/20 " +
-                    "focus-visible:shadow-[0_0_0_3px_rgba(167,139,250,0.22)] disabled:cursor-not-allowed disabled:bg-accent/8 disabled:opacity-55"
+                    "focus-visible:shadow-[0_0_0_3px_var(--color-accent-a22)] disabled:cursor-not-allowed disabled:bg-accent/8 disabled:opacity-55"
                   }
                 >
                   i

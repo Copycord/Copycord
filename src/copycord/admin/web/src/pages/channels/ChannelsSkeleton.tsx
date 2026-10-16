@@ -35,18 +35,18 @@ export const CONTROLS = "flex flex-wrap items-center gap-2.5";
 export const MAPPING_SELECT = "min-w-[180px]";
 
 export const SEARCH_INPUT =
-  "w-auto max-w-[260px] min-w-[220px] flex-none rounded-input border border-[#3b365a] bg-[#1c1830] px-2.5 py-1.5 text-[14px] text-[#e6e1ff] " +
-  "caret-[#7c5cff] outline-none transition-[border-color,box-shadow,background-color] duration-150 " +
-  "placeholder:text-[color-mix(in_srgb,#e6e1ff_55%,transparent)] placeholder:opacity-75 " +
-  "hover:border-[#7c5cff] hover:[box-shadow:0_0_0_1px_#7c5cff] focus:border-[#7c5cff] focus:[box-shadow:0_0_0_1px_#7c5cff]";
+  "w-auto max-w-[260px] min-w-[220px] flex-none rounded-input border border-log-input-edge bg-log-input-bg px-2.5 py-1.5 text-[14px] text-text-soft " +
+  "caret-log-input-focus outline-none transition-[border-color,box-shadow,background-color] duration-150 " +
+  "placeholder:text-[color-mix(in_srgb,var(--color-text-soft)_55%,transparent)] placeholder:opacity-75 " +
+  "hover:border-log-input-focus hover:[box-shadow:0_0_0_1px_var(--color-log-input-focus)] focus:border-log-input-focus focus:[box-shadow:0_0_0_1px_var(--color-log-input-focus)]";
 
 /** .btn.btn-ghost-red */
 export const DELETE_ALL_BTN =
-  "flex h-[34px] cursor-pointer items-center justify-center rounded-input border border-border bg-[rgba(255,255,255,0.04)] px-2.5 " +
+  "flex h-[34px] cursor-pointer items-center justify-center rounded-input border border-border bg-wash-4 px-2.5 " +
   "text-[13px] leading-8 font-semibold text-accent transition-colors duration-150 " +
-  "hover:border-[color-mix(in_oklab,#2c1d4a_20%,#ef4444_80%)] hover:bg-[rgba(255,255,255,0.08)] hover:text-danger active:bg-[rgba(255,255,255,0.1)] " +
+  "hover:border-[color-mix(in_oklab,var(--color-border)_20%,var(--color-danger)_80%)] hover:bg-line-1 hover:text-danger active:bg-wash-10 " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28 " +
-  "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-[rgba(255,255,255,0.04)] disabled:hover:text-accent";
+  "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border disabled:hover:bg-wash-4 disabled:hover:text-accent";
 
 /** .card-titlebar: the h2, then one wrapping row of controls (.titlebar-actions). The old visible h2 is the page's top heading. */
 export function ChannelsTitle() {

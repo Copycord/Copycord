@@ -37,7 +37,7 @@ export function GuildCard({ guild, menuOpen, onOpenMenu }: GuildCardProps) {
       className={cx(
         GUILD_CARD,
         "transition-[border-color,box-shadow,transform,background-color] duration-150",
-        "hover:-translate-y-0.5 hover:border-accent hover:bg-[rgba(27,16,48,0.6)] hover:[box-shadow:0_8px_20px_rgba(0,0,0,0.6)]",
+        "hover:-translate-y-0.5 hover:border-accent hover:bg-card-hover hover:[box-shadow:0_8px_20px_var(--color-shadow-60)]",
       )}
     >
       <button
@@ -53,7 +53,7 @@ export function GuildCard({ guild, menuOpen, onOpenMenu }: GuildCardProps) {
         <span
           className={cx(
             ICON_FRAME,
-            "bg-[radial-gradient(120px_120px_at_10%_0,rgba(167,139,250,0.18),transparent_60%),radial-gradient(120px_120px_at_90%_100%,rgba(16,185,129,0.18),transparent_60%)]",
+            "bg-[radial-gradient(120px_120px_at_10%_0,var(--color-accent-a18),transparent_60%),radial-gradient(120px_120px_at_90%_100%,var(--color-good-a18),transparent_60%)]",
           )}
         >
           <img

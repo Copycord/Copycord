@@ -9,19 +9,19 @@ import { GHOST_RED_HOVER, GHOST_TINT_FILL } from "../../components/ui/Button";
 
 // The old .btn had no gap; only the loading spinner gets one.
 const BASE =
-  "inline-flex min-h-[42px] items-center justify-center has-[svg]:gap-2 rounded-control border border-border bg-[rgba(255,255,255,0.04)] " +
+  "inline-flex min-h-[42px] items-center justify-center has-[svg]:gap-2 rounded-control border border-border bg-wash-4 " +
   "px-4 py-2.5 font-semibold leading-none text-accent no-underline select-none outline-none " +
   "transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60";
 
 const LIFT =
-  "hover:-translate-y-0.5 hover:border-accent/30 hover:bg-[rgba(255,255,255,0.08)] hover:shadow-soft active:translate-y-0 active:scale-[0.97]";
+  "hover:-translate-y-0.5 hover:border-accent/30 hover:bg-line-1 hover:shadow-soft active:translate-y-0 active:scale-[0.97]";
 
 /** The old card collapse button (.btn.btn-ghost.btn-icon.card-toggle) and its .chev glyph. */
 export const CHEV_BUTTON =
   "inline-flex size-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-btn border border-border " +
-  "bg-[rgba(255,255,255,0.04)] text-[14px] font-semibold leading-none text-accent outline-none transition duration-200 " +
+  "bg-wash-4 text-[14px] font-semibold leading-none text-accent outline-none transition duration-200 " +
   "focus-visible:ring-2 focus-visible:ring-accent/60 hover:-translate-y-0.5 hover:border-accent/30 " +
-  "hover:bg-[rgba(255,255,255,0.08)] hover:shadow-soft";
+  "hover:bg-line-1 hover:shadow-soft";
 export const CHEV = "inline-block text-[16px] leading-none text-accent";
 
 export interface LinkButtonProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
@@ -78,7 +78,7 @@ export function GhostButton({
         "cursor-pointer disabled:cursor-not-allowed",
         danger
           ? `${GHOST_RED_HOVER} ${GHOST_TINT_FILL}`
-          : "enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-[rgba(255,255,255,0.08)] enabled:hover:shadow-soft " +
+          : "enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-line-1 enabled:hover:shadow-soft " +
               "enabled:active:translate-y-0 enabled:active:scale-[0.97] disabled:opacity-55",
         className,
       )}

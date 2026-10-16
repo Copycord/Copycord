@@ -46,7 +46,7 @@ export interface ToolbarSelectProps {
 const TOOLBAR_TOGGLE =
   "inline-block min-h-[34px] rounded-btn border border-border bg-control py-2 pr-9 pl-2.5 " +
   "font-sans text-[13px] text-text outline-none transition-[border,box-shadow,background] duration-200 " +
-  "focus-visible:border-accent focus-visible:shadow-[0_20px_56px_rgba(0,0,0,0.5)] disabled:cursor-not-allowed disabled:opacity-60";
+  "focus-visible:border-accent focus-visible:shadow-[0_20px_56px_var(--color-shadow-50)] disabled:cursor-not-allowed disabled:opacity-60";
 
 export function ToolbarSelect({
   id,
@@ -146,7 +146,7 @@ export function ToolbarSelect({
           disabled={disabled}
           hidden={nativeHidden}
           onChange={(e) => onChange(e.target.value)}
-          className="absolute top-0 left-0 size-0 border-0 bg-[#efefef] p-0 text-[13px] text-black opacity-0"
+          className="absolute top-0 left-0 size-0 border-0 bg-native-select p-0 text-[13px] text-black opacity-0"
         >
           {options.map((o) => (
             <option key={o.value} value={o.value} disabled={o.disabled}>
@@ -199,7 +199,7 @@ export function ToolbarSelect({
           aria-labelledby={label ? undefined : id}
           className={cx(
             "absolute inset-x-0 top-[calc(100%+4px)] z-[55] block max-h-[180px] overflow-x-hidden overflow-y-auto",
-            "rounded-control border border-border bg-[#0f0820] p-1 shadow-[0_4px_12px_rgba(0,0,0,0.25),0_14px_50px_rgba(0,0,0,0.45)]",
+            "rounded-control border border-border bg-surface-deep p-1 shadow-[0_4px_12px_var(--color-shadow-25),0_14px_50px_var(--color-shadow-45)]",
           )}
         >
           {options.map((o, i) => (
@@ -219,7 +219,7 @@ export function ToolbarSelect({
                 i === selected
                   ? "bg-linear-to-b from-primary to-primary-700 text-white"
                   : i === focus
-                    ? "bg-[rgba(167,139,250,0.12)] text-text"
+                    ? "bg-accent-a12 text-text"
                     : "text-text",
               )}
             >
