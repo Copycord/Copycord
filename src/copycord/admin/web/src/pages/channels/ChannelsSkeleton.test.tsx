@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
-import { ConfirmProvider } from "../../components/ui";
+import { CARD_HOVER, ConfirmProvider } from "../../components/ui";
 import { holdFetch } from "../../test/holdFetch";
 import { cells, shared, structure } from "../../test/structure";
 import type { ChannelRow } from "../../types/channels";
@@ -98,7 +98,8 @@ describe("Channels skeleton", () => {
     // A cloned channel has no badge: its card is the name row and the id row, as the loading card.
     const card = loaded.container.querySelector('article[data-cid="10"]')!;
     expect(cells(section)).toEqual(skelShape.section);
-    expect(shared(card, ["ch-card"])).toBe(skelShape.card);
+    // The hover lift is interaction only, the loading card has no hover.
+    expect(shared(card, ["ch-card", ...CARD_HOVER.split(" ")])).toBe(skelShape.card);
     expect(cells(card)).toEqual(skelShape.head);
     const parts = Array.from(card.children).map((c) => cells(c));
     // The name cell (type icon and name) and the menu box, then the id row (one id while loading, the clone id after).

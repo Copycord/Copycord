@@ -15,7 +15,7 @@ class FakeSource {
   }
 }
 const EsImpl = FakeSource as unknown as typeof EventSource;
-const last = () => FakeSource.instances[FakeSource.instances.length - 1];
+const last = () => FakeSource.instances[FakeSource.instances.length - 1]!;
 
 // jsdom has no layout: give elements a 100px viewport, 20px per text line and a real scrollTop.
 const LINE_PX = 20;

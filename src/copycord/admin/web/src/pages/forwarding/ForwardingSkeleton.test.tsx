@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
+import { CARD_HOVER } from "../../components/ui";
 import { ConfirmProvider } from "../../components/ui/ConfirmDialog";
 import { holdFetch } from "../../test/holdFetch";
 import { cells, shared, structure } from "../../test/structure";
@@ -38,7 +39,8 @@ const page = () =>
 // The rule tiles of both states; the toolbar is compared as chrome. The skeleton's toolbar is aria-hidden
 // and inert but has the same controls.
 const ROWS = ".fwd-card, [data-skeleton-row]";
-const TILE_HOOKS = ["fwd-card", "fwd-card-title", "fwd-edit-btn", "fwd-toggle-btn", "fwd-duplicate-btn", "fwd-delete-btn"];
+// Hover classes count as hooks too: the loading tile has no hover.
+const TILE_HOOKS = ["fwd-card", "fwd-card-title", "fwd-edit-btn", "fwd-toggle-btn", "fwd-duplicate-btn", "fwd-delete-btn", ...CARD_HOVER.split(" ")];
 
 beforeEach(() => serve([RULE]));
 
