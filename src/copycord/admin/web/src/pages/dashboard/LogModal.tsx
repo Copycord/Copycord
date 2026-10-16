@@ -17,6 +17,11 @@ import { appendCapped, clearLogs, filterLines, parseLogData } from "./model";
 
 const STICK_PX = 24;
 const RETRY_MS = 1500;
+// The server sends the backlog in 50-line batches; the body stays hidden until
+// they stop arriving (quiet for SETTLE_MS, at most SETTLE_MAX_MS) so it appears
+// once, already at the bottom, instead of visibly scrolling down batch by batch.
+const SETTLE_MS = 150;
+const SETTLE_MAX_MS = 1000;
 
 export interface LogModalProps {
   /** The open stream, or null when closed. */
@@ -33,6 +38,7 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
   const confirm = useSafeConfirm();
   const [lines, setLines] = useState<string[]>([]);
   const [query, setQuery] = useState("");
+  const [settled, setSettled] = useState(false);
   const bodyRef = useRef<HTMLPreElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const follow = useRef(true);
@@ -49,10 +55,18 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
     let closed = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let client: { close: () => void } | undefined;
+    let quiet: ReturnType<typeof setTimeout> | undefined;
+    const settle = () => setSettled(true);
+    const cap = setTimeout(settle, SETTLE_MAX_MS);
+    quiet = setTimeout(settle, SETTLE_MS);
     const start = () => {
       client = logStream(which, {
         EventSourceImpl,
-        onMessage: (raw) => setLines((prev) => appendCapped(prev, parseLogData(raw))),
+        onMessage: (raw) => {
+          setLines((prev) => appendCapped(prev, parseLogData(raw)));
+          if (quiet) clearTimeout(quiet);
+          quiet = setTimeout(settle, SETTLE_MS);
+        },
         onError: () => {
           client?.close();
           if (closed) return;
@@ -65,7 +79,10 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
     return () => {
       closed = true;
       if (retry) clearTimeout(retry);
+      if (quiet) clearTimeout(quiet);
+      clearTimeout(cap);
       client?.close();
+      setSettled(false);
       // Clear on close, not on open: the next open then never paints the old tail at the top.
       setLines([]);
       setQuery("");
@@ -95,7 +112,7 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
   useLayoutEffect(() => {
     const el = bodyRef.current;
     if (el && follow.current) el.scrollTop = el.scrollHeight;
-  }, [which, view.length, query]);
+  }, [which, view.length, query, settled]);
 
   if (!open) return null;
 
@@ -160,8 +177,9 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
             follow.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
           }}
           className={cx(
-            "m-0 flex-1 overflow-auto overscroll-contain rounded-b-panel bg-log-bg px-4 py-3 font-mono text-xs leading-normal",
+            "m-0 flex-1 overflow-auto overscroll-contain bg-log-bg px-4 py-3 font-mono text-xs leading-normal",
             "whitespace-pre-wrap text-text-soft",
+            !settled && "invisible",
           )}
         >
           {view.length ? view.join("\n") + "\n" : ""}
