@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
 import {
+  COLUMN_GROUPS,
+  COLUMNS,
   COLUMNS_KEY,
+  COLUMNS_KEY_V1,
   DEFAULT_COLUMNS,
+  migrateV1,
+  tableMinWidth,
   NO_FILTERS,
   dayBound,
   filtersActive,
@@ -17,9 +22,36 @@ import {
 describe("columns persistence", () => {
   it("starts from the defaults and keeps a saved choice in table order", () => {
     expect(loadColumns()).toEqual([...DEFAULT_COLUMNS]);
-    saveColumns(["message_id", "author", "author_id"]);
-    expect(JSON.parse(localStorage.getItem(COLUMNS_KEY)!)).toEqual(["message_id", "author", "author_id"]);
-    expect(loadColumns()).toEqual(["author", "message_id", "author_id"]);
+    saveColumns(["message_id", "username", "author_id"]);
+    expect(JSON.parse(localStorage.getItem(COLUMNS_KEY)!)).toEqual(["message_id", "username", "author_id"]);
+    expect(loadColumns()).toEqual(["username", "author_id", "message_id"]);
+  });
+
+  it("has the v2 defaults, every column in a group, Preview not toggleable", () => {
+    expect(COLUMNS_KEY).toBe("cc.messages.columns.v2");
+    expect([...DEFAULT_COLUMNS]).toEqual(["time", "author_name", "username", "original_channel", "mapping", "attachments", "links", "message_id"]);
+    expect(COLUMNS).toHaveLength(19);
+    for (const c of COLUMNS) expect(COLUMN_GROUPS).toContain(c.group);
+    expect(COLUMNS.map((c) => c.label)).not.toContain("Preview");
+    expect(tableMinWidth(["time"])).toBe(96 + 96);
+  });
+
+  it("migrates a v1 choice: author and guild ids split, new columns off, v1 removed", () => {
+    localStorage.setItem(COLUMNS_KEY_V1, JSON.stringify(["time", "author", "guild_ids", "counts", "cloned_channel_id", "gone"]));
+    const cols = ["time", "author_name", "username", "cloned_channel_id", "original_guild_id", "cloned_guild_id", "attachments", "embeds"];
+    expect(loadColumns()).toEqual(cols);
+    expect(JSON.parse(localStorage.getItem(COLUMNS_KEY)!)).toEqual(cols);
+    expect(localStorage.getItem(COLUMNS_KEY_V1)).toBeNull();
+    expect(migrateV1(["channel", "message_id"])).toEqual(["original_channel", "message_id"]);
+  });
+
+  it("prefers a v2 choice over a v1 one and ignores an unusable v1", () => {
+    localStorage.setItem(COLUMNS_KEY, JSON.stringify(["links"]));
+    localStorage.setItem(COLUMNS_KEY_V1, JSON.stringify(["author"]));
+    expect(loadColumns()).toEqual(["links"]);
+    localStorage.clear();
+    localStorage.setItem(COLUMNS_KEY_V1, JSON.stringify(["nope"]));
+    expect(loadColumns()).toEqual([...DEFAULT_COLUMNS]);
   });
 
   it("falls back to the defaults for junk, unknown keys or an empty list", () => {
@@ -32,9 +64,14 @@ describe("columns persistence", () => {
   });
 
   it("toggles a column and never hides the last one", () => {
-    expect(toggleColumn(["time", "author"], "author")).toEqual(["time"]);
+    expect(toggleColumn(["time", "username"], "username")).toEqual(["time"]);
     expect(toggleColumn(["time"], "time")).toEqual(["time"]);
-    expect(toggleColumn(["author"], "time")).toEqual(["time", "author"]);
+    expect(toggleColumn(["username"], "time")).toEqual(["time", "username"]);
+  });
+
+  it("sorts by username and original guild through the API", () => {
+    expect(new URL(messagesUrl(NO_FILTERS, "username"), "http://x").searchParams.get("sort")).toBe("username");
+    expect(new URL(messagesUrl(NO_FILTERS, "guild"), "http://x").searchParams.get("sort")).toBe("guild");
   });
 });
 

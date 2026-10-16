@@ -8,10 +8,12 @@ function row(n: number, extra: Partial<MessageRow> = {}): MessageRow {
   return {
     original_message_id: `13000000000000${String(n).padStart(5, "0")}`,
     original_guild_id: "111",
+    original_guild_name: "Source Server",
     original_channel_id: "10",
     original_channel_name: "general",
     cloned_message_id: `14000000000000${String(n).padStart(5, "0")}`,
     cloned_guild_id: "222",
+    cloned_guild_name: "Clone Server",
     cloned_channel_id: "20",
     cloned_channel_name: "general",
     mapping_id: "m1",
@@ -200,6 +202,55 @@ describe("Messages page", () => {
     render(<Messages />);
     expect(screen.getByRole("columnheader", { name: "Author ID" })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Mapping" })).toBeNull();
+  });
+
+  it("shows the default columns, groups the menu and restores the defaults", async () => {
+    const f = holdingFetch();
+    render(<Messages />);
+    await waitFor(() => expect(f.lists()).toHaveLength(1));
+    await answer(f.last(), [row(1)], null);
+    const heads = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(heads).toEqual(["Time", "Author name", "Username", "Original channel", "Mapping", "Attachments", "Links", "Message ID", "Preview"]);
+    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    const menu = screen.getByRole("group", { name: "Visible columns" });
+    for (const g of ["Message", "Author", "Channel", "Guild", "Other"]) {
+      expect(within(menu).getByRole("group", { name: `${g} columns` })).toBeInTheDocument();
+    }
+    const guild = within(menu).getByRole("group", { name: "Guild columns" });
+    expect(within(guild).getAllByRole("checkbox")).toHaveLength(4);
+    fireEvent.click(within(menu).getByLabelText("Original guild ID"));
+    expect(screen.getByRole("columnheader", { name: "Original guild ID" })).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("button", { name: "Restore defaults" }));
+    expect(screen.queryByRole("columnheader", { name: "Original guild ID" })).toBeNull();
+  });
+
+  it("puts one value in each cell: display name, username, names and ids", async () => {
+    localStorage.setItem(
+      COLUMNS_KEY,
+      JSON.stringify([
+        "author_name", "username", "author_id", "original_channel", "original_channel_id", "cloned_channel",
+        "cloned_channel_id", "original_guild", "original_guild_id", "cloned_guild", "cloned_guild_id", "embeds",
+      ]),
+    );
+    const f = holdingFetch();
+    render(<Messages />);
+    await waitFor(() => expect(f.lists()).toHaveLength(1));
+    await answer(
+      f.last(),
+      [
+        row(1, { author_name: "Mac", author_username: "xmacj", cloned_channel_name: "general-clone", embed_count: 2 }),
+        row(2, { original_guild_name: null, cloned_channel_id: null }),
+      ],
+      null,
+    );
+    const [first, second] = screen.getAllByRole("row").filter((r) => r.hasAttribute("data-message-row"));
+    const cells = within(first!).getAllByRole("cell").map((c) => c.textContent);
+    expect(cells).toEqual(["Mac", "@xmacj", "4242", "#general", "10", "#general-clone", "20", "Source Server", "111", "Clone Server", "222", "2", "Preview"]);
+    expect(within(first!).getByTitle("Mac")).toBeInTheDocument();
+    expect(within(first!).getByRole("button", { name: "Copy original guild ID" })).toBeInTheDocument();
+    const cells2 = within(second!).getAllByRole("cell").map((c) => c.textContent);
+    expect(cells2[6]).toBe("-");
+    expect(cells2[7]).toBe("-");
   });
 });
 

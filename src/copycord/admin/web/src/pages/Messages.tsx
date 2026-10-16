@@ -18,6 +18,7 @@ import {
   MessagesToolbar,
   RESET_BTN,
   TABLE,
+  tableStyle,
   TABLE_WRAP,
 } from "./messages/MessagesSkeleton";
 import { COUNT } from "./logs/LogsSkeleton";
@@ -256,7 +257,7 @@ export function Messages() {
       ) : null}
 
       <div ref={wrapRef} className={cx(TABLE_WRAP, busy && everLoaded && "opacity-70")} aria-busy={busy || undefined}>
-        <table id="messages-table" className={TABLE}>
+        <table id="messages-table" className={TABLE} style={tableStyle(visible)}>
           <MessagesHead columns={visible} />
           <tbody className={reveal}>
             {firstLoad ? (

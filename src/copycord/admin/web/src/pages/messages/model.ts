@@ -9,56 +9,124 @@ export const SEARCH_DEBOUNCE_MS = 300;
 
 export type ColumnKey =
   | "time"
-  | "author"
-  | "channel"
+  | "created"
+  | "author_name"
+  | "username"
+  | "author_id"
+  | "original_channel"
+  | "original_channel_id"
+  | "cloned_channel"
+  | "cloned_channel_id"
+  | "original_guild"
+  | "original_guild_id"
+  | "cloned_guild"
+  | "cloned_guild_id"
   | "mapping"
-  | "counts"
+  | "attachments"
+  | "embeds"
   | "links"
   | "message_id"
-  | "author_id"
-  | "original_channel_id"
-  | "cloned_message_id"
-  | "cloned_channel_id"
-  | "guild_ids";
+  | "cloned_message_id";
+
+export type ColumnGroup = "Message" | "Author" | "Channel" | "Guild" | "Other";
 
 export interface ColumnDef {
   key: ColumnKey;
   label: string;
-  /** Width class of the header cell (table-fixed). */
-  width: string;
+  /** Header cell width in px; the table never gets narrower than the sum, it scrolls instead. */
+  width: number;
+  group: ColumnGroup;
   defaultOn: boolean;
 }
 
+/** In table order. Preview is not here: it is always the last, sticky column. */
 export const COLUMNS: readonly ColumnDef[] = [
-  { key: "time", label: "Time", width: "w-[104px]", defaultOn: true },
-  { key: "author", label: "Author", width: "w-[200px]", defaultOn: true },
-  { key: "channel", label: "Channel", width: "w-[160px]", defaultOn: true },
-  { key: "mapping", label: "Mapping", width: "w-[130px]", defaultOn: true },
-  { key: "counts", label: "Files", width: "w-[84px]", defaultOn: true },
-  { key: "links", label: "Links", width: "w-[150px]", defaultOn: true },
-  { key: "message_id", label: "Message ID", width: "w-[210px]", defaultOn: true },
-  { key: "author_id", label: "Author ID", width: "w-[200px]", defaultOn: false },
-  { key: "original_channel_id", label: "Original channel ID", width: "w-[200px]", defaultOn: false },
-  { key: "cloned_message_id", label: "Cloned message ID", width: "w-[210px]", defaultOn: false },
-  { key: "cloned_channel_id", label: "Cloned channel ID", width: "w-[200px]", defaultOn: false },
-  { key: "guild_ids", label: "Guild IDs", width: "w-[200px]", defaultOn: false },
+  { key: "time", label: "Time", width: 96, group: "Message", defaultOn: true },
+  { key: "created", label: "Created", width: 190, group: "Message", defaultOn: false },
+  { key: "author_name", label: "Author name", width: 150, group: "Author", defaultOn: true },
+  { key: "username", label: "Username", width: 140, group: "Author", defaultOn: true },
+  { key: "author_id", label: "Author ID", width: 190, group: "Author", defaultOn: false },
+  { key: "original_channel", label: "Original channel", width: 160, group: "Channel", defaultOn: true },
+  { key: "original_channel_id", label: "Original channel ID", width: 190, group: "Channel", defaultOn: false },
+  { key: "cloned_channel", label: "Cloned channel", width: 160, group: "Channel", defaultOn: false },
+  { key: "cloned_channel_id", label: "Cloned channel ID", width: 190, group: "Channel", defaultOn: false },
+  { key: "original_guild", label: "Original guild", width: 160, group: "Guild", defaultOn: false },
+  { key: "original_guild_id", label: "Original guild ID", width: 190, group: "Guild", defaultOn: false },
+  { key: "cloned_guild", label: "Cloned guild", width: 160, group: "Guild", defaultOn: false },
+  { key: "cloned_guild_id", label: "Cloned guild ID", width: 190, group: "Guild", defaultOn: false },
+  { key: "mapping", label: "Mapping", width: 130, group: "Other", defaultOn: true },
+  { key: "attachments", label: "Attachments", width: 116, group: "Other", defaultOn: true },
+  { key: "embeds", label: "Embeds", width: 88, group: "Other", defaultOn: false },
+  { key: "links", label: "Links", width: 150, group: "Other", defaultOn: true },
+  { key: "message_id", label: "Message ID", width: 200, group: "Message", defaultOn: true },
+  { key: "cloned_message_id", label: "Cloned message ID", width: 200, group: "Message", defaultOn: false },
 ];
 
+export const COLUMN_GROUPS: readonly ColumnGroup[] = ["Message", "Author", "Channel", "Guild", "Other"];
+
+export const PREVIEW_WIDTH = 96;
+
+/** Min width of the table for these columns: the sum of their widths plus the Preview column. */
+export function tableMinWidth(cols: readonly ColumnKey[]): number {
+  const on = new Set(cols);
+  return COLUMNS.reduce((sum, c) => (on.has(c.key) ? sum + c.width : sum), PREVIEW_WIDTH);
+}
+
 /** Versioned: a new column set bumps the key so an old saved list cannot hide a new default. */
-export const COLUMNS_KEY = "cc.messages.columns.v1";
+export const COLUMNS_KEY = "cc.messages.columns.v2";
+export const COLUMNS_KEY_V1 = "cc.messages.columns.v1";
+
+/** v1 column keys and what each became in v2; a v1 key missing here was dropped. */
+const V1_TO_V2: Record<string, readonly ColumnKey[]> = {
+  time: ["time"],
+  author: ["author_name", "username"],
+  channel: ["original_channel"],
+  mapping: ["mapping"],
+  counts: ["attachments", "embeds"],
+  links: ["links"],
+  message_id: ["message_id"],
+  author_id: ["author_id"],
+  original_channel_id: ["original_channel_id"],
+  cloned_message_id: ["cloned_message_id"],
+  cloned_channel_id: ["cloned_channel_id"],
+  guild_ids: ["original_guild_id", "cloned_guild_id"],
+};
 
 export const DEFAULT_COLUMNS: readonly ColumnKey[] = COLUMNS.filter((c) => c.defaultOn).map((c) => c.key);
 
-/** The saved column choice, or the defaults when nothing usable is stored. Always in table order. */
+function inTableOrder(keys: Iterable<string>): ColumnKey[] {
+  const keep = new Set(keys);
+  return COLUMNS.filter((c) => keep.has(c.key)).map((c) => c.key);
+}
+
+function readList(storage: Storage | null, key: string): string[] | null {
+  const raw = storage?.getItem(key);
+  if (!raw) return null;
+  const parsed: unknown = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
+}
+
+/** A v1 saved choice in v2 keys: each v1 column brings its v2 columns, new columns stay off. */
+export function migrateV1(v1: readonly string[]): ColumnKey[] {
+  return inTableOrder(v1.flatMap((k) => V1_TO_V2[k] ?? []));
+}
+
+/** The saved column choice, or the defaults when nothing usable is stored. Always in table order.
+ * Without a v2 choice a v1 one is migrated, saved as v2 and the v1 entry removed. */
 export function loadColumns(storage: Storage | null = safeStorage()): ColumnKey[] {
   try {
-    const raw = storage?.getItem(COLUMNS_KEY);
-    if (!raw) return [...DEFAULT_COLUMNS];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [...DEFAULT_COLUMNS];
-    const keep = new Set(parsed.filter((k): k is string => typeof k === "string"));
-    const cols = COLUMNS.filter((c) => keep.has(c.key)).map((c) => c.key);
-    return cols.length ? cols : [...DEFAULT_COLUMNS];
+    const saved = readList(storage, COLUMNS_KEY);
+    if (saved) {
+      const cols = inTableOrder(saved);
+      return cols.length ? cols : [...DEFAULT_COLUMNS];
+    }
+    const v1 = readList(storage, COLUMNS_KEY_V1);
+    if (!v1) return [...DEFAULT_COLUMNS];
+    const cols = migrateV1(v1);
+    if (!cols.length) return [...DEFAULT_COLUMNS];
+    storage?.setItem(COLUMNS_KEY, JSON.stringify(cols));
+    storage?.removeItem(COLUMNS_KEY_V1);
+    return cols;
   } catch {
     return [...DEFAULT_COLUMNS];
   }
@@ -79,7 +147,7 @@ export function toggleColumn(cols: readonly ColumnKey[], key: ColumnKey): Column
     if (on.size === 1) return [...cols];
     on.delete(key);
   } else on.add(key);
-  return COLUMNS.filter((c) => on.has(c.key)).map((c) => c.key);
+  return inTableOrder(on);
 }
 
 function safeStorage(): Storage | null {
@@ -90,20 +158,24 @@ function safeStorage(): Storage | null {
   }
 }
 
-export type SortKey = "newest" | "oldest" | "author" | "channel";
+export type SortKey = "newest" | "oldest" | "author" | "username" | "channel" | "guild";
 
 export const SORT_OPTIONS: ReadonlyArray<{ value: SortKey; label: string }> = [
   { value: "newest", label: "Newest" },
   { value: "oldest", label: "Oldest" },
-  { value: "author", label: "Author" },
+  { value: "author", label: "Author name" },
+  { value: "username", label: "Username" },
   { value: "channel", label: "Channel" },
+  { value: "guild", label: "Original guild" },
 ];
 
 const SORT_PARAMS: Record<SortKey, { sort: string; order: string }> = {
   newest: { sort: "created_at", order: "desc" },
   oldest: { sort: "created_at", order: "asc" },
   author: { sort: "author", order: "asc" },
+  username: { sort: "username", order: "asc" },
   channel: { sort: "channel", order: "asc" },
+  guild: { sort: "guild", order: "asc" },
 };
 
 export interface Filters {
@@ -188,6 +260,11 @@ export function absoluteTime(sec: number | null): string {
 export function channelLabel(name: string | null, id: string | null): string {
   if (name) return `#${name}`;
   return id ?? "-";
+}
+
+/** The display name, or the username when Discord had no separate display name. */
+export function authorDisplayName(r: Pick<MessageRow, "author_name" | "author_username">): string | null {
+  return r.author_name || r.author_username || null;
 }
 
 export interface PreviewError {

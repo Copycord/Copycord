@@ -5,8 +5,8 @@ import { memo, useEffect, useState } from "react";
 import { cx } from "../../components/ui/cx";
 import type { MessageRow as Row } from "../../types/messages";
 import { MessagesIcon } from "./icons";
-import { CELL_TEXT, MONO, MUTED, ROW, TD } from "./MessagesSkeleton";
-import { absoluteTime, channelLabel, relativeTime } from "./model";
+import { CELL_TEXT, MONO, MUTED, PREVIEW_TD, ROW, TD } from "./MessagesSkeleton";
+import { absoluteTime, authorDisplayName, relativeTime } from "./model";
 import type { ColumnKey } from "./model";
 
 const SMALL_BTN =
@@ -70,7 +70,27 @@ export function DiscordLink({ href, label, text }: { href: string | null; label:
 }
 
 export function authorText(r: Row): { name: string | null; username: string | null } {
-  return { name: r.author_name ?? r.author_username, username: r.author_username };
+  return { name: authorDisplayName(r), username: r.author_username };
+}
+
+/** A name that truncates with the full text in its title; a dash when unknown. */
+function Name({ text, className }: { text: string | null; className?: string }) {
+  if (!text) return DASH;
+  return (
+    <span className={cx(CELL_TEXT, className)} title={text}>
+      {text}
+    </span>
+  );
+}
+
+function Count({ n, icon, one, many }: { n: number | null; icon: "paperclip" | "embed"; one: string; many: string }) {
+  if (n === null || n === undefined) return DASH;
+  return (
+    <span className={cx(CELL_TEXT, "flex items-center gap-1 text-xs text-text-2 tabular-nums", n === 0 && "text-muted/60")} title={`${n} ${n === 1 ? one : many}`}>
+      <MessagesIcon name={icon} size={13} />
+      {n}
+    </span>
+  );
 }
 
 function Cell({ k, r, now }: { k: ColumnKey; r: Row; now: number }) {
@@ -81,57 +101,36 @@ function Cell({ k, r, now }: { k: ColumnKey; r: Row; now: number }) {
           {relativeTime(r.created_at, now)}
         </span>
       );
-    case "author": {
-      const { name, username } = authorText(r);
-      if (!name) return DASH;
-      const full = username && username !== name ? `${name} @${username}` : name;
-      return (
-        <span className={CELL_TEXT} title={full}>
-          <span className="font-medium">{name}</span>
-          {username && username !== name ? <span className={cx(MUTED, "ml-1.5")}>@{username}</span> : null}
-        </span>
-      );
-    }
-    case "channel": {
-      const text = channelLabel(r.original_channel_name, r.original_channel_id);
-      return (
-        <span className={cx(CELL_TEXT, !r.original_channel_name && cx(MONO, "text-text-2"))} title={text}>
-          {text}
-        </span>
-      );
-    }
+    case "created":
+      return r.created_at === null ? DASH : <Name text={absoluteTime(r.created_at)} className="text-xs text-text-2 tabular-nums" />;
+    case "author_name":
+      return <Name text={authorDisplayName(r)} className="font-medium" />;
+    case "username":
+      return <Name text={r.author_username ? `@${r.author_username}` : null} className="text-text-2" />;
+    case "author_id":
+      return <CopyId id={r.author_id} label="author ID" />;
+    case "original_channel":
+      return <Name text={r.original_channel_name ? `#${r.original_channel_name}` : null} />;
+    case "original_channel_id":
+      return <CopyId id={r.original_channel_id} label="original channel ID" />;
+    case "cloned_channel":
+      return <Name text={r.cloned_channel_name ? `#${r.cloned_channel_name}` : null} />;
+    case "cloned_channel_id":
+      return <CopyId id={r.cloned_channel_id} label="cloned channel ID" />;
+    case "original_guild":
+      return <Name text={r.original_guild_name} />;
+    case "original_guild_id":
+      return <CopyId id={r.original_guild_id} label="original guild ID" />;
+    case "cloned_guild":
+      return <Name text={r.cloned_guild_name} />;
+    case "cloned_guild_id":
+      return <CopyId id={r.cloned_guild_id} label="cloned guild ID" />;
     case "mapping":
-      return r.mapping_name ? (
-        <span className={cx(CELL_TEXT, "text-text-2")} title={r.mapping_name}>
-          {r.mapping_name}
-        </span>
-      ) : (
-        DASH
-      );
-    case "counts": {
-      if (r.attachment_count === null && r.embed_count === null) return DASH;
-      const a = r.attachment_count ?? 0;
-      const e = r.embed_count ?? 0;
-      const title = [`${a} attachment${a === 1 ? "" : "s"}`, `${e} embed${e === 1 ? "" : "s"}`].join(", ");
-      return (
-        <span className={cx(CELL_TEXT, "flex items-center gap-2.5 text-xs text-text-2 tabular-nums")} title={title}>
-          {a > 0 ? (
-            <span className="inline-flex items-center gap-0.5">
-              <MessagesIcon name="paperclip" size={13} />
-              <span className="sr-only">Attachments</span>
-              {a}
-            </span>
-          ) : null}
-          {e > 0 ? (
-            <span className="inline-flex items-center gap-0.5">
-              <MessagesIcon name="embed" size={13} />
-              <span className="sr-only">Embeds</span>
-              {e}
-            </span>
-          ) : null}
-        </span>
-      );
-    }
+      return <Name text={r.mapping_name} className="text-text-2" />;
+    case "attachments":
+      return <Count n={r.attachment_count} icon="paperclip" one="attachment" many="attachments" />;
+    case "embeds":
+      return <Count n={r.embed_count} icon="embed" one="embed" many="embeds" />;
     case "links":
       return (
         <span className="flex items-center gap-0.5">
@@ -141,28 +140,8 @@ function Cell({ k, r, now }: { k: ColumnKey; r: Row; now: number }) {
       );
     case "message_id":
       return <CopyId id={r.original_message_id} label="message ID" />;
-    case "author_id":
-      return <CopyId id={r.author_id} label="author ID" />;
-    case "original_channel_id":
-      return <CopyId id={r.original_channel_id} label="original channel ID" />;
     case "cloned_message_id":
       return <CopyId id={r.cloned_message_id} label="cloned message ID" />;
-    case "cloned_channel_id":
-      return <CopyId id={r.cloned_channel_id} label="cloned channel ID" />;
-    case "guild_ids":
-      return (
-        <span className="flex min-w-0 items-center gap-1">
-          <span className="min-w-0 flex-1">
-            <CopyId id={r.original_guild_id} label="original guild ID" />
-          </span>
-          <span className={MUTED} aria-label="cloned to">
-            →
-          </span>
-          <span className="min-w-0 flex-1">
-            <CopyId id={r.cloned_guild_id} label="cloned guild ID" />
-          </span>
-        </span>
-      );
   }
 }
 
@@ -184,7 +163,7 @@ export const MessageRow = memo(function MessageRow({
           <Cell k={k} r={row} now={now} />
         </td>
       ))}
-      <td className={cx(TD, "text-right leading-6")}>
+      <td className={cx(TD, PREVIEW_TD, "leading-6")}>
         <button type="button" className={PREVIEW_BTN} onClick={() => onPreview(row)} aria-label={`Preview message ${row.original_message_id}`}>
           Preview
         </button>

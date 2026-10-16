@@ -9,7 +9,7 @@ import { ToolbarSelect } from "../channels/ToolbarSelect";
 import type { ToolbarOption } from "../channels/ToolbarSelect";
 import { CONTROL, COUNT, HEAD_ROW, ICON_BTN, TH } from "../logs/LogsSkeleton";
 import { MessagesIcon } from "./icons";
-import { COLUMNS, NO_FILTERS, SORT_OPTIONS, loadColumns } from "./model";
+import { COLUMNS, NO_FILTERS, PREVIEW_WIDTH, SORT_OPTIONS, loadColumns, tableMinWidth } from "./model";
 import type { ColumnKey, Filters, SortKey } from "./model";
 
 export const TOOLBAR = cx(
@@ -37,13 +37,20 @@ export const TABLE_WRAP = cx(
   "relative h-[calc(100vh-318px)] min-h-[360px] overflow-auto rounded-xl border border-border",
   "bg-linear-to-b from-card-a50 to-well-a60 transition-opacity max-md:h-[calc(100vh-260px)]",
 );
-export const TABLE = "w-full min-w-[980px] table-fixed border-collapse";
+export const TABLE = "w-full table-fixed border-collapse";
 export const ROW = "group transition-colors hover:bg-primary-a6";
 export const TD = "overflow-hidden border-b border-b-white/4 px-3 py-2 align-middle text-[13px] text-text";
 export const CELL_TEXT = "block truncate";
 export const MUTED = "text-xs text-muted";
 export const MONO = "font-mono text-xs";
-export const PREVIEW_TH = cx(TH, "w-[96px] px-3 text-right");
+// Preview stays pinned to the right edge while the other columns scroll under it; a solid fill
+// hides them and a soft shadow marks the edge.
+const PINNED = "sticky right-0 shadow-[-10px_0_12px_-10px_rgba(0,0,0,0.6)]";
+export const PREVIEW_TH = cx(TH.replace("relative ", ""), PINNED, "z-[1] bg-card-solid px-3 text-right");
+export const PREVIEW_TD = cx(
+  PINNED,
+  "bg-card-solid text-right group-hover:bg-[linear-gradient(var(--color-primary-a6),var(--color-primary-a6))]",
+);
 
 const ALL_MAPPINGS: ToolbarOption[] = [{ value: "", label: "All mappings" }];
 const ALL_CHANNELS: ToolbarOption[] = [{ value: "", label: "All channels" }];
@@ -189,11 +196,11 @@ export function MessagesHead({ columns }: { columns: readonly ColumnKey[] }) {
     <thead className="sticky top-0 z-[2]">
       <tr className={HEAD_ROW}>
         {COLUMNS.filter((c) => on.has(c.key)).map((c) => (
-          <th key={c.key} scope="col" className={cx(TH, "px-3 text-left", c.width)}>
+          <th key={c.key} scope="col" className={cx(TH, "px-3 text-left")} style={{ width: c.width }}>
             {c.label}
           </th>
         ))}
-        <th scope="col" className={PREVIEW_TH}>
+        <th scope="col" className={PREVIEW_TH} style={{ width: PREVIEW_WIDTH }}>
           <span className="sr-only">Preview</span>
         </th>
       </tr>
@@ -204,18 +211,30 @@ export function MessagesHead({ columns }: { columns: readonly ColumnKey[] }) {
 // Bar widths per column so loading rows vary like real ones.
 const BAR: Record<ColumnKey, number[]> = {
   time: [52, 44, 60],
-  author: [120, 96, 140],
-  channel: [90, 110, 70],
-  mapping: [70, 90, 60],
-  counts: [24, 0, 36],
-  links: [110, 110, 110],
-  message_id: [150, 150, 150],
+  created: [150, 140, 150],
+  author_name: [90, 70, 110],
+  username: [80, 96, 64],
   author_id: [140, 140, 140],
+  original_channel: [90, 110, 70],
   original_channel_id: [140, 140, 140],
-  cloned_message_id: [150, 150, 150],
+  cloned_channel: [90, 110, 70],
   cloned_channel_id: [140, 140, 140],
-  guild_ids: [160, 160, 160],
+  original_guild: [100, 80, 120],
+  original_guild_id: [140, 140, 140],
+  cloned_guild: [100, 80, 120],
+  cloned_guild_id: [140, 140, 140],
+  mapping: [70, 90, 60],
+  attachments: [24, 24, 24],
+  embeds: [24, 24, 24],
+  links: [110, 110, 110],
+  message_id: [140, 140, 140],
+  cloned_message_id: [140, 140, 140],
 };
+
+/** The table element's sizing for these columns: full width, never narrower than the columns. */
+export function tableStyle(cols: readonly ColumnKey[]): { minWidth: number } {
+  return { minWidth: tableMinWidth(cols) };
+}
 export const LOADING_ROWS = 16;
 
 /** The table body while the first page loads: one row per message row, a bar where each value lands. */
@@ -234,7 +253,7 @@ export function MessagesLoadingRows({ columns, rows = LOADING_ROWS }: { columns:
               </td>
             );
           })}
-          <td className={cx(TD, "text-right")}>
+          <td className={cx(TD, PREVIEW_TD)}>
             <Skeleton.Text className="inline-block leading-6" width={64} />
           </td>
         </tr>
@@ -260,7 +279,7 @@ export function MessagesSkeleton() {
         />
       </div>
       <div inert className={TABLE_WRAP}>
-        <table className={TABLE}>
+        <table className={TABLE} style={tableStyle(columns)}>
           <MessagesHead columns={columns} />
           <tbody>
             <MessagesLoadingRows columns={columns} />

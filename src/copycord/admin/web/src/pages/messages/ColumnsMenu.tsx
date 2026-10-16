@@ -1,10 +1,11 @@
-// The Columns menu: a checkbox per column, saved by the page. Closes on Escape and outside clicks.
+// The Columns menu: a checkbox per column in groups (Message, Author, Channel, Guild, Other), saved
+// by the page. Closes on Escape and outside clicks.
 
 import { useEffect, useId, useRef, useState } from "react";
 import { Checkbox } from "../../components/ui/Checkbox";
 import { MessagesIcon } from "./icons";
 import { COLUMNS_BTN } from "./MessagesSkeleton";
-import { COLUMNS } from "./model";
+import { COLUMN_GROUPS, COLUMNS } from "./model";
 import type { ColumnKey } from "./model";
 
 export function ColumnsMenu({
@@ -60,34 +61,44 @@ export function ColumnsMenu({
           id={menuId}
           role="group"
           aria-label="Visible columns"
-          className="absolute top-[calc(100%+6px)] right-0 z-30 w-[240px] rounded-xl border border-border bg-surface-deep p-2 shadow-[0_16px_40px_var(--color-shadow-50)] max-md:left-0 max-md:w-full"
+          className="absolute top-[calc(100%+6px)] right-0 z-30 w-[440px] rounded-xl border border-border bg-surface-deep p-2 shadow-[0_16px_40px_var(--color-shadow-50)] max-md:left-0 max-md:w-full"
         >
-          <ul className="m-0 flex list-none flex-col p-0">
-            {COLUMNS.map((c) => {
-              const checked = on.has(c.key);
-              const last = checked && on.size === 1;
-              return (
-                <li key={c.key}>
-                  <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-text hover:bg-white/5">
-                    <Checkbox
-                      checked={checked}
-                      disabled={last}
-                      title={last ? "At least one column stays visible" : undefined}
-                      onChange={() => onToggle(c.key)}
-                    />
-                    {c.label}
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="max-h-[min(62vh,520px)] gap-x-2 overflow-y-auto overscroll-contain md:columns-2">
+            {COLUMN_GROUPS.map((g) => (
+              <div key={g} role="group" aria-label={`${g} columns`} className="mb-1.5 break-inside-avoid">
+                <div className="px-2 pt-1 pb-0.5 text-[11px] font-semibold tracking-[0.5px] text-muted uppercase" aria-hidden="true">
+                  {g}
+                </div>
+                <ul className="m-0 flex list-none flex-col p-0">
+                  {COLUMNS.filter((c) => c.group === g).map((c) => {
+                    const checked = on.has(c.key);
+                    const last = checked && on.size === 1;
+                    return (
+                      <li key={c.key}>
+                        <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1 text-[13px] text-text hover:bg-white/5">
+                          <Checkbox
+                            checked={checked}
+                            disabled={last}
+                            title={last ? "At least one column stays visible" : undefined}
+                            onChange={() => onToggle(c.key)}
+                          />
+                          {c.label}
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+            <div className="mb-1.5 break-inside-avoid px-2 pt-1 text-xs text-muted/70">Preview always shows.</div>
+          </div>
           <div className="mt-1 border-t border-t-border pt-1.5">
             <button
               type="button"
               className="w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-muted hover:bg-white/5 hover:text-text"
               onClick={onReset}
             >
-              Restore default columns
+              Restore defaults
             </button>
           </div>
         </div>
