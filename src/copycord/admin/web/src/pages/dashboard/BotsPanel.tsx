@@ -153,9 +153,9 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
         <table className={BOTS_TABLE}>
           <thead>
             <tr>
-              <th className={cx(HEAD, "text-left")}>Component</th>
-              <th className={cx(HEAD, "w-[200px] text-center")}>State</th>
-              <th className={cx(HEAD, "w-[120px] text-center")}>Uptime</th>
+              <th className={cx(HEAD, "w-[120px] text-left")}>Component</th>
+              <th className={cx(HEAD, "w-[180px] text-left max-sm:w-[130px]")}>State</th>
+              <th className={cx(HEAD, "text-left")}>Uptime</th>
             </tr>
           </thead>
           <tbody id="runtime-body">
@@ -166,7 +166,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
               return (
                 <tr key={role}>
                   <td className={cx(CELL, "text-left")}>{label}</td>
-                  <td className={cx(CELL, "text-center")}>
+                  <td className={cx(CELL, "text-left")}>
                     {loaded ? (
                       <span
                         id={`${role}-state`}
@@ -185,14 +185,14 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
                       tabIndex={note ? 0 : -1}
                       onClick={() => setExpanded((x) => ({ ...x, [role]: !x[role] }))}
                       className={cx(
-                        "mx-auto mt-1 block max-w-[184px] cursor-pointer overflow-hidden text-[11px] font-medium text-ellipsis text-muted empty:hidden",
+                        "mt-1 block max-w-full cursor-pointer overflow-hidden text-[11px] font-medium text-ellipsis text-muted empty:hidden",
                         expanded[role] ? "whitespace-normal" : "whitespace-nowrap",
                       )}
                     >
                       {note}
                     </span>
                   </td>
-                  <td id={`${role}-uptime`} className={cx(CELL, "text-center")}>
+                  <td id={`${role}-uptime`} className={cx(CELL, "text-left")}>
                     {s.running && s.uptime_sec != null && start != null ? <Uptime start={start} /> : ""}
                   </td>
                 </tr>

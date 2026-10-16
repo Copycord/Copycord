@@ -1,6 +1,6 @@
 // Covers a page while useStatusGate says the bot is not ready: the content is
-// blurred and inert, and the gate message is announced politely. Like the old #status-gate the
-// dim is fixed over the whole viewport under the header, below the side menu drawer (see Z).
+// faded to grey (no blur: it smeared accent fills into a glow) and inert, and the gate message
+// is announced politely. Like the old #status-gate the dim is fixed over the whole viewport under the header, below the side menu drawer (see Z).
 
 import type { ReactNode } from "react";
 import type { StatusGateState } from "../../hooks/useStatusGate";
@@ -13,7 +13,7 @@ export function StatusGate({ gate, children }: { gate: StatusGateState; children
       <div
         inert={gate.gated || undefined}
         aria-hidden={gate.gated || undefined}
-        className={cx(gate.gated && "pointer-events-none select-none blur-[4px]")}
+        className={cx(gate.gated && "pointer-events-none select-none opacity-40 grayscale")}
       >
         {children}
       </div>

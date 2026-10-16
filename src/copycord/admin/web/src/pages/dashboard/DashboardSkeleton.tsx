@@ -269,19 +269,19 @@ export function DashboardSkeleton() {
           <table className={BOTS_TABLE}>
             <thead>
               <tr>
-                <th className={cx(BOTS_HEAD, "text-left")}>Component</th>
-                <th className={cx(BOTS_HEAD, "w-[200px] text-center")}>State</th>
-                <th className={cx(BOTS_HEAD, "w-[120px] text-center")}>Uptime</th>
+                <th className={cx(BOTS_HEAD, "w-[120px] text-left")}>Component</th>
+                <th className={cx(BOTS_HEAD, "w-[180px] text-left max-sm:w-[130px]")}>State</th>
+                <th className={cx(BOTS_HEAD, "text-left")}>Uptime</th>
               </tr>
             </thead>
             <tbody>
               {BOT_ROLES.map(({ role, label }) => (
                 <tr key={role}>
                   <td className={cx(BOTS_CELL, "text-left")}>{label}</td>
-                  <td className={cx(BOTS_CELL, "text-center")}>
+                  <td className={cx(BOTS_CELL, "text-left")}>
                     <BotStatePending />
                   </td>
-                  <td className={cx(BOTS_CELL, "text-center")} />
+                  <td className={cx(BOTS_CELL, "text-left")} />
                 </tr>
               ))}
             </tbody>

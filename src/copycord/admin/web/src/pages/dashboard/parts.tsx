@@ -33,8 +33,8 @@ export const BOTS_CARD = "mt-[18px] rounded-card border border-border bg-(image:
 export const BOTS_TITLE = "my-[0.83em] text-[24px] leading-[normal] font-bold";
 export const BOTS_TABLE = "mt-2 w-full table-fixed border-collapse border-table-rule text-left [&_tr]:border-table-rule";
 
-// The old .runtime-table: fixed layout, 110px State and 120px Uptime columns,
-// muted 0.9rem headers, a rule under every row, centered cells after the first.
+// The old .runtime-table: fixed layout, 120px Component and 180px State columns,
+// Uptime takes the rest, muted 0.9rem headers, a rule under every row, left-aligned cells.
 export const BOTS_HEAD = "border-b border-b-border px-3 py-2 align-middle text-[0.9rem] font-medium whitespace-nowrap text-muted";
 export const BOTS_CELL = "border-b border-b-border px-3 py-2 align-middle text-[0.95rem] whitespace-nowrap";
 
