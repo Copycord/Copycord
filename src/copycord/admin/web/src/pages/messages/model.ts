@@ -35,7 +35,7 @@ export const COLUMNS: readonly ColumnDef[] = [
   { key: "channel", label: "Channel", width: "w-[160px]", defaultOn: true },
   { key: "mapping", label: "Mapping", width: "w-[130px]", defaultOn: true },
   { key: "counts", label: "Files", width: "w-[84px]", defaultOn: true },
-  { key: "links", label: "Links", width: "w-[84px]", defaultOn: true },
+  { key: "links", label: "Links", width: "w-[150px]", defaultOn: true },
   { key: "message_id", label: "Message ID", width: "w-[210px]", defaultOn: true },
   { key: "author_id", label: "Author ID", width: "w-[200px]", defaultOn: false },
   { key: "original_channel_id", label: "Original channel ID", width: "w-[200px]", defaultOn: false },

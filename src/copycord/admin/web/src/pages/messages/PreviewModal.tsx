@@ -27,6 +27,8 @@ function embedText(v: LiveEmbed["author"] | LiveEmbed["footer"]): string | null 
   return ("name" in v ? v.name : "text" in v ? v.text : null) ?? null;
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 function formatSize(n: number | null | undefined): string {
   if (!n) return "";
   if (n < 1024) return `${n} B`;
@@ -102,7 +104,7 @@ export function PreviewModal({ row, onClose }: { row: MessageRow | null; onClose
         <Meta label="Attachments, embeds">
           {row.attachment_count === null && row.embed_count === null
             ? "-"
-            : `${row.attachment_count ?? 0} attachments, ${row.embed_count ?? 0} embeds`}
+            : plural(row.attachment_count ?? 0, "attachment") + ", " + plural(row.embed_count ?? 0, "embed")}
         </Meta>
         <Meta label="Discord">
           <span className="-ml-1.5 flex items-center gap-1">

@@ -16,7 +16,7 @@ export const TOOLBAR = cx(
   "mb-3 flex flex-col gap-2.5 rounded-xl border border-border px-3.5 py-2.5",
   "bg-linear-135 from-card-hover to-panel-a40",
 );
-export const TOOLBAR_ROW = "flex flex-wrap items-center gap-2.5 max-md:flex-col max-md:items-stretch";
+export const TOOLBAR_ROW = "flex flex-wrap items-center gap-2.5 max-md:grid max-md:grid-cols-2 max-md:items-end";
 export const SEARCH_INPUT = cx(CONTROL, "w-full py-[7px] pr-3 pl-[30px] placeholder:text-muted/60");
 export const DATE_INPUT = cx(CONTROL, "h-[34px] w-[150px] px-2.5 [color-scheme:dark] max-md:w-full");
 export const PILL_BTN =
@@ -39,7 +39,7 @@ export const TABLE_WRAP = cx(
 );
 export const TABLE = "w-full min-w-[980px] table-fixed border-collapse";
 export const ROW = "group transition-colors hover:bg-primary-a6";
-export const TD = "border-b border-b-white/4 px-3 py-2 align-middle text-[13px] text-text";
+export const TD = "overflow-hidden border-b border-b-white/4 px-3 py-2 align-middle text-[13px] text-text";
 export const CELL_TEXT = "block truncate";
 export const MUTED = "text-xs text-muted";
 export const MONO = "font-mono text-xs";
@@ -58,7 +58,7 @@ export function MessagesHeader({ count }: { count?: ReactNode }) {
     <div className="my-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
       <div className="min-w-0">
         <h1 className="m-0 text-[22px] font-bold text-text">Messages</h1>
-        <p className="m-0 mt-0.5 truncate text-[13px] text-muted">
+        <p className="m-0 mt-0.5 text-[13px] text-muted md:truncate">
           Every message Copycord cloned. Search, filter and preview them live from Discord.
         </p>
       </div>
@@ -100,13 +100,13 @@ export function MessagesToolbar({
   return (
     <div className={TOOLBAR}>
       <div className={TOOLBAR_ROW}>
-        <div className="relative flex min-w-[240px] flex-1 items-center">
+        <div className="relative flex min-w-[240px] flex-1 items-center max-md:col-span-2 max-md:min-w-0">
           <MessagesIcon name="search" size={15} className="pointer-events-none absolute left-2.5 text-muted" />
           <input
             type="search"
             id="messages-search"
             className={SEARCH_INPUT}
-            placeholder="Search author name, or a message, channel or author id"
+            placeholder="Search by author name or ID"
             aria-label="Search messages"
             autoComplete="off"
             value={searchInput}
@@ -154,7 +154,7 @@ export function MessagesToolbar({
           options={ATTACHMENT_OPTIONS}
           onChange={(v) => onFilter({ attachments: v })}
         />
-        <label className="flex items-center gap-1.5 text-xs text-muted max-md:justify-between">
+        <label className="flex items-center gap-1.5 text-xs text-muted max-md:flex-col max-md:items-stretch">
           From
           <input
             type="date"
@@ -165,7 +165,7 @@ export function MessagesToolbar({
             onChange={(e) => onFilter({ from: e.target.value })}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted max-md:justify-between">
+        <label className="flex items-center gap-1.5 text-xs text-muted max-md:flex-col max-md:items-stretch">
           To
           <input
             type="date"
