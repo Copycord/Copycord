@@ -9,8 +9,7 @@ import { readLastCount } from "../../components/ui/lastCount";
 
 /** The rule grid, shared with the page so both lay the tiles out the same way. */
 export const FWD_LIST =
-  "fwd-list grid grid-cols-[1fr] items-start gap-3.5 min-[701px]:grid-cols-[repeat(2,minmax(260px,1fr))] " +
-  "min-[1101px]:grid-cols-[repeat(3,minmax(260px,1fr))] min-[1501px]:grid-cols-[repeat(4,minmax(260px,1fr))]";
+  "fwd-list grid grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] items-start gap-3.5";
 
 /** The toolbar over the rules (search, Total Forwarded, New Forward) and its search box, shared with the page. */
 export const FWD_TOOLBAR = "col-span-full mb-2 flex items-start justify-between gap-3";

@@ -19,10 +19,7 @@ export const CUSTOM =
   "bg-[color-mix(in_srgb,var(--color-custom-ink)_12%,var(--color-wash-4-5))] text-custom-ink";
 
 export const CARD_GRID =
-  "grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3 xl:gap-4 " +
-  "max-sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] " +
-  "max-[520px]:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] max-[520px]:gap-2.5 " +
-  "max-[360px]:grid-cols-1";
+  "grid grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] gap-3 xl:gap-4 max-[520px]:gap-2.5";
 // The card surface of the dashboard mapping cards (bg-card).
 export const CARD = "block min-w-0 rounded-panel border bg-card p-3 max-[520px]:p-2.5";
 // .ch-head: the name (.ch-name) and the menu button (.ch-top-right)

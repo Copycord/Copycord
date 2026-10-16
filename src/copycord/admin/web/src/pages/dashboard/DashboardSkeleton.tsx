@@ -229,7 +229,7 @@ export const MAPPINGS_HINT_TEXT = "Map a source server to a target server to ena
 export const MAPPINGS_SEARCH =
   "ml-0 inline-block min-w-[220px] rounded-lg border border-log-input-edge bg-log-input-bg px-2.5 py-1.5 text-[13.3333px] text-text-soft caret-log-input-focus outline-none transition placeholder:text-text-soft/55 focus-visible:border-log-input-focus";
 export const MAPPING_GRID =
-  "mt-4 grid max-h-80 min-h-[180px] grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4 overflow-y-auto py-2 pr-1 max-[600px]:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] max-[600px]:gap-3";
+  "mt-4 grid max-h-80 min-h-[180px] grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] gap-4 overflow-y-auto py-2 pr-1 max-[600px]:gap-3";
 export const NEW_MAPPING_TILE =
   "group/new relative flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-wash-2 p-4 text-left text-muted transition max-[600px]:min-h-[120px] max-[600px]:p-3.5";
 

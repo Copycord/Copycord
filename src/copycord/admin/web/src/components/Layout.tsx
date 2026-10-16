@@ -1,5 +1,5 @@
 // Page frame from the old templates: a fixed header at every width, the side menu as a drawer under it,
-// the content column (.container and its per-page width variants) and the page footer.
+// the content column (one centered column for every page) and the page footer.
 
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
@@ -20,28 +20,23 @@ interface Frame {
   sidebarFooter?: "version" | "social";
 }
 
-// .container: centered, a flex column that grows to push the footer down, 1100px wide at most.
-const COLUMN = "mx-auto flex w-full flex-1 flex-col";
-const CONTAINER = `${COLUMN} max-w-[1100px]`;
-// .channels-page / .guilds-page .container.wide and body.page-forwarding .container: full width, 20px sides.
-const WIDE = "flex w-full flex-1 flex-col px-5";
+// One column for every page: centered, a flex column that grows to push the footer down, --layout-max
+// (1320px) wide at most. The body's 28px padding is the gutter on both sides at every width.
+const PAGE_COLUMN = "mx-auto flex w-full max-w-(--layout-max) flex-1 flex-col";
 
 // The Tasks list and its run pages (/tasks/runs/:id) share one frame.
-const TASKS_FRAME: Frame = { main: WIDE };
+const TASKS_FRAME: Frame = { main: PAGE_COLUMN };
 
 const FRAMES: Record<string, Frame> = {
-  "/": { main: CONTAINER, footerInside: true },
-  "/channels": { main: `${WIDE} max-sm:px-3` },
-  "/guilds": { main: WIDE },
-  "/forwarding": { main: WIDE, footerInside: true },
+  "/": { main: PAGE_COLUMN, footerInside: true },
+  "/channels": { main: PAGE_COLUMN },
+  "/guilds": { main: PAGE_COLUMN },
+  "/forwarding": { main: PAGE_COLUMN, footerInside: true },
   "/tasks": TASKS_FRAME,
-  // .scraper-wide
-  "/scraper": { main: `${COLUMN} max-w-[1200px] px-5 pb-20`, sidebarFooter: "social" },
-  // .adv-wide
-  "/system": { main: `${COLUMN} max-w-[1120px] xl:max-w-[1240px]` },
-  // .logs-wide
-  "/logs": { main: `${COLUMN} max-w-[1200px]` },
-  "/_kit": { main: CONTAINER },
+  "/scraper": { main: `${PAGE_COLUMN} pb-20`, sidebarFooter: "social" },
+  "/system": { main: PAGE_COLUMN },
+  "/logs": { main: PAGE_COLUMN },
+  "/_kit": { main: PAGE_COLUMN },
 };
 
 // 404.html: main.page-main fills the width and the page has no footer.

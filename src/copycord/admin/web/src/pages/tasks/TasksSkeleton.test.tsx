@@ -137,11 +137,12 @@ describe("run row skeleton", () => {
     expect(ROW_MENU.split(" ")).toEqual(expect.arrayContaining(["relative", "z-10"]));
   });
 
-  it("keeps the runs card unclipped with no empty minimum body under one row, the page at most 1280 px and centred", () => {
+  it("keeps the runs card unclipped with no empty minimum body under one row, the page filling the shared centered column", () => {
     expect(LIST_FRAME.split(" ")).not.toContain("overflow-hidden");
     expect(LIST_FRAME).not.toMatch(/min-h-/);
     expect(ROW_BOX).toMatch(/min-h-16/);
-    expect(PAGE.split(" ")).toEqual(expect.arrayContaining(["mx-auto", "max-w-[1280px]"]));
+    expect(PAGE.split(" ")).not.toContain("mx-auto");
+    expect(PAGE).not.toMatch(/max-w-/);
   });
 
   it("draws as many rows as the list had last time, at most a page, one on a first visit, and the empty state with none", () => {

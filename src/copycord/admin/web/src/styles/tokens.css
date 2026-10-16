@@ -73,6 +73,11 @@
   --spacing-drawer: min(320px, 86vw);
 }
 
+/* The page column every route shares: centered, 1320px at most, inside the body's 28px gutters. */
+@theme static {
+  --layout-max: 1320px;
+}
+
 /* Role tokens for colours the components used to hardcode. Static so the
    ones only read through var() in inline styles are always emitted. */
 @theme static {

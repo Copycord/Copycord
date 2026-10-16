@@ -17,8 +17,8 @@ import { ToolbarSelect } from "../channels/ToolbarSelect";
 import type { RunCounts } from "../../types/tasks";
 import { runTypeOf, typeLabel } from "./typeLabels";
 
-/** The rail and the page's column, at most 1280 px wide and centred, so a wide screen keeps a row together. */
-export const PAGE = "mx-auto my-3 flex w-full max-w-[1280px] gap-6 max-md:flex-col";
+/** The rail and the page's column side by side, filling the shared centered page column (--layout-max). */
+export const PAGE = "my-3 flex w-full gap-6 max-md:flex-col";
 export const RAIL = "w-[240px] shrink-0 max-md:w-full";
 export const RAIL_ITEM =
   "relative flex items-center justify-between gap-2 rounded-rail px-3 py-1.5 text-sm text-text no-underline transition-colors " +

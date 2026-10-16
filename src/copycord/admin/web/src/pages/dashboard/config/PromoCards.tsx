@@ -66,7 +66,7 @@ const svg = (size: number, d: string, className?: string) => (
 
 export function PromoCards() {
   return (
-    <section className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4" aria-label="Quick actions">
+    <section className="mb-4 grid grid-cols-[repeat(auto-fill,minmax(min(320px,100%),1fr))] gap-4" aria-label="Quick actions">
       <Promo
         className="promo-star [--icon-glow-rgb:255,213,79]"
         href={PROMO_LINKS.github}
