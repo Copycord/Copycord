@@ -122,7 +122,21 @@ export function Sidebar({ onNavigate, hide = [], footer = "version", version }: 
               </svg>
               GitHub
             </a>
-            <span className="text-text-2 tabular-nums opacity-90">{version || "dev"}</span>
+            {version ? (
+              // Same target as the page footer's version link: the release notes for this tag.
+              <a
+                id="sidebar-version-link"
+                className="text-text-2 tabular-nums opacity-90 transition-colors duration-200 hover:text-accent hover:opacity-100"
+                href={`${PROMO_LINKS.github}/releases/tag/${version}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Copycord ${version} release notes`}
+              >
+                {version}
+              </a>
+            ) : (
+              <span className="text-text-2 tabular-nums opacity-90">dev</span>
+            )}
           </>
         )}
       </footer>
