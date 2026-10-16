@@ -1,36 +1,41 @@
-/* Tailwind entry and design tokens, taken from the custom properties in
-   frontend/src/main.css so the SPA matches the current dashboard. */
+/* Tailwind entry and design tokens. The palette: near-black neutral surfaces
+   barely tinted toward the brand hue (base #0c0c14, surface #12121b, elevated
+   #181826, hover #1e1e2d), hairline borders (#262637, strong #34344a), three
+   text steps (#ededf4, #a3a3b8, #6e6e86), the brand purple as the one accent,
+   and semantic status colours: success #3ecf8e, warning #f5a524 (cancelled and
+   stopped too), danger #f0506e, info #4f9cf7, neutral #8b8b9e. */
 @import "tailwindcss";
 
 @theme {
-  --color-page: #120a22;
-  --color-bg2: #2a273f;
-  --color-bg-2: #141224;
-  --color-bg-3: #19172c;
-  --color-card: #1b1030aa;
-  --color-card-solid: #1b1030;
-  --color-text: #f6f2ff;
-  --color-text-1: #e7e7f4;
-  --color-text-2: #b8b8cc;
-  --color-muted: #c8b8e8;
-  --color-border: #2c1d4a;
+  --color-page: #0c0c14;
+  --color-bg2: #262637;
+  --color-bg-2: #12121b;
+  --color-bg-3: #181826;
+  --color-card: #12121b;
+  --color-card-solid: #12121b;
+  --color-text: #ededf4;
+  --color-text-1: #ededf4;
+  --color-text-2: #a3a3b8;
+  --color-muted: #a3a3b8;
+  --color-border: #262637;
   --color-line-1: rgba(255, 255, 255, 0.08);
   --color-line-2: rgba(255, 255, 255, 0.14);
   --color-primary: #8b5cf6;
   --color-primary-600: #7c3aed;
   --color-primary-700: #6d28d9;
   --color-accent: #a78bfa;
-  --color-brand-ghost: rgba(139, 92, 246, 0.18);
-  --color-brand-ghost-2: rgba(139, 92, 246, 0.32);
-  --color-danger: #ef4444;
-  --color-good: #10b981;
+  --color-brand-ghost: rgba(139, 92, 246, 0.14);
+  --color-brand-ghost-2: rgba(139, 92, 246, 0.28);
+  --color-danger: #f0506e;
+  --color-good: #3ecf8e;
   /* Active work (a running or queued task run); the only blue in the theme. */
   --color-info: #4f9cf7;
-  --color-custom-ink: #facc15;
-  --color-progress: #22c55e;
-  --color-control: #140b26;
-  --color-rail-hover: rgba(167, 139, 250, 0.16);
-  --color-rail-active: rgba(167, 139, 250, 0.28);
+  /* Warning: cancelled, stopped, degraded, customised. */
+  --color-custom-ink: #f5a524;
+  --color-progress: #3ecf8e;
+  --color-control: #181826;
+  --color-rail-hover: rgba(255, 255, 255, 0.05);
+  --color-rail-active: rgba(139, 92, 246, 0.16);
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
     "Noto Sans", sans-serif;
@@ -53,10 +58,11 @@
   --radius-panel: 16px;
   --radius-card: 18px;
 
-  --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.25);
-  --shadow-soft: 0 4px 12px rgba(0, 0, 0, 0.2);
-  --shadow-accent: 0 4px 16px rgba(167, 139, 250, 0.2);
-  --shadow-danger: 0 4px 16px rgba(239, 68, 68, 0.35);
+  /* Flat surfaces: a hairline-deep shadow at most, no coloured glows. */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-accent: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-danger: 0 1px 2px rgba(0, 0, 0, 0.25);
 
   --spacing-header: 60px;
   --spacing-footer: 48px;
@@ -69,60 +75,64 @@
 /* Role tokens for colours the components used to hardcode. Static so the
    ones only read through var() in inline styles are always emitted. */
 @theme static {
-  --color-surface-deep: #0f0820;
-  --color-control-top: #1a1030;
-  --color-text-soft: #e6e1ff;
-  --color-text-status: #cfd3ff;
+  --color-border-strong: #34344a;
+  --color-surface-deep: #12121b;
+  --color-control-top: #181826;
+  --color-text-soft: #ededf4;
+  --color-text-status: #a3a3b8;
   --color-accent-soft: #c4b5fd;
   --color-accent-deep: #5a27c9;
-  --color-good-deep: #0b8a69;
+  --color-good-deep: #23a06a;
   --color-primary-hover: #9366f9;
   --color-primary-edge: #4c2d7a;
-  --color-secondary-top: #1f1237;
-  --color-secondary-bottom: #160b2a;
-  --color-danger-soft: #f87171;
-  --color-danger-strong: #dc2626;
-  --color-danger-deep: #b91c1c;
-  --color-danger-edge: #7f1d1d;
-  --color-danger-text: #fecaca;
+  --color-secondary-top: #181826;
+  --color-secondary-bottom: #181826;
+  --color-danger-soft: #f4728b;
+  --color-danger-strong: #d9405d;
+  --color-danger-deep: #c4304f;
+  --color-danger-edge: #7a2638;
+  --color-danger-text: #f9c0cb;
   --color-wash-4: rgba(255, 255, 255, 0.04);
   --color-wash-10: rgba(255, 255, 255, 0.1);
   --color-shadow-18: rgba(0, 0, 0, 0.18);
   --color-shadow-45: rgba(0, 0, 0, 0.45);
   --color-shadow-50: rgba(0, 0, 0, 0.5);
-  --color-shadow-55: rgba(0, 0, 0, 0.55);
+  /* Only the Login card reads this one; a flat card keeps a faint lift. */
+  --color-shadow-55: rgba(0, 0, 0, 0.2);
   --color-shadow-60: rgba(0, 0, 0, 0.6);
   --color-primary-a15: rgba(139, 92, 246, 0.15);
   --color-primary-a28: rgba(139, 92, 246, 0.28);
   --color-accent-a10: rgba(167, 139, 250, 0.1);
   --color-accent-a18: rgba(167, 139, 250, 0.18);
   --color-accent-a30: rgba(167, 139, 250, 0.3);
-  --color-danger-a10: rgba(239, 68, 68, 0.1);
-  --color-danger-a35: rgba(239, 68, 68, 0.35);
+  --color-danger-a10: rgba(240, 80, 110, 0.1);
+  --color-danger-a35: rgba(240, 80, 110, 0.35);
 
   /* Dashboard */
-  --color-field-readonly: #1a102d;
-  --color-card-hover: rgba(27, 16, 48, 0.6);
-  --color-log-bg: #0e0720;
-  --color-log-input-bg: #1c1830;
-  --color-log-input-edge: #3b365a;
-  --color-log-input-focus: #7c5cff;
-  --color-table-rule: #808080;
+  --color-field-readonly: #12121b;
+  --color-card-hover: rgba(30, 30, 45, 0.6);
+  --color-log-bg: #0c0c14;
+  --color-log-input-bg: #181826;
+  --color-log-input-edge: #34344a;
+  --color-log-input-focus: #8b5cf6;
+  --color-table-rule: #34344a;
   --color-role-default: #99AAB5;
-  --color-run-bg: #183a2e;
-  --color-run-text: #baf7d0;
-  --color-stop-bg: #3a1c20;
-  --color-stop-text: #ffc5cf;
-  --color-ok: #4caf50;
-  --color-warn: #ff9800;
-  --color-fail: #ff6b6b;
-  --color-favorite: #ffc83d;
-  --color-update: #e53935;
-  --color-good-pale: #86efac;
-  --color-danger-pale: #f4a3a3;
-  --color-note: #e0a44b;
+  /* Running and stopped state chips: the success and danger soft tints laid
+     solid over a surface, with the status hue as the text. */
+  --color-run-bg: #182c2b;
+  --color-run-text: #3ecf8e;
+  --color-stop-bg: #311b27;
+  --color-stop-text: #f7a1b2;
+  --color-ok: #3ecf8e;
+  --color-warn: #f5a524;
+  --color-fail: #f0506e;
+  --color-favorite: #f5a524;
+  --color-update: #f0506e;
+  --color-good-pale: #8fe6bd;
+  --color-danger-pale: #f7a1b2;
+  --color-note: #f5a524;
   --color-star: #ffd54f;
-  --color-promo-edge: rgba(214, 188, 250, 0.35);
+  --color-promo-edge: #34344a;
   --color-github-top: #24292f;
   --color-github-bottom: #0d1117;
   --color-discord: #5865f2;
@@ -143,80 +153,82 @@
   --color-wash-18: rgba(255, 255, 255, 0.18);
   --color-wash-20: rgba(255, 255, 255, 0.2);
   --color-wash-35: rgba(255, 255, 255, 0.35);
-  --color-shadow-20: rgba(0, 0, 0, 0.2);
+  /* shadow-20 and shadow-40 sit under flat cards (forwarding rules, the
+     mapping and guild placeholders), so they are near-none. */
+  --color-shadow-20: rgba(0, 0, 0, 0.1);
   --color-shadow-25: rgba(0, 0, 0, 0.25);
   --color-shadow-32: rgba(0, 0, 0, 0.32);
   --color-shadow-35: rgba(0, 0, 0, 0.35);
-  --color-shadow-40: rgba(0, 0, 0, 0.4);
+  --color-shadow-40: rgba(0, 0, 0, 0.1);
   --color-accent-a12: rgba(167, 139, 250, 0.12);
-  --color-danger-a8: rgba(239, 68, 68, 0.08);
-  --color-delete-a10: rgba(255, 76, 76, 0.1);
-  --color-fail-a10: rgba(255, 80, 80, 0.1);
-  --color-ok-a10: rgba(76, 175, 80, 0.1);
-  --color-ok-a12: rgba(76, 175, 80, 0.12);
-  --color-warn-a10: rgba(255, 152, 0, 0.1);
-  --color-warn-a12: rgba(255, 152, 0, 0.12);
-  --color-favorite-a10: rgba(255, 200, 61, 0.1);
-  --color-favorite-a40: rgba(255, 200, 61, 0.4);
-  --color-danger-pale-a12: rgba(244, 163, 163, 0.12);
+  --color-danger-a8: rgba(240, 80, 110, 0.08);
+  --color-delete-a10: rgba(240, 80, 110, 0.1);
+  --color-fail-a10: rgba(240, 80, 110, 0.1);
+  --color-ok-a10: rgba(62, 207, 142, 0.1);
+  --color-ok-a12: rgba(62, 207, 142, 0.12);
+  --color-warn-a10: rgba(245, 165, 36, 0.1);
+  --color-warn-a12: rgba(245, 165, 36, 0.12);
+  --color-favorite-a10: rgba(245, 165, 36, 0.1);
+  --color-favorite-a40: rgba(245, 165, 36, 0.4);
+  --color-danger-pale-a12: rgba(247, 161, 178, 0.12);
   --color-star-a55: rgba(255, 213, 79, 0.55);
 
   /* Channels */
-  --color-menu-hover: #8b8b8b;
+  --color-menu-hover: #8b8b9e;
   --color-native-select: #efefef;
   --color-wash-4-5: rgba(255, 255, 255, 0.045);
-  --color-good-a12: rgba(16, 185, 129, 0.12);
-  --color-good-a35: rgba(16, 185, 129, 0.35);
+  --color-good-a12: rgba(62, 207, 142, 0.12);
+  --color-good-a35: rgba(62, 207, 142, 0.35);
 
   /* Guilds */
-  --color-dialog-text: #e7eaf0;
-  --color-dialog-small: #160c30;
+  --color-dialog-text: #ededf4;
+  --color-dialog-small: #12121b;
   --color-accent-a6: rgba(167, 139, 250, 0.06);
   --color-accent-a22: rgba(167, 139, 250, 0.22);
-  --color-good-a18: rgba(16, 185, 129, 0.18);
+  --color-good-a18: rgba(62, 207, 142, 0.18);
 
   /* Forwarding */
-  --color-good-strong: #059669;
-  --color-info-soft: #60a5fa;
-  --color-muted-a40: rgba(200, 184, 232, 0.4);
-  --color-surface-deep-a95: rgba(15, 8, 32, 0.95);
-  --color-good-a40: rgba(16, 185, 129, 0.4);
-  --color-danger-a12: rgba(239, 68, 68, 0.12);
+  --color-good-strong: #26a06b;
+  --color-info-soft: #4f9cf7;
+  --color-muted-a40: rgba(163, 163, 184, 0.4);
+  --color-surface-deep-a95: rgba(18, 18, 27, 0.95);
+  --color-good-a40: rgba(62, 207, 142, 0.4);
+  --color-danger-a12: rgba(240, 80, 110, 0.12);
   --color-primary-a12: rgba(139, 92, 246, 0.12);
   --color-primary-a30: rgba(139, 92, 246, 0.3);
   --color-primary-a35: rgba(139, 92, 246, 0.35);
-  --color-info-a12: rgba(59, 130, 246, 0.12);
-  --color-info-a35: rgba(59, 130, 246, 0.35);
-  --color-slate-a10: rgba(148, 163, 184, 0.1);
-  --color-slate-a30: rgba(148, 163, 184, 0.3);
+  --color-info-a12: rgba(79, 156, 247, 0.12);
+  --color-info-a35: rgba(79, 156, 247, 0.35);
+  --color-slate-a10: rgba(139, 139, 158, 0.1);
+  --color-slate-a30: rgba(139, 139, 158, 0.3);
 
   /* Scraper */
-  --color-good-soft: #34d399;
-  --color-caution: #fbbf24;
-  --color-control-a35: rgba(20, 11, 38, 0.35);
-  --color-control-a40: rgba(20, 11, 38, 0.4);
-  --color-control-a50: rgba(20, 11, 38, 0.5);
-  --color-control-a60: rgba(20, 11, 38, 0.6);
-  --color-control-a70: rgba(20, 11, 38, 0.7);
-  --color-control-a80: rgba(20, 11, 38, 0.8);
-  --color-good-soft-a10: rgba(52, 211, 153, 0.1);
-  --color-good-soft-a25: rgba(52, 211, 153, 0.25);
-  --color-good-a8: rgba(16, 185, 129, 0.08);
-  --color-good-a10: rgba(16, 185, 129, 0.1);
-  --color-good-a15: rgba(16, 185, 129, 0.15);
-  --color-good-a30: rgba(16, 185, 129, 0.3);
-  --color-good-a50: rgba(16, 185, 129, 0.5);
-  --color-danger-a15: rgba(239, 68, 68, 0.15);
-  --color-danger-a30: rgba(239, 68, 68, 0.3);
-  --color-danger-a40: rgba(239, 68, 68, 0.4);
+  --color-good-soft: #3ecf8e;
+  --color-caution: #f5a524;
+  --color-control-a35: rgba(24, 24, 38, 0.35);
+  --color-control-a40: rgba(24, 24, 38, 0.4);
+  --color-control-a50: rgba(24, 24, 38, 0.5);
+  --color-control-a60: rgba(24, 24, 38, 0.6);
+  --color-control-a70: rgba(24, 24, 38, 0.7);
+  --color-control-a80: rgba(24, 24, 38, 0.8);
+  --color-good-soft-a10: rgba(62, 207, 142, 0.1);
+  --color-good-soft-a25: rgba(62, 207, 142, 0.25);
+  --color-good-a8: rgba(62, 207, 142, 0.08);
+  --color-good-a10: rgba(62, 207, 142, 0.1);
+  --color-good-a15: rgba(62, 207, 142, 0.15);
+  --color-good-a30: rgba(62, 207, 142, 0.3);
+  --color-good-a50: rgba(62, 207, 142, 0.5);
+  --color-danger-a15: rgba(240, 80, 110, 0.15);
+  --color-danger-a30: rgba(240, 80, 110, 0.3);
+  --color-danger-a40: rgba(240, 80, 110, 0.4);
   --color-primary-a8: rgba(139, 92, 246, 0.08);
   --color-primary-a25: rgba(139, 92, 246, 0.25);
   --color-primary-a40: rgba(139, 92, 246, 0.4);
-  --color-info-a15: rgba(59, 130, 246, 0.15);
+  --color-info-a15: rgba(79, 156, 247, 0.15);
 
   /* Logs */
-  --color-danger-light: #fca5a5;
-  --color-slate: #94a3b8;
+  --color-danger-light: #f7a1b2;
+  --color-slate: #8b8b9e;
   --color-kind-thread: #f472b6;
   --color-kind-role: #fb923c;
   --color-kind-emoji: #22d3ee;
@@ -224,27 +236,27 @@
   --color-kind-guild: #c084fc;
   --color-kind-permissions: #fdba74;
   --color-kind-metadata: #7dd3fc;
-  --color-card-a50: rgba(27, 16, 48, 0.5);
-  --color-panel-a40: rgba(20, 10, 40, 0.4);
-  --color-panel-a60: rgba(20, 10, 40, 0.6);
-  --color-panel-a95: rgba(20, 10, 40, 0.95);
-  --color-well-a50: rgba(15, 8, 30, 0.5);
-  --color-well-a60: rgba(15, 8, 30, 0.6);
+  --color-card-a50: rgba(18, 18, 27, 0.5);
+  --color-panel-a40: rgba(18, 18, 27, 0.4);
+  --color-panel-a60: rgba(18, 18, 27, 0.6);
+  --color-panel-a95: rgba(18, 18, 27, 0.95);
+  --color-well-a50: rgba(12, 12, 20, 0.5);
+  --color-well-a60: rgba(12, 12, 20, 0.6);
   --color-primary-a6: rgba(139, 92, 246, 0.06);
   --color-primary-a10: rgba(139, 92, 246, 0.1);
   --color-primary-a20: rgba(139, 92, 246, 0.2);
   --color-primary-a50: rgba(139, 92, 246, 0.5);
   --color-accent-a15: rgba(167, 139, 250, 0.15);
   --color-accent-a25: rgba(167, 139, 250, 0.25);
-  --color-danger-a20: rgba(239, 68, 68, 0.2);
-  --color-danger-a25: rgba(239, 68, 68, 0.25);
-  --color-good-a25: rgba(16, 185, 129, 0.25);
-  --color-caution-a15: rgba(251, 191, 36, 0.15);
-  --color-caution-a25: rgba(251, 191, 36, 0.25);
-  --color-info-soft-a15: rgba(96, 165, 250, 0.15);
-  --color-info-soft-a25: rgba(96, 165, 250, 0.25);
-  --color-slate-a15: rgba(148, 163, 184, 0.15);
-  --color-slate-a25: rgba(148, 163, 184, 0.25);
+  --color-danger-a20: rgba(240, 80, 110, 0.2);
+  --color-danger-a25: rgba(240, 80, 110, 0.25);
+  --color-good-a25: rgba(62, 207, 142, 0.25);
+  --color-caution-a15: rgba(245, 165, 36, 0.15);
+  --color-caution-a25: rgba(245, 165, 36, 0.25);
+  --color-info-soft-a15: rgba(79, 156, 247, 0.15);
+  --color-info-soft-a25: rgba(79, 156, 247, 0.25);
+  --color-slate-a15: rgba(139, 139, 158, 0.15);
+  --color-slate-a25: rgba(139, 139, 158, 0.25);
   --color-kind-thread-a15: rgba(244, 114, 182, 0.15);
   --color-kind-thread-a25: rgba(244, 114, 182, 0.25);
   --color-kind-role-a15: rgba(251, 146, 60, 0.15);
@@ -262,11 +274,12 @@
 }
 
 :root {
-  /* .card and .side-menu background, plain sRGB like the old stylesheet. */
-  --card-gradient: linear-gradient(180deg, #1b1030aa 0, rgba(20, 10, 40, 0.45) 100%);
-  /* .input and select.input background. */
-  --control-gradient: linear-gradient(180deg, #1a1030 0%, #140b26 100%);
-  --select-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23a78bfa' d='M1.41 0L6 4.58 10.59 0 12 1.41l-6 6-6-6z'/%3E%3C/svg%3E")
+  /* .card and .side-menu background: a flat surface (no purple wash), kept as
+     an image because the components set it through bg-(image:...). */
+  --card-gradient: linear-gradient(var(--color-card-solid), var(--color-card-solid));
+  /* .input and select.input background: flat elevated. */
+  --control-gradient: linear-gradient(var(--color-control-top), var(--color-control));
+  --select-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23a3a3b8' d='M1.41 0L6 4.58 10.59 0 12 1.41l-6 6-6-6z'/%3E%3C/svg%3E")
       no-repeat right 14px center,
     var(--control-gradient);
   /* The marks of the Checkbox and Radio controls (components/ui/Checkbox.tsx). */
@@ -313,12 +326,12 @@
   a {
     color: var(--color-accent);
   }
-  /* Every scroller, the page itself included: a thin accent thumb on a clear track. In the base layer so
+  /* Every scroller, the page itself included: a thin neutral thumb on a clear track. In the base layer so
      a utility such as [scrollbar-width:none] still hides a bar on purpose. Chrome 121+ and Firefox read
      the two standard properties; Safari and older Chrome read the -webkit- rules. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--color-accent) transparent;
+    scrollbar-color: var(--color-border-strong) transparent;
   }
   *::-webkit-scrollbar {
     width: 8px;
@@ -331,7 +344,7 @@
   *::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
     border-radius: 9999px;
-    background: var(--color-accent) padding-box;
+    background: var(--color-border-strong) padding-box;
   }
 }
 
@@ -350,9 +363,9 @@
   background-image: linear-gradient(
     90deg,
     transparent 0%,
-    var(--color-brand-ghost) 40%,
+    var(--color-wash-4) 40%,
     var(--color-line-2) 50%,
-    var(--color-brand-ghost) 60%,
+    var(--color-wash-4) 60%,
     transparent 100%
   );
   background-size: 200% 100%;
