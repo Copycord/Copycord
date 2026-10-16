@@ -6,11 +6,11 @@ import { COLUMNS_KEY, SEARCH_DEBOUNCE_MS } from "./messages/model";
 
 function row(n: number, extra: Partial<MessageRow> = {}): MessageRow {
   return {
-    original_message_id: String(1300000000000000000 + n),
+    original_message_id: `13000000000000${String(n).padStart(5, "0")}`,
     original_guild_id: "111",
     original_channel_id: "10",
     original_channel_name: "general",
-    cloned_message_id: String(1400000000000000000 + n),
+    cloned_message_id: `14000000000000${String(n).padStart(5, "0")}`,
     cloned_guild_id: "222",
     cloned_channel_id: "20",
     cloned_channel_name: "general",
