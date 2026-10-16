@@ -507,7 +507,7 @@ describe("run page skeleton structure", () => {
       headerLines: root.querySelectorAll("header p").length,
       cardHeads: root.querySelectorAll(`[class="${CARD_HEAD}"]`).length,
       overview: Array.from(root.querySelectorAll(`section[aria-label=Summary] > [class="${OVERVIEW}"] > *`)).map((c) => c.getAttribute("data-testid") ?? "bar"),
-      details: Array.from(root.querySelectorAll("section details")).map((d) => [d.open, d.querySelector("summary")?.textContent]),
+      details: Array.from(root.querySelectorAll<HTMLDetailsElement>("section details")).map((d) => [d.open, d.querySelector("summary")?.textContent]),
       steps: root.querySelectorAll("section[aria-label=Steps] li").length,
     });
     const loaded = render(
