@@ -27,6 +27,7 @@ import {
   ROW,
   ROW_HEAD,
   ROW_ID,
+  ROW_ID_BOX,
   ROW_LINK,
   ROW_MAIN,
   ROW_MENU,
@@ -164,18 +165,21 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
           <RunStatusPill status={run.status} className="shrink-0" />
         </div>
         <div className={ROW_META}>
-          <span className={ROW_ID} title={`Run ID ${run.id}`}>
-            {run.id.slice(0, 8)}
+          {/* Below 1280 px the ID gives its room to the mapping, trigger and actor; the run page has it. */}
+          <span className={ROW_ID_BOX}>
+            <span className={ROW_ID} title={`Run ID ${run.id}`}>
+              {run.id.slice(0, 8)}
+            </span>
+            <MetaDot />
           </span>
           {mapping ? (
             <>
-              <MetaDot />
               <span className={MAPPING_CHIP} title="Mapping">
                 {mapping}
               </span>
+              <MetaDot />
             </>
           ) : null}
-          <MetaDot />
           <span className={META_ITEM}>
             <MetaGlyph name="trigger" />
             {triggerLabel(run)}

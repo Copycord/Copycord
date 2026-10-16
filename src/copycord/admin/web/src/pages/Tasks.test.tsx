@@ -124,7 +124,7 @@ describe("Tasks page", () => {
     expect(id).toHaveClass("font-mono");
     expect(id).toHaveAttribute("title", "Run ID 4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     // The meta line: the run ID, the mapping chip, the trigger and the actor.
-    expect(id.parentElement).toHaveTextContent("4f2a9c1e·Main mapping·Manual·admin");
+    expect(id.parentElement!.parentElement).toHaveTextContent("4f2a9c1e·Main mapping·Manual·admin");
     // What the run did, from its summary, over the segmented bar; a run with nothing to count says nothing.
     expect(within(rows[0]!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");
     expect(within(rows[0]!).getByRole("progressbar", { name: "6 of 6 steps finished" })).toBeInTheDocument();

@@ -62,6 +62,8 @@ export const ROW_LINK =
 export const ROW_META = "mt-1 flex h-[18px] min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] leading-[18px] text-muted";
 /** A run ID in mono, the list row and the run page alike. */
 export const ROW_ID = "font-mono text-xs";
+/** The run ID and its dot on a row's meta line, gone below 1280 px so the mapping, trigger and actor keep their room. */
+export const ROW_ID_BOX = "contents max-xl:hidden";
 /** One item of a meta line: a 12 px glyph and its words. */
 export const META_ITEM = "inline-flex shrink-0 items-center gap-1";
 export const META_DOT = "text-muted/50";
