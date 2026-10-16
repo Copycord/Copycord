@@ -95,15 +95,16 @@ describe("Channels skeleton", () => {
     const loaded = page();
     await waitFor(() => expect(loaded.container.querySelectorAll("#channels-root article")).toHaveLength(3));
     const section = loaded.container.querySelector("#channels-root section")!;
-    // A plain channel (not cloned) has one badge, a cloned one two: the loading card has two, as a cloned channel.
+    // A cloned channel has no badge: its card is the name row and the id row, as the loading card.
     const card = loaded.container.querySelector('article[data-cid="10"]')!;
     expect(cells(section)).toEqual(skelShape.section);
     expect(shared(card, ["ch-card"])).toBe(skelShape.card);
     expect(cells(card)).toEqual(skelShape.head);
     const parts = Array.from(card.children).map((c) => cells(c));
-    // The name cell and the menu box, the badge row, the id row (one id while loading, the clone id after).
+    // The name cell (type icon and name) and the menu box, then the id row (one id while loading, the clone id after).
+    expect(parts).toHaveLength(2);
+    expect(skelShape.parts).toHaveLength(2);
     expect(parts[0]).toEqual(skelShape.parts[0]);
-    expect(parts[1]!.length).toBe(skelShape.parts[1]!.length);
-    expect(skelShape.parts[2]!.length).toBeGreaterThanOrEqual(1);
+    expect(skelShape.parts[1]!.length).toBeGreaterThanOrEqual(1);
   });
 });

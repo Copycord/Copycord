@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelRow, GuildMapping } from "../types/channels";
@@ -91,7 +91,7 @@ describe("Channels page", () => {
     ]);
   });
 
-  it("renders names as text, with type, clone chip and ids", async () => {
+  it("renders names as text, with a type icon, exception badges only and ids", async () => {
     serve();
     renderPage();
     const card = await waitFor(() => {
@@ -100,10 +100,15 @@ describe("Channels page", () => {
       return a!;
     });
     expect(card.querySelector("b")).toBeNull();
-    expect(card).toHaveTextContent("# alpha <b>x</b>");
-    expect(card).toHaveTextContent("Voice");
+    expect(card.querySelector("bdi")).toHaveTextContent("alpha <b>x</b>");
+    expect(card.querySelector("bdi")!.className).not.toMatch(/custom-ink/);
+    expect(within(card as HTMLElement).getByRole("img", { name: "Voice" })).toHaveAttribute("data-channel-type", "voice");
+    // No clone target: the loud exception badge.
+    expect(Array.from(card.querySelectorAll("[data-badge]")).map((b) => b.textContent)).toEqual(["Not cloned"]);
     const cloned = document.querySelector('article[data-cid="10"]')!;
-    expect(cloned).toHaveTextContent("Clone");
+    // Cloned is the normal state: no badge, no type pill.
+    expect(cloned.querySelectorAll("[data-badge]")).toHaveLength(0);
+    expect(cloned).not.toHaveTextContent(/\bClone\b/);
     expect(cloned).toHaveTextContent("→ 110");
   });
 

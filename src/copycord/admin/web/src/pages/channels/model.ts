@@ -31,6 +31,25 @@ export function chTypeLabel(t: number | "" | null | undefined): string {
   return (typeof t === "number" && map[t]) || `Type ${t ?? "-"}`;
 }
 
+/** The icon beside a channel name, Discord style; any other type falls back to the text channel's #. */
+export type ChannelTypeIconKey = "text" | "voice" | "announcement" | "forum" | "stage";
+
+export function chTypeIcon(t: number): ChannelTypeIconKey {
+  const map: Record<number, ChannelTypeIconKey> = { 2: "voice", 5: "announcement", 15: "forum", 13: "stage" };
+  return map[t] ?? "text";
+}
+
+/** A card's badges: cloned is the normal state and has none, so only the exceptions show. */
+export type ChannelBadge = "orphan" | "notcloned" | "custom";
+
+export function channelBadges(c: { orphan: boolean; clonedId: string; customized: boolean }): ChannelBadge[] {
+  if (c.orphan) return ["orphan"];
+  const out: ChannelBadge[] = [];
+  if (!c.clonedId) out.push("notcloned");
+  if (c.customized) out.push("custom");
+  return out;
+}
+
 /** Option text of #mapping-select, as the Jinja template rendered it. */
 export function mappingLabel(m: GuildMapping): string {
   const name = (m.mapping_name ?? "").trim();

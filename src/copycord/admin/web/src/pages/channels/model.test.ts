@@ -3,7 +3,9 @@ import type { ChannelRow, Orphans } from "../../types/channels";
 import {
   buildCategoryPins,
   buildTree,
+  channelBadges,
   channelsUrl,
+  chTypeIcon,
   chTypeLabel,
   mappingLabel,
   NO_ORPHANS,
@@ -145,5 +147,22 @@ describe("tree", () => {
     ]);
     // With orphans present the tree is never "empty", as render() did.
     expect(tree({ query: "nothing" }, orphans).empty).toBe(false);
+  });
+});
+
+describe("channel type icons and badges", () => {
+  it("maps each channel type to its Discord style icon, any other type to the #", () => {
+    expect([0, 2, 5, 13, 15, 4, 99].map(chTypeIcon)).toEqual(["text", "voice", "announcement", "stage", "forum", "text", "text"]);
+    expect(chTypeLabel(13)).toBe("Stage");
+    expect(chTypeLabel(99)).toBe("Type 99");
+  });
+
+  it("badges only the exceptions: cloned is the normal state", () => {
+    const c = (orphan: boolean, clonedId: string, customized: boolean) => channelBadges({ orphan, clonedId, customized });
+    expect(c(false, "110", false)).toEqual([]);
+    expect(c(false, "", false)).toEqual(["notcloned"]);
+    expect(c(false, "110", true)).toEqual(["custom"]);
+    expect(c(false, "", true)).toEqual(["notcloned", "custom"]);
+    expect(c(true, "", false)).toEqual(["orphan"]);
   });
 });

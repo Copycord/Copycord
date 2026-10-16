@@ -5,7 +5,7 @@
 // Like the old page it waits until both Server and Client are connected.
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Card, useReveal } from "../components/ui";
+import { useReveal } from "../components/ui";
 import { useLastShape } from "../components/ui/lastCount";
 import {
   CHANNELS_CARD,
@@ -101,7 +101,7 @@ export function Channels() {
 
   return (
     <StatusGate gate={gate}>
-      <Card className={CHANNELS_CARD}>
+      <section className={CHANNELS_CARD}>
         <header className="mb-1.5 block gap-3">
           <ChannelsTitle />
           <span className={CONTROLS}>
@@ -185,7 +185,7 @@ export function Channels() {
         <div id="channels-empty" hidden={!(loaded && tree.empty)} className="text-[0.9em] text-muted opacity-80">
           No channels found.
         </div>
-      </Card>
+      </section>
     </StatusGate>
   );
 }

@@ -4,13 +4,14 @@
 
 import { memo } from "react";
 import type { ReactNode } from "react";
+import { ChannelTypeIcon } from "../../components/icons";
 import { cx } from "../../components/ui";
-import type { ChannelTree as Tree, TreeChannel } from "./model";
+import { channelBadges, chTypeIcon } from "./model";
+import type { ChannelBadge, ChannelTree as Tree, TreeChannel } from "./model";
 import type { ChannelTreeSlots } from "./slots";
 import {
   BADGE,
-  BADGE_GOOD,
-  BADGE_MUTED,
+  BADGE_NOT_CLONED,
   BADGE_ORPHAN,
   BADGE_ROW,
   CARD,
@@ -18,15 +19,18 @@ import {
   CARD_GRID,
   CARD_HEAD,
   CARD_NAME,
-  CAT_CHIP,
-  CAT_GOOD,
-  CAT_ORPHAN,
+  CAT_COUNT,
+  CAT_DOT,
+  CAT_DOT_CUSTOM,
+  CAT_DOT_ORPHAN,
+  CAT_LABEL,
   CUSTOM,
   ID_ROW,
   SECTION,
   SECTION_HEAD,
   SECTION_TITLE,
   TREE,
+  TYPE_ICON,
 } from "./treeClasses";
 
 export interface ChannelTreeProps extends ChannelTreeSlots {
@@ -46,13 +50,24 @@ export function ChannelTree({ tree, hidden, busy, className, channelActions, cat
         <section key={s.key} className={cx("ch-section", SECTION)}>
           <div className={SECTION_HEAD}>
             <h3 className={SECTION_TITLE}>
+              {s.orphanCategory || s.customized ? (
+                <span
+                  role="img"
+                  aria-label={s.orphanCategory ? "Orphan category" : "Customized category"}
+                  title={s.orphanCategory ? "Orphan category" : "Customized category"}
+                  className={cx(CAT_DOT, s.orphanCategory ? CAT_DOT_ORPHAN : CAT_DOT_CUSTOM)}
+                />
+              ) : null}
               <span
                 data-cat-name={s.originalName}
                 title={s.tooltip || undefined}
                 data-orphan-cat-id={s.orphanCategoryId ?? undefined}
-                className={cx(CAT_CHIP, s.orphanCategory ? CAT_ORPHAN : s.customized ? CUSTOM : CAT_GOOD)}
+                className={CAT_LABEL}
               >
                 {s.displayName}
+                <span title={`${s.channels.length} ${s.channels.length === 1 ? "channel" : "channels"}`} className={CAT_COUNT}>
+                  {s.channels.length}
+                </span>
                 {!s.uncategorized ? categoryActions?.(s) : null}
               </span>
             </h3>
@@ -73,7 +88,15 @@ interface ChannelCardProps {
   actions: ReactNode;
 }
 
+const BADGE_VIEW: Record<ChannelBadge, { label: string; title: string; className: string }> = {
+  orphan: { label: "Orphan", title: "In the clone but no longer in the host server", className: BADGE_ORPHAN },
+  notcloned: { label: "Not cloned", title: "No cloned channel yet", className: BADGE_NOT_CLONED },
+  custom: { label: "Custom", title: "Customized channel", className: CUSTOM },
+};
+
+// The card is not clickable (only its ⋯ menu is), so it has no hover state.
 const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCardProps) {
+  const badges = channelBadges(c);
   return (
     <article
       data-cid={c.id}
@@ -82,30 +105,21 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCa
     >
       <div className={CARD_HEAD}>
         <span className={CARD_NAME}>
-          <bdi title={c.title} className={cx("min-w-0 truncate", c.customized && "text-custom-ink")}>
-            # {c.displayName}
+          <ChannelTypeIcon kind={chTypeIcon(c.type)} label={c.typeLabel} className={TYPE_ICON} />
+          <bdi title={c.title} className="min-w-0 truncate">
+            {c.displayName}
           </bdi>
+          {badges.length ? (
+            <span className={BADGE_ROW}>
+              {badges.map((b) => (
+                <span key={b} data-badge={b} title={BADGE_VIEW[b].title} className={cx(BADGE, BADGE_VIEW[b].className)}>
+                  {BADGE_VIEW[b].label}
+                </span>
+              ))}
+            </span>
+          ) : null}
         </span>
         {actions ? <div className={CARD_ACTIONS}>{actions}</div> : null}
-      </div>
-      <div className={BADGE_ROW}>
-        <span title="Channel type" className={cx(BADGE, BADGE_MUTED)}>
-          {c.typeLabel}
-        </span>
-        {c.orphan ? (
-          <span className={cx(BADGE, BADGE_ORPHAN)}>Orphan</span>
-        ) : c.clonedId ? (
-          <>
-            <span title="Part of the host servers structure" className={cx(BADGE, BADGE_GOOD)}>
-              Clone
-            </span>
-            {c.customized ? (
-              <span title="Customized channel" className={cx(BADGE, CUSTOM)}>
-                Custom
-              </span>
-            ) : null}
-          </>
-        ) : null}
       </div>
       <div className={ID_ROW}>
         <span title="Original channel ID">{c.id}</span>

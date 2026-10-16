@@ -3,21 +3,20 @@
 // where its label goes. Kept out of Channels.tsx so the app shell can show it without the page chunk;
 // the page takes its shared classes and the loading rows from here.
 
-import { Card, Skeleton, cx } from "../../components/ui";
+import { Skeleton, cx } from "../../components/ui";
 import { readLastShape } from "../../components/ui/lastCount";
 import { StatusGate } from "../../components/ui/StatusGate";
 import { useStatusGate } from "../../hooks/useStatusGate";
 import { FILTER_OPTIONS, SORT_OPTIONS } from "./model";
 import { ToolbarSelect } from "./ToolbarSelect";
 import {
-  BADGE,
-  BADGE_ROW,
   CARD,
   CARD_ACTIONS,
   CARD_GRID,
   CARD_HEAD,
   CARD_NAME,
-  CAT_CHIP,
+  CAT_COUNT,
+  CAT_LABEL,
   CATEGORY_MENU_BTN,
   CHANNEL_MENU_BTN,
   ID_ROW,
@@ -25,10 +24,12 @@ import {
   SECTION_HEAD,
   SECTION_TITLE,
   TREE,
+  TYPE_ICON,
 } from "./treeClasses";
 
-/** The old .container.wide sat 20px in from the body padding at every width; the shell gives 12px below sm. */
-export const CHANNELS_CARD = "mt-[18px] max-sm:mx-2";
+/** No panel: the title, the controls and the tree sit on the page, inset as far as the content of the other pages' cards
+ *  (18px padding and a 1px transparent border), so the title lines up across pages. */
+export const CHANNELS_CARD = "mt-[18px] border border-transparent p-[18px] text-text max-sm:mx-2";
 export const CONTROLS = "flex flex-wrap items-center gap-2.5";
 /** The Guild mapping select: its toggle sizes to its label, so both rows give it one floor that the loading bar
  *  and a usual mapping name fit under; the search box after it then stands in the same place. */
@@ -62,12 +63,13 @@ export const TREE_SHAPE_KEY = "channels.tree";
 const DEFAULT_SHAPE = [4, 3];
 const NAME_WIDTHS = [118, 92, 140, 104, 80, 126];
 
-/** One channel card while the list loads: the card's boxes and menu button, bars on the name, badges and ids. */
+/** One channel card while the list loads: the card's boxes and menu button, the type icon, bars on the name and ids. */
 function ChannelCardSkeleton({ index }: { index: number }) {
   return (
     <article data-skeleton-row="" className={cx(CARD, "border-border")}>
       <div className={CARD_HEAD}>
         <span className={CARD_NAME}>
+          <Skeleton.Box className={TYPE_ICON} />
           <Skeleton.Text width={NAME_WIDTHS[index % NAME_WIDTHS.length]!} />
         </span>
         <div className={CARD_ACTIONS}>
@@ -75,10 +77,6 @@ function ChannelCardSkeleton({ index }: { index: number }) {
             ⋯
           </button>
         </div>
-      </div>
-      <div className={BADGE_ROW}>
-        <Skeleton.Text className={cx(BADGE, "border-transparent")} width={44} />
-        <Skeleton.Text className={cx(BADGE, "border-transparent")} width={52} />
       </div>
       <div className={ID_ROW}>
         <Skeleton.Text width={140} />
@@ -96,10 +94,13 @@ export function ChannelRowsSkeleton({ shape = readLastShape(TREE_SHAPE_KEY, DEFA
         <section key={i} aria-hidden="true" className={SECTION}>
           <div className={SECTION_HEAD}>
             <h3 className={SECTION_TITLE}>
-              <Skeleton.Box className={CAT_CHIP} style={{ width: 96 + (i % 3) * 18 }}>
-                {" "}
+              <span className={CAT_LABEL}>
+                <Skeleton.Text width={72 + (i % 3) * 18} />
+                <span className={CAT_COUNT}>
+                  <Skeleton.Text width={10} />
+                </span>
                 <span className={CATEGORY_MENU_BTN}>⋯</span>
-              </Skeleton.Box>
+              </span>
             </h3>
           </div>
           <div className={CARD_GRID}>
@@ -120,7 +121,7 @@ export function ChannelsSkeleton() {
   const gate = useStatusGate({ require: "both" });
   return (
     <StatusGate gate={gate}>
-      <Card className={CHANNELS_CARD} data-testid="card-skeleton">
+      <section className={CHANNELS_CARD} data-testid="card-skeleton">
         <header className="mb-1.5 block gap-3">
           <ChannelsTitle />
           {/* As at the page's first paint: the mapping list is still empty (disabled). */}
@@ -145,7 +146,7 @@ export function ChannelsSkeleton() {
           </span>
         </header>
         <ChannelRowsSkeleton />
-      </Card>
+      </section>
     </StatusGate>
   );
 }
