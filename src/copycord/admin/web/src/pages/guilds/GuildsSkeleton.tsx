@@ -3,7 +3,7 @@
 // so the app shell can show it without the page chunk; the page and GuildCard take their shared classes
 // and the loading tiles from here.
 
-import { Card, Skeleton } from "../../components/ui";
+import { PageFrame, Skeleton } from "../../components/ui";
 import { readLastCount } from "../../components/ui/lastCount";
 import { StatusGate } from "../../components/ui/StatusGate";
 import { useStatusGate } from "../../hooks/useStatusGate";
@@ -65,7 +65,7 @@ export function GuildsSkeleton() {
   const gate = useStatusGate({ require: "both" });
   return (
     <StatusGate gate={gate}>
-      <Card className="mt-[18px]" data-testid="card-skeleton">
+      <PageFrame data-testid="card-skeleton">
         <header className="mb-1.5 block gap-3">
           <GuildsTitle />
           <span inert className={CONTROLS}>
@@ -76,7 +76,7 @@ export function GuildsSkeleton() {
           </span>
         </header>
         <GuildTileSkeletons />
-      </Card>
+      </PageFrame>
     </StatusGate>
   );
 }

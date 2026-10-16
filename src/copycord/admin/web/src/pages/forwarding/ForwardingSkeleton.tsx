@@ -4,7 +4,7 @@
 // tile have the same boxes.
 
 import type { ButtonHTMLAttributes } from "react";
-import { Button, Card, Skeleton, cx } from "../../components/ui";
+import { Button, PageFrame, Skeleton, cx } from "../../components/ui";
 import { DANGER_OUTLINE } from "../../components/ui/Button";
 import { readLastCount } from "../../components/ui/lastCount";
 
@@ -159,7 +159,7 @@ export function ForwardingSkeleton() {
     <div className="forwarding-page w-full" role="status" aria-busy="true" aria-label="Loading page">
       <div className="relative">
         <div>
-          <Card className="mt-[18px]" data-testid="card-skeleton">
+          <PageFrame data-testid="card-skeleton">
             <header>
               <h2 className="mb-1 text-[18px] font-bold">Forwarding</h2>
             </header>
@@ -168,7 +168,7 @@ export function ForwardingSkeleton() {
                 <RuleSkeletons />
               </div>
             </div>
-          </Card>
+          </PageFrame>
         </div>
       </div>
       <h1 className="sr-only">Forwarding</h1>

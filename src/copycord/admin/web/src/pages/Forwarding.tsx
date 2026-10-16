@@ -6,7 +6,7 @@
 // Element ids match the old page for the e2e specs.
 
 import { useState } from "react";
-import { Button, Card, cx, useReveal } from "../components/ui";
+import { Button, PageFrame, cx, useReveal } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
@@ -140,7 +140,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
   return (
     <div id="fwd-root" className="forwarding-page w-full">
       <StatusGate gate={tokenGate}>
-        <Card className="mt-[18px]">
+        <PageFrame>
           <header>
             <h2 className="mb-1 text-[18px] font-bold">Forwarding</h2>
           </header>
@@ -247,7 +247,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
               </p>
             ) : null}
           </div>
-        </Card>
+        </PageFrame>
       </StatusGate>
       {/* After the card so the visible "Forwarding" h2 comes first, as on the old page. */}
       <h1 className="sr-only">Forwarding</h1>

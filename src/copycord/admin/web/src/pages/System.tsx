@@ -29,6 +29,7 @@ import {
   ArchivesHead,
   CELL,
   DB_CARD,
+  SystemTitle,
   DB_HEADER,
   DB_TITLE,
   LastBackupPending,
@@ -191,7 +192,7 @@ export function System() {
 
   return (
     <div id="adv-root">
-      <h1 className="sr-only">System</h1>
+      <SystemTitle />
       <Card
         id="adv-data-card"
         aria-label="Database"

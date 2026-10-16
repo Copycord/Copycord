@@ -4,7 +4,7 @@
 // Like the old page it waits until both Server and Client are connected.
 
 import { useCallback, useMemo, useState } from "react";
-import { Card, cx, useReveal } from "../components/ui";
+import { PageFrame, cx, useReveal } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
@@ -66,7 +66,7 @@ export function Guilds() {
   return (
     <>
       <StatusGate gate={gate}>
-        <Card className="mt-[18px]">
+        <PageFrame>
           {/* .card-titlebar: the h2, then the search and the sort direction button (.titlebar-actions). */}
           <header className="mb-1.5 block gap-3">
             <GuildsTitle />
@@ -123,7 +123,7 @@ export function Guilds() {
           <div id="guilds-empty" hidden={!(loaded && guilds.length === 0)} className="text-[0.9em] text-muted opacity-80">
             No guilds found.
           </div>
-        </Card>
+        </PageFrame>
       </StatusGate>
 
       {menu ? (
