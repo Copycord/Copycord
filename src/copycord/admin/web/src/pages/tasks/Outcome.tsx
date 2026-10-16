@@ -1,5 +1,4 @@
-// What a run did, the same on the list row and the run page: its steps by outcome ("6 steps · 2 done ·
-// 4 cancelled · 92 delivered") and the segmented bar (done green, cancelled amber, failed red, skipped
+// What a run did, on the run page: its steps by outcome and the segmented bar (done green, cancelled amber, failed red, skipped
 // neutral, the rest of the track still to go), so a cancelled run never reads as a full bar.
 
 import { cx } from "../../components/ui/cx";
@@ -36,30 +35,6 @@ export function stepCounts(run: Pick<TaskRun, "summary" | "steps" | "step_count"
     c.total = Math.max(run.step_count ?? 0, finishedOf(c));
   }
   return c.total > 0 ? c : null;
-}
-
-/** The messages the run delivered, when its summary counts them. */
-export function deliveredOf(run: Pick<TaskRun, "summary">): number | null {
-  const v = run.summary?.delivered;
-  return typeof v === "number" ? v : null;
-}
-
-const WORDS: [keyof Omit<StepCounts, "total">, string][] = [
-  ["success", "done"],
-  ["failed", "failed"],
-  ["cancelled", "cancelled"],
-  ["skipped", "skipped"],
-];
-
-/** "6 steps · 2 done · 4 cancelled · 92 delivered"; an outcome no step had is left out. */
-export function outcomeText(counts: StepCounts | null, delivered: number | null): string {
-  const parts: string[] = [];
-  if (counts) {
-    parts.push(`${formatCount(counts.total)} ${counts.total === 1 ? "step" : "steps"}`);
-    for (const [k, word] of WORDS) if (counts[k]) parts.push(`${formatCount(counts[k])} ${word}`);
-  }
-  if (delivered != null) parts.push(`${formatCount(delivered)} delivered`);
-  return parts.join(" · ");
 }
 
 /** The segments in the order they fill the track, each in its state's colour. */

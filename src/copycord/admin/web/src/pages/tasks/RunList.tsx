@@ -9,7 +9,6 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
-import { deliveredOf, outcomeText, stepCounts } from "./Outcome";
 import { StatusIcon } from "./StatusIcon";
 import {
   AUTO_REFRESH_LABEL,
@@ -27,7 +26,6 @@ import {
   ROW_MAIN,
   ROW_MENU,
   ROW_META,
-  ROW_OUTCOME,
   ROW_TIME,
   ROW_TIMING,
   RUN_COUNT,
@@ -145,10 +143,9 @@ export interface RunRowProps {
 /**
  * One run, the whole row a link: the status glyph centred on the row (it alone carries the status), the
  * task name and number over the meta line (plain muted "Triggered by admin", cut with an ellipsis at its
- * end); the outcome line, right-aligned; the timing; the menu.
+ * end); the timing; the menu.
  */
 export function RunRow({ run, typeTitle, actions }: RunRowProps) {
-  const outcome = outcomeText(stepCounts(run), deliveredOf(run));
   const started = formatWhen(run.started_at ?? run.created_at);
   return (
     <li className={ROW} data-run-id={run.id}>
@@ -165,9 +162,6 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
         </div>
         <div className={ROW_META}>{triggeredByText(run)}</div>
       </div>
-      <span data-testid="run-outcome" title={outcome || undefined} className={ROW_OUTCOME}>
-        {outcome}
-      </span>
       <RunTiming run={run} />
       {actions}
     </li>

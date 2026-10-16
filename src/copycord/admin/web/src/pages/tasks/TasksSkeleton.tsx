@@ -49,8 +49,8 @@ export const PAGER = "flex items-center justify-between gap-3 border-t border-bo
 export const ROW_BOX = "relative flex min-h-16 items-center gap-3 border-b border-border px-4 py-2.5 last:rounded-b-card last:border-b-0";
 export const ROW = `${ROW_BOX} transition-colors duration-150 hover:bg-rail-hover`;
 /**
- * A run row's left column: the task name over the meta line, taking the room the outcome leaves, its meta
- * line cut at the end when short; from 1024 px it keeps 220 px and only then does the outcome give way.
+ * A run row's left column: the task name over the meta line, taking the room up to the timing, its meta
+ * line cut at the end when short; from 1024 px it keeps 220 px.
  */
 export const ROW_MAIN = "min-w-0 flex-1 lg:min-w-[220px]";
 /** The name line: the task name and number. */
@@ -71,8 +71,6 @@ export const ROW_ID = "font-mono text-xs";
 /** One item of a meta line: a 12 px glyph and its words. */
 export const META_ITEM = "inline-flex shrink-0 items-center gap-1";
 export const META_DOT = "text-muted/50";
-/** What the run did, one muted line in full before the timing; cut only once the name column is down to 220 px, gone below 1024 px. */
-export const ROW_OUTCOME = "h-[18px] min-w-0 truncate text-right text-[13px] leading-[18px] text-muted tabular-nums max-lg:hidden";
 /** Started (relative) over duration, each after a small glyph, 13 px muted with tabular numbers. */
 export const ROW_TIMING = "flex w-[80px] shrink-0 flex-col gap-1 text-[13px] leading-[18px] text-muted tabular-nums max-sm:hidden";
 export const ROW_TIME = "flex items-center gap-1.5 whitespace-nowrap";
@@ -551,7 +549,7 @@ export function RailEntryLoading() {
 
 /**
  * One loading row in the shape of RunRow (RunList.tsx): the same box, a round bar for the status glyph,
- * a bar for the name, a bar on the meta line, a bar for the outcome line, the two timing lines with their
+ * a bar for the name, a bar on the meta line, the two timing lines with their
  * glyphs as themselves and bars for the values, and the row menu button, each in the same type size and
  * padding as the real element, so the first page lands without the list jumping.
  */
@@ -567,9 +565,6 @@ function RunRowLoading({ nameWidth }: { nameWidth: number }) {
           <Skeleton.Text className="align-top">Triggered by admin</Skeleton.Text>
         </div>
       </div>
-      <span className={ROW_OUTCOME}>
-        <Skeleton.Text>6 steps · 4 done · 1 failed · 1 cancelled · 224 delivered</Skeleton.Text>
-      </span>
       <div className={ROW_TIMING}>
         <span className={ROW_TIME}>
           <MetaGlyph name="started" />

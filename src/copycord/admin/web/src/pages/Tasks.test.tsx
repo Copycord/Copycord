@@ -125,9 +125,9 @@ describe("Tasks page", () => {
     expect(within(rows[0]!).getByText("Triggered by admin").textContent).toBe("Triggered by admin");
     expect(within(rows[0]!).queryByText("4f2a9c1e")).toBeNull();
     expect(rows[0]).not.toHaveTextContent("Main mapping");
-    // What the run did, from its summary, one line with no bar; a run with nothing to count says nothing.
-    expect(within(rows[0]!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");
-    expect(within(rows[1]!).getByTestId("run-outcome").textContent).toBe("");
+    // No step counts or outcome text on the row, and no bar.
+    expect(rows[0]).not.toHaveTextContent(/steps|delivered/);
+    expect(within(rows[0]!).queryByTestId("run-outcome")).toBeNull();
     expect(within(list).queryByRole("progressbar")).toBeNull();
     // Started (relative, the date in the title) over the duration.
     expect(within(rows[0]!).getByTitle("Duration")).toHaveTextContent("48s");

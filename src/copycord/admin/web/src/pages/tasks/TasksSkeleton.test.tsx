@@ -37,7 +37,6 @@ import {
   ROW_HEAD,
   ROW_LINK,
   ROW_META,
-  ROW_OUTCOME,
   ROW_TIME,
   ROW_MAIN,
   ROW_MENU,
@@ -94,15 +93,15 @@ describe("run row skeleton", () => {
     expect(real!.className.startsWith(ROW_BOX)).toBe(true);
     const cols = (li: Element) => Array.from(li.children).map(layout);
     expect(cols(skeleton!)).toEqual(cols(real!));
-    // The status glyph centred on the row, name and meta line, the outcome, timing, menu.
-    expect(Array.from(real!.children).map((c) => c.className)).toEqual([`${STATUS_BOX} text-custom-ink`, ROW_MAIN, ROW_OUTCOME, ROW_TIMING, ROW_MENU]);
+    // The status glyph centred on the row, name and meta line, timing, menu.
+    expect(Array.from(real!.children).map((c) => c.className)).toEqual([`${STATUS_BOX} text-custom-ink`, ROW_MAIN, ROW_TIMING, ROW_MENU]);
     expect(real!.children[0]).toHaveAttribute("data-status", "cancelled");
     // The glyph alone carries the status: no badge on the row, the word in the glyph's label and title.
     expect(real!.children[0]).toHaveAttribute("role", "img");
     expect(real!.children[0]).toHaveAttribute("aria-label", "Cancelled");
     expect(real!.children[0]).toHaveAttribute("title", "Cancelled");
     expect(real!.querySelector('[title^="Status:"]')).toBeNull();
-    expect(Array.from(skeleton!.children).map((c) => c.className)).toEqual([STATUS_BOX, ROW_MAIN, ROW_OUTCOME, ROW_TIMING, ROW_MENU]);
+    expect(Array.from(skeleton!.children).map((c) => c.className)).toEqual([STATUS_BOX, ROW_MAIN, ROW_TIMING, ROW_MENU]);
     expect(skeleton!.children[0]!.querySelector("[data-skeleton]")).not.toBeNull();
     // The name line (the name alone) over the meta line; the skeleton bars both.
     const lines = (li: Element) => Array.from(li.children[1]!.children).map((c) => c.className);
@@ -117,21 +116,18 @@ describe("run row skeleton", () => {
     expect(meta.textContent).toBe("Triggered by admin");
     expect(meta.children).toHaveLength(0);
     expect(ROW_META.split(" ")).toContain("truncate");
-    // The outcome as one line with no bar; the skeleton bars it.
-    expect(within(real!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");
-    expect(within(real!).getByTestId("run-outcome").children).toHaveLength(0);
+    // No step counts or outcome text on the row, and no bar; the skeleton holds no place for them.
+    expect(real!.textContent).not.toMatch(/steps|delivered/);
+    expect(within(real!).queryByTestId("run-outcome")).toBeNull();
     expect(real!.querySelector("[role=progressbar]")).toBeNull();
     expect(skeleton!.querySelector("[role=progressbar]")).toBeNull();
-    expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]")).toHaveLength(1);
-    expect(ROW_OUTCOME.split(" ")).toEqual(expect.arrayContaining(["text-right", "truncate", "max-lg:hidden"]));
     expect(ROW_MAIN.split(" ")).toEqual(expect.arrayContaining(["flex-1", "lg:min-w-[220px]"]));
-    expect(ROW_OUTCOME).not.toMatch(/w-\[/);
     // Started over duration, each a glyph and its value; the skeleton draws the glyphs and bars the values.
-    const timing = (li: Element) => Array.from(li.children[3]!.children).map((c) => `${c.className} ${c.querySelectorAll("svg").length}`);
+    const timing = (li: Element) => Array.from(li.children[2]!.children).map((c) => `${c.className} ${c.querySelectorAll("svg").length}`);
     expect(timing(real!)).toEqual([`${ROW_TIME} 1`, `${ROW_TIME} 1`]);
     expect(timing(skeleton!)).toEqual(timing(real!));
-    expect(real!.children[3]!.children[1]!.textContent).toBe("48s");
-    expect(skeleton!.children[3]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
+    expect(real!.children[2]!.children[1]!.textContent).toBe("48s");
+    expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
   });
 
   it("makes the whole row one link with a focus ring and a hover tint, the menu above it", () => {

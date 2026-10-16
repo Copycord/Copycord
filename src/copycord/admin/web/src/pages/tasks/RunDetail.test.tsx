@@ -7,7 +7,7 @@ import type { TaskRun, TaskStep, TaskType } from "../../types/tasks";
 import { ReportPanel } from "./ReportPanel";
 import { countsText, RunDetail, RunHeader, RunSummary, RunView } from "./RunDetail";
 import { formatAgo, formatWhen, runConfirm } from "./RunList";
-import { outcomeText, stepCounts } from "./Outcome";
+import { stepCounts } from "./Outcome";
 import { StepList, orderSteps, stepLabel } from "./StepList";
 import {
   BUSY,
@@ -607,16 +607,14 @@ describe("RunSummary", () => {
     expect(countsText(makeRun({ steps: [], summary: null }))).toBe("");
   });
 
-  it("words the outcome the same for a list row: steps by outcome, then the messages delivered", () => {
+  it("counts the steps by outcome from a run's summary when it holds no steps", () => {
     const counts = stepCounts({ summary: { success: 2, failed: 0, skipped: 0, cancelled: 4, delivered: 92 }, step_count: 6 });
     expect(counts).toEqual({ total: 6, success: 2, failed: 0, skipped: 0, cancelled: 4 });
-    expect(outcomeText(counts, 92)).toBe("6 steps · 2 done · 4 cancelled · 92 delivered");
     // A running run: steps still to go leave the track bare.
     const live = stepCounts({ summary: { success: 1, failed: 0, skipped: 0, cancelled: 0, delivered: 9 }, step_count: 3 })!;
-    expect(outcomeText(live, 9)).toBe("3 steps · 1 done · 9 delivered");
-    // No steps and no counts: nothing to say.
+    expect(live).toEqual({ total: 3, success: 1, failed: 0, skipped: 0, cancelled: 0 });
+    // No steps and no counts: nothing to count.
     expect(stepCounts({ summary: null })).toBeNull();
-    expect(outcomeText(null, null)).toBe("");
   });
 
   it("a type without a registry entry: counts in words, inputs by schema title in schema order", () => {
