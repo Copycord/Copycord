@@ -15,6 +15,7 @@ import { readLastCount, readLastLabels } from "../../components/ui/lastCount";
 import { Skeleton, useReveal } from "../../components/ui/Skeleton";
 import { RowMenu } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
+import type { RunCounts } from "../../types/tasks";
 import { runTypeOf, typeLabel } from "./typeLabels";
 
 /** The rail and the page's column, at most 1280 px wide and centred, so a wide screen keeps a row together. */
@@ -522,7 +523,7 @@ export const STATUS_TAB_LIST = [
 
 export interface StatusTabsProps {
   /** Runs per status; null while the first page loads, so the counts shimmer and the labels stay text. */
-  counts: Partial<Record<(typeof STATUS_TAB_LIST)[number]["key"], number>> | null;
+  counts: Partial<RunCounts> | null;
   /** The status filter in the URL, "" for All. */
   value: string;
   onSelect?: (value: string) => void;
