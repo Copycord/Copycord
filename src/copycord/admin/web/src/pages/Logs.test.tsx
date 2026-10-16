@@ -197,6 +197,7 @@ describe("Logs page", () => {
     expect(mutations().map((c) => `${c.method} ${c.url.pathname}`)).toEqual(["DELETE /api/event-logs"]);
     expect(mutations()[0]!.csrf).toBe("1");
     expect(screen.getByText("All logs cleared")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear all logs" })).toBeDisabled();
   });
 
   it("deletes one row only after confirming", async () => {

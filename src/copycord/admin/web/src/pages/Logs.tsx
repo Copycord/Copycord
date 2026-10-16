@@ -120,6 +120,8 @@ export function Logs() {
   const logs = useMemo(() => list.data?.logs ?? [], [list.data]);
   const total = list.data?.total ?? 0;
   const pages = totalPages(total);
+  // Clear all deletes every log, so only an unfiltered empty list means there is nothing to clear.
+  const nothingToClear = !type && !search && list.data !== undefined && total === 0;
   const rows = useMemo(() => sortLogs(logs, sort), [logs, sort]);
 
   // After deletes the current page can run past the end; step back to the last page.
@@ -295,7 +297,7 @@ export function Logs() {
             title="Clear all logs"
             aria-label="Clear all logs"
             className={CLEAR_ALL_BTN}
-            disabled={clearBusy}
+            disabled={clearBusy || nothingToClear}
             onClick={() => void clearAll()}
           >
             <LogsIcon name="trash" size={16} />

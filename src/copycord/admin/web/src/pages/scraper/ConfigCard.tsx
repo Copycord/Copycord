@@ -246,7 +246,7 @@ export function ConfigCard({ tokenCount, queueLength, running, onStarted, onCanc
               Add to Queue
             </Button>
             {running ? (
-              <Button id="sc-cancel-btn" variant="danger" disabled={busy === "cancel"} onClick={() => void onCancel()}>
+              <Button id="sc-cancel-btn" variant="danger-outline" disabled={busy === "cancel"} onClick={() => void onCancel()}>
                 Cancel
               </Button>
             ) : (
