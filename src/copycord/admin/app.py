@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import deque
 import contextlib
 import mimetypes
+import hashlib
 import json
 import os
 import socket
@@ -987,8 +988,185 @@ async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
     return errs
 
 
+# The user account's guild list (/users/@me/guilds), shared by /api/client-guilds and
+# _selfbot_in_guild. 60 s TTL: the list only changes when the account joins or leaves a
+# server, a page refresh or modal reopen within a minute reuses it, and a membership miss
+# forces one refresh so a server joined seconds ago is still found. Keyed by a hash of the
+# token (never the raw token), so a changed CLIENT_TOKEN misses the cache by construction.
+USER_GUILDS_TTL = 60.0
+USER_GUILDS_SHORT_WAIT = 2.0
+_USER_GUILDS_MAX_KEYS = 64
+_user_guilds_cache: dict[str, tuple[float, list[dict]]] = {}
+_user_guilds_inflight: dict[str, "asyncio.Task"] = {}
+_user_guilds_blocked_until: dict[str, float] = {}
+
+BOT_GUILD_TTL = 60.0
+_bot_guild_cache: dict[tuple[str, int], float] = {}
+
+
+class DiscordGuildsError(Exception):
+    """A /users/@me/guilds lookup that produced no list; detail is the API error code."""
+
+    def __init__(self, detail: str, status: int = 502, retry_after: float | None = None):
+        super().__init__(detail)
+        self.detail = detail
+        self.status = status
+        self.retry_after = retry_after
+
+
+def _token_key(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()[:24]
+
+
+def _rate_limit_wait(resp, body: Any = None) -> float:
+    """Seconds until Discord accepts this route again, from the 429 body or the headers."""
+    waits: list[float] = []
+    if isinstance(body, dict):
+        try:
+            waits.append(float(body.get("retry_after")))
+        except Exception:
+            pass
+    hdrs = getattr(resp, "headers", None) or {}
+    for name in ("Retry-After", "X-RateLimit-Reset-After"):
+        try:
+            waits.append(float(hdrs.get(name)))
+        except Exception:
+            pass
+    waits = [w for w in waits if w >= 0]
+    return max(waits) if waits else 1.0
+
+
+def _user_guilds_invalidate(token: str | None = None) -> None:
+    if token is None:
+        _user_guilds_cache.clear()
+        _user_guilds_blocked_until.clear()
+        return
+    key = _token_key(token)
+    _user_guilds_cache.pop(key, None)
+    _user_guilds_blocked_until.pop(key, None)
+
+
+async def _fetch_user_guilds(token: str, key: str) -> list[dict]:
+    """Page /users/@me/guilds once. On 429 serve the cached list if any, else wait once when short."""
+    base_url = f"{DISCORD_API_BASE}/users/@me/guilds"
+    headers = _selfbot_headers(token)
+    sess = shared_session()
+    guilds: list[dict] = []
+    after = "0"
+    waited = False
+    try:
+        while True:
+            url = f"{base_url}?limit=200&after={after}"
+            async with sess.get(url, headers=headers, timeout=15) as resp:
+                status = resp.status
+                if status == 429:
+                    try:
+                        body = await resp.json(content_type=None)
+                    except Exception:
+                        body = None
+                    wait = _rate_limit_wait(resp, body)
+                    _user_guilds_blocked_until[key] = time.monotonic() + wait
+                    LOGGER.info(
+                        "Discord /users/@me/guilds rate limited: retry_after=%.3fs global=%s token=%s",
+                        wait,
+                        bool(isinstance(body, dict) and body.get("global")),
+                        _redact_token(token),
+                    )
+                    cached = _user_guilds_cache.get(key)
+                    if cached:
+                        return cached[1]
+                    if waited or wait > USER_GUILDS_SHORT_WAIT:
+                        raise DiscordGuildsError(
+                            "discord-rate-limited", status=429, retry_after=wait
+                        )
+                    waited = True
+                    await asyncio.sleep(wait)
+                    continue
+
+                if status != 200:
+                    text = await resp.text()
+                    LOGGER.warning(
+                        "Discord /users/@me/guilds failed: status=%s body=%s",
+                        status,
+                        text[:300],
+                    )
+                    if status == 401:
+                        raise DiscordGuildsError("client-token-invalid")
+                    raise DiscordGuildsError("discord-guilds-fetch-failed")
+
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception:
+                    LOGGER.exception("Failed to decode JSON from /users/@me/guilds")
+                    raise DiscordGuildsError("discord-guilds-json-error")
+
+                hdrs = getattr(resp, "headers", None) or {}
+                if str(hdrs.get("X-RateLimit-Remaining", "")) == "0":
+                    _user_guilds_blocked_until[key] = time.monotonic() + _rate_limit_wait(resp)
+
+            if not isinstance(data, list) or not data:
+                break
+            for g in data:
+                if isinstance(g, dict) and g.get("id") is not None:
+                    guilds.append(
+                        {"id": str(g.get("id")), "name": str(g.get("name") or f"Guild {g.get('id')}")}
+                    )
+            if len(data) < 200:
+                break
+            after = str(data[-1].get("id", "0"))
+    except DiscordGuildsError:
+        raise
+    except Exception as e:
+        LOGGER.warning(
+            "Error calling Discord /users/@me/guilds: %s token=%s", repr(e), _redact_token(token)
+        )
+        raise DiscordGuildsError("discord-guilds-error")
+
+    if len(_user_guilds_cache) >= _USER_GUILDS_MAX_KEYS and key not in _user_guilds_cache:
+        oldest = min(_user_guilds_cache, key=lambda k: _user_guilds_cache[k][0])
+        _user_guilds_cache.pop(oldest, None)
+    _user_guilds_cache[key] = (time.monotonic(), guilds)
+    return guilds
+
+
+async def _user_guilds(token: str, *, refresh: bool = False) -> list[dict]:
+    """The account's guilds as [{"id", "name"}], cached per token for USER_GUILDS_TTL.
+
+    Concurrent callers share one in-flight Discord request. While Discord's rate limit for
+    the token is in force the cached list is served (even past the TTL) and Discord is not
+    called; with nothing cached a DiscordGuildsError("discord-rate-limited", 429) is raised.
+    refresh=True skips the TTL but still honours the rate limit and the in-flight request.
+    """
+    key = _token_key(token)
+    now = time.monotonic()
+    cached = _user_guilds_cache.get(key)
+    if cached and not refresh and now - cached[0] < USER_GUILDS_TTL:
+        return cached[1]
+
+    blocked = _user_guilds_blocked_until.get(key, 0.0)
+    if now < blocked:
+        if cached:
+            return cached[1]
+        raise DiscordGuildsError(
+            "discord-rate-limited", status=429, retry_after=round(blocked - now, 3)
+        )
+
+    task = _user_guilds_inflight.get(key)
+    if task is None:
+
+        async def _run() -> list[dict]:
+            try:
+                return await _fetch_user_guilds(token, key)
+            finally:
+                _user_guilds_inflight.pop(key, None)
+
+        task = asyncio.ensure_future(_run())
+        _user_guilds_inflight[key] = task
+    return await asyncio.shield(task)
+
+
 async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
-    """Return True if the user account is a member of guild_id, paging /users/@me/guilds and retrying on 429."""
+    """Return True if the user account is a member of guild_id, from the shared guild list."""
     if not client_token or not guild_id:
         LOGGER.debug(
             "_selfbot_in_guild | missing client_token or guild_id token=%s guild_id=%s",
@@ -997,76 +1175,38 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
         )
         return False
 
-    base_url = f"{DISCORD_API_BASE}/users/@me/guilds"
-
-    headers = _selfbot_headers(client_token)
     wanted = str(guild_id)
 
+    async def _lookup(refresh: bool) -> bool:
+        try:
+            guilds = await _user_guilds(client_token, refresh=refresh)
+        except DiscordGuildsError as e:
+            if e.status != 429 or e.retry_after is None or e.retry_after > 10:
+                raise
+            await asyncio.sleep(e.retry_after)
+            guilds = await _user_guilds(client_token, refresh=refresh)
+        return any(g["id"] == wanted for g in guilds)
+
     try:
-        async with contextlib.nullcontext(shared_session()) as sess:
-            after = "0"
-            total_checked = 0
-
-            while True:
-                url = f"{base_url}?limit=200&after={after}"
-                async with sess.get(url, headers=headers, timeout=10) as resp:
-                    status = resp.status
-
-                    if status == 429:
-                        try:
-                            body = await resp.json()
-                            retry_after = float(body.get("retry_after", 2))
-                        except Exception:
-                            retry_after = 2.0
-                        LOGGER.info(
-                            "_selfbot_in_guild | rate limited, retrying in %.1fs token=%s",
-                            retry_after,
-                            _redact_token(client_token),
-                        )
-                        await asyncio.sleep(retry_after + 0.25)
-                        continue
-
-                    if status != 200:
-                        LOGGER.warning(
-                            "_selfbot_in_guild | discord status=%s token=%s guild_id=%s -> not_member",
-                            status,
-                            _redact_token(client_token),
-                            guild_id,
-                        )
-                        return False
-
-                    data = await resp.json()
-                    if not data:
-                        break
-
-                    for g in data:
-                        gid = str(g.get("id", ""))
-                        if gid == wanted:
-                            LOGGER.debug(
-                                "_selfbot_in_guild | found guild_id=%s for token=%s after checking %d guilds",
-                                guild_id,
-                                _redact_token(client_token),
-                                total_checked + 1,
-                            )
-                            return True
-
-                    total_checked += len(data)
-                    after = str(data[-1].get("id", "0"))
-
-                    if len(data) < 200:
-                        break
-
-            LOGGER.debug(
-                "_selfbot_in_guild | guild_id=%s NOT found for token=%s total_guilds_checked=%d",
-                guild_id,
-                _redact_token(client_token),
-                total_checked,
-            )
+        if await _lookup(False):
+            return True
+        # A miss may be a server joined after the list was cached: look once more, fresh,
+        # unless the list was fetched moments ago.
+        cached = _user_guilds_cache.get(_token_key(client_token))
+        if cached and time.monotonic() - cached[0] < 5.0:
             return False
-    except Exception as e:
+        found = await _lookup(True)
+        LOGGER.debug(
+            "_selfbot_in_guild | guild_id=%s found=%s token=%s",
+            guild_id,
+            found,
+            _redact_token(client_token),
+        )
+        return found
+    except DiscordGuildsError as e:
         LOGGER.warning(
-            "_selfbot_in_guild | exception=%s token=%s guild_id=%s",
-            repr(e),
+            "_selfbot_in_guild | %s token=%s guild_id=%s -> not_member",
+            e.detail,
             _redact_token(client_token),
             guild_id,
         )
@@ -1114,6 +1254,12 @@ async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
         )
         return False
 
+    # Only a yes is cached, so a bot invited after a failed check is seen at once.
+    cache_key = (_token_key(server_token), int(guild_id))
+    seen_at = _bot_guild_cache.get(cache_key)
+    if seen_at is not None and time.monotonic() - seen_at < BOT_GUILD_TTL:
+        return True
+
     url = f"{DISCORD_API_BASE}/guilds/{guild_id}?with_counts=true"
     headers = {
         "Authorization": f"Bot {server_token}",
@@ -1146,6 +1292,10 @@ async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
                     body_preview,
                 )
 
+                if ok:
+                    if len(_bot_guild_cache) >= 256:
+                        _bot_guild_cache.clear()
+                    _bot_guild_cache[cache_key] = time.monotonic()
                 return ok
     except Exception as e:
         LOGGER.warning(
@@ -5501,7 +5651,10 @@ async def api_create_mapping(payload: dict = Body(...)):
     client_token = db.get_config("CLIENT_TOKEN", "")
     server_token = db.get_config("SERVER_TOKEN", "")
 
-    in_host = await _selfbot_in_guild(client_token, host_gid)
+    in_host, in_clone = await asyncio.gather(
+        _selfbot_in_guild(client_token, host_gid),
+        _bot_in_guild(server_token, clone_gid),
+    )
     if not in_host:
         return JSONResponse(
             {
@@ -5512,7 +5665,6 @@ async def api_create_mapping(payload: dict = Body(...)):
             status_code=400,
         )
 
-    in_clone = await _bot_in_guild(server_token, clone_gid)
     if not in_clone:
         return JSONResponse(
             {
@@ -5560,8 +5712,18 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
     client_token = db.get_config("CLIENT_TOKEN", "")
     server_token = db.get_config("SERVER_TOKEN", "")
 
-    in_host = await _selfbot_in_guild(client_token, original_guild_id)
-    in_clone = await _bot_in_guild(server_token, cloned_guild_id)
+    if (
+        existing
+        and old_host_id == original_guild_id
+        and old_clone_id == cloned_guild_id
+    ):
+        # Same pair as stored: it was checked when saved, so a settings save skips Discord.
+        in_host, in_clone = True, True
+    else:
+        in_host, in_clone = await asyncio.gather(
+            _selfbot_in_guild(client_token, original_guild_id),
+            _bot_in_guild(server_token, cloned_guild_id),
+        )
 
     if not in_host:
         return JSONResponse(
@@ -5894,55 +6056,15 @@ async def api_client_guilds():
 
         raise HTTPException(status_code=400, detail="client-token-missing")
 
-    url = f"{DISCORD_API_BASE}/users/@me/guilds"
-    headers = _selfbot_headers(client_token)
-
     try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, headers=headers, timeout=15) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    LOGGER.warning(
-                        "Discord /users/@me/guilds failed: status=%s body=%s",
-                        resp.status,
-                        text[:300],
-                    )
-                    if resp.status == 401:
+        guilds = await _user_guilds(client_token)
+    except DiscordGuildsError as e:
+        headers = None
+        if e.retry_after is not None:
+            headers = {"Retry-After": str(max(1, int(e.retry_after + 0.999)))}
+        raise HTTPException(status_code=e.status, detail=e.detail, headers=headers)
 
-                        raise HTTPException(
-                            status_code=502, detail="client-token-invalid"
-                        )
-                    raise HTTPException(
-                        status_code=502, detail="discord-guilds-fetch-failed"
-                    )
-                try:
-                    raw = json.loads(text)
-                except Exception:
-                    LOGGER.exception("Failed to decode JSON from /users/@me/guilds")
-                    raise HTTPException(
-                        status_code=502, detail="discord-guilds-json-error"
-                    )
-    except HTTPException:
-
-        raise
-    except Exception:
-        LOGGER.exception("Error calling Discord /users/@me/guilds")
-        raise HTTPException(status_code=502, detail="discord-guilds-error")
-
-    items: list[dict[str, str]] = []
-    for g in raw or []:
-        try:
-            gid = str(g.get("id"))
-        except Exception:
-            continue
-        name = str(g.get("name") or f"Guild {gid}")
-        items.append(
-            {
-                "id": gid,
-                "name": name,
-            }
-        )
-
+    items: list[dict[str, str]] = [{"id": g["id"], "name": g["name"]} for g in guilds]
     items.sort(key=lambda x: x["name"].lower())
 
     return JSONResponse({"ok": True, "items": items})
