@@ -20,7 +20,7 @@ function serve(items: ForwardingRule[]) {
       if (url === "/api/forwarding") return json({ ok: true, items });
       if (url === "/api/forwarding/count") return json({ ok: true, count: 42, by_provider: {} });
       if (url === "/api/forwarding/count/by-rule") return json({ ok: true, by_rule: { r1: 42 } });
-      if (url === "/api/client-guilds") return json({ items: [] });
+      if (url === "/api/config") return json({ CLIENT_TOKEN: "tok" });
       return new Response("{}", { status: 404 });
     }),
   );

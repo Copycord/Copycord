@@ -6,7 +6,15 @@ import { ConfirmProvider } from "../../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../../lib/api";
 import type { ForwardingRule, ForwardingRulePayload } from "../../types/forwarding";
 import { Forwarding } from "../Forwarding";
-import { buildPayload, EMPTY_FORM, formFromRequest, formFromRule, localProblem } from "./ruleForm";
+import {
+  buildPayload,
+  CLIENT_TOKEN_MESSAGE,
+  EMPTY_FORM,
+  formFromRequest,
+  formFromRule,
+  GUILDS_RATE_LIMITED_MESSAGE,
+  localProblem,
+} from "./ruleForm";
 
 // Made up secrets; every request below is answered by the fetch stub.
 const PUSH_RULE: ForwardingRule = {
@@ -150,6 +158,32 @@ describe("rule payload", () => {
 });
 
 describe("rule modal", () => {
+  it("asks for the client guilds only when the modal opens, once", async () => {
+    const user = userEvent.setup();
+    const fetchMock = server({ "GET /api/config": () => jsonResponse({ CLIENT_TOKEN: "tok" }) });
+    renderPage();
+    await findCard("r1");
+    expect(calls(fetchMock, "GET /api/config")).toHaveLength(1);
+    expect(calls(fetchMock, "GET /api/client-guilds")).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "New Forward" }));
+    await screen.findByRole("dialog", { name: "New Forwarding Rule" });
+    await waitFor(() => expect(calls(fetchMock, "GET /api/client-guilds")).toHaveLength(1));
+  });
+
+  it("says Discord is rate limiting when the guild list is rate limited", async () => {
+    const user = userEvent.setup();
+    server({ "GET /api/client-guilds": () => jsonResponse({ detail: "discord-rate-limited" }, 429) });
+    const dialog = await openNew(user);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(GUILDS_RATE_LIMITED_MESSAGE);
+  });
+
+  it("shows the client token message when the token is rejected", async () => {
+    const user = userEvent.setup();
+    server({ "GET /api/client-guilds": () => jsonResponse({ detail: "client-token-invalid" }, 502) });
+    const dialog = await openNew(user);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(CLIENT_TOKEN_MESSAGE);
+  });
+
   it("lists client guilds and creates a Discord rule without the validate call", async () => {
     const user = userEvent.setup();
     const fetchMock = server();

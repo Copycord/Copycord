@@ -30,7 +30,7 @@ function server(routes: Record<string, Handler>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const key = `${init.method ?? "GET"} ${String(input)}`;
     // A configured client token unless a test says otherwise.
-    const handler = routes[key] ?? (key === "GET /api/client-guilds" ? () => jsonResponse({ items: [] }) : undefined);
+    const handler = routes[key] ?? (key === "GET /api/config" ? () => jsonResponse({ CLIENT_TOKEN: "tok" }) : undefined);
     return handler ? handler(init) : new Response("not found", { status: 404 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -248,25 +248,22 @@ describe("forwarding helpers", () => {
 
 describe("Forwarding client token gate", () => {
   it("dims the page with the old message while no client token is configured", async () => {
-    server({ ...listRoutes(), "GET /api/client-guilds": () => jsonResponse({ detail: "client-token-missing" }, 400) });
+    const fetchMock = server({ ...listRoutes(), "GET /api/config": () => jsonResponse({ CLIENT_TOKEN: "" }) });
     renderPage();
     const gate = await screen.findByTestId("status-gate");
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/client-guilds")).toHaveLength(0);
     expect(gate).toHaveTextContent(CLIENT_TOKEN_MESSAGE);
     expect(gate).toHaveClass("fixed", "top-header", "bottom-0");
     expect(within(gate).getByText(CLIENT_TOKEN_MESSAGE)).toHaveAttribute("aria-live", "polite");
     expect(document.getElementById("fwd-root")!.querySelector("[inert]")).not.toBeNull();
   });
 
-  it("dims the page when the configured client token is rejected", async () => {
-    server({ ...listRoutes(), "GET /api/client-guilds": () => jsonResponse({ detail: "client-token-invalid" }, 502) });
-    renderPage();
-    expect(await screen.findByTestId("status-gate")).toHaveTextContent(CLIENT_TOKEN_MESSAGE);
-  });
-
-  it("shows no gate when the client guilds load", async () => {
-    server({ ...listRoutes(), "GET /api/client-guilds": () => jsonResponse({ items: [{ id: "1", name: "G" }] }) });
+  it("shows no gate and asks Discord for nothing when a client token is configured", async () => {
+    const fetchMock = server(listRoutes());
     renderPage();
     await waitFor(() => expect(document.querySelectorAll(".fwd-card")).toHaveLength(2));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/config")).toBe(true));
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/client-guilds")).toHaveLength(0);
     expect(screen.queryByTestId("status-gate")).toBeNull();
     expect(document.getElementById("fwd-root")!.querySelector("[inert]")).toBeNull();
   });

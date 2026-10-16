@@ -626,3 +626,265 @@ class TestForwardingSaveValidation:
         assert resp.text == "Telegram: invalid bot token. (Unauthorized)"
         validator.assert_awaited_once()
         assert db.get_message_forwarding_rule("fwd-dead-token")["enabled"] is False
+
+
+# ---------------------------------------------------------------------------
+# Account guild list: cache, single-flight, rate limits (Discord is faked)
+# ---------------------------------------------------------------------------
+
+class _GuildsResp:
+    def __init__(self, status, body, headers=None, delay=0.0):
+        self.status = status
+        self._body = body
+        self.headers = headers or {}
+        self._delay = delay
+
+    async def __aenter__(self):
+        import asyncio
+
+        if self._delay:
+            await asyncio.sleep(self._delay)
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def json(self, content_type=None):
+        return self._body
+
+    async def text(self):
+        import json
+
+        return json.dumps(self._body)
+
+
+class _GuildsSession:
+    """Answers GET /users/@me/guilds from a queue of responses, recording each URL."""
+
+    def __init__(self, *responses):
+        self.queue = list(responses)
+        self.urls = []
+
+    def get(self, url, headers=None, timeout=None):
+        self.urls.append(url)
+        resp = self.queue.pop(0) if len(self.queue) > 1 else self.queue[0]
+        return resp
+
+
+def _guilds(*ids):
+    return [{"id": str(i), "name": f"G{i}"} for i in ids]
+
+
+@pytest.fixture()
+def fake_discord(monkeypatch):
+    import copycord.admin.app as app_mod
+
+    app_mod._user_guilds_invalidate()
+    app_mod._user_guilds_inflight.clear()
+    app_mod._bot_guild_cache.clear()
+    monkeypatch.setattr(app_mod, "_selfbot_headers", lambda token: {"Authorization": "x"})
+
+    def install(*responses):
+        sess = _GuildsSession(*responses)
+        monkeypatch.setattr(app_mod, "shared_session", lambda: sess)
+        return sess
+
+    yield install
+    app_mod._user_guilds_invalidate()
+    app_mod._user_guilds_inflight.clear()
+
+
+class TestUserGuildsHelper:
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_within_ttl(self, fake_discord):
+        import copycord.admin.app as app_mod
+
+        sess = fake_discord(_GuildsResp(200, _guilds(1, 2)))
+        a = await app_mod._user_guilds("tok-a")
+        b = await app_mod._user_guilds("tok-a")
+        assert a == b == _guilds(1, 2)
+        assert len(sess.urls) == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_callers_share_one_request(self, fake_discord):
+        import asyncio
+        import copycord.admin.app as app_mod
+
+        sess = fake_discord(_GuildsResp(200, _guilds(1), delay=0.05))
+        results = await asyncio.gather(*(app_mod._user_guilds("tok-a") for _ in range(6)))
+        assert all(r == _guilds(1) for r in results)
+        assert len(sess.urls) == 1
+
+    @pytest.mark.asyncio
+    async def test_429_with_cache_serves_stale_until_reset(self, fake_discord):
+        import copycord.admin.app as app_mod
+
+        sess = fake_discord(_GuildsResp(200, _guilds(1)))
+        await app_mod._user_guilds("tok-a")
+        key = app_mod._token_key("tok-a")
+        at, items = app_mod._user_guilds_cache[key]
+        app_mod._user_guilds_cache[key] = (at - app_mod.USER_GUILDS_TTL - 1, items)
+
+        sess.queue = [_GuildsResp(429, {"retry_after": 30, "global": False}, {"Retry-After": "30"})]
+        assert await app_mod._user_guilds("tok-a") == _guilds(1)
+        assert len(sess.urls) == 2
+        # Still inside the reset window: stale list, Discord not called again.
+        assert await app_mod._user_guilds("tok-a") == _guilds(1)
+        assert await app_mod._user_guilds("tok-a", refresh=True) == _guilds(1)
+        assert len(sess.urls) == 2
+
+    @pytest.mark.asyncio
+    async def test_429_without_cache_retries_once_after_short_wait(self, fake_discord):
+        import copycord.admin.app as app_mod
+
+        sess = fake_discord(
+            _GuildsResp(429, {"retry_after": 0.05, "global": False}),
+            _GuildsResp(200, _guilds(7)),
+        )
+        assert await app_mod._user_guilds("tok-a") == _guilds(7)
+        assert len(sess.urls) == 2
+
+    @pytest.mark.asyncio
+    async def test_429_without_cache_long_wait_raises(self, fake_discord):
+        import copycord.admin.app as app_mod
+
+        sess = fake_discord(_GuildsResp(429, {"retry_after": 5, "global": False}))
+        with pytest.raises(app_mod.DiscordGuildsError) as err:
+            await app_mod._user_guilds("tok-a")
+        assert err.value.status == 429
+        assert err.value.detail == "discord-rate-limited"
+        # Blocked until the reset: no second request.
+        with pytest.raises(app_mod.DiscordGuildsError):
+            await app_mod._user_guilds("tok-a")
+        assert len(sess.urls) == 1
+
+    @pytest.mark.asyncio
+    async def test_token_change_misses_cache(self, fake_discord):
+        import copycord.admin.app as app_mod
+
+        sess = fake_discord(_GuildsResp(200, _guilds(1)))
+        await app_mod._user_guilds("tok-a")
+        await app_mod._user_guilds("tok-b")
+        assert len(sess.urls) == 2
+        assert "tok-a" not in str(app_mod._user_guilds_cache)
+
+    @pytest.mark.asyncio
+    async def test_membership_pages_past_200(self, fake_discord):
+        import copycord.admin.app as app_mod
+
+        sess = fake_discord(
+            _GuildsResp(200, _guilds(*range(1, 201))),
+            _GuildsResp(200, _guilds(500)),
+        )
+        assert await app_mod._selfbot_in_guild("tok-a", 500) is True
+        assert len(sess.urls) == 2
+        assert sess.urls[1].endswith("after=200")
+        # Served from the cache now.
+        assert await app_mod._selfbot_in_guild("tok-a", 3) is True
+        assert len(sess.urls) == 2
+
+    @pytest.mark.asyncio
+    async def test_client_guilds_route_reports_rate_limit(self, client, fake_discord):
+        fake_discord(_GuildsResp(429, {"retry_after": 9, "global": False}))
+        db.set_config("CLIENT_TOKEN", "tok-route")
+        try:
+            resp = await client.get("/api/client-guilds")
+        finally:
+            db.set_config("CLIENT_TOKEN", "")
+        assert resp.status_code == 429
+        assert resp.json() == {"detail": "discord-rate-limited"}
+        assert int(resp.headers["Retry-After"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Mapping save: membership checks
+# ---------------------------------------------------------------------------
+
+class TestMappingSaveChecks:
+
+    def _make_mapping(self):
+        return db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name="Save checks",
+            original_guild_id=111,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=222,
+            cloned_guild_name="",
+        )
+
+    def _concurrent_checks(self, monkeypatch):
+        import asyncio
+        import copycord.admin.app as app_mod
+
+        state = {"active": 0, "peak": 0, "calls": []}
+
+        def fake(name):
+            async def check(token, gid):
+                state["calls"].append((name, gid))
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+                await asyncio.sleep(0.05)
+                state["active"] -= 1
+                return True
+
+            return check
+
+        monkeypatch.setattr(app_mod, "_selfbot_in_guild", fake("host"))
+        monkeypatch.setattr(app_mod, "_bot_in_guild", fake("clone"))
+        return state
+
+    @pytest.mark.asyncio
+    async def test_patch_same_ids_skips_checks(self, client, monkeypatch):
+        import copycord.admin.app as app_mod
+
+        host = AsyncMock(return_value=False)
+        bot = AsyncMock(return_value=False)
+        monkeypatch.setattr(app_mod, "_selfbot_in_guild", host)
+        monkeypatch.setattr(app_mod, "_bot_in_guild", bot)
+        mid = self._make_mapping()
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}",
+            json={"mapping_name": "Renamed", "original_guild_id": "111", "cloned_guild_id": "222"},
+        )
+        assert resp.status_code == 200
+        host.assert_not_awaited()
+        bot.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_patch_changed_ids_checks_both_concurrently(self, client, monkeypatch):
+        state = self._concurrent_checks(monkeypatch)
+        mid = self._make_mapping()
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}",
+            json={"mapping_name": "Moved", "original_guild_id": "333", "cloned_guild_id": "222"},
+        )
+        assert resp.status_code == 200
+        assert sorted(state["calls"]) == [("clone", 222), ("host", 333)]
+        assert state["peak"] == 2
+
+    @pytest.mark.asyncio
+    async def test_patch_changed_ids_still_rejects_non_member(self, client, monkeypatch):
+        import copycord.admin.app as app_mod
+
+        monkeypatch.setattr(app_mod, "_selfbot_in_guild", AsyncMock(return_value=False))
+        monkeypatch.setattr(app_mod, "_bot_in_guild", AsyncMock(return_value=True))
+        mid = self._make_mapping()
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}",
+            json={"mapping_name": "Moved", "original_guild_id": "333", "cloned_guild_id": "222"},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["which"] == "original_guild_id"
+
+    @pytest.mark.asyncio
+    async def test_create_checks_both_concurrently(self, client, monkeypatch):
+        state = self._concurrent_checks(monkeypatch)
+        resp = await client.post(
+            "/api/guild-mappings",
+            json={"mapping_name": "New", "original_guild_id": "444", "cloned_guild_id": "555"},
+        )
+        assert resp.status_code == 200
+        assert sorted(state["calls"]) == [("clone", 555), ("host", 444)]
+        assert state["peak"] == 2

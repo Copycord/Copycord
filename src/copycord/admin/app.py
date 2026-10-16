@@ -6059,10 +6059,11 @@ async def api_client_guilds():
     try:
         guilds = await _user_guilds(client_token)
     except DiscordGuildsError as e:
+        # The same {"detail"} body the HTTPException handler writes, plus Retry-After.
         headers = None
         if e.retry_after is not None:
             headers = {"Retry-After": str(max(1, int(e.retry_after + 0.999)))}
-        raise HTTPException(status_code=e.status, detail=e.detail, headers=headers)
+        return JSONResponse({"detail": e.detail}, status_code=e.status, headers=headers)
 
     items: list[dict[str, str]] = [{"id": g["id"], "name": g["name"]} for g in guilds]
     items.sort(key=lambda x: x["name"].lower())
