@@ -23,8 +23,10 @@ const RETRY_MS = 1500;
 // empty log sends no batch at all, so SETTLE_MAX_MS ends the wait regardless.
 const SETTLE_MS = 150;
 const SETTLE_MAX_MS = 2500;
-// Log lines shimmer in the body while the backlog loads (widths vary like real lines).
+// Log lines shimmer in the body while the backlog loads, one per 18 px log line (text-xs, leading-normal),
+// enough rows to fill the tallest body (80vh); the overflow is clipped. Widths repeat like real lines.
 const PLACEHOLDER_WIDTHS = ["72%", "58%", "84%", "46%", "77%", "63%", "88%", "52%", "69%", "41%", "80%", "57%"];
+const PLACEHOLDER_ROWS = Array.from({ length: 60 }, (_, i) => PLACEHOLDER_WIDTHS[i % PLACEHOLDER_WIDTHS.length]!);
 
 export interface LogModalProps {
   /** The open stream, or null when closed. */
@@ -174,8 +176,10 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
         <div className="relative flex min-h-0 flex-1 flex-col">
         {!settled && (
           <div data-testid="log-loading" aria-hidden="true" className="absolute inset-0 z-10 overflow-hidden bg-log-bg px-4 py-3">
-            {PLACEHOLDER_WIDTHS.map((w, i) => (
-              <Skeleton.Text key={i} block className="text-xs leading-normal" width={w} style={{ marginBottom: 4 }} />
+            {PLACEHOLDER_ROWS.map((w, i) => (
+              <div key={i} className="flex h-[18px] items-center">
+                <Skeleton.Line width={w} height={10} className="my-0" />
+              </div>
             ))}
           </div>
         )}
