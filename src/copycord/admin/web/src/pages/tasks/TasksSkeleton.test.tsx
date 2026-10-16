@@ -195,7 +195,7 @@ function chrome(root: HTMLElement) {
     headGroups: Array.from(head.children).map((c) => c.className),
     headLeft: byClass(FRAME_HEAD_LEFT).children.length,
     dropdowns: Array.from(byClass(FRAME_HEAD_FILTERS).querySelectorAll("button[aria-haspopup=listbox]")).map(label),
-    autoRefresh: label(byClass(FRAME_HEAD_LEFT).querySelector("button[aria-haspopup=listbox]")!),
+    headLeftControls: byClass(FRAME_HEAD_LEFT).querySelectorAll("button").length,
     pager: Array.from(root.querySelectorAll("nav[aria-label=Pagination] button")).map((b) => `${b.textContent} ${(b as HTMLButtonElement).disabled}`),
   };
 }
@@ -204,7 +204,6 @@ describe("page skeleton", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", FakeWs);
     localStorage.clear();
-    localStorage.setItem("tasks:autorefresh", "0");
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) =>
@@ -260,8 +259,9 @@ describe("page skeleton", () => {
       tabs: ["All 2", "Running 2", "Done 2", "Failed 2", "Cancelled 2"],
       // The runs card does not clip, so an open filter list hangs past it.
       frames: 1,
-      headLeft: 2,
-      autoRefresh: "Auto-refresh: Off",
+      // The run count alone: no Auto-refresh control, the list is live.
+      headLeft: 1,
+      headLeftControls: 0,
       dropdowns: ["Task type: All", "Status: All", "Mapping: All", "Actor: All"],
       // One page: no pager in either.
       pager: [],
@@ -419,7 +419,7 @@ describe("page skeleton", () => {
 describe("placeholder to content", () => {
   const list = (loading: boolean, refreshing = false) => (
     <MemoryRouter>
-      <RunList runs={[RUN]} total={1} loading={loading} refreshing={refreshing} typeTitle={() => "Backfill channels"} autoRefresh="0" onAutoRefresh={() => {}} />
+      <RunList runs={[RUN]} total={1} loading={loading} refreshing={refreshing} typeTitle={() => "Backfill channels"} />
     </MemoryRouter>
   );
 

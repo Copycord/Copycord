@@ -1,7 +1,7 @@
 // Task runs for the Tasks page: one list page per filter set and the open run, kept live by
 // task.run.updated frames on /ws/out. A frame patches the row it names when its seq is newer, a run
-// the list does not hold goes to the top when it matches the filters (first page only), anything else
-// is ignored. On a socket reconnect the page and the open run are fetched again, since frames sent
+// the list does not hold goes to the top when it matches the filters (first page only); a new run or a
+// status change also refetches the page quietly so the totals and tab counts follow. On a socket reconnect the page and the open run are fetched again, since frames sent
 // while it was down are gone.
 //   const { runs, total, loading } = useTaskRuns({ type: "backfill_channels" });
 //   const { run } = useTaskRun("12");
@@ -100,6 +100,18 @@ export function mergeIntoList(state: ListState, frame: TaskRunUpdated, filters: 
   return { runs: [row, ...state.runs].slice(0, PER_PAGE), total: state.total + 1 };
 }
 
+/** After a frame the list refetches this long after, so a burst of frames costs one fetch. */
+export const LIVE_REFETCH_MS = 500;
+
+/**
+ * Does a frame change what the page cannot work out alone: a run seen for the first time (a new run, or
+ * one off this page) changes the total, the tab counts and maybe the page; a run moving to another
+ * status changes the tab counts and the rail's running badge.
+ */
+export function changesCounts(last: Pick<TaskRun, "status"> | undefined, frame: TaskRunUpdated): boolean {
+  return !last || last.status !== frame.run.status;
+}
+
 /** A list page without the run `id` (after a delete); unchanged when the page does not hold it. */
 export function removeFromList(state: ListState, id: string): ListState {
   if (!state.runs.some((r) => r.id === id)) return state;
@@ -120,7 +132,7 @@ function useReconnectRefetch(connected: boolean, refetch: () => void) {
 export interface TaskRunsState extends ListState {
   /** No page has landed yet since the list mounted: show the skeleton. Never true again after that. */
   loading: boolean;
-  /** A fetch is out while the held rows stay on screen (search, filters, paging, auto-refresh, reconnect, reload). */
+  /** A fetch is out while the held rows stay on screen (search, filters, paging, reconnect, reload); not for a live refetch. */
   refreshing: boolean;
   /** The held page answers the current filters; until then an empty page is not news (no empty state). */
   settled: boolean;
@@ -142,10 +154,19 @@ export interface TaskRunsState extends ListState {
 /**
  * The list page for `filters`, live. Stale while revalidate: only the first fetch after mount loads (the
  * skeleton); every later one, for new filters too, keeps the held rows with `refreshing` set until its
- * answer replaces them. A fetch made stale by a newer one is aborted and its answer ignored.
+ * answer replaces them. A fetch made stale by a newer one is aborted and its answer ignored. A frame
+ * for a run the page has not seen, or one that changes a run's status, also refetches the page (and its
+ * counts) LIVE_REFETCH_MS later, quietly: no refreshing mark; `onCountsChange` is called with it.
  */
-export function useTaskRuns(filters: RunFilters): TaskRunsState {
+export function useTaskRuns(filters: RunFilters, onCountsChange?: () => void): TaskRunsState {
   const url = runsUrl(filters);
+  const stateRef = useRef<ListState>({ runs: [], total: 0 });
+  // The next fetch is a live refetch: no refreshing mark, the rows just change when it lands.
+  const quiet = useRef(false);
+  const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seen = useRef(new Map<string, { seq: number; status: TaskRun["status"] }>());
+  const onCountsRef = useRef(onCountsChange);
+  onCountsRef.current = onCountsChange;
   const [state, setState] = useState<ListState>({ runs: [], total: 0 });
   const [choices, setChoices] = useState<{ actors: string[]; contexts: TaskContext[]; counts: RunCounts | null }>({
     actors: [],
@@ -159,10 +180,12 @@ export function useTaskRuns(filters: RunFilters): TaskRunsState {
   const [tick, setTick] = useState(0);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
+  stateRef.current = state;
 
   useEffect(() => {
     const ctl = new AbortController();
-    setRefreshing(true);
+    if (!quiet.current) setRefreshing(true);
+    quiet.current = false;
     api
       .get<TaskRunsResponse>(url, { signal: ctl.signal })
       .then((d) => {
@@ -183,11 +206,33 @@ export function useTaskRuns(filters: RunFilters): TaskRunsState {
   }, [url, tick]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
+  // One refetch for a burst of frames: the first that changes the counts sets the timer, later ones ride on it.
+  const refetchLive = useCallback(() => {
+    if (liveTimer.current) return;
+    liveTimer.current = setTimeout(() => {
+      liveTimer.current = null;
+      quiet.current = true;
+      setTick((t) => t + 1);
+      onCountsRef.current?.();
+    }, LIVE_REFETCH_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (liveTimer.current) clearTimeout(liveTimer.current);
+    },
+    [],
+  );
   const { connected } = useWsMessages(
     "/ws/out",
     (msg) => {
       const frame = parseRunFrame(msg);
-      if (frame) setState((s) => mergeIntoList(s, frame, filtersRef.current));
+      if (!frame) return;
+      const { id, seq, status } = frame.run;
+      const last = stateRef.current.runs.find((r) => r.id === id) ?? seen.current.get(id);
+      if (last && seq <= last.seq) return;
+      seen.current.set(id, { seq, status });
+      setState((s) => mergeIntoList(s, frame, filtersRef.current));
+      if (changesCounts(last, frame)) refetchLive();
     },
     { types: [RUN_UPDATED] },
   );

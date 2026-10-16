@@ -38,7 +38,7 @@ export const FRAME = "overflow-hidden rounded-card border border-border bg-card"
 /** The runs card: FRAME without the clip, so an open filter list hangs past the card's bottom edge, over the page. */
 export const LIST_FRAME = "rounded-card border border-border bg-card";
 export const FRAME_HEAD = "flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5 text-sm";
-/** Left of the frame head: the run count and Auto-refresh. */
+/** Left of the frame head: the run count. */
 export const FRAME_HEAD_LEFT = "flex items-center gap-4";
 /** Right of the frame head: the filter dropdowns. */
 export const FRAME_HEAD_FILTERS = "flex flex-wrap items-center gap-3";
@@ -351,27 +351,6 @@ export const RUN_PAGES_KEY = "tasks.pages";
 /** Whether the loading list draws the pager: the list had more than one page last time. */
 export function readPagerShown(): boolean {
   return readLastCount(RUN_PAGES_KEY, 1, 10000) > 1;
-}
-
-export const AUTO_REFRESH_KEY = "tasks:autorefresh";
-/** The closed control reads "Auto-refresh: Off" (ToolbarSelect prefix); the options stay plain. */
-export const AUTO_REFRESH_LABEL = "Auto-refresh";
-export const AUTO_REFRESH_OPTIONS = [
-  { value: "0", label: "Off" },
-  { value: "10", label: "10s" },
-  { value: "30", label: "30s" },
-  { value: "60", label: "60s" },
-] as const;
-
-/** The stored auto-refresh interval, 30 s by default. */
-export function readAutoRefresh(): string {
-  try {
-    const v = localStorage.getItem(AUTO_REFRESH_KEY);
-    if (v && AUTO_REFRESH_OPTIONS.some((o) => o.value === v)) return v;
-  } catch {
-    // Storage blocked: use the default.
-  }
-  return "30";
 }
 
 /** The filter dropdowns of the frame head in order; Task type shows on All tasks only. */
@@ -808,14 +787,6 @@ export function TasksSkeleton() {
                 <div className={FRAME_HEAD}>
                   <div className={FRAME_HEAD_LEFT}>
                     <RunCountLoading />
-                    <ToolbarSelect
-                      id="tasks-autorefresh-skeleton"
-                      label={AUTO_REFRESH_LABEL}
-                      prefix={AUTO_REFRESH_LABEL}
-                      value={readAutoRefresh()}
-                      options={AUTO_REFRESH_OPTIONS}
-                      onChange={noop}
-                    />
                   </div>
                   <div className={FRAME_HEAD_FILTERS}>
                     {filters.map((k) => (

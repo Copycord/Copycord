@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskRun, TaskStep } from "../../types/tasks";
-import { applyFrame, FINAL_FETCH_ATTEMPTS, mergeIntoList, parseRunFrame, runsUrl, useTaskRun, useTaskRuns } from "./runStore";
+import { applyFrame, FINAL_FETCH_ATTEMPTS, LIVE_REFETCH_MS, mergeIntoList, parseRunFrame, runsUrl, useTaskRun, useTaskRuns } from "./runStore";
 
 function makeRun(over: Partial<TaskRun> = {}): TaskRun {
   return {
@@ -113,6 +113,39 @@ describe("runStore hooks", () => {
     act(() => ws.onclose?.());
     act(() => ws.open());
     await waitFor(() => expect(fetchMock.mock.calls.length).toBe(calls + 1));
+  });
+
+  it("useTaskRuns refetches the page quietly, once per burst, when a frame names a run it has not seen", async () => {
+    let serverRuns = [makeRun({ id: "1", seq: 1, status: "failed" })];
+    fetchMock.mockImplementation(async () => Response.json({ runs: serverRuns, total: serverRuns.length, page: 1, actors: [], contexts: [] }));
+    const onCounts = vi.fn();
+    const { result } = renderHook(() => useTaskRuns({ status: "failed" }, onCounts));
+    await waitFor(() => expect(result.current.runs).toHaveLength(1));
+    const ws = FakeWs.all[0]!;
+    act(() => ws.open());
+    const calls = fetchMock.mock.calls.length;
+
+    // A run that just started: not on this page's filters, so the frame alone cannot place it.
+    serverRuns = [makeRun({ id: "5", number: 5, seq: 3, status: "failed" }), ...serverRuns];
+    act(() => ws.emit(frame(makeRun({ id: "5", number: 5, seq: 1, status: "queued" }))));
+    act(() => ws.emit(frame(makeRun({ id: "5", number: 5, seq: 2, status: "running" }))));
+    expect(result.current.runs.map((r) => r.id)).toEqual(["1"]);
+    expect(result.current.refreshing).toBe(false);
+
+    // One fetch for the burst, of the same page, after LIVE_REFETCH_MS; no refreshing mark, no skeleton.
+    await waitFor(() => expect(result.current.runs.map((r) => r.id)).toEqual(["5", "1"]));
+    expect(fetchMock.mock.calls.length).toBe(calls + 1);
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toContain("status=failed");
+    expect(result.current.loading).toBe(false);
+    expect(result.current.refreshing).toBe(false);
+    expect(result.current.total).toBe(2);
+    expect(onCounts).toHaveBeenCalledTimes(1);
+
+    // A progress frame for a held run with the same status changes no counts: no fetch.
+    act(() => ws.emit(frame(makeRun({ id: "1", seq: 2, status: "failed", summary: { failed: 1 } }))));
+    await new Promise((r) => setTimeout(r, LIVE_REFETCH_MS + 100));
+    expect(fetchMock.mock.calls.length).toBe(calls + 1);
+    expect(onCounts).toHaveBeenCalledTimes(1);
   });
 
   it("useTaskRun follows frames for its run only", async () => {

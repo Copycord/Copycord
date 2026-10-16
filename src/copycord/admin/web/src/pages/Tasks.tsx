@@ -17,7 +17,6 @@ import { RunList, RunMenu, runConfirm, type RunAction } from "./tasks/RunList";
 import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
 import {
   ALL_TASKS_DESCRIPTION,
-  AUTO_REFRESH_KEY,
   MAIN,
   PAGE,
   RUNS_COUNT_KEY,
@@ -28,7 +27,6 @@ import {
   StatusTabs,
   TasksHeader,
   TasksHeading,
-  readAutoRefresh,
   readPagerShown,
 } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
@@ -87,7 +85,7 @@ export function Tasks() {
   const { id } = useParams<{ id: string }>();
   const [params] = useSearchParams();
   const typeKey = params.get("type") ?? "";
-  const { data, loading: typesLoading } = useApi<TaskTypesResponse>("/api/tasks/types");
+  const { data, loading: typesLoading, reload: reloadTypes } = useApi<TaskTypesResponse>("/api/tasks/types");
   const types = useMemo(() => data?.types ?? [], [data]);
   const selected = types.find((t) => t.key === typeKey);
   // A type page names its type from the first paint, as the skeleton does: the remembered title, or the
@@ -121,7 +119,13 @@ export function Tasks() {
                 description={label ? label.description : ALL_TASKS_DESCRIPTION}
                 action={runAction}
               />
-              <RunsView types={types} typeTitle={typeTitle} runType={selected ?? (typeKey ? undefined : defaultType(types))} onRun={openForm} />
+              <RunsView
+                types={types}
+                typeTitle={typeTitle}
+                runType={selected ?? (typeKey ? undefined : defaultType(types))}
+                onRun={openForm}
+                onCountsChange={reloadTypes}
+              />
             </>
           )}
         </div>
@@ -131,7 +135,7 @@ export function Tasks() {
   );
 }
 
-/** Poll this often while the socket is down and auto-refresh is Off, so the list still moves. */
+/** Poll this often while the socket is down, so the list still moves; while it is up the frames keep it live. */
 const SOCKET_DOWN_POLL_S = 30;
 
 /** The type All tasks offers to run from its empty list: backfill when there is one, else the first type. */
@@ -145,12 +149,16 @@ interface RunsViewProps {
   /** The type the empty list offers to run, once the types load. */
   runType?: TaskType;
   onRun: (type: TaskType) => void;
+  /** A live frame started a run or moved one to another status: the rail's counts are stale. */
+  onCountsChange?: () => void;
 }
 
-function RunsView({ types, typeTitle, runType, onRun }: RunsViewProps) {
+function RunsView({ types, typeTitle, runType, onRun, onCountsChange }: RunsViewProps) {
   const { filters, active, set, setPage, clear } = useRunFilters();
-  const { runs, total, counts, loading, refreshing, settled, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(filters);
-  const [autoRefresh, setAutoRefresh] = useState(readAutoRefresh);
+  const { runs, total, counts, loading, refreshing, settled, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(
+    filters,
+    onCountsChange,
+  );
   const navigate = useNavigate();
   const confirm = useConfirm();
   const toast = useToast();
@@ -163,11 +171,10 @@ function RunsView({ types, typeTitle, runType, onRun }: RunsViewProps) {
   useEffect(() => rememberRunTypes(runs), [runs]);
 
   useEffect(() => {
-    const secs = Number(autoRefresh) || (connected ? 0 : SOCKET_DOWN_POLL_S);
-    if (!secs) return;
-    const t = window.setInterval(reload, secs * 1000);
+    if (connected) return;
+    const t = window.setInterval(reload, SOCKET_DOWN_POLL_S * 1000);
     return () => window.clearInterval(t);
-  }, [autoRefresh, connected, reload]);
+  }, [connected, reload]);
 
   const onAction = async (act: RunAction, run: TaskRun) => {
     const name = `${typeTitle(run.type)} #${run.number}`;
@@ -195,15 +202,6 @@ function RunsView({ types, typeTitle, runType, onRun }: RunsViewProps) {
       } catch (e) {
         toast.show(errorText(e, `Could not delete ${name}`), { kind: "error" });
       }
-    }
-  };
-
-  const onAutoRefresh = (v: string) => {
-    setAutoRefresh(v);
-    try {
-      localStorage.setItem(AUTO_REFRESH_KEY, v);
-    } catch {
-      // Storage blocked: keep it for this visit only.
     }
   };
 
@@ -261,8 +259,6 @@ function RunsView({ types, typeTitle, runType, onRun }: RunsViewProps) {
         loading={loading}
         refreshing={refreshing}
         typeTitle={typeTitle}
-        autoRefresh={autoRefresh}
-        onAutoRefresh={onAutoRefresh}
         filters={
           <RunFilterSelects
             filters={filters}

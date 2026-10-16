@@ -231,7 +231,7 @@ describe("Tasks page", () => {
     serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
     renderAt("/tasks");
     await screen.findByRole("link", { name: "Backfill channels #12" });
-    expect(screen.getByRole("button", { name: "Auto-refresh: 30s" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Auto-refresh/ })).toBeNull();
     for (const name of ["Task type: All", "Mapping: All", "Actor: All"]) expect(screen.getByRole("button", { name })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Status: All" }));
     const listbox = screen.getByRole("listbox", { name: "Status" });

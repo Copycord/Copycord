@@ -1,4 +1,4 @@
-// The list frame of the Tasks page: its header row ("N task runs", auto-refresh, filter slots) and the
+// The list frame of the Tasks page: its header row ("N task runs", filter slots) and the
 // run rows in the GitHub Actions layout, or the empty state.
 
 import { useEffect, useState, type ReactNode } from "react";
@@ -8,11 +8,8 @@ import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
-import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { StatusIcon } from "./StatusIcon";
 import {
-  AUTO_REFRESH_LABEL,
-  AUTO_REFRESH_OPTIONS,
   BUSY,
   FADE_IN,
   FRAME_HEAD,
@@ -33,8 +30,6 @@ import {
   RunRowsLoading,
   runCountText,
 } from "./TasksSkeleton";
-
-export { AUTO_REFRESH_KEY, AUTO_REFRESH_OPTIONS } from "./TasksSkeleton";
 
 // rerun: runs stored before Re-run was removed still say how they started; nothing starts one now.
 const TRIGGER: Record<string, string> = { manual: "Manual", rerun: "Re-run", api: "API" };
@@ -176,8 +171,6 @@ export interface RunListProps {
   /** A fetch is out (search, filters, paging, refresh): the rows or the empty state stay, only marked busy. */
   refreshing?: boolean;
   typeTitle: (key: string) => string;
-  autoRefresh: string;
-  onAutoRefresh: (value: string) => void;
   /** Right side of the header row: the filter dropdowns. */
   filters?: ReactNode;
   /** Shown in place of rows when the page has none. */
@@ -228,8 +221,6 @@ export function RunList({
   loading,
   refreshing = false,
   typeTitle,
-  autoRefresh,
-  onAutoRefresh,
   filters,
   empty,
   footer,
@@ -240,14 +231,6 @@ export function RunList({
       <div className={FRAME_HEAD}>
         <div className={FRAME_HEAD_LEFT}>
           {loading ? <RunCountLoading /> : <span className={cx(RUN_COUNT, FADE_IN)}>{runCountText(total)}</span>}
-          <ToolbarSelect
-            id="tasks-autorefresh"
-            label={AUTO_REFRESH_LABEL}
-            prefix={AUTO_REFRESH_LABEL}
-            value={autoRefresh}
-            options={AUTO_REFRESH_OPTIONS}
-            onChange={onAutoRefresh}
-          />
         </div>
         {filters ? <div className={FRAME_HEAD_FILTERS}>{filters}</div> : null}
       </div>
