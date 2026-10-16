@@ -10,7 +10,7 @@ import { ACTIVE_STATUSES, type TaskRun } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { deliveredOf, outcomeText, SegBar, stepCounts } from "./Outcome";
-import { RunStatusPill } from "./StatusIcon";
+import { RunStatusPill, StatusIcon } from "./StatusIcon";
 import {
   AUTO_REFRESH_LABEL,
   AUTO_REFRESH_OPTIONS,
@@ -107,12 +107,10 @@ export function runDuration(run: TaskRun, now: number): string | null {
   return Number.isNaN(start) || Number.isNaN(end) ? null : formatDuration(end - start);
 }
 
-const TRIGGERED: Record<string, string> = { manual: "Triggered manually", rerun: "Triggered by a re-run", api: "Triggered via the API" };
-
-/** "Triggered manually by admin": how the run started and who started it, for the run page's meta line. */
+/** "Manual · admin": how the run started and who started it, short, for the run page's meta line. */
 export function triggeredText(run: Pick<TaskRun, "trigger" | "actor">): string {
-  const how = TRIGGERED[run.trigger] ?? "Triggered";
-  return run.actor ? `${how} by ${run.actor}` : how;
+  const how = triggerLabel(run);
+  return run.actor ? `${how} · ${run.actor}` : how;
 }
 
 /** The row's right side: started as relative time over the duration, each after a small glyph; the date in the titles. */
@@ -142,9 +140,9 @@ export interface RunRowProps {
 }
 
 /**
- * One run, the whole row a link: the task name and number with its one coloured status badge, over the
- * meta line (run ID in mono, the mapping chip, trigger and actor after 12 px glyphs); the outcome line
- * over its segmented bar; the timing; the menu.
+ * One run, the whole row a link: the status glyph centred on the row, the task name and number with its
+ * coloured status badge (the word alone), over the meta line (run ID in mono, the mapping chip, trigger
+ * and actor after 12 px glyphs); the outcome line in full over its segmented bar; the timing; the menu.
  */
 export function RunRow({ run, typeTitle, actions }: RunRowProps) {
   const mapping = run.context?.label;
@@ -153,6 +151,7 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
   const started = formatWhen(run.started_at ?? run.created_at);
   return (
     <li className={ROW} data-run-id={run.id}>
+      <StatusIcon status={run.status} />
       <div className={ROW_MAIN}>
         <div className={ROW_HEAD}>
           <Link
@@ -193,7 +192,7 @@ export function RunRow({ run, typeTitle, actions }: RunRowProps) {
         </div>
       </div>
       <div className={ROW_OUTCOME}>
-        <span data-testid="run-outcome" className={ROW_OUTCOME_TEXT}>
+        <span data-testid="run-outcome" title={outcome} className={ROW_OUTCOME_TEXT}>
           {outcome}
         </span>
         {counts ? <SegBar counts={counts} className={ROW_SEG} /> : <span aria-hidden="true" className={cx(ROW_SEG, "rounded-full bg-line-1")} />}

@@ -153,9 +153,12 @@ describe("RunHeader", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
     expect(screen.getByText("#12")).toBeInTheDocument();
     expect(screen.getByTestId("run-status")).toHaveTextContent("Success");
-    // The badge sits beside the number; no glyph of the header's own.
+    // The badge sits beside the number, the word alone; the one glyph stands before the title.
     expect(screen.getByTestId("run-status").parentElement!.className).toBe(RUN_TITLE_ROW);
-    expect(screen.getAllByRole("img", { hidden: true }).filter((g) => g.hasAttribute("data-status"))).toHaveLength(1);
+    const glyphs = screen.getAllByRole("img", { hidden: true }).filter((g) => g.hasAttribute("data-status"));
+    expect(glyphs).toHaveLength(1);
+    expect(glyphs[0]!.nextElementSibling).toBe(screen.getByRole("heading", { level: 2 }));
+    expect(screen.getByTestId("run-status").querySelector("svg")).toBeNull();
     // The menu button sits on the title's row; a finished run has no Cancel run.
     const row = screen.getByRole("heading", { level: 2 }).closest(`[class^="${RUN_HEAD_ROW}"]`)!;
     expect(within(row as HTMLElement).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? text(b))).toEqual(["Run actions"]);
@@ -166,9 +169,11 @@ describe("RunHeader", () => {
     const started = "2026-10-14T18:00:01Z";
     const meta = screen.getByTestId("run-meta");
     expect(text(meta)).toBe(
-      `Triggered manually by admin·started ${formatWhen(started)} (${formatAgo(started, Date.now())})·ran 48s·mapping Main mapping·ID 4f2a9c1e`,
+      `Manual · admin·started ${formatAgo(started, Date.now())}·ran 48s·mapping Main mapping·ID 4f2a9c1e`,
     );
     expect(meta.tagName).toBe("P");
+    // Relative time on the line, the date in its title, as on the list rows.
+    expect(screen.getByTestId("run-started")).toHaveAttribute("title", formatWhen(started));
     // 12 px glyphs before trigger, started, duration and mapping, and on the copy button.
     expect(Array.from(meta.querySelectorAll("svg")).map((s) => s.getAttribute("width"))).toEqual(["12", "12", "12", "12", "12"]);
     // The mapping is a quiet outlined chip; the ID is mono with the whole id in its title and a copy button.
@@ -181,7 +186,7 @@ describe("RunHeader", () => {
     // Other triggers, no actor, and a run still going.
     const { unmount } = renderHeader(makeRun({ trigger: "api", actor: "", status: "running", finished_at: null }));
     const live = screen.getAllByTestId("run-meta")[1]!;
-    expect(text(live)).toMatch(/^Triggered via the API·started /);
+    expect(text(live)).toMatch(/^API·started /);
     expect(within(live).getByTestId("run-duration")).toHaveTextContent(/^running \d/);
     unmount();
   });
@@ -309,7 +314,7 @@ describe("Run page structure", () => {
         title: "Backfill channels",
         number: "#12",
         status: "Running",
-        meta: expect.stringMatching(/^Triggered manually by admin·started .+·running .+·mapping Main mapping·ID 4f2a9c1e$/),
+        meta: expect.stringMatching(/^Manual · admin·started .+·running .+·mapping Main mapping·ID 4f2a9c1e$/),
         actions: ["Cancel run", "Run actions", "Copy run ID"],
       },
       cards: [

@@ -137,6 +137,19 @@ def test_start_get_list_cancel_and_detail(client, events):
     assert body["total"] == 2 and body["page"] == 2 and body["runs"][0]["id"] == run["id"]
     assert client.get("/api/tasks/runs", params={"status": "failed"}).json()["total"] == 0
 
+
+def test_list_counts_runs_per_status_under_the_other_filters(client):
+    ok = _start(client).json()["run"]
+    _finished(client, ok["id"])
+    other = _start(client, trigger="api").json()["run"]
+    _finished(client, other["id"])
+    zero = {"queued": 0, "running": 0, "failed": 0, "cancelled": 0}
+    # The status filter narrows the rows, never the tab counts.
+    body = client.get("/api/tasks/runs", params={"status": "failed"}).json()
+    assert body["total"] == 0 and body["counts"] == {**zero, "success": 2, "all": 2}
+    body = client.get("/api/tasks/runs", params={"q": "#1"}).json()
+    assert body["counts"] == {**zero, "success": 1, "all": 1}
+
     resp = client.post(f"/api/tasks/runs/{run['id']}/cancel")
     assert resp.status_code == 409
     assert resp.json()["run"]["status"] == "success"

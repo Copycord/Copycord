@@ -1,7 +1,7 @@
-// One run at /tasks/runs/:id, the same page for every task type: the header with the title, number and
+// One run at /tasks/runs/:id, the same page for every task type: the header with the status glyph, title, number and
 // the run's one coloured status badge, Cancel run while it is active and the "Run actions" menu (Copy run
-// ID, Download report, Delete when finished) on one line, the meta line under it ("Triggered manually by
-// admin · started ... · ran 1m 55s · mapping Clone-1 · ID 0d88ac5a"), then one column: the summary card
+// ID, Download report, Delete when finished) on one line, the meta line under it ("Manual · admin ·
+// started 5h ago · ran 1m 55s · mapping Clone-1 · ID 0d88ac5a"), then one column: the summary card
 // (the hero count and the segmented step bar, the step counts as stat tiles, then its Inputs), the Steps
 // card and the collapsed "Report (JSON)" panel. Everything type specific comes from the registry in ./types.
 
@@ -21,7 +21,7 @@ import { finishedText, SegBar, stepCounts } from "./Outcome";
 import { ReportPanel, reportUrl, useRunToast } from "./ReportPanel";
 import { formatAgo, formatWhen, runConfirm, runDuration, triggeredText, useNow } from "./RunList";
 import { runUrl, useTaskRun } from "./runStore";
-import { COLOUR, RunStatusPill } from "./StatusIcon";
+import { COLOUR, RunStatusPill, StatusIcon } from "./StatusIcon";
 import { StepList, formatCount } from "./StepList";
 import {
   BUSY,
@@ -106,8 +106,8 @@ export function RunMeta({ run }: { run: TaskRun }) {
       values={{
         trigger: <span className={FADE_IN}>{triggeredText(run)}</span>,
         started: (
-          <span data-testid="run-started" className={cx("tabular-nums", FADE_IN)}>
-            {when ? `${when} (${formatAgo(started, now)})` : "-"}
+          <span data-testid="run-started" title={when || undefined} className={cx("tabular-nums", FADE_IN)}>
+            {when ? formatAgo(started, now) : "-"}
           </span>
         ),
         ran: (
@@ -257,6 +257,7 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
       <div className={RUN_HEAD_ROW}>
         {/* The type's title is a label the skeleton already showed; the run's own parts fade in. */}
         <div className={RUN_TITLE_ROW}>
+          <StatusIcon status={run.status} size={20} className={FADE_IN} />
           <h2 className={RUN_TITLE} title={run.title}>
             {typeTitle}
           </h2>

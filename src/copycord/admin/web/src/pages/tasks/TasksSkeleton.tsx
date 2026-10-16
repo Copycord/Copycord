@@ -66,12 +66,12 @@ export const META_ITEM = "inline-flex shrink-0 items-center gap-1";
 export const META_DOT = "text-muted/50";
 /** The mapping on a meta line: a link-like name, so a subtle outlined chip rather than plain text. */
 export const MAPPING_CHIP = "inline-block max-w-[20ch] truncate rounded-full border border-line-2 px-1.5 text-xs leading-4 text-text-2";
-/** The outcome column: "6 steps · 2 done · 4 cancelled · 92 delivered" over the thin segmented bar. */
-export const ROW_OUTCOME = "flex w-[300px] shrink-0 flex-col gap-2 max-lg:hidden";
+/** The outcome column, wide enough for "6 steps · 4 done · 1 failed · 1 cancelled · 224 delivered" in full, over the thin segmented bar. */
+export const ROW_OUTCOME = "flex w-[368px] shrink-0 flex-col gap-2 max-lg:hidden";
 export const ROW_OUTCOME_TEXT = "h-[18px] truncate text-[13px] leading-[18px] text-muted tabular-nums";
 export const ROW_SEG = "h-1 w-full";
 /** Started (relative) over duration, each after a small glyph, 13 px muted with tabular numbers. */
-export const ROW_TIMING = "flex w-[96px] shrink-0 flex-col gap-1 text-[13px] leading-[18px] text-muted tabular-nums max-sm:hidden";
+export const ROW_TIMING = "flex w-[80px] shrink-0 flex-col gap-1 text-[13px] leading-[18px] text-muted tabular-nums max-sm:hidden";
 export const ROW_TIME = "flex items-center gap-1.5 whitespace-nowrap";
 /** Above the row link's cover, so the kebab opens its menu instead of the run. */
 export const ROW_MENU = "relative z-10 shrink-0";
@@ -94,7 +94,7 @@ export const RUN_PILL = "ml-1 shrink-0";
 export const RUN_PILL_BADGE = "h-6 gap-1.5 px-2.5 py-0! leading-none! font-medium!";
 /** Right of the title line: Cancel run while the run is active, then the Run actions menu. */
 export const RUN_ACTIONS = "flex shrink-0 items-center gap-2";
-/** "Triggered manually by admin · started ... · ran 1m 55s · mapping Clone-1 · ID 0d88ac5a": muted inline text under the title. */
+/** "Manual · admin · started 5h ago · ran 1m 55s · mapping Clone-1 · ID 0d88ac5a": muted inline text under the title. */
 export const RUN_META = "m-0 mt-1.5 flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] leading-5 text-muted";
 
 /** A type's page, where the run page's breadcrumb leads. */
@@ -168,12 +168,20 @@ export function MetaDot() {
   );
 }
 
-/** The status badge's box as itself; its glyph and word are the run's status, so they shimmer. */
+/** The status glyph's box (StatusIcon) with a round bar: the glyph is the run's status, so it shimmers. */
+export function StatusIconLoading({ size = 16, className }: { size?: number; className?: string }) {
+  return (
+    <span data-testid="status-icon-loading" className={cx(STATUS_BOX, className)}>
+      <Skeleton width={size} height={size} rounded="rounded-full" />
+    </span>
+  );
+}
+
+/** The status badge's box as itself; its word is the run's status, so it shimmers. */
 export function StatusPillLoading({ testId, className }: { testId?: string; className?: string }) {
   return (
     <span data-testid={testId} className={cx("inline-flex", className)}>
       <Badge className={RUN_PILL_BADGE}>
-        <Skeleton width={12} height={12} rounded="rounded-full" />
         <Skeleton.Text>Cancelled</Skeleton.Text>
       </Badge>
     </span>
@@ -181,9 +189,9 @@ export function StatusPillLoading({ testId, className }: { testId?: string; clas
 }
 
 export interface RunMetaValues {
-  /** "Triggered manually by admin". */
+  /** "Manual · admin". */
   trigger: ReactNode;
-  /** After the static word "started": the date and the relative time. */
+  /** After the static word "started": the relative time, the date in its title. */
   started: ReactNode;
   /** "ran 1m 55s", or "running 12s" while active. */
   ran: ReactNode;
@@ -291,8 +299,8 @@ export const INPUTS_LABELS_KEY = "tasks.input-labels";
 export const INPUTS_BOX = "px-4 py-3";
 export const INPUTS_TITLE = "m-0 mb-2 text-xs font-semibold text-muted";
 export const INPUTS_LIST = "m-0 grid grid-cols-[minmax(110px,max-content)_1fr] gap-x-6 gap-y-1 text-sm leading-5";
-/** The status glyph's box (StatusIcon): it centres itself on the line it sits in, a step row or the inside
- * of a status badge, whatever that line aligns its other parts to. */
+/** The status glyph's box (StatusIcon): it centres itself on the line it sits in, a run row, the run title
+ * or a step row, whatever that line aligns its other parts to. */
 export const STATUS_BOX = "inline-flex shrink-0 items-center self-center";
 /** The Steps card head: the title, the counts line and the status filter on one line (the run's bar is in the Summary). */
 export const STEPS_HEAD = CARD_HEAD;
@@ -521,6 +529,7 @@ export function RailEntryLoading() {
 function RunRowLoading({ nameWidth }: { nameWidth: number }) {
   return (
     <li className={ROW_BOX}>
+      <StatusIconLoading />
       <div className={ROW_MAIN}>
         <div className={ROW_HEAD}>
           <TextBar width={nameWidth} className={ROW_NAME} />
@@ -532,7 +541,7 @@ function RunRowLoading({ nameWidth }: { nameWidth: number }) {
       </div>
       <div className={ROW_OUTCOME}>
         <span className={ROW_OUTCOME_TEXT}>
-          <Skeleton.Text>6 steps · 2 done · 4 cancelled · 92 delivered</Skeleton.Text>
+          <Skeleton.Text>6 steps · 4 done · 1 failed · 1 cancelled · 224 delivered</Skeleton.Text>
         </span>
         <Skeleton rounded="rounded-full" className={ROW_SEG} />
       </div>
@@ -670,6 +679,7 @@ export function RunDetailSkeleton({
           </nav>
           <div className={RUN_HEAD_ROW}>
             <div className={RUN_TITLE_ROW}>
+              <StatusIconLoading size={20} />
               <h2 className={RUN_TITLE}>{title ?? <TextBar width={180} />}</h2>
               <Skeleton.Text className="shrink-0 text-[22px] leading-8">#00</Skeleton.Text>
               <StatusPillLoading testId="run-status" className={RUN_PILL} />
@@ -680,8 +690,8 @@ export function RunDetailSkeleton({
           </div>
           <RunMetaLine
             values={{
-              trigger: <Skeleton.Text>Triggered manually by admin</Skeleton.Text>,
-              started: <Skeleton.Text>Oct 15, 5:06 PM EDT (5h ago)</Skeleton.Text>,
+              trigger: <Skeleton.Text>Manual · admin</Skeleton.Text>,
+              started: <Skeleton.Text>5h ago</Skeleton.Text>,
               ran: <Skeleton.Text>ran 1m 55s</Skeleton.Text>,
               mapping: <Skeleton.Box className={MAPPING_CHIP}>Clone-1</Skeleton.Box>,
               id: <RunIdValue id={null} />,

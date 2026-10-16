@@ -17,6 +17,9 @@ from fastapi.responses import JSONResponse, Response
 from . import registry
 from .service import ACTIVE, RunFinished, TaskService, _ids_to_str
 
+# The statuses the runs list counts for its tabs.
+COUNTED = ("queued", "running", "success", "failed", "cancelled")
+
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 # What a start may send. A run stored with an older trigger still reads and lists as stored.
@@ -156,9 +159,14 @@ async def list_runs(request: Request):
     filters = _filters(request)
     runs, total = svc.list(filters, page, per_page)
     actors, contexts = _distinct(svc, filters.get("type"))
+    # The quick status tabs: runs per status under every filter but the status itself.
+    rest = {k: v for k, v in filters.items() if k != "status"}
+    counts = {s: svc.list({**rest, "status": s}, 1, 1)[1] for s in COUNTED}
+    counts["all"] = svc.list(rest, 1, 1)[1]
     return {
         "runs": [r.to_wire(include_steps=False) for r in runs],
         "total": total,
+        "counts": counts,
         "page": page,
         "actors": actors,
         "contexts": contexts,

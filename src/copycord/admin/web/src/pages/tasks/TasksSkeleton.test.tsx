@@ -44,6 +44,7 @@ import {
   ROW_MENU,
   ROW_NAME,
   ROW_TIMING,
+  STATUS_BOX,
   RUN_PAGES_KEY,
   RUNS_COUNT_KEY,
   RunRowsLoading,
@@ -92,29 +93,32 @@ describe("run row skeleton", () => {
     expect(real!.className.startsWith(ROW_BOX)).toBe(true);
     const cols = (li: Element) => Array.from(li.children).map(layout);
     expect(cols(skeleton!)).toEqual(cols(real!));
-    // Name and meta line, the outcome, timing, menu; no glyph column of its own.
-    expect(Array.from(real!.children).map((c) => c.className)).toEqual([ROW_MAIN, ROW_OUTCOME, ROW_TIMING, ROW_MENU]);
-    expect(Array.from(skeleton!.children).map((c) => c.className)).toEqual([ROW_MAIN, ROW_OUTCOME, ROW_TIMING, ROW_MENU]);
+    // The status glyph centred on the row, name and meta line, the outcome, timing, menu.
+    expect(Array.from(real!.children).map((c) => c.className)).toEqual([`${STATUS_BOX} text-custom-ink`, ROW_MAIN, ROW_OUTCOME, ROW_TIMING, ROW_MENU]);
+    expect(real!.children[0]).toHaveAttribute("data-status", "cancelled");
+    expect(real!.querySelector(`[title^="Status:"] svg`)).toBeNull();
+    expect(Array.from(skeleton!.children).map((c) => c.className)).toEqual([STATUS_BOX, ROW_MAIN, ROW_OUTCOME, ROW_TIMING, ROW_MENU]);
+    expect(skeleton!.children[0]!.querySelector("[data-skeleton]")).not.toBeNull();
     // The name line (the name and the one status badge) over the meta line; the skeleton has the badge's box and bars.
-    const lines = (li: Element) => Array.from(li.children[0]!.children).map((c) => c.className);
+    const lines = (li: Element) => Array.from(li.children[1]!.children).map((c) => c.className);
     expect(lines(real!)).toEqual([ROW_HEAD, ROW_META]);
     expect(lines(skeleton!)).toEqual(lines(real!));
     expect(real!.querySelector(`[class="${ROW_LINK}"]`)).toHaveTextContent("Backfill channels #1");
-    expect(real!.children[0]!.children[0]!.lastElementChild).toHaveTextContent("Cancelled");
+    expect(real!.children[1]!.children[0]!.lastElementChild).toHaveTextContent("Cancelled");
     expect(skeleton!.querySelector(`[class="${ROW_NAME}"], [class="block ${ROW_NAME}"]`)).not.toBeNull();
-    expect(real!.children[0]!.children[1]!.textContent).toBe("1·Main mapping·Manual·admin");
+    expect(real!.children[1]!.children[1]!.textContent).toBe("1·Main mapping·Manual·admin");
     expect(real!.querySelector(`[class="${ROW_ID}"]`)).toHaveAttribute("title", "Run ID 1");
     // The outcome line over the segmented bar; the skeleton bars both.
     expect(within(real!).getByTestId("run-outcome")).toHaveTextContent("6 steps · 2 done · 4 cancelled · 92 delivered");
     expect(within(real!).getByTestId("run-outcome").className).toBe(ROW_OUTCOME_TEXT);
     expect(within(real!).getByRole("progressbar", { name: "6 of 6 steps finished" })).toBeInTheDocument();
-    expect(skeleton!.children[1]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
+    expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
     // Started over duration, each a glyph and its value; the skeleton draws the glyphs and bars the values.
-    const timing = (li: Element) => Array.from(li.children[2]!.children).map((c) => `${c.className} ${c.querySelectorAll("svg").length}`);
+    const timing = (li: Element) => Array.from(li.children[3]!.children).map((c) => `${c.className} ${c.querySelectorAll("svg").length}`);
     expect(timing(real!)).toEqual([`${ROW_TIME} 1`, `${ROW_TIME} 1`]);
     expect(timing(skeleton!)).toEqual(timing(real!));
-    expect(real!.children[2]!.children[1]!.textContent).toBe("48s");
-    expect(skeleton!.children[2]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
+    expect(real!.children[3]!.children[1]!.textContent).toBe("48s");
+    expect(skeleton!.children[3]!.querySelectorAll("[data-skeleton]")).toHaveLength(2);
   });
 
   it("makes the whole row one link with a focus ring and a hover tint, the menu above it", () => {

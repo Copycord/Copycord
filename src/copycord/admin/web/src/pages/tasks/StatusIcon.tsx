@@ -1,7 +1,7 @@
 // Run and step status glyphs in one colour per state, the same on every surface: success green
 // check-circle, failed red x-circle, cancelled amber slashed circle, running a blue spinning ring, queued
 // a blue hollow dot, skipped a neutral arrow. Each is an img with a label and a title, and the status
-// badge always carries the word beside it, so colour is never the only signal.
+// badge on the same row carries the word, so colour is never the only signal.
 // The glyph's box centres itself on the row that holds it (STATUS_BOX).
 
 import { Badge, type BadgeTone } from "../../components/ui/Badge";
@@ -56,17 +56,14 @@ const PILL_TONE: Record<RunStatus, BadgeTone> = {
 };
 
 /**
- * A run's status as the one coloured badge on its row or header: 24 px, 12 px text, a 12 px glyph and the
- * status word, tinted by state.
+ * A run's status as the one coloured badge on its row or header: 24 px, 12 px text, the status word
+ * alone, tinted by state; the glyph stands at the start of the row or before the title (StatusIcon).
  */
 export function RunStatusPill({ status, testId, className }: { status: RunStatus; testId?: string; className?: string }) {
   const label = STATUS_LABEL[status] ?? status;
   return (
     <span data-testid={testId} title={`Status: ${label}`} className={cx("inline-flex", className)}>
       <Badge tone={PILL_TONE[status] ?? "neutral"} className={cx(RUN_PILL_BADGE, status === "queued" && "bg-transparent")}>
-        <span aria-hidden="true" className="inline-flex">
-          <StatusIcon status={status} size={12} />
-        </span>
         {label}
       </Badge>
     </span>
