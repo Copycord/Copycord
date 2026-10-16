@@ -12,7 +12,7 @@ import { Button } from "../../components/ui/Button";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { cx } from "../../components/ui/cx";
 import { EmptyState } from "../../components/ui/EmptyState";
-import { api, errorText } from "../../lib/api";
+import { ApiError, api, errorText } from "../../lib/api";
 import { ACTIVE_STATUSES } from "../../types/tasks";
 import type { StepState, TaskRun, TaskType } from "../../types/tasks";
 import { RowMenu, type MenuItem } from "../channels/actions/RowMenu";
@@ -224,7 +224,8 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
       } else {
         await api.del(runUrl(run.id));
         toast.show(`Deleted ${name}`, { kind: "success" });
-        navigate("/tasks");
+        // Replace, so Back does not return to the deleted run's page.
+        navigate("/tasks", { replace: true });
       }
     } catch (e) {
       toast.show(errorText(e, what === "cancel" ? `Could not cancel ${name}` : `Could not delete ${name}`), { kind: "error" });
@@ -302,6 +303,21 @@ export function RunDetail({ id, typeOf }: { id: string; typeOf: (key: string) =>
   }, [run]);
   if (!run) {
     if (loading) return <RunDetailSkeleton runType={runTypeOf(id)} />;
+    // A 404 says so in words, not the server's text; other errors keep theirs.
+    if (error instanceof ApiError && error.status === 404) {
+      return (
+        <EmptyState
+          plain
+          title="Run not found"
+          description="This run was deleted or never existed."
+          action={
+            <Link to="/tasks" className={RUN_CRUMB}>
+              Back to all tasks
+            </Link>
+          }
+        />
+      );
+    }
     return <EmptyState plain title="Run not found" description={error ? errorText(error, "Could not load the run.") : undefined} />;
   }
   return <RunView run={run} type={typeOf(run.type)} refreshing={refreshing} />;

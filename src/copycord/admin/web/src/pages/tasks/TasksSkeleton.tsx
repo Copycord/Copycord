@@ -572,10 +572,10 @@ export function RunsEmptyIcon() {
   );
 }
 
-/** The runs empty state: icon, title, a line under it and one button, the same shape whichever variant shows. */
+/** The runs empty state: icon, title and a line under it; the filtered variant adds Clear filters. */
 export const RUNS_EMPTY = "py-12";
 
-/** The empty state (Tasks.tsx) with bars on its lines and its button's box, for a list that had no runs last time. */
+/** The empty state (Tasks.tsx) with bars on its lines, for a list that had no runs last time. */
 function RunsEmptyLoading() {
   return (
     <EmptyState
@@ -584,11 +584,6 @@ function RunsEmptyLoading() {
       icon={<RunsEmptyIcon />}
       title={<Skeleton.Text>No task runs yet</Skeleton.Text>}
       description={<Skeleton.Text>Runs show up here once a task starts</Skeleton.Text>}
-      action={
-        <Button variant="ghost" disabled>
-          <Skeleton.Text>Run Backfill channels</Skeleton.Text>
-        </Button>
-      }
     />
   );
 }

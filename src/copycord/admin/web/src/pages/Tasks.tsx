@@ -47,32 +47,17 @@ export const BOTS_DOWN = "Start the bots first";
  * "Run task" on a type page opens that type's form. All tasks has none: the rail picks the type first.
  * A type that needs the bots keeps the button off, with the reason beside it, until both bots run.
  */
-export function RunTaskButton({
-  type,
-  onRun,
-  botsUp = null,
-  label = "Run task",
-  reason = true,
-}: RunTaskButtonProps & { label?: string; reason?: boolean }) {
+export function RunTaskButton({ type, onRun, botsUp = null }: RunTaskButtonProps) {
   const blocked = Boolean(type.requires_bots) && botsUp !== true;
   const down = blocked && botsUp === false;
   return (
     <div className="flex shrink-0 items-center gap-2.5">
-      {down && reason ? <span className="text-sm text-muted">{BOTS_DOWN}</span> : null}
+      {down ? <span className="text-sm text-muted">{BOTS_DOWN}</span> : null}
       <Button variant="primary" disabled={blocked} title={down ? BOTS_DOWN : undefined} onClick={() => onRun(type)}>
-        {label}
+        Run task
       </Button>
     </div>
   );
-}
-
-/**
- * The empty list's call to action: "Run Backfill channels", off while a type that needs the bots lacks
- * them; the reason beside it only on All tasks, since a type page's header already says it.
- */
-function EmptyRunButton({ type, onRun, reason }: { type: TaskType; onRun: (type: TaskType) => void; reason: boolean }) {
-  const botsUp = useBotsRunning(Boolean(type.requires_bots));
-  return <RunTaskButton type={type} botsUp={botsUp} onRun={onRun} label={`Run ${type.title}`} reason={reason} />;
 }
 
 interface OpenForm {
@@ -122,8 +107,6 @@ export function Tasks() {
               <RunsView
                 types={types}
                 typeTitle={typeTitle}
-                runType={selected ?? (typeKey ? undefined : defaultType(types))}
-                onRun={openForm}
                 onCountsChange={reloadTypes}
               />
             </>
@@ -138,22 +121,14 @@ export function Tasks() {
 /** Poll this often while the socket is down, so the list still moves; while it is up the frames keep it live. */
 const SOCKET_DOWN_POLL_S = 30;
 
-/** The type All tasks offers to run from its empty list: backfill when there is one, else the first type. */
-function defaultType(types: TaskType[]): TaskType | undefined {
-  return types.find((t) => t.key === "backfill_channels") ?? types[0];
-}
-
 interface RunsViewProps {
   types: TaskType[];
   typeTitle: (key: string) => string;
-  /** The type the empty list offers to run, once the types load. */
-  runType?: TaskType;
-  onRun: (type: TaskType) => void;
   /** A live frame started a run or moved one to another status: the rail's counts are stale. */
   onCountsChange?: () => void;
 }
 
-function RunsView({ types, typeTitle, runType, onRun, onCountsChange }: RunsViewProps) {
+function RunsView({ types, typeTitle, onCountsChange }: RunsViewProps) {
   const { filters, active, set, setPage, clear } = useRunFilters();
   const { runs, total, counts, loading, refreshing, settled, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(
     filters,
@@ -205,8 +180,8 @@ function RunsView({ types, typeTitle, runType, onRun, onCountsChange }: RunsView
     }
   };
 
-  // Inside the runs frame, both in one shape (icon, title, a line, one button) so the loading list can
-  // stand in for either. Which one shows follows the filters the held page answers, so it changes only
+  // Inside the runs frame, both in one shape (icon, title, a line) so the loading list can stand in for
+  // either; only the filtered one adds Clear filters. Which one shows follows the filters the held page answers, so it changes only
   // when a fetch settles.
   const emptyFor = useRef({ active });
   if (settled) emptyFor.current = { active };
@@ -230,18 +205,6 @@ function RunsView({ types, typeTitle, runType, onRun, onCountsChange }: RunsView
       icon={<RunsEmptyIcon />}
       title="No task runs yet"
       description="Runs show up here once a task starts"
-      action={
-        runType ? (
-          <EmptyRunButton type={runType} onRun={onRun} reason={!filters.type} />
-        ) : (
-          // The types have not answered yet: the button's place, held empty.
-          <span aria-hidden="true" className="invisible">
-            <Button variant="primary" disabled>
-              Run task
-            </Button>
-          </span>
-        )
-      }
     />
   );
 

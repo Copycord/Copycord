@@ -153,7 +153,7 @@ describe("run row skeleton", () => {
     };
     expect(rows().li).toBe(1);
     localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "0");
-    expect(rows()).toEqual({ li: 0, empty: "No task runs yetRuns show up here once a task startsRun Backfill channels" });
+    expect(rows()).toEqual({ li: 0, empty: "No task runs yetRuns show up here once a task starts" });
     localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "4");
     expect(rows().li).toBe(4);
     localStorage.setItem(`skel:${RUNS_COUNT_KEY}`, "90");
@@ -242,10 +242,10 @@ describe("page skeleton", () => {
     await screen.findByRole("link", { name: "Backfill channels" });
     const loaded = chrome(page.container);
     expect(screen.getByText("No task runs yet").closest(".flex-col")!.className).toBe(skelEmpty);
-    // The empty state sits inside the runs frame, not a second dashed card: icon, title, a line, and the
-    // button to run the backfill, in the skeleton's shape.
+    // The empty state sits inside the runs frame, not a second dashed card: icon, title and a line, no
+    // button, in the skeleton's shape.
     expect(page.container.querySelector(".border-dashed")).toBeNull();
-    expect(await screen.findByRole("button", { name: "Run Backfill channels" })).toBeEnabled();
+    expect(within(screen.getByText("No task runs yet").parentElement!).queryAllByRole("button")).toHaveLength(0);
     expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
 
     expect(skeleton).toEqual(loaded);

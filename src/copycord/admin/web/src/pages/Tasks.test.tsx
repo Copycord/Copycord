@@ -145,7 +145,7 @@ describe("Tasks page", () => {
     expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
   });
 
-  it("shows the empty state when there are no runs: icon, words, Run Backfill channels, and no pager", async () => {
+  it("shows the empty state when there are no runs: icon, words, no button, and no pager", async () => {
     serve([]);
     renderAt("/tasks");
     // The loading list stands in the empty state's shape with the same words, so wait for it to go.
@@ -153,19 +153,27 @@ describe("Tasks page", () => {
     expect(screen.getByText("No task runs yet")).toBeInTheDocument();
     expect(screen.getByText("0 task runs")).toBeInTheDocument();
     expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Run Backfill channels" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
     const box = screen.getByText("No task runs yet").parentElement!;
+    expect(within(box).queryAllByRole("button")).toHaveLength(0);
     expect(box.className).not.toMatch(/border-dashed/);
     expect(box.querySelector("svg")).not.toBeNull();
     expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeNull();
   });
 
-  it("opens the backfill form from the empty state's button", async () => {
-    serve([]);
-    renderAt("/tasks");
-    fireEvent.click(await screen.findByRole("button", { name: "Run Backfill channels" }));
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  it("says a run that is gone was deleted or never existed, not the server's text, with a link back to all tasks", async () => {
+    serve([], {
+      handle: (url) => (url.startsWith("/api/tasks/runs/") ? Response.json({ detail: "Unknown run" }, { status: 404 }) : undefined),
+    });
+    renderAt("/tasks/runs/8e3b2d853281447fadf99f8db59baed3");
+    expect(await screen.findByText("Run not found")).toBeInTheDocument();
+    expect(screen.getByText("This run was deleted or never existed.")).toBeInTheDocument();
+    expect(screen.queryByText(/Unknown run/)).toBeNull();
+    const back = screen.getByRole("link", { name: "Back to all tasks" });
+    expect(back).toHaveAttribute("href", "/tasks");
+    expect(back.className).toContain("text-accent");
+    // The page shell stays: the rail is still there.
+    expect(screen.getByRole("navigation", { name: "Task types" })).toBeInTheDocument();
   });
 
   it("shows the type title and description when a type is picked", async () => {
@@ -299,7 +307,7 @@ describe("Tasks page", () => {
     expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
   });
 
-  it("shows No task runs yet with the type's own button on an empty type page with no filter, Run task in the header", async () => {
+  it("shows No task runs yet with no button on an empty type page with no filter, Run task in the header", async () => {
     serve([]);
     renderAt("/tasks?type=backfill_channels");
     const title = await screen.findByText("No task runs yet");
@@ -307,10 +315,10 @@ describe("Tasks page", () => {
     expect(screen.queryByText("No runs match these filters")).toBeNull();
     expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
     expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(1);
-    // Inside the runs frame, not a second dashed card; its one button runs this type.
+    // Inside the runs frame, not a second dashed card, and no button of its own.
     const box = title.parentElement!;
     expect(box.className).not.toMatch(/border/);
-    expect(within(box).getAllByRole("button").map((b) => b.textContent)).toEqual(["Run Backfill channels"]);
+    expect(within(box).queryAllByRole("button")).toHaveLength(0);
   });
 
   it("shows No runs match these filters on a type page only when a filter is set, and Clear filters stays on the type", async () => {

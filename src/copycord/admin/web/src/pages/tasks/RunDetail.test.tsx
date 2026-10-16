@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
 import type { TaskRun, TaskStep, TaskType } from "../../types/tasks";
@@ -295,6 +295,30 @@ describe("RunHeader", () => {
     expect(url).toBe("/api/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     expect(init.method).toBe("DELETE");
     expect(await screen.findByText("Deleted Backfill channels #12")).toBeInTheDocument();
+  });
+
+  it("replaces the deleted run's page in history, so Back does not return to it", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    function Back() {
+      const navigate = useNavigate();
+      return <button onClick={() => void navigate(-1)}>Back</button>;
+    }
+    render(
+      <ToastProvider>
+        <MemoryRouter initialEntries={["/tasks?type=backfill_channels", "/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]} initialIndex={1}>
+          <Routes>
+            <Route path="*" element={<><RunHeader run={makeRun()} typeTitle="Backfill channels" /><Where /><Back /></>} />
+          </Routes>
+        </MemoryRouter>
+      </ToastProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Run actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(/^\/tasks$/));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/tasks?type=backfill_channels"));
   });
 
   it("keeps Delete when the confirm is dismissed", async () => {
