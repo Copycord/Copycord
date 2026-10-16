@@ -5,7 +5,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { cx } from "../../components/ui";
+import { cx, Skeleton } from "../../components/ui";
 import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_OVERLAY, MODAL_TITLE, useScrollLock } from "../../components/Modal";
 import { errorText } from "../../lib/api";
 import { logStream } from "../../lib/sse";
@@ -22,6 +22,8 @@ const RETRY_MS = 1500;
 // once, already at the bottom, instead of visibly scrolling down batch by batch.
 const SETTLE_MS = 150;
 const SETTLE_MAX_MS = 1000;
+// Log lines shimmer in the body while the backlog loads (widths vary like real lines).
+const PLACEHOLDER_WIDTHS = ["72%", "58%", "84%", "46%", "77%", "63%", "88%", "52%", "69%", "41%", "80%", "57%"];
 
 export interface LogModalProps {
   /** The open stream, or null when closed. */
@@ -169,6 +171,14 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
             ✕
           </button>
         </div>
+        <div className="relative flex min-h-0 flex-1 flex-col">
+        {!settled && (
+          <div data-testid="log-loading" aria-hidden="true" className="absolute inset-0 z-10 overflow-hidden bg-log-bg px-4 py-3">
+            {PLACEHOLDER_WIDTHS.map((w, i) => (
+              <Skeleton.Text key={i} block className="text-xs leading-normal" width={w} style={{ marginBottom: 4 }} />
+            ))}
+          </div>
+        )}
         <pre
           ref={bodyRef}
           id="log-body"
@@ -184,6 +194,7 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
         >
           {view.length ? view.join("\n") + "\n" : ""}
         </pre>
+        </div>
         <footer className="mt-3 flex flex-wrap justify-end gap-2.5 px-4 py-2">
           <GhostButton id="log-clear-btn" className="gap-[normal]!" onClick={() => void clear()}>
             Clear logs

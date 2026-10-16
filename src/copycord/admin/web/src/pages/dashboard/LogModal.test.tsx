@@ -84,8 +84,10 @@ describe("LogModal scroll position", () => {
       act(() => vi.advanceTimersByTime(100));
       act(() => last().emit(many(50, "batch2")));
       expect(body().className).toContain("invisible");
+      expect(document.querySelector("[data-testid=log-loading] [data-skeleton]")).not.toBeNull();
       act(() => vi.advanceTimersByTime(200));
       expect(body().className).not.toContain("invisible");
+      expect(document.querySelector("[data-testid=log-loading]")).toBeNull();
       expect(atBottom(body())).toBe(true);
     } finally {
       vi.useRealTimers();
