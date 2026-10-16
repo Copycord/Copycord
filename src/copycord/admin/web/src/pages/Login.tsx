@@ -44,7 +44,7 @@ export function Login() {
             draggable={false}
             className="pointer-events-none mb-[18px] size-[86px] select-none"
           />
-          <section className="w-full max-w-[420px] rounded-[14px] border border-border bg-card px-6 pt-[26px] pb-[22px] text-text shadow-[0_18px_30px_var(--color-shadow-55)]">
+          <section className="w-full max-w-[420px] rounded-[14px] border border-border bg-card px-6 pt-[26px] pb-[22px] text-text shadow-popover">
             <h1 className="m-0 mb-1 text-[1.3rem] font-semibold text-text">Copycord</h1>
             <p className="m-0 mb-5 text-[0.9rem] text-muted">Enter the password to continue.</p>
 

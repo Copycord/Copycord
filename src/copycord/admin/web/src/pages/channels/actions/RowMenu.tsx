@@ -109,7 +109,7 @@ export function RowMenu({ kind, items, label, disabled = false }: RowMenuProps) 
               role="menu"
               tabIndex={-1}
               style={{ position: "fixed", top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
-              className="z-50 max-h-[calc(100vh-24px)] min-w-[200px] overflow-y-auto rounded-control border border-border bg-control p-1.5 text-text shadow-[0_20px_56px_var(--color-shadow-50)] outline-none"
+              className="z-50 max-h-[calc(100vh-24px)] min-w-[200px] overflow-y-auto rounded-control border border-border bg-control p-1.5 text-text shadow-popover outline-none"
             >
               {items.map((it) => [
                 it.separator ? <div key={`${it.act}:sep`} role="separator" className="my-1 h-px bg-border" /> : null,

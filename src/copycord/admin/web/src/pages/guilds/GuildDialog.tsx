@@ -122,7 +122,7 @@ export function GuildDialog({
           // export dialogs are the old .export-modal card.
           top
             ? "top-[calc(var(--spacing-header)+8vh)] mt-[18px] max-h-[80vh] rounded-panel text-text"
-            : "top-1/2 max-h-[min(84vh,860px)] -translate-y-1/2 rounded-[14px] text-dialog-text shadow-[0_20px_56px_var(--color-shadow-50)]",
+            : "top-1/2 max-h-[min(84vh,860px)] -translate-y-1/2 rounded-[14px] text-dialog-text shadow-popover",
           width === "md" ? "w-[min(720px,92vw)] bg-surface-deep" : "w-[min(480px,92vw)] bg-dialog-small",
         )}
       >

@@ -46,7 +46,7 @@ export interface ToolbarSelectProps {
 const TOOLBAR_TOGGLE =
   "inline-block min-h-[34px] rounded-btn border border-border-input bg-control py-2 pr-9 pl-2.5 " +
   "font-sans text-[13px] text-text outline-none transition-[border,box-shadow,background] duration-200 " +
-  "focus-visible:border-accent focus-visible:shadow-[0_20px_56px_var(--color-shadow-50)] disabled:cursor-not-allowed disabled:opacity-60";
+  "focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-60";
 
 export function ToolbarSelect({
   id,
@@ -199,7 +199,7 @@ export function ToolbarSelect({
           aria-labelledby={label ? undefined : id}
           className={cx(
             "absolute inset-x-0 top-[calc(100%+4px)] z-[55] block max-h-[180px] overflow-x-hidden overflow-y-auto",
-            "rounded-control border border-border bg-surface-deep p-1 shadow-[0_4px_12px_var(--color-shadow-25),0_14px_50px_var(--color-shadow-45)]",
+            "rounded-control border border-border bg-surface-deep p-1 shadow-popover",
           )}
         >
           {options.map((o, i) => (

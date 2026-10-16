@@ -650,7 +650,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                         <div
                           id="user-token-settings-menu"
                           role="menu"
-                          className="user-token-settings-menu absolute top-[calc(100%+6px)] right-0 z-40 flex min-w-[184px] flex-col gap-0.5 rounded-btn border border-border bg-card-solid p-1.5 shadow-[0_10px_30px_var(--color-shadow-45)]"
+                          className="user-token-settings-menu absolute top-[calc(100%+6px)] right-0 z-40 flex min-w-[184px] flex-col gap-0.5 rounded-btn border border-border bg-card-solid p-1.5 shadow-popover"
                         >
                           <button
                             type="button"

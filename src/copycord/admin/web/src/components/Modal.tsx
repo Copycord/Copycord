@@ -13,7 +13,7 @@ export const MODAL_OVERLAY = "fixed inset-x-0 top-header bottom-0 z-40 flex item
 export const MODAL_BACKDROP = "absolute inset-0 bg-black/[0.68]";
 /** The old .modal-content without its width (min(900px, 92vw) unless a dialog sets its own). */
 export const MODAL_CARD =
-  "relative z-[1] mt-[6vh] flex max-h-[80vh] flex-col rounded-panel border border-border bg-surface-deep text-text shadow-[0_20px_56px_var(--color-shadow-50)] outline-none";
+  "relative z-[1] mt-[6vh] flex max-h-[80vh] flex-col rounded-panel border border-border bg-surface-deep text-text shadow-popover outline-none";
 export const MODAL_HEADER = "flex items-center justify-between px-4 py-3";
 export const MODAL_TITLE = "m-0 text-base font-bold text-text";
 /** The old .icon-btn.verify-close square close button. */
@@ -277,7 +277,7 @@ export function TipLabel({ htmlFor, text, tip, tipLabel, tipId, align = "start",
         aria-hidden={!open}
         data-open={open}
         data-placement={placement}
-        className={`tip-bubble pointer-events-none absolute z-[60] w-max scale-[0.98] rounded-control border border-border bg-surface-deep px-3 py-2.5 text-[12.5px] leading-[1.45] text-text opacity-0 shadow-[0_12px_40px_var(--color-shadow-45)] transition-[opacity,translate,scale] duration-150 after:absolute after:border-[6px] after:border-solid after:border-transparent after:content-[''] data-[open=true]:pointer-events-auto data-[open=true]:scale-100 data-[open=true]:opacity-100 ${BUBBLE_PLACEMENT[placement]} ${BUBBLE_ALIGN[align]}`}
+        className={`tip-bubble pointer-events-none absolute z-[60] w-max scale-[0.98] rounded-control border border-border bg-surface-deep px-3 py-2.5 text-[12.5px] leading-[1.45] text-text opacity-0 shadow-popover transition-[opacity,translate,scale] duration-150 after:absolute after:border-[6px] after:border-solid after:border-transparent after:content-[''] data-[open=true]:pointer-events-auto data-[open=true]:scale-100 data-[open=true]:opacity-100 ${BUBBLE_PLACEMENT[placement]} ${BUBBLE_ALIGN[align]}`}
       >
         {tip}
       </span>
