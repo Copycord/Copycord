@@ -77,9 +77,6 @@ class BackfillManager(BackfillWebhookPool):
         ev.set()
         self._cleanup_in_progress.discard(cid)
 
-    def is_cleanup_in_progress(self, cid: int) -> bool:
-        return not self._ensure_cleanup_event(cid).is_set()
-
     async def on_started(self, original_id: int, *, meta: dict | None = None) -> None:
         cid = int(original_id)
         await self._wait_cleanup_if_needed(cid)

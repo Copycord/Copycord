@@ -121,13 +121,6 @@ class SitemapService:
 
         return f"{guild_name_fallback} ({origin_guild_id})"
 
-    def _iter_mapped_guilds(self):
-        ids = self._mapped_original_ids()
-        for gid in ids:
-            g = self.bot.get_guild(int(gid))
-            if g:
-                yield g
-
     def enqueue(self, guild_id: int) -> None:
         """Queue a guild; one already queued keeps its position."""
         gid = int(guild_id)
@@ -357,77 +350,6 @@ class SitemapService:
             "excluded_channel_ids": excluded_channel_ids,
             "whitelist_enabled": bool(include_category_ids or include_channel_ids),
         }
-
-    async def _build_and_send_selected(
-        self,
-        origin_ids: list[int],
-        max_concurrency: int = 10,
-    ) -> None:
-        """Build and send sitemaps for the given original guild ids, fanning out to each clone with limited concurrency."""
-        if not origin_ids:
-            return
-
-        sem = asyncio.Semaphore(max_concurrency)
-        tasks: list[asyncio.Future] = []
-
-        async def _handle_mapping(
-            g: Guild,
-            clone_id: int | None,
-        ) -> None:
-            async with sem:
-                try:
-
-                    if clone_id is None:
-                        sm = await self.build_for_guild(g)
-                    else:
-                        sm = await self.build_for_guild_and_clone(g, int(clone_id))
-
-                    if not sm:
-                        return
-
-                    await self.ws.send({"type": "sitemap", "data": sm})
-
-                    label = self._mapping_label(
-                        g.id,
-                        g.name,
-                        int(clone_id) if clone_id is not None else None,
-                    )
-                    self.logger.info(
-                        "[📩] Sitemap sent for %s",
-                        label,
-                    )
-                except Exception as e:
-                    self.logger.exception(
-                        "[sitemap] failed to send for guild %s (%s) clone %s: %s",
-                        getattr(g, "name", "?"),
-                        getattr(g, "id", "?"),
-                        clone_id,
-                        e,
-                    )
-
-        for ogid in origin_ids:
-            g = self.bot.get_guild(int(ogid))
-            if not g:
-                continue
-
-            try:
-                clones = self.db.get_clone_guild_ids_for_origin(int(g.id)) or [None]
-            except Exception as e:
-                self.logger.exception(
-                    "[sitemap] get_clone_guild_ids_for_origin failed for guild %s (%s): %s",
-                    getattr(g, "name", "?"),
-                    getattr(g, "id", "?"),
-                    e,
-                )
-                continue
-
-            for cg in clones:
-                clone_id = int(cg) if cg is not None else None
-                tasks.append(_handle_mapping(g, clone_id))
-
-        if tasks:
-
-            await asyncio.gather(*tasks)
 
     async def send_for_mapping_id(self, mapping_id: str) -> None:
         """Build and send a sitemap for the one mapping row identified by mapping_id."""
@@ -1416,35 +1338,6 @@ class SitemapService:
         finally:
             self._debounce_task = None
 
-    def _log_filter_settings(self):
-        cfg = self.config
-        self.logger.debug(
-            "[filter] settings: wl_enabled=%s | inc_cats=%d inc_chs=%d | exc_cats=%d exc_chs=%d",
-            bool(cfg.whitelist_enabled),
-            len(getattr(cfg, "include_category_ids", set())),
-            len(getattr(cfg, "include_channel_ids", set())),
-            len(getattr(cfg, "excluded_category_ids", set())),
-            len(getattr(cfg, "excluded_channel_ids", set())),
-        )
-
-    def _filter_reason(self, channel_id: int | None, category_id: int | None) -> str:
-        cfg = self.config
-        wl_on = bool(cfg.whitelist_enabled)
-        allowed_ch = bool(channel_id and channel_id in cfg.include_channel_ids)
-        allowed_cat = bool(category_id and category_id in cfg.include_category_ids)
-        ex_ch = bool(channel_id and channel_id in cfg.excluded_channel_ids)
-        ex_cat = bool(category_id and category_id in cfg.excluded_category_ids)
-
-        if wl_on and not (allowed_ch or allowed_cat):
-            return "blocked by whitelist (not listed)"
-        if wl_on and allowed_cat and not allowed_ch and ex_ch:
-            return "carve-out: excluded channel under whitelisted category"
-        if ex_ch and not allowed_ch:
-            return "excluded channel"
-        if ex_cat and not (allowed_cat or allowed_ch):
-            return "excluded category"
-        return "allowed"
-
     def _filter_sitemap(
         self, sitemap: Dict[str, Any], view: Dict[str, object]
     ) -> Dict[str, Any]:
@@ -1657,30 +1550,3 @@ class SitemapService:
 
         sitemap["dropped"] = dropped_channels
         return sitemap
-
-    def _is_filtered_out(self, channel_id: int | None, category_id: int | None) -> bool:
-        cfg = self.config
-
-        wl_ch = bool(channel_id and channel_id in cfg.include_channel_ids)
-        wl_cat = bool(category_id and category_id in cfg.include_category_ids)
-        ex_ch = bool(channel_id and channel_id in cfg.excluded_channel_ids)
-        ex_cat = bool(category_id and category_id in cfg.excluded_category_ids)
-
-        wl_on = bool(
-            cfg.whitelist_enabled
-            and (cfg.include_channel_ids or cfg.include_category_ids)
-        )
-
-        if wl_on and not (wl_ch or wl_cat):
-            return True
-
-        if ex_ch and not wl_ch:
-            return True
-
-        if ex_cat and not (wl_cat or wl_ch):
-            return True
-
-        return False
-
-    def is_excluded_ids(self, channel_id: int | None, category_id: int | None) -> bool:
-        return self._is_filtered_out(channel_id, category_id)
