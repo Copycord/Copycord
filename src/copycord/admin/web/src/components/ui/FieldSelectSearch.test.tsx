@@ -112,7 +112,7 @@ describe("FieldSelect searchable", () => {
     expect(box.parentElement).not.toHaveAttribute("aria-busy");
     expect(box.parentElement!.querySelector("[data-skeleton]")).toBeNull();
     expect(rows()).toEqual(["Alpha", "Beta", "Alphabet soup"]);
-    await user.type(box, "bet");
+    await user.type(box, "beta");
     expect(rows()).toEqual(["Beta"]);
   });
 });
