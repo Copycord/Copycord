@@ -1,14 +1,13 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
-import { ConfirmProvider } from "../../../../components/ui/ConfirmDialog";
 import type { TaskRun, TaskType } from "../../../../types/tasks";
 import { typeLabel } from "../../typeLabels";
 import { describeRunInputs, entryFor, heroStat } from "..";
 import { GONE, ScrapeDownloadCard, includeWords, scrapeFileUrl, scrapePathOf } from "./entry";
 import { SCRAPE_EXPLAINER, ScrapeMembersForm, guildIdError, guildOptionLabel, tokenTotal } from "./ScrapeMembersForm";
-import { ScraperSettingsCard, displayMask } from "./ScraperSettingsCard";
+import { ScraperSettingsCard, TOKENS_URL, textLines } from "./ScraperSettingsCard";
 
 const TYPE: TaskType = { key: "scrape_members", title: "Scrape members", description: "", inputs_schema: {}, active: 0, total: 0 };
 const GUILDS = [
@@ -224,92 +223,108 @@ describe("Scrape members run page", () => {
   });
 });
 
-const TOKENS = [
-  { token_id: "t1", label: "Main", masked: "MTAxMj…ab12", username: "scrapey", is_valid: false },
-  { token_id: "t2", label: "Spare", masked: "plainlongtokenvalue1234", username: null, is_valid: true },
-];
-
 function renderSettings() {
-  render(
+  return render(
     <ToastProvider>
-      <ConfirmProvider>
-        <ScraperSettingsCard />
-      </ConfirmProvider>
+      <ScraperSettingsCard />
     </ToastProvider>,
   );
 }
 
 describe("ScraperSettingsCard", () => {
-  function serveSettings(tokens = TOKENS, proxies = ["1.2.3.4:80"]) {
-    let held = [...tokens];
+  function serveSettings(tokens: unknown = ["MTAxMjM0.tok.one", "OTg3NjU0.tok.two"], proxies = ["1.2.3.4:80"], status = 200) {
     return serve({
-      "GET /api/scraper/tokens": () => ({ body: { ok: true, tokens: held } }),
-      "POST /api/scraper/tokens/add": (b) => {
-        held = [...held, { token_id: "t3", label: String((b as { label: string }).label), masked: "abcdef…wxyz", username: null, is_valid: false }];
-        return { body: { ok: true, is_valid: false } };
-      },
-      "POST /api/scraper/tokens/t1/update": () => ({ body: { ok: true } }),
-      "DELETE /api/scraper/tokens/t2": () => {
-        held = held.filter((t) => t.token_id !== "t2");
-        return { body: { ok: true } };
-      },
+      "GET /api/scraper/tokens": () => ({ status, body: status === 200 ? { ok: true, tokens } : { ok: false, error: "Could not read the token file" } }),
+      "PUT /api/scraper/tokens": () => ({ body: { ok: true, count: 3 } }),
       "GET /api/scraper/proxies": () => ({ body: { ok: true, proxies } }),
       "PUT /api/scraper/proxies": () => ({ body: { ok: true, count: 2 } }),
     });
   }
 
-  it("lists the tokens masked, with no validity marks or validate buttons", async () => {
-    serveSettings();
-    renderSettings();
-    const list = await screen.findByRole("list", { name: "Scraper tokens" });
-    expect(within(list).getByText("scrapey")).toBeInTheDocument();
-    expect(within(list).getByText("MTAxMj…ab12")).toBeInTheDocument();
-    expect(within(list).getByText("plainl…1234")).toBeInTheDocument();
-    expect(screen.queryByText("plainlongtokenvalue1234")).not.toBeInTheDocument();
-    expect(screen.getByText("2 tokens")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /validate/i })).not.toBeInTheDocument();
-    expect(screen.queryByTitle(/valid/i)).not.toBeInTheDocument();
-    expect(displayMask("short")).toBe("sh…");
-  });
-
-  it("adds a token as a form post and reloads the list", async () => {
+  it("shows the saved tokens one per line in a plain textbox, with no list, add, rename or delete", async () => {
     const calls = serveSettings();
     renderSettings();
-    await screen.findByRole("list", { name: "Scraper tokens" });
-    fireEvent.change(screen.getByRole("textbox", { name: "Discord token" }), { target: { value: " secret.token.value " } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Token label" }), { target: { value: "Third" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add token" }));
-    expect(await screen.findByText("Third")).toBeInTheDocument();
-    expect(calls.find((c) => c.url === "/api/scraper/tokens/add")?.body).toEqual({ token_value: "secret.token.value", label: "Third" });
-    expect(screen.getByRole("textbox", { name: "Discord token" })).toHaveValue("");
-    expect(calls.some((c) => c.url.includes("validate"))).toBe(false);
+    expect(await screen.findByText("2 tokens saved")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    expect(input.tagName).toBe("TEXTAREA");
+    expect(input).toHaveAttribute("rows", "6");
+    expect(input).toHaveAttribute("spellcheck", "false");
+    expect(input).toHaveValue("MTAxMjM0.tok.one\nOTg3NjU0.tok.two");
+    expect(screen.getByText(/They are not validated: one that fails or is not in the server is skipped/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save tokens" })).toBeDisabled();
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add token|edit|delete|validate/i })).not.toBeInTheDocument();
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });
 
-  it("renames a token", async () => {
+  it("saves the tokens as the deduped list of trimmed lines", async () => {
     const calls = serveSettings();
     renderSettings();
-    fireEvent.click(await screen.findByRole("button", { name: "Edit scrapey" }));
-    const box = screen.getByRole("textbox", { name: "Label of scrapey" });
-    expect(box).toHaveValue("Main");
-    fireEvent.change(box, { target: { value: "Primary" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(calls.find((c) => c.url === "/api/scraper/tokens/t1/update")?.body).toEqual({ label: "Primary" }));
-    expect(await screen.findByRole("button", { name: "Edit scrapey" })).toBeInTheDocument();
+    await screen.findByText("2 tokens saved");
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    const save = screen.getByRole("button", { name: "Save tokens" });
+    fireEvent.change(input, { target: { value: "MTAxMjM0.tok.one\n\n  OTg3NjU0.tok.two  \nMTAxMjM0.tok.one\nnew.tok.three\n" } });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")).toEqual({
+        method: "PUT",
+        url: "/api/scraper/tokens",
+        body: { tokens: ["MTAxMjM0.tok.one", "OTg3NjU0.tok.two", "new.tok.three"] },
+      }),
+    );
+    expect(await screen.findByText("Tokens saved")).toBeInTheDocument();
+    expect(screen.getByText("3 tokens saved")).toBeInTheDocument();
+    expect(input).toHaveValue("MTAxMjM0.tok.one\nOTg3NjU0.tok.two\nnew.tok.three");
+    expect(save).toBeDisabled();
+    expect(textLines(" a \r\nb\n\na\n")).toEqual(["a", "b"]);
   });
 
-  it("deletes a token after the confirm", async () => {
-    const calls = serveSettings();
-    renderSettings();
-    fireEvent.click(await screen.findByRole("button", { name: "Delete Spare" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.url === "/api/scraper/tokens/t2")).toBe(true));
-    await waitFor(() => expect(screen.queryByText("Spare")).not.toBeInTheDocument());
-  });
-
-  it("says so when no tokens are saved", async () => {
+  it("shows an empty textbox with its hint when no tokens are saved", async () => {
     serveSettings([]);
     renderSettings();
-    expect(await screen.findByText("No tokens saved. Add one to start scraping members.")).toBeInTheDocument();
+    expect(await screen.findByText("0 tokens saved")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "One Discord token per line");
+    expect(screen.getByRole("button", { name: "Save tokens" })).toBeDisabled();
+  });
+
+  it("says so when the tokens cannot be loaded and keeps the save off", async () => {
+    const calls = serveSettings(undefined, ["1.2.3.4:80"], 500);
+    renderSettings();
+    expect(await screen.findByText("Could not read the token file")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    expect(input).toHaveAttribute("readonly");
+    fireEvent.change(input, { target: { value: "typed.anyway" } });
+    expect(screen.getByRole("button", { name: "Save tokens" })).toBeDisabled();
+    expect(await screen.findByText("1 proxy saved")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("shimmers only the count and the lines while loading, in the textbox's own box", async () => {
+    let answer: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        url === TOKENS_URL ? new Promise<Response>((r) => (answer = r)) : Promise.resolve(Response.json({ ok: true, proxies: [] })),
+      ),
+    );
+    const { container } = renderSettings();
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    expect(input).toHaveAttribute("readonly");
+    expect(input).not.toHaveAttribute("placeholder");
+    expect(input.parentElement).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByText("Tokens")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save tokens" })).toBeDisabled();
+    await screen.findByText("0 proxies saved");
+    expect(container.querySelectorAll("[data-skeleton]").length).toBe(4);
+    answer(Response.json({ ok: true, tokens: ["a.b.c"] }));
+    expect(await screen.findByText("1 token saved")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Tokens" })).toBe(input);
+    expect(input).toHaveValue("a.b.c");
+    expect(input).not.toHaveAttribute("readonly");
+    expect(container.querySelectorAll("[data-skeleton]").length).toBe(0);
   });
 
   it("saves the proxy list", async () => {
@@ -327,5 +342,6 @@ describe("ScraperSettingsCard", () => {
     fireEvent.click(save);
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ proxies: ["1.2.3.4:80", "5.6.7.8:3128"] }));
     expect(await screen.findByText("2 proxies saved")).toBeInTheDocument();
+    expect(await screen.findByText("Proxies saved")).toBeInTheDocument();
   });
 });
