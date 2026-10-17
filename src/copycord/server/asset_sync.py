@@ -141,8 +141,10 @@ class AssetSync:
     # frames
 
     async def _publish(self, typ: str, **data: Any) -> None:
+        # Job frames go out as kind "client", as the server's backfill_job_delivered does;
+        # the admin's job listener reads that kind.
         with contextlib.suppress(Exception):
-            await self.server.bus.publish("server", {"type": typ, "data": data})
+            await self.server.bus.publish("client", {"type": typ, "data": data})
 
     async def _step(self, job: _Job, step: str, state: str, **fields: Any) -> None:
         await self._publish("sync_assets_step", job_id=job.job_id, step=step, state=state, **fields)

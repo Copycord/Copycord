@@ -91,6 +91,7 @@ from copycord.admin.web_config import router as links_router
 from copycord.admin.web_config import startup_links, shutdown_links
 import copycord.admin.tasks  # noqa: F401  task types register at import
 from copycord.admin.tasks import backfill as task_backfill
+from copycord.admin.tasks import sync_assets as task_sync_assets
 from copycord.admin.tasks import purge as task_purge
 from copycord.admin.tasks import routes as task_routes
 from copycord.admin import messages as messages_api
@@ -809,6 +810,8 @@ async def _backfill_job_listener():
         p = ev.get("payload") or {}
         if p.get("type") in task_backfill.JOB_FRAMES:
             await task_backfill.dispatch(p)
+        elif p.get("type") in task_sync_assets.FRAMES:
+            await task_sync_assets.dispatch(p)
 
 
 async def _close_ws_quietly(
@@ -2073,6 +2076,7 @@ async def _startup_tasks():
     service = TaskService(SqliteTaskRepo(db), publish=_publish_task_event)
     task_routes.set_service(service)
     task_backfill.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame))
+    task_sync_assets.configure(db=db, send=lambda frame: _ws_cmd(SERVER_AGENT_URL, frame, timeout=5.0))
     task_purge.configure(db=db)
     try:
         recovered = service.recover()
