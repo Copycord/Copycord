@@ -117,20 +117,16 @@ describe("ScrapeMembersForm", () => {
     expect(calls.some((c) => c.url.includes("guild_id=") || c.url.includes("validate"))).toBe(false);
   });
 
-  it("starts with 1 session per token by default and posts the one picked", async () => {
+  it("offers no sessions per token choice and always posts 1 session per token", async () => {
     const calls = serveForm();
     renderForm();
     await screen.findByText("4 saved proxies.");
-    expect(screen.getByText("More is faster but riskier.")).toBeInTheDocument();
-    const sessions = screen.getByRole("combobox", { name: "Sessions per token" });
-    expect(sessions).toHaveTextContent("1");
-    fireEvent.click(sessions);
-    fireEvent.click(await screen.findByRole("option", { name: "3" }));
-    expect(sessions).toHaveTextContent("3");
+    expect(screen.queryByRole("combobox", { name: "Sessions per token" })).not.toBeInTheDocument();
+    expect(screen.queryByText("More is faster but riskier.")).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Or a server ID" }), { target: { value: "999" } });
     submit();
     expect(await screen.findByText("Run page r9")).toBeInTheDocument();
-    expect((posts(calls)[0] as { inputs: { sessions_per_token: number } }).inputs.sessions_per_token).toBe(3);
+    expect((posts(calls)[0] as { inputs: { sessions_per_token: number } }).inputs.sessions_per_token).toBe(1);
   });
 
   it("starts with a typed server ID for a server not listed, and refuses one that is not a number", async () => {
