@@ -120,9 +120,9 @@ export function RunTiming({ run }: { run: TaskRun }) {
         <MetaGlyph name="started" />
         {formatAgo(started, now)}
       </span>
-      <span className={ROW_TIME} title="Duration">
+      <span className={ROW_TIME} title={run.status === "queued" ? "Queued, not started yet" : "Duration"}>
         <MetaGlyph name="duration" />
-        {duration ?? "-"}
+        {run.status === "queued" ? "Queued" : (duration ?? "-")}
       </span>
     </div>
   );
