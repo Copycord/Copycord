@@ -197,6 +197,26 @@ describe("Global Configuration card", () => {
     expect(document.getElementById("cfg-cancel-btn")).toBeDisabled();
   });
 
+  it("follows the Bots card's live state: stopping the bots unlocks Save without a reload", async () => {
+    server({ ...baseRoutes(), "/api/status": () => json({ server: { running: true }, client: { running: true } }) });
+    const user = userEvent.setup();
+    const tree = (running: boolean) => (
+      <ToastProvider>
+        <ConfirmProvider>
+          <GlobalConfigSection botsRunning={running} />
+        </ConfirmProvider>
+      </ToastProvider>
+    );
+    const { rerender } = render(tree(true));
+    await user.type(await screen.findByLabelText("Server Token"), "x");
+    const save = document.getElementById("cfg-save-btn")!;
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title", "Stop the bot to edit global configuration");
+    rerender(tree(false));
+    expect(save).toBeEnabled();
+    expect(save).not.toHaveAttribute("title");
+  });
+
   it("marks tokens the validation endpoint rejects and keeps the invite link off", async () => {
     server({
       ...baseRoutes(),
