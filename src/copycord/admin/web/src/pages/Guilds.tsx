@@ -1,8 +1,7 @@
-// Guilds page, ported from templates/guilds.html and frontend/src/js/guilds.js:
-// the grid of guilds the bot has seen (GET /api/guilds) with search and sort
+// Guilds page: the grid of guilds the bot has seen (GET /api/guilds) with search and sort
 // direction, a menu per card with "View details" and "Export messages", which opens the Export
 // messages task's Run form with the guild picked.
-// Like the old page it waits until both Server and Client are connected.
+// It waits until both Server and Client are connected.
 
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
@@ -36,7 +35,7 @@ interface MenuState {
 }
 
 export function Guilds() {
-  // The list loads once, the first time the gate opens, as afterGateReady did.
+  // The list loads once, the first time the gate opens.
   const [booted, setBooted] = useState(false);
   const gate = useStatusGate({ require: "both", onUp: () => setBooted(true) });
   const { data, error, loading, reload } = useApi<GuildListResponse>(booted ? "/api/guilds" : null);

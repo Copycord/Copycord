@@ -1,4 +1,4 @@
-// Unknown route: the old 404.html card (.card, 640px wide, 40px from the top) inside the normal shell.
+// Unknown route: a 404 card (640px wide, 40px from the top) inside the normal shell.
 
 import { Link } from "react-router";
 import { Card } from "../components/ui";

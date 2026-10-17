@@ -1,5 +1,4 @@
-// Login page: a plain form post to POST /login (auth.py), same ids as the old
-// templates/login.html. A failed post returns this page again with the error
+// Login page: a plain form post to POST /login (auth.py). A failed post returns this page again with the error
 // in a meta tag, shown here as text.
 
 import { useState } from "react";

@@ -1,7 +1,7 @@
-// System page: the Database card from the old system.html and system.js.
+// System page: the Database card.
 // Collapsed by default; open it to back up now, download the latest or any
 // archive, restore from an upload or an existing archive, and delete archives.
-// Restore and delete ask first. Element ids match the old page for the e2e specs.
+// Restore and delete ask first. The e2e specs select by element id.
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";
@@ -76,7 +76,7 @@ export function System() {
   const lastBackup = archives ? (latest ? fmtBackupWhen(latest.mtime) : SHRUG) : NO_VALUE;
   useLastCount(ARCHIVES_COUNT_KEY, archives?.length);
 
-  // Show at most VISIBLE_ROWS rows and scroll the rest, measured like the old page.
+  // Show at most VISIBLE_ROWS rows and scroll the rest.
   useLayoutEffect(() => {
     const table = tableRef.current;
     const rows = archives?.length ?? 0;
@@ -98,7 +98,7 @@ export function System() {
     return () => window.removeEventListener("resize", measure);
   }, [open, archives]);
 
-  // The old page stayed blank when the info call failed; say so in the table.
+  // A failed info call is said in the table rather than leaving it blank.
   const loadFailed = error !== undefined || (data !== undefined && !data.ok);
 
   const onCardMouseDown = (e: MouseEvent) => {

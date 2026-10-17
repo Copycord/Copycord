@@ -1,7 +1,6 @@
-// Event logs page, the SPA version of templates/logs.html and logs.js:
-// search, type filter, clear filters, refresh, per row expand and delete,
+// Event logs page: search, type filter, clear filters, refresh, per row expand and delete,
 // clear all, and 50 logs at a time, the next 50 loading as the end of the table scrolls into view.
-// The element ids match the old page so the e2e parity spec runs unchanged.
+// The e2e parity spec selects by element id, so keep the ids stable.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../components/Toast";
@@ -106,7 +105,7 @@ export function Logs() {
     reloadTypes();
   }, [reloadList, reloadTypes]);
 
-  // Debounce typing like the old page; a new search goes back to page 1.
+  // Debounce typing; a new search goes back to page 1.
   useEffect(() => {
     const q = searchInput.trim();
     if (q === search) return;

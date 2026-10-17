@@ -1,9 +1,8 @@
-// Forwarding page: the rule list from the old forwarding.html and
-// forwarding.js. Search, the total forwarded count, one card per rule with
+// Forwarding page: the rule list. Search, the total forwarded count, one card per rule with
 // its own count, Enable/Disable and Delete (asks first). New Forward, Edit
 // and Duplicate open the rule modal (forwarding/RuleModal.tsx) through
 // openRuleEditor.
-// Element ids match the old page for the e2e specs.
+// The e2e specs select by element id, so keep the ids stable.
 
 import { useState } from "react";
 import { Button, PageFrame, cx, useReveal } from "../components/ui";
@@ -42,7 +41,7 @@ const CONFIG_URL = "/api/config";
 
 export { CLIENT_TOKEN_MESSAGE };
 
-// The old loadGuilds gate, without asking Discord: the page is dimmed with the old warning while
+// Without asking Discord, the page is dimmed with a warning while
 // the saved config has no client token. The guild list itself is fetched when the rule modal opens.
 function clientTokenGate(config: Pick<GlobalConfig, "CLIENT_TOKEN"> | undefined): StatusGateState {
   const missing = config !== undefined && String(config.CLIENT_TOKEN ?? "").trim() === "";
@@ -124,7 +123,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
     }
   }
 
-  // The old saveForwardingRule: swap the saved rule in, or put a new one first; reload when only the id came back.
+  // Swap the saved rule in, or put a new one first; reload when only the id came back.
   function onSaved(saved: ForwardingRule | null) {
     if (!saved) {
       rules.reload();
@@ -249,7 +248,7 @@ export function Forwarding({ openRuleEditor: openOverride }: ForwardingProps) {
           </div>
         </PageFrame>
       </StatusGate>
-      {/* After the card so the visible "Forwarding" h2 comes first, as on the old page. */}
+      {/* After the card so the visible "Forwarding" h2 comes first. */}
       <h1 className="sr-only">Forwarding</h1>
       {openOverride ? null : <RuleModal request={editor} onClose={() => setEditor(null)} onSaved={onSaved} />}
     </div>

@@ -1,8 +1,7 @@
-// Channels page, ported from templates/channels.html and frontend/src/js/channels.js:
-// the mapping select, the tree of categories and channels (GET /api/channels)
-// with search, filter and sort. Row actions (lane 23) and the orphan scan plug
-// into the ChannelTree slots. Cloning messages lives on the Tasks page.
-// Like the old page it waits until both Server and Client are connected.
+// Channels page: the mapping select, the tree of categories and channels
+// (GET /api/channels) with search, filter and sort. Row actions and the orphan
+// scan plug into the ChannelTree slots. Cloning messages lives on the Tasks page.
+// It waits until both Server and Client are connected.
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useReveal } from "../components/ui";
@@ -45,13 +44,13 @@ import type { FilterMode, SortDir, SortMode } from "./channels/model";
 const NO_ROWS: ChannelRow[] = [];
 
 export function Channels() {
-  // The tree loads once the gate first opens, as afterGateReady did.
+  // The tree loads once the gate first opens.
   const [booted, setBooted] = useState(false);
   const gate = useStatusGate({ require: "both", onUp: () => setBooted(true) });
   const mappings = useApi<GuildMappingListResponse>("/api/guild-mappings");
   const list = mappings.data?.mappings ?? [];
 
-  // The template preselected the first mapping; "" lists every channel.
+  // The first mapping starts selected; "" lists every channel.
   const [picked, setPicked] = useState<string | null>(null);
   const mappingId = picked ?? list[0]?.mapping_id ?? "";
   const mappingsSettled = mappings.data !== undefined || mappings.error !== undefined;
@@ -64,7 +63,7 @@ export function Channels() {
   const orphans = useOrphans();
   const orphanCount = orphans.categories.length + orphans.channels.length;
   const setOrphans = orphanStore.set;
-  // Asks the client for the orphan list on load, as the old page did.
+  // Asks the client for the orphan list on load.
   useVerify(mappingId);
 
   // Typing stays responsive on large guilds: the tree rebuilds from the deferred query.
@@ -77,7 +76,7 @@ export function Channels() {
   );
 
   useEffect(() => () => orphanStore.set(NO_ORPHANS), []);
-  // Drops the bf:* keys the old "Clone messages" UI left in storage.
+  // Drops leftover bf:* clone UI keys from storage (channels/legacyStorage.ts).
   useEffect(() => clearLegacyCloneStorageOnce(), []);
 
   const actions = useRowActions({

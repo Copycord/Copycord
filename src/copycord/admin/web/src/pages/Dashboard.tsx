@@ -1,7 +1,5 @@
-// Configuration page (the old index.html): the update notice, the Bots card
-// with its log modal, then one slot per remaining card in the old order. Each
-// slot lives in its own file under dashboard/ so later lanes port one card
-// without touching the others.
+// Configuration page: the update notice, the Bots card with its log modal,
+// then the remaining cards, each in its own file under dashboard/.
 
 import { useState } from "react";
 import type { UseWsOptions } from "../hooks/useWsMessages";
@@ -32,7 +30,7 @@ export function Dashboard({ WebSocketImpl, EventSourceImpl }: DashboardProps = {
 
   return (
     <div className="flex flex-col">
-      {/* The old page has no visible title; this one is for screen readers and the shell test. */}
+      {/* No visible title; this one is for screen readers and the shell test. */}
       <h1 className="sr-only">Configuration</h1>
       <UpdateNotice />
       <PromoCards />
