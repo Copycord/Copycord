@@ -13,6 +13,7 @@ import type { TaskRun, TaskStep } from "../../../types/tasks";
 import { formatCount } from "../StepList";
 import { BackfillForm } from "./backfill/BackfillForm";
 import { EXPORT_DMS_ENTRY } from "./export_dms/entry";
+import { DOWNLOAD_AVATARS_ENTRY } from "./download_avatars/entry";
 import { PurgeForm } from "./purge/PurgeForm";
 import { PURGE_ASSETS } from "./purge_assets/entry";
 import { useStartRun, type TaskFormProps } from "./start";
@@ -48,6 +49,8 @@ export interface TaskTypeEntry {
   hero?: { key: string; label: string };
   /** A finished step's note in the words its running label uses; null keeps the server's note. */
   stepNote?: (step: TaskStep) => string | null;
+  /** A card of the type's own on the run page, under the summary (the avatars zip link). */
+  RunCard?: ComponentType<{ run: TaskRun }>;
 }
 
 const DAY = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -205,6 +208,7 @@ export const TASK_TYPES: Record<string, TaskTypeEntry> = {
   },
   purge_assets: PURGE_ASSETS,
   export_dms: EXPORT_DMS_ENTRY,
+  download_avatars: DOWNLOAD_AVATARS_ENTRY,
 };
 
 function formatValue(v: unknown): string {

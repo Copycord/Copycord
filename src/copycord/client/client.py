@@ -57,6 +57,7 @@ from copycord.client.export_runners import (
     DmHistoryExporter,
 )
 from copycord.client.forwarding import ForwardingManager
+from copycord.client.avatar_members import FRAMES as AVATAR_FRAMES, AvatarMembers
 from copycord.client.proxy_rotator import ProxyRotator, _mask_proxy_url
 
 
@@ -207,6 +208,8 @@ class ClientListener:
             listen_port=self.config.CLIENT_WS_PORT,
             logger=logger,
         )
+
+        self.avatar_members = AvatarMembers(lambda: self.bot, lambda frame: self.bus.publish("client", frame))
 
         self.forwarding = ForwardingManager(
             config=self.config,
@@ -446,6 +449,9 @@ class ClientListener:
 
         elif typ == "backfill_cancel":
             return await self._cancel_backfill_job(str((data or {}).get("job_id")))
+
+        elif typ in AVATAR_FRAMES:
+            return await self.avatar_members.handle(typ, data)
 
         elif typ == "backfill_done":
             data = msg.get("data") or {}

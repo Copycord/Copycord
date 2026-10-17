@@ -283,11 +283,13 @@ export function RunHeader({ run, typeTitle }: { run: TaskRun; typeTitle: string 
 
 /** The run page body for a held run: header, summary and inputs, steps, report. */
 export function RunView({ run, type, refreshing = false }: { run: TaskRun; type?: TaskType; refreshing?: boolean }) {
+  const { RunCard } = entryFor(run.type);
   return (
     <div className={cx("flex flex-col transition-opacity motion-reduce:transition-none", refreshing && BUSY)} aria-busy={refreshing || undefined}>
       <RunHeader run={run} typeTitle={type?.title ?? typeLabel(run.type).title} />
       <div className={RUN_BODY}>
         <RunSummary run={run} schema={type?.inputs_schema} />
+        {RunCard ? <RunCard run={run} /> : null}
         <StepList run={run} noteOf={entryFor(run.type).stepNote} />
         <ReportPanel run={run} />
       </div>

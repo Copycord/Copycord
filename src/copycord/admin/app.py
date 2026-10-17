@@ -93,7 +93,11 @@ import copycord.admin.tasks  # noqa: F401  task types register at import
 from copycord.admin.tasks import backfill as task_backfill
 from copycord.admin.tasks import export_dms as task_export_dms
 from copycord.admin.tasks import purge as task_purge
+<<<<<<< HEAD
 from copycord.admin.tasks import purge_assets as task_purge_assets
+=======
+from copycord.admin.tasks import avatars as task_avatars
+>>>>>>> origin/v4/tasks-L68
 from copycord.admin.tasks import routes as task_routes
 from copycord.admin import messages as messages_api
 from copycord.admin.tasks.repo import SqliteTaskRepo
@@ -2079,7 +2083,12 @@ async def _startup_tasks():
     task_backfill.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame))
     task_export_dms.configure(send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=5.0))
     task_purge.configure(db=db)
+<<<<<<< HEAD
     task_purge_assets.configure(db=db, send=lambda frame, timeout: _ws_cmd(SERVER_AGENT_URL, frame, timeout=timeout))
+=======
+    task_avatars.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=task_avatars.SEND_TIMEOUT),
+                           user_guilds=_user_guilds, data_dir=DATA_DIR, bus=hub)
+>>>>>>> origin/v4/tasks-L68
     try:
         recovered = service.recover()
         if recovered:
