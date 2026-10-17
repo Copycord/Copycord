@@ -189,7 +189,10 @@ def test_stop_cancels_the_running_run_before_the_bots_go(client, events, monkeyp
         await step.start()
         await ctx.cancelled.wait()
 
-    registry.register(registry.TaskType(key="held_api", title="Held", run=held, inputs=Inputs))
+    # A run that needs the bots (only those end when the bots stop); they count as up here.
+    registry.register(registry.TaskType(key="held_api", title="Held", run=held, inputs=Inputs,
+                                        requires_bots=True))
+    monkeypatch.setattr(task_routes, "_bots_running", None)
     try:
         cmds = []
 
@@ -310,7 +313,8 @@ def test_a_bot_stopped_status_cancels_active_runs(monkeypatch):
     monkeypatch.setattr(hub, "status", {"server": {}, "client": {}})
     monkeypatch.setattr(hub, "_last_seen", {})
     monkeypatch.setattr(hub, "_watchdog_notified", {})
-    registry.register(registry.TaskType(key="held_bus", title="Held", run=held, inputs=Inputs))
+    registry.register(registry.TaskType(key="held_bus", title="Held", run=held, inputs=Inputs,
+                                        requires_bots=True))
 
     async def main():
         svc = TaskService(MemoryRunRepo(), cancel_grace=0.1)
