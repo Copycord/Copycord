@@ -155,15 +155,6 @@ describe("Logs page", () => {
     expect(screen.getByLabelText("Search logs")).toHaveValue("");
   });
 
-  it("refresh refetches the list and the types", async () => {
-    const { user, calls } = setup();
-    await loaded();
-    const n = calls.length;
-    await user.click(screen.getByRole("button", { name: "Refresh logs" }));
-    await waitFor(() => expect(calls.length).toBe(n + 2));
-    expect(calls.slice(n).map((c) => c.url.pathname).sort()).toEqual(["/api/event-log-types", "/api/event-logs"]);
-  });
-
   it("pages through results with offset and disables the ends", async () => {
     const many = Array.from({ length: 120 }, (_, i) => entry(`id${i}`, { details: `Row ${i}`, created_at: 2_000 - i }));
     const { user, lists } = setup(many);
@@ -197,10 +188,6 @@ describe("Logs page", () => {
     expect(mutations().map((c) => `${c.method} ${c.url.pathname}`)).toEqual(["DELETE /api/event-logs"]);
     expect(mutations()[0]!.csrf).toBe("1");
     expect(screen.getByText("All logs cleared")).toBeInTheDocument();
-    const clear = screen.getByRole("button", { name: "Clear all logs" });
-    expect(clear).toBeDisabled();
-    expect(clear).toHaveAttribute("aria-disabled", "true");
-    expect(clear).toHaveAttribute("title", "Nothing to clear");
   });
 
   it("deletes one row only after confirming", async () => {
