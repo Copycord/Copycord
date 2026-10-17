@@ -89,6 +89,7 @@ from copycord.common.selfbot_headers import (
 from copycord.admin.web_config import router as links_router
 from copycord.admin.web_config import startup_links, shutdown_links
 import copycord.admin.tasks  # noqa: F401  task types register at import
+from copycord.admin import scraper_tokens
 from copycord.admin.tasks import backfill as task_backfill
 from copycord.admin.tasks import export_dms as task_export_dms
 from copycord.admin.tasks import sync_assets as task_sync_assets
@@ -2066,6 +2067,10 @@ async def _startup_tasks():
     task_purge_assets.configure(db=db, send=lambda frame, timeout: _ws_cmd(SERVER_AGENT_URL, frame, timeout=timeout))
     task_avatars.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=task_avatars.SEND_TIMEOUT),
                            user_guilds=_user_guilds, data_dir=DATA_DIR, bus=hub)
+    try:
+        scraper_tokens.migrate_from_db(db, DATA_DIR)
+    except Exception:
+        LOGGER.exception("Scraper tokens: migration to the text file failed")
     task_scrape.configure(db=db, data_dir=DATA_DIR, in_guild=_selfbot_in_guild,
                           user_guilds=_user_guilds, log_path=out_dir() / "scraper.out")
     try:
@@ -3672,78 +3677,34 @@ CLIENT_AGENT_TIMEOUT = int(os.getenv("CLIENT_AGENT_TIMEOUT", "10"))
 
 
 @app.get("/api/scraper/tokens", response_class=JSONResponse)
-async def api_scraper_tokens_list():
-    """List all scraper tokens with masked values."""
+async def api_scraper_tokens_get():
+    """Return the saved scraper tokens (data/scraper_tokens.txt)."""
+    return JSONResponse({"ok": True, "tokens": scraper_tokens.read_tokens(DATA_DIR)})
+
+
+@app.put("/api/scraper/tokens", response_class=JSONResponse)
+async def api_scraper_tokens_put(request: Request):
+    """Save the scraper tokens: {"tokens": [...]} or {"text": "one per line"}."""
     try:
-        tokens = db.list_scraper_tokens()
-        masked_tokens = []
-        for t in tokens:
-            masked_tokens.append(
-                {
-                    "token_id": t["token_id"],
-                    "label": t.get("label") or "Unlabeled",
-                    "masked": _mask_token(t["token_value"]),
-                    "is_valid": bool(t.get("is_valid")),
-                    "last_validated": t.get("last_validated"),
-                    "username": t.get("username"),
-                    "user_id": t.get("user_id"),
-                    "added_at": t.get("added_at"),
-                    "last_used": t.get("last_used"),
-                    "use_count": t.get("use_count", 0),
-                }
-            )
-        return JSONResponse({"ok": True, "tokens": masked_tokens})
-    except Exception as e:
-        LOGGER.exception("Failed to list scraper tokens: %s", e)
-        return JSONResponse({"ok": False, "error": "server-error"}, status_code=500)
-
-
-@app.post("/api/scraper/tokens/add", response_class=JSONResponse)
-async def api_scraper_tokens_add(
-    token_value: str = Form(...),
-    label: str = Form(""),
-):
-    """Add a scraper token. Not validated: the scrape skips a token that fails."""
-    token_value = (token_value or "").strip()
-    label = (label or "").strip()
-
-    if not token_value:
-        raise HTTPException(status_code=400, detail="token_value is required")
-
-    try:
-        existing = db.list_scraper_tokens()
-        for t in existing:
-            if t["token_value"] == token_value:
-                raise HTTPException(400, detail="Token already exists")
-    except HTTPException:
-        raise
+        payload = await request.json()
     except Exception:
-        pass
-
+        raise HTTPException(400, detail="Invalid JSON")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, detail="Invalid JSON")
+    if "tokens" in payload:
+        values = payload["tokens"]
+        if not isinstance(values, list):
+            raise HTTPException(400, detail="tokens must be a list")
+    elif isinstance(payload.get("text"), str):
+        values = payload["text"].splitlines()
+    else:
+        raise HTTPException(400, detail="tokens or text is required")
     try:
-        token_id = db.add_scraper_token(token_value, label)
-        return JSONResponse({"ok": True, "token_id": token_id})
+        tokens = scraper_tokens.write_tokens(DATA_DIR, values)
     except Exception as e:
-        LOGGER.exception("Failed to add scraper token: %s", e)
+        LOGGER.exception("Failed to save scraper tokens: %s", e)
         return JSONResponse({"ok": False, "error": "server-error"}, status_code=500)
-
-
-@app.post("/api/scraper/tokens/{token_id}/update", response_class=JSONResponse)
-async def api_scraper_tokens_update(token_id: str, label: str = Form(...)):
-    """Update a scraper token's label."""
-    if not db.get_scraper_token(token_id):
-        raise HTTPException(404, detail="Token not found")
-
-    db.update_scraper_token(token_id, label=label.strip())
-    return JSONResponse({"ok": True})
-
-
-@app.delete("/api/scraper/tokens/{token_id}", response_class=JSONResponse)
-async def api_scraper_tokens_delete(token_id: str):
-    """Delete a scraper token."""
-    if not db.delete_scraper_token(token_id):
-        raise HTTPException(404, detail="Token not found")
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "tokens": tokens})
 
 
 _PROXY_FILE = DATA_DIR / "proxies.txt"

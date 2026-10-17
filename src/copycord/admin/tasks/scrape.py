@@ -44,6 +44,7 @@ from typing import Any, Awaitable, Callable, Optional
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
+from copycord.admin import scraper_tokens
 from copycord.admin.standalone_scraper import ScraperConfig, StandaloneScraper
 
 from .context import STEP_FINAL
@@ -131,18 +132,12 @@ def describe(inputs: ScrapeInputs, lookups: Any = None) -> tuple[str, dict]:
 
 # settings: tokens and proxies
 
-def _tokens() -> list[dict]:
-    """Every saved scraper token, least used first. Tokens are not validated: one that
-    fails or cannot see the server is skipped when it is used."""
-    db = _wiring.db
-    if db is None:
+def _tokens() -> list[str]:
+    """Every saved scraper token (data/scraper_tokens.txt), in file order. Tokens are not
+    validated: one that fails or cannot see the server is skipped when it is used."""
+    if _wiring.data_dir is None:
         return []
-    try:
-        tokens = [t for t in (db.list_scraper_tokens() or []) if t.get("token_value")]
-    except Exception:
-        log.exception("scraper tokens unreadable")
-        return []
-    return sorted(tokens, key=lambda t: int(t.get("use_count") or 0))
+    return scraper_tokens.read_tokens(_wiring.data_dir)
 
 
 def saved_proxies() -> list[str]:
@@ -156,17 +151,17 @@ def saved_proxies() -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-async def _access(tokens: list[dict], guild_id: int) -> list[dict]:
+async def _access(tokens: list[str], guild_id: int) -> list[str]:
     """The tokens that can see the server. A token whose check fails (bad token, Discord
     error) counts as not in the server."""
     if _wiring.in_guild is None:
         return []
-    usable: list[dict] = []
+    usable: list[str] = []
     for token in tokens:
         try:
-            ok = await _wiring.in_guild(token["token_value"], guild_id)
+            ok = await _wiring.in_guild(token, guild_id)
         except Exception as exc:
-            log.info("scraper token %s skipped: %s", token.get("token_id"), exc)
+            log.info("a scraper token was skipped: %s", exc)
             ok = False
         if ok:
             usable.append(token)
@@ -197,7 +192,7 @@ async def options(params: dict) -> dict:
         errors: list[str] = []
         for token in tokens:
             try:
-                raw = await _wiring.user_guilds(token["token_value"])
+                raw = await _wiring.user_guilds(token)
             except Exception as exc:
                 errors.append(_guilds_error(exc))
                 out["tokens"]["skipped"] += 1
@@ -460,11 +455,6 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
         await end(note)
         ctx.fail(note)
         return
-    for token in usable:
-        try:
-            _wiring.db.increment_scraper_token_usage(token["token_id"])
-        except Exception:
-            pass
     note = f"{len(usable)} of {len(tokens)} token{'s' if len(tokens) != 1 else ''} used"
     if skipped:
         note += f", {skipped} skipped"
@@ -478,7 +468,7 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
     job = _Job(gid)
     config = ScraperConfig(
         guild_id=int(gid),
-        tokens=[t["token_value"] for t in usable],
+        tokens=list(usable),
         proxies=proxies,
         include_username=inputs.include_username,
         include_avatar_url=inputs.include_avatar_url,
