@@ -11,8 +11,8 @@
 from __future__ import annotations
 
 import asyncio
-import aiohttp
 import base64
+import contextlib
 import heapq
 import itertools
 import json
@@ -24,15 +24,24 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlsplit
 
-from copycord.common.selfbot_headers import build_headers
+from copycord.common.selfbot_headers import (
+    TLS_IMPERSONATE,
+    _mask_proxy_for_log,
+    build_headers,
+)
+from copycord.selfclient.gateway import (
+    GatewayClient,
+    ZlibStreamInflater,
+    gateway_url,
+    open_websocket,
+)
 
 try:
-    from aiohttp_socks import ProxyConnector
-
-    _HAS_AIOHTTP_SOCKS = True
+    from curl_cffi.requests import AsyncSession as _CurlAsyncSession
 except ImportError:
-    _HAS_AIOHTTP_SOCKS = False
+    _CurlAsyncSession = None
 
 logger = logging.getLogger("standalone_scraper")
 
@@ -538,16 +547,10 @@ class SharedPlanner:
             self.p.set_session_slots(n)
 
 
-def _build_headers(token: str) -> dict[str, str]:
-    """Discord desktop-client headers for a user token."""
-    return build_headers(token)
-
-
 class StandaloneScraper:
     """Member scraper that uses multiple tokens over the Discord gateway."""
 
     DISCORD_API = "https://discord.com/api/v9"
-    GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json"
 
     def __init__(self, config: ScraperConfig):
         self.config = config
@@ -566,6 +569,11 @@ class StandaloneScraper:
             self._normalize_proxy(p) for p in (config.proxies or []) if p
         ]
         self._proxy_idx = 0
+        # (token, session slot) -> its proxy, and the scraper's own curl_cffi session for
+        # it. The slot's gateway socket goes through the same proxy.
+        self._slot_proxies: Dict[tuple, Optional[str]] = {}
+        self._http_sessions: Dict[tuple, Any] = {}
+        self._bio_failures: Dict[str, int] = {}
 
     @staticmethod
     def _normalize_proxy(raw: str) -> str:
@@ -609,23 +617,51 @@ class StandaloneScraper:
         self._proxy_idx += 1
         return proxy
 
-    def _make_session(
-        self, proxy: Optional[str] = None, **kwargs
-    ) -> aiohttp.ClientSession:
-        """Create an aiohttp.ClientSession, using ProxyConnector for SOCKS proxies."""
-        if proxy and proxy.startswith("socks") and _HAS_AIOHTTP_SOCKS:
-            connector = ProxyConnector.from_url(proxy)
-            return aiohttp.ClientSession(connector=connector, **kwargs)
-        return aiohttp.ClientSession(**kwargs)
+    def _plan_proxies(self, tokens: List[str]):
+        """Give every (token, session slot) its proxy, round-robin in token order."""
+        self._slot_proxies = {}
+        self._proxy_idx = 0
+        for token in tokens:
+            for slot in range(max(1, self.config.sessions_per_token)):
+                self._slot_proxies[(token, slot)] = self._next_proxy()
 
-    @staticmethod
-    def _proxy_kwarg(proxy: Optional[str]) -> dict:
-        """Return {'proxy': url} for HTTP proxies, {} for SOCKS (handled by the connector) or None."""
-        if proxy and not proxy.startswith("socks"):
-            return {"proxy": proxy}
-        return {}
+    def _proxy_for(self, token: str, slot: int = 0) -> Optional[str]:
+        return self._slot_proxies.get((token, slot))
+
+    def _http(self, token: str, slot: int = 0):
+        """The scraper's curl_cffi session for this token and slot, made on first use with
+        the Chrome TLS fingerprint and the slot's proxy. Not get_tls_session's cache: a
+        scrape never rebinds the session or proxy lease the client or sender holds."""
+        key = (token, slot)
+        sess = self._http_sessions.get(key)
+        if sess is None:
+            if _CurlAsyncSession is None:
+                raise RuntimeError("curl_cffi is not installed")
+            sess = _CurlAsyncSession(
+                impersonate=TLS_IMPERSONATE, proxy=self._proxy_for(token, slot)
+            )
+            self._http_sessions[key] = sess
+        return sess
+
+    async def _close_http(self):
+        sessions = list(self._http_sessions.values())
+        self._http_sessions.clear()
+        for sess in sessions:
+            try:
+                await sess.close()
+            except Exception:
+                pass
+
+    def _redact(self, message: str) -> str:
+        """Hide the credentials of any configured proxy, should an error message carry one."""
+        for proxy in self._proxy_list:
+            creds = urlsplit(proxy).netloc.rpartition("@")[0]
+            if creds:
+                message = message.replace(f"{creds}@", "***@")
+        return message
 
     def _log(self, message: str, level: str = "info"):
+        message = self._redact(message)
         getattr(logger, level if level != "warn" else "warning", logger.info)(message)
         if self.config.log_callback:
             try:
@@ -635,6 +671,7 @@ class StandaloneScraper:
 
     def _debug(self, message: str, level: str = "info"):
         """Diagnostic log to the Python logger only, not the UI."""
+        message = self._redact(message)
         getattr(logger, level if level != "warn" else "warning", logger.info)(message)
 
     def _progress(self, current: int, total: Optional[int] = None, message: str = ""):
@@ -673,109 +710,98 @@ class StandaloneScraper:
             return f"{m}m {s}s"
         return f"{s}s"
 
+    async def _get(self, token: str, url: str, timeout: float):
+        """GET as this token: its own curl_cffi session and its own client headers."""
+        return await self._http(token).get(
+            url, headers=build_headers(token), timeout=timeout
+        )
+
     async def _validate_token(
-        self, session: aiohttp.ClientSession, token: str
+        self, token: str
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        proxy = self._next_proxy()
         try:
-            async with session.get(
-                f"{self.DISCORD_API}/users/@me",
-                headers=_build_headers(token),
-                timeout=aiohttp.ClientTimeout(total=5),
-                **self._proxy_kwarg(proxy),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return True, data.get("username"), str(data.get("id"))
-                return False, None, None
+            resp = await self._get(token, f"{self.DISCORD_API}/users/@me", 5)
+            if resp.status_code == 200:
+                data = resp.json()
+                return True, data.get("username"), str(data.get("id"))
+            return False, None, None
         except Exception as e:
             self._log(f"⚠️ Token validation error", "error")
             self._debug(f"Token validation error: {e}")
             return False, None, None
 
-    async def _check_guild_access(
-        self, session: aiohttp.ClientSession, token: str, guild_id: int
-    ) -> bool:
+    async def _check_guild_access(self, token: str, guild_id: int) -> bool:
         """Paginate /users/@me/guilds to check membership (handles 200+ guilds and rate limits)."""
         wanted = str(guild_id)
         after = "0"
-        proxy = self._next_proxy()
         try:
             while True:
                 url = f"{self.DISCORD_API}/users/@me/guilds?limit=200&after={after}"
-                async with session.get(
-                    url,
-                    headers=_build_headers(token),
-                    timeout=aiohttp.ClientTimeout(total=8),
-                    **self._proxy_kwarg(proxy),
-                ) as resp:
-                    if resp.status == 429:
-                        try:
-                            body = await resp.json()
-                            retry_after = float(body.get("retry_after", 2))
-                        except Exception:
-                            retry_after = 2.0
-                        self._debug(
-                            f"Rate limited on guild access check, retrying in {retry_after:.1f}s",
-                            "warn",
-                        )
-                        await asyncio.sleep(retry_after + 0.25)
-                        continue
-                    if resp.status != 200:
-                        return False
-                    guilds = await resp.json()
-                    if not guilds:
-                        return False
-                    for g in guilds:
-                        if str(g.get("id")) == wanted:
-                            return True
-                    after = str(guilds[-1].get("id", "0"))
-                    if len(guilds) < 200:
-                        return False
+                resp = await self._get(token, url, 8)
+                if resp.status_code == 429:
+                    try:
+                        retry_after = float(resp.json().get("retry_after", 2))
+                    except Exception:
+                        retry_after = 2.0
+                    self._debug(
+                        f"Rate limited on guild access check, retrying in {retry_after:.1f}s",
+                        "warn",
+                    )
+                    await asyncio.sleep(retry_after + 0.25)
+                    continue
+                if resp.status_code != 200:
+                    return False
+                guilds = resp.json()
+                if not guilds:
+                    return False
+                for g in guilds:
+                    if str(g.get("id")) == wanted:
+                        return True
+                after = str(guilds[-1].get("id", "0"))
+                if len(guilds) < 200:
+                    return False
         except Exception as e:
             self._debug(f"Guild access check error: {e}", "error")
             return False
 
     async def _get_guild_info(
-        self, session: aiohttp.ClientSession, token: str, guild_id: int
+        self, token: str, guild_id: int
     ) -> tuple[Optional[int], Optional[str]]:
         """Fetch approximate member count and guild name via REST."""
-        proxy = self._next_proxy()
         try:
-            async with session.get(
-                f"{self.DISCORD_API}/guilds/{guild_id}?with_counts=true",
-                headers=_build_headers(token),
-                timeout=aiohttp.ClientTimeout(total=8),
-                **self._proxy_kwarg(proxy),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    count = (
-                        int(
-                            data.get("approximate_member_count")
-                            or data.get("member_count")
-                            or 0
-                        )
-                        or None
+            resp = await self._get(
+                token, f"{self.DISCORD_API}/guilds/{guild_id}?with_counts=true", 8
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                count = (
+                    int(
+                        data.get("approximate_member_count")
+                        or data.get("member_count")
+                        or 0
                     )
-                    name = data.get("name")
-                    return count, name
-                return None, None
+                    or None
+                )
+                name = data.get("name")
+                return count, name
+            return None, None
         except Exception:
             return None, None
 
     async def _bio_worker(
         self,
-        session: aiohttp.ClientSession,
+        token: str,
         bio_queue: asyncio.Queue,
         stop: asyncio.Event,
     ):
-        """Fetch /users/{id}/profile bios until stop is set and the queue is empty, or the
-        scrape is stopped. Every id taken off the queue is marked done exactly once (the
-        finally below): fetched, skipped (BIO_REFUSED at once, any other failure after
-        BIO_ATTEMPTS tries) or put back first, for a 429 or a failure with tries left."""
+        """Fetch /users/{id}/profile bios as one token until stop is set and the queue is
+        empty, or the scrape is stopped. Every valid token runs one, all on the same queue,
+        each pacing its own calls. Every id taken off the queue is marked done exactly once
+        (the finally below): fetched, skipped (BIO_REFUSED at once, any other failure after
+        BIO_ATTEMPTS tries, counted across tokens) or put back first, for a 429 or a
+        failure with tries left."""
         next_allowed = 0.0
-        failures: Dict[str, int] = {}
+        failures = self._bio_failures
 
         while not stop.is_set() or not bio_queue.empty():
             if self._stop_event.is_set():
@@ -797,7 +823,7 @@ class StandaloneScraper:
                 if wait > 0 and await self._pause(wait + 0.05):
                     continue
 
-                outcome, retry_after = await self._fetch_bio(session, uid)
+                outcome, retry_after = await self._fetch_bio(token, uid)
                 if outcome == "rate_limited":
                     next_allowed = self._clock() + retry_after + 0.25
                     bio_queue.put_nowait(uid)
@@ -819,44 +845,37 @@ class StandaloneScraper:
             finally:
                 bio_queue.task_done()
 
-    async def _fetch_bio(
-        self, session: aiohttp.ClientSession, uid: str
-    ) -> tuple[str, float]:
-        """One GET /users/{uid}/profile: ("ok", 0), ("rate_limited", retry_after),
-        ("refused", 0) for BIO_REFUSED, or ("failed", 0) for any other status, a network,
-        proxy or timeout error, or a body that does not parse."""
+    async def _fetch_bio(self, token: str, uid: str) -> tuple[str, float]:
+        """One GET /users/{uid}/profile as this token: ("ok", 0), ("rate_limited",
+        retry_after), ("refused", 0) for BIO_REFUSED, or ("failed", 0) for any other
+        status, a network, proxy or timeout error, or a body that does not parse."""
         url = f"{self.DISCORD_API}/users/{uid}/profile"
-        proxy = self._next_proxy()
         try:
-            async with session.get(
-                url,
-                timeout=aiohttp.ClientTimeout(total=10),
-                **self._proxy_kwarg(proxy),
-            ) as resp:
-                if resp.status == 429:
-                    retry_after = 1.0
-                    try:
-                        body = await resp.json()
-                        retry_after = float(body.get("retry_after", 1.0))
-                    except Exception:
-                        hdr = resp.headers.get("Retry-After")
-                        if hdr:
-                            try:
-                                retry_after = float(hdr)
-                            except Exception:
-                                pass
-                    return "rate_limited", max(retry_after, 0.0)
+            resp = await self._get(token, url, 10)
+            status = resp.status_code
+            if status == 429:
+                retry_after = 1.0
+                try:
+                    retry_after = float(resp.json().get("retry_after", 1.0))
+                except Exception:
+                    hdr = resp.headers.get("Retry-After")
+                    if hdr:
+                        try:
+                            retry_after = float(hdr)
+                        except Exception:
+                            pass
+                return "rate_limited", max(retry_after, 0.0)
 
-                if resp.status in BIO_REFUSED:
-                    self._debug(f"Bio refused uid={uid}: HTTP {resp.status}")
-                    return "refused", 0.0
+            if status in BIO_REFUSED:
+                self._debug(f"Bio refused uid={uid}: HTTP {status}")
+                return "refused", 0.0
 
-                if resp.status != 200:
-                    self._debug(f"Bio fetch failed uid={uid}: HTTP {resp.status}")
-                    return "failed", 0.0
+            if status != 200:
+                self._debug(f"Bio fetch failed uid={uid}: HTTP {status}")
+                return "failed", 0.0
 
-                data = await resp.json()
-                bio_val = (data.get("user") or {}).get("bio") or data.get("bio")
+            data = resp.json()
+            bio_val = (data.get("user") or {}).get("bio") or data.get("bio")
         except Exception as exc:
             self._debug(f"Bio fetch error uid={uid}: {exc}")
             return "failed", 0.0
@@ -878,11 +897,13 @@ class StandaloneScraper:
         self._bios["queued"] += 1
         bio_queue.put_nowait(uid)
 
-    async def _finish_bios(self, bio_queue: asyncio.Queue, bio_task: asyncio.Task):
+    async def _finish_bios(
+        self, bio_queue: asyncio.Queue, bio_tasks: List[asyncio.Task]
+    ):
         """Wait until every queued bio is fetched or skipped, or the scrape is stopped; no
-        time cap. Reports bios done of queued now, then the worker reports each one it
-        finishes. A worker that ended without draining the queue (it should not) ends the
-        wait too, so the scrape still saves."""
+        time cap. Reports bios done of queued now, then the workers report each one they
+        finish. Workers that all ended without draining the queue (they should not) end
+        the wait too, so the scrape still saves."""
         b = self._bios
         left = b["queued"] - b["fetched"] - b["skipped"]
         if left > 0:
@@ -891,20 +912,40 @@ class StandaloneScraper:
         self._bio_progress()
         join = asyncio.ensure_future(bio_queue.join())
         stopped = asyncio.ensure_future(self._stop_event.wait())
+        workers = asyncio.ensure_future(asyncio.wait(bio_tasks))
         try:
             done, _ = await asyncio.wait(
-                {join, stopped, bio_task}, return_when=asyncio.FIRST_COMPLETED
+                {join, stopped, workers}, return_when=asyncio.FIRST_COMPLETED
             )
-            if done == {bio_task}:
-                self._debug("Bio worker ended before the queue drained", "warn")
+            if done == {workers}:
+                self._debug("Bio workers ended before the queue drained", "warn")
         finally:
             join.cancel()
             stopped.cancel()
+            workers.cancel()
             self._bio_phase = False
         if b["skipped"]:
             self._log(
                 f"⚠️ {b['skipped']:,} bio(s) skipped: the profile did not load", "warn"
             )
+
+    @contextlib.asynccontextmanager
+    async def _gateway_socket(self, identity: GatewayClient, proxy: Optional[str]):
+        """A gateway socket opened the way the client opens one: the zlib-stream URL, the
+        client's upgrade headers for this token, and the proxy's tunnel. ``identity``
+        sends on it while it is open."""
+        ws = await open_websocket(
+            gateway_url(zlib_stream=True), identity._ws_headers(), proxy
+        )
+        identity._ws = ws
+        try:
+            yield ws
+        finally:
+            identity._ws = None
+            try:
+                await asyncio.wait_for(ws.close(), timeout=0.5)
+            except Exception:
+                pass
 
     async def _run_gateway_session(
         self,
@@ -943,6 +984,11 @@ class StandaloneScraper:
             nonce_seq += 1
             return f"s{session_index}-n{nonce_seq}:{q}"
 
+        # The selfclient's gateway client for this token, used only for what it would send
+        # on connecting: its upgrade headers and its IDENTIFY. Sessions of the same token
+        # share the token's fingerprint, as the client's do.
+        identity = GatewayClient(token, reconnect=False)
+
         max_reconnects = 5
         max_total_reconnects = 999
         attempt = 0
@@ -951,82 +997,65 @@ class StandaloneScraper:
             if self._stop_event.is_set():
                 return
 
-            headers = _build_headers(token)
             connection_productive = False
+            hb_task: Optional[asyncio.Task] = None
             try:
+                async with self._gateway_socket(identity, proxy_url) as ws:
+                    inflater = ZlibStreamInflater()
 
-                connector = None
-                use_proxy_kwarg = None
-                if proxy_url and proxy_url.startswith("socks"):
-                    if _HAS_AIOHTTP_SOCKS:
-                        connector = ProxyConnector.from_url(proxy_url)
-                    else:
-                        self._debug(
-                            f"[S{session_index}] SOCKS proxy requires aiohttp-socks package",
-                            "warn",
-                        )
-                elif proxy_url:
-                    use_proxy_kwarg = proxy_url
+                    async def next_frame(timeout: Optional[float]) -> Optional[dict]:
+                        """The next gateway payload, or None while a zlib-stream
+                        message is still incomplete."""
+                        raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
+                        if isinstance(raw, (bytes, bytearray, memoryview)):
+                            text = inflater.feed(bytes(raw))
+                            if text is None:
+                                return None
+                        else:
+                            text = raw
+                        return json.loads(text)
 
-                async with aiohttp.ClientSession(connector=connector) as ws_session:
-                    ws_kwargs: dict = dict(
-                        headers=headers,
-                        max_msg_size=16 * 1024 * 1024,
-                        timeout=aiohttp.ClientWSTimeout(ws_close=10),
-                    )
-                    if use_proxy_kwarg:
-                        ws_kwargs["proxy"] = use_proxy_kwarg
-                    async with ws_session.ws_connect(
-                        self.GATEWAY_URL,
-                        **ws_kwargs,
-                    ) as ws:
+                    async def first_frame() -> dict:
+                        while True:
+                            frame = await next_frame(None)
+                            if frame is not None:
+                                return frame
 
-                        hello = await asyncio.wait_for(ws.receive_json(), timeout=10)
-                        if hello.get("op") != 10:
-                            raise RuntimeError(f"Unexpected hello op={hello.get('op')}")
-                        hb_interval = hello["d"]["heartbeat_interval"] / 1000.0
+                    hello = await asyncio.wait_for(first_frame(), timeout=10)
+                    if hello.get("op") != 10:
+                        raise RuntimeError(f"Unexpected hello op={hello.get('op')}")
+                    hb_interval = hello["d"]["heartbeat_interval"] / 1000.0
 
-                        hb_stop = asyncio.Event()
-                        seq_num = [None]
+                    hb_stop = asyncio.Event()
+                    seq_num = [None]
 
-                        async def heartbeater():
-                            await asyncio.sleep(hb_interval * random.uniform(0.1, 0.9))
-                            while not hb_stop.is_set():
-                                try:
-                                    await ws.send_json({"op": 1, "d": seq_num[0]})
-                                except Exception:
-                                    return
-                                try:
-                                    await asyncio.wait_for(
-                                        hb_stop.wait(), timeout=hb_interval
-                                    )
-                                except asyncio.TimeoutError:
-                                    pass
+                    async def heartbeater():
+                        await asyncio.sleep(hb_interval * random.uniform(0.1, 0.9))
+                        while not hb_stop.is_set():
+                            try:
+                                await ws.send(json.dumps({"op": 1, "d": seq_num[0]}))
+                            except Exception:
+                                return
+                            try:
+                                await asyncio.wait_for(
+                                    hb_stop.wait(), timeout=hb_interval
+                                )
+                            except asyncio.TimeoutError:
+                                pass
 
-                        hb_task = asyncio.create_task(heartbeater())
+                    hb_task = asyncio.create_task(heartbeater())
 
-                        await ws.send_json(
-                            {
-                                "op": 2,
-                                "d": {
-                                    "token": token,
-                                    "properties": {
-                                        "$os": "linux",
-                                        "$browser": "disco",
-                                        "$device": "disco",
-                                    },
-                                    "compress": False,
-                                    "large_threshold": 250,
-                                },
-                            }
-                        )
+                    # The client's own IDENTIFY: capabilities, this token's web-client
+                    # properties, presence, compress and client_state.
+                    await identity._send_identify()
 
-                        ready = False
+                    ready = False
 
-                        async def send_query(q: str):
-                            nonlocal queries_total
-                            n = mk_nonce(q)
-                            await ws.send_json(
+                    async def send_query(q: str):
+                        nonlocal queries_total
+                        n = mk_nonce(q)
+                        await ws.send(
+                            json.dumps(
                                 {
                                     "op": 8,
                                     "d": {
@@ -1038,262 +1067,254 @@ class StandaloneScraper:
                                     },
                                 }
                             )
-                            in_flight.add(n)
-                            nonce_to_query[n] = q
-                            queries_total += 1
+                        )
+                        in_flight.add(n)
+                        nonce_to_query[n] = q
+                        queries_total += 1
 
-                        async def pump_queries():
-                            if self._stop_event.is_set():
-                                return
-                            slots = parallel - len(in_flight)
-                            if slots <= 0:
-                                return
+                    async def pump_queries():
+                        if self._stop_event.is_set():
+                            return
+                        slots = parallel - len(in_flight)
+                        if slots <= 0:
+                            return
+                        await planner.refill_if_starving(
+                            threshold=refill_threshold, step=refill_step
+                        )
+
+                        skip_single = (member_count_hint or 0) > 1000
+
+                        max_local_rounds = 200
+                        local_rounds = 0
+                        while slots > 0 and local_rounds < max_local_rounds:
+                            batch = await planner.next_batch(slots)
+                            if not batch:
+                                break
+                            sent_any = False
+                            for q in batch:
+                                if self._stop_event.is_set():
+                                    return
+                                if skip_single and q and len(q) < 2:
+
+                                    await planner.on_chunk_result(q, 100)
+                                    await planner.ensure_children(
+                                        q, force_full=True
+                                    )
+                                    local_rounds += 1
+                                    continue
+                                try:
+                                    await send_query(q)
+                                    sent_any = True
+                                    slots -= 1
+                                except Exception:
+                                    await planner.requeue(q)
+                                    return
+                            if sent_any:
+                                break
+
                             await planner.refill_if_starving(
                                 threshold=refill_threshold, step=refill_step
                             )
 
-                            skip_single = (member_count_hint or 0) > 1000
+                    stall_start = time.time()
+                    STALL_TIMEOUT = 120.0
+                    MSG_TIMEOUT = 2.0
 
-                            max_local_rounds = 200
-                            local_rounds = 0
-                            while slots > 0 and local_rounds < max_local_rounds:
-                                batch = await planner.next_batch(slots)
-                                if not batch:
+                    while True:
+                        if self._stop_event.is_set():
+                            break
+
+                        try:
+                            data = await next_frame(MSG_TIMEOUT)
+                        except asyncio.TimeoutError:
+
+                            if not in_flight and not await planner.has_work():
+
+                                if await planner.all_leaves_exhausted():
+                                    total = len(self._members)
+                                    self._debug(
+                                        f"[S{session_index}] Planner fully exhausted — finishing (total={total:,})"
+                                    )
                                     break
-                                sent_any = False
-                                for q in batch:
-                                    if self._stop_event.is_set():
-                                        return
-                                    if skip_single and q and len(q) < 2:
 
-                                        await planner.on_chunk_result(q, 100)
-                                        await planner.ensure_children(
-                                            q, force_full=True
+                                if (
+                                    time.time() - last_growth_at
+                                    >= NO_GROWTH_TIMEOUT
+                                ):
+                                    total = len(self._members)
+                                    self._debug(
+                                        f"[S{session_index}] No new members for {NO_GROWTH_TIMEOUT:.0f}s "
+                                        f"and planner empty — finishing (total={total:,})"
+                                    )
+                                    break
+                            continue
+                        except Exception as exc:
+                            # Closed by Discord or the proxy, or a frame that does not decode.
+                            self._debug(
+                                f"[S{session_index}] WS closed/error: {exc!r}", "warn"
+                            )
+                            break
+
+                        if isinstance(data, dict):
+                            op = data.get("op")
+                            t = data.get("t")
+                            d = data.get("d")
+                            s = data.get("s")
+                            if s is not None:
+                                seq_num[0] = s
+
+                            if op == 0 and t == "READY":
+                                ready = True
+                                self._sessions_ready += 1
+                                self._log(
+                                    f"🟢 Session {session_index + 1} connected",
+                                    "info",
+                                )
+                                await asyncio.sleep(0.3)
+                                await pump_queries()
+
+                            elif op == 0 and t == "GUILD_MEMBERS_CHUNK":
+                                nonce = (d or {}).get("nonce")
+                                got = (d or {}).get("members") or []
+
+                                q_for_nonce = None
+                                if nonce and nonce in in_flight:
+                                    in_flight.discard(nonce)
+                                    q_for_nonce = nonce_to_query.pop(nonce, None)
+
+                                added = 0
+                                if got:
+                                    async with self._members_lock:
+                                        for m in got:
+                                            u = (m or {}).get("user") or {}
+                                            uid = u.get("id")
+                                            if not uid or uid in self._members:
+                                                continue
+                                            rec: Dict[str, Any] = {
+                                                "id": uid,
+                                                "bot": bool(u.get("bot", False)),
+                                            }
+                                            if self.config.include_username:
+                                                rec["username"] = u.get("username")
+                                            if self.config.include_avatar_url:
+                                                rec["avatar_url"] = (
+                                                    self._build_avatar_url(
+                                                        uid, u.get("avatar")
+                                                    )
+                                                )
+                                            if self.config.include_roles:
+                                                rec["roles"] = [
+                                                    str(r)
+                                                    for r in (m.get("roles") or [])
+                                                ]
+                                            if self.config.include_bio:
+                                                rec["bio"] = None
+                                                if bio_queue is not None:
+                                                    self._queue_bio(bio_queue, uid)
+                                            self._members[uid] = rec
+                                            added += 1
+                                    stall_start = time.time()
+                                    connection_productive = True
+                                    if added > 0:
+                                        last_growth_at = time.time()
+
+                                usernames = []
+                                for m in got or []:
+                                    u = (m or {}).get("user") or {}
+                                    uname = (u.get("username") or "").casefold()
+                                    if uname:
+                                        usernames.append(uname)
+                                if usernames:
+                                    await planner.mark_observed_usernames_bulk(
+                                        usernames
+                                    )
+
+                                if q_for_nonce is not None:
+                                    size = len(got)
+
+                                    expand_step = min(10 + (num_tokens - 1) * 4, 26)
+                                    await planner.on_chunk_result_and_expand(
+                                        q_for_nonce, size, expand_step=expand_step
+                                    )
+
+                                total = len(self._members)
+                                now = time.time()
+                                if now - last_progress_push >= 0.25:
+                                    self._progress(
+                                        total,
+                                        member_count_hint,
+                                        f"Found {total:,} members",
+                                    )
+                                    last_progress_push = now
+
+                                if not logged_99_pct:
+                                    target = (
+                                        int(member_count_hint * 0.99)
+                                        if member_count_hint
+                                        else 0
+                                    )
+                                    if target and total >= target:
+                                        self._log(
+                                            f"🎯 Almost done! {total:,}/{member_count_hint:,} members — finishing up...",
+                                            "info",
                                         )
-                                        local_rounds += 1
-                                        continue
-                                    try:
-                                        await send_query(q)
-                                        sent_any = True
-                                        slots -= 1
-                                    except Exception:
-                                        await planner.requeue(q)
-                                        return
-                                if sent_any:
-                                    break
+                                        logged_99_pct = True
 
-                                await planner.refill_if_starving(
-                                    threshold=refill_threshold, step=refill_step
-                                )
-
-                        stall_start = time.time()
-                        STALL_TIMEOUT = 120.0
-                        MSG_TIMEOUT = 2.0
-
-                        while True:
-                            if self._stop_event.is_set():
-                                break
-
-                            try:
-                                msg = await asyncio.wait_for(
-                                    ws.receive(), timeout=MSG_TIMEOUT
-                                )
-                            except asyncio.TimeoutError:
+                                await pump_queries()
 
                                 if not in_flight and not await planner.has_work():
 
-                                    if await planner.all_leaves_exhausted():
-                                        total = len(self._members)
-                                        self._debug(
-                                            f"[S{session_index}] Planner fully exhausted — finishing (total={total:,})"
-                                        )
-                                        break
-
-                                    if (
-                                        time.time() - last_growth_at
-                                        >= NO_GROWTH_TIMEOUT
-                                    ):
-                                        total = len(self._members)
-                                        self._debug(
-                                            f"[S{session_index}] No new members for {NO_GROWTH_TIMEOUT:.0f}s "
-                                            f"and planner empty — finishing (total={total:,})"
-                                        )
-                                        break
-                                continue
-
-                            if msg.type == aiohttp.WSMsgType.TEXT:
-                                data = json.loads(msg.data)
-                                op = data.get("op")
-                                t = data.get("t")
-                                d = data.get("d")
-                                s = data.get("s")
-                                if s is not None:
-                                    seq_num[0] = s
-
-                                if op == 0 and t == "READY":
-                                    ready = True
-                                    self._sessions_ready += 1
-                                    self._log(
-                                        f"🟢 Session {session_index + 1} connected",
-                                        "info",
+                                    swept = (
+                                        await planner.sweep_full_children_for_saturated()
                                     )
-                                    await asyncio.sleep(0.3)
-                                    await pump_queries()
-
-                                elif op == 0 and t == "GUILD_MEMBERS_CHUNK":
-                                    nonce = (d or {}).get("nonce")
-                                    got = (d or {}).get("members") or []
-
-                                    q_for_nonce = None
-                                    if nonce and nonce in in_flight:
-                                        in_flight.discard(nonce)
-                                        q_for_nonce = nonce_to_query.pop(nonce, None)
-
-                                    added = 0
-                                    if got:
-                                        async with self._members_lock:
-                                            for m in got:
-                                                u = (m or {}).get("user") or {}
-                                                uid = u.get("id")
-                                                if not uid or uid in self._members:
-                                                    continue
-                                                rec: Dict[str, Any] = {
-                                                    "id": uid,
-                                                    "bot": bool(u.get("bot", False)),
-                                                }
-                                                if self.config.include_username:
-                                                    rec["username"] = u.get("username")
-                                                if self.config.include_avatar_url:
-                                                    rec["avatar_url"] = (
-                                                        self._build_avatar_url(
-                                                            uid, u.get("avatar")
-                                                        )
-                                                    )
-                                                if self.config.include_roles:
-                                                    rec["roles"] = [
-                                                        str(r)
-                                                        for r in (m.get("roles") or [])
-                                                    ]
-                                                if self.config.include_bio:
-                                                    rec["bio"] = None
-                                                    if bio_queue is not None:
-                                                        self._queue_bio(bio_queue, uid)
-                                                self._members[uid] = rec
-                                                added += 1
-                                        stall_start = time.time()
-                                        connection_productive = True
-                                        if added > 0:
-                                            last_growth_at = time.time()
-
-                                    usernames = []
-                                    for m in got or []:
-                                        u = (m or {}).get("user") or {}
-                                        uname = (u.get("username") or "").casefold()
-                                        if uname:
-                                            usernames.append(uname)
-                                    if usernames:
-                                        await planner.mark_observed_usernames_bulk(
-                                            usernames
-                                        )
-
-                                    if q_for_nonce is not None:
-                                        size = len(got)
-
-                                        expand_step = min(10 + (num_tokens - 1) * 4, 26)
-                                        await planner.on_chunk_result_and_expand(
-                                            q_for_nonce, size, expand_step=expand_step
-                                        )
-
-                                    total = len(self._members)
-                                    now = time.time()
-                                    if now - last_progress_push >= 0.25:
-                                        self._progress(
-                                            total,
-                                            member_count_hint,
-                                            f"Found {total:,} members",
-                                        )
-                                        last_progress_push = now
-
-                                    if not logged_99_pct:
-                                        target = (
-                                            int(member_count_hint * 0.99)
-                                            if member_count_hint
-                                            else 0
-                                        )
-                                        if target and total >= target:
-                                            self._log(
-                                                f"🎯 Almost done! {total:,}/{member_count_hint:,} members — finishing up...",
-                                                "info",
-                                            )
-                                            logged_99_pct = True
-
-                                    await pump_queries()
-
-                                    if not in_flight and not await planner.has_work():
-
-                                        swept = (
-                                            await planner.sweep_full_children_for_saturated()
-                                        )
-                                        miss = await planner.missing_roots()
-                                        for r in miss:
-                                            await planner.requeue(r)
-                                        await planner.refill_if_starving(
-                                            threshold=refill_threshold, step=refill_step
-                                        )
-                                        if await planner.has_work():
-                                            await pump_queries()
-
-                                elif op == 11:
-                                    pass
-                                elif op == 9:
-                                    self._debug(
-                                        f"[S{session_index}] Invalid session, reconnecting...",
-                                        "warn",
+                                    miss = await planner.missing_roots()
+                                    for r in miss:
+                                        await planner.requeue(r)
+                                    await planner.refill_if_starving(
+                                        threshold=refill_threshold, step=refill_step
                                     )
-                                    self._log(
-                                        f"🔄 Session {session_index + 1} reconnecting...",
-                                        "warn",
-                                    )
-                                    break
-                                elif op == 7:
-                                    self._debug(
-                                        f"[S{session_index}] Server requested reconnect",
-                                        "warn",
-                                    )
-                                    self._log(
-                                        f"🔄 Session {session_index + 1} reconnecting...",
-                                        "warn",
-                                    )
-                                    break
+                                    if await planner.has_work():
+                                        await pump_queries()
 
-                            elif msg.type in (
-                                aiohttp.WSMsgType.CLOSED,
-                                aiohttp.WSMsgType.CLOSING,
-                                aiohttp.WSMsgType.ERROR,
-                            ):
+                            elif op == 11:
+                                pass
+                            elif op == 9:
                                 self._debug(
-                                    f"[S{session_index}] WS closed/error", "warn"
+                                    f"[S{session_index}] Invalid session, reconnecting...",
+                                    "warn",
+                                )
+                                self._log(
+                                    f"🔄 Session {session_index + 1} reconnecting...",
+                                    "warn",
                                 )
                                 break
-
-                            if (
-                                time.time() - stall_start > STALL_TIMEOUT
-                                and not in_flight
-                            ):
+                            elif op == 7:
                                 self._debug(
-                                    f"[S{session_index}] Stall detected, breaking",
+                                    f"[S{session_index}] Server requested reconnect",
+                                    "warn",
+                                )
+                                self._log(
+                                    f"🔄 Session {session_index + 1} reconnecting...",
                                     "warn",
                                 )
                                 break
 
-                        pq_len = await planner.queue_len()
-                        self._debug(
-                            f"[S{session_index}] WS loop exited "
-                            f"in_flight={len(in_flight)} pq={pq_len} total={len(self._members):,} "
-                            f"productive={connection_productive}"
-                        )
-                        hb_stop.set()
-                        hb_task.cancel()
+                        if (
+                            time.time() - stall_start > STALL_TIMEOUT
+                            and not in_flight
+                        ):
+                            self._debug(
+                                f"[S{session_index}] Stall detected, breaking",
+                                "warn",
+                            )
+                            break
+
+                    pq_len = await planner.queue_len()
+                    self._debug(
+                        f"[S{session_index}] WS loop exited "
+                        f"in_flight={len(in_flight)} pq={pq_len} total={len(self._members):,} "
+                        f"productive={connection_productive}"
+                    )
 
             except asyncio.CancelledError:
                 raise
@@ -1307,6 +1328,10 @@ class StandaloneScraper:
                     "warn",
                 )
                 await asyncio.sleep(2 + attempt)
+            finally:
+                if hb_task is not None:
+                    hb_task.cancel()
+                    hb_task = None
 
             total_attempts += 1
             if connection_productive:
@@ -1356,8 +1381,9 @@ class StandaloneScraper:
         self._bios = {"queued": 0, "fetched": 0, "skipped": 0}
         self._bio_phase = False
         self._sessions_ready = 0
-        bio_task: Optional[asyncio.Task] = None
-        bio_session: Optional[aiohttp.ClientSession] = None
+        self._bio_failures = {}
+        bio_tasks: List[asyncio.Task] = []
+        self._plan_proxies(self.config.tokens)
 
         guild_id = self.config.guild_id
         guild_name = None
@@ -1376,17 +1402,16 @@ class StandaloneScraper:
         try:
 
             valid_tokens: list[str] = []
-            async with self._make_session(self._next_proxy()) as http:
-                for i, token in enumerate(self.config.tokens, 1):
-                    self._log(
-                        f"🔑 Validating token {i}/{len(self.config.tokens)}...", "info"
-                    )
-                    ok, uname, uid = await self._validate_token(http, token)
-                    if not ok:
-                        self._log(f"⚠️ Token {i} is invalid — skipping", "warn")
-                        continue
-                    self._log(f"✅ Token {i} valid ({uname})", "info")
-                    valid_tokens.append(token)
+            for i, token in enumerate(self.config.tokens, 1):
+                self._log(
+                    f"🔑 Validating token {i}/{len(self.config.tokens)}...", "info"
+                )
+                ok, uname, uid = await self._validate_token(token)
+                if not ok:
+                    self._log(f"⚠️ Token {i} is invalid — skipping", "warn")
+                    continue
+                self._log(f"✅ Token {i} valid ({uname})", "info")
+                valid_tokens.append(token)
 
             if not valid_tokens:
                 return ScraperResult(
@@ -1395,10 +1420,9 @@ class StandaloneScraper:
 
             self._log(f"✅ {len(valid_tokens)} token(s) ready", "info")
 
-            async with self._make_session(self._next_proxy()) as http:
-                member_count, guild_name = await self._get_guild_info(
-                    http, valid_tokens[0], guild_id
-                )
+            member_count, guild_name = await self._get_guild_info(
+                valid_tokens[0], guild_id
+            )
             if member_count and guild_name:
                 self._log(f"🏰 Guild: {guild_name} (~{member_count:,} members)", "info")
             elif member_count:
@@ -1455,13 +1479,10 @@ class StandaloneScraper:
             bio_stop = asyncio.Event()
             if self.config.include_bio:
                 bio_queue = asyncio.Queue()
-                bio_headers = _build_headers(valid_tokens[0])
-                bio_session = self._make_session(
-                    self._next_proxy(), headers=bio_headers
-                )
-                bio_task = asyncio.create_task(
-                    self._bio_worker(bio_session, bio_queue, bio_stop)
-                )
+                bio_tasks = [
+                    asyncio.create_task(self._bio_worker(token, bio_queue, bio_stop))
+                    for token in valid_tokens
+                ]
 
             progress_stop = asyncio.Event()
 
@@ -1520,10 +1541,10 @@ class StandaloneScraper:
                 sessions_per = self.config.sessions_per_token
                 for token in valid_tokens:
                     for s in range(sessions_per):
-                        session_proxy = self._next_proxy()
+                        session_proxy = self._proxy_for(token, s)
                         if session_proxy:
                             self._debug(
-                                f"[S{session_idx}] Using proxy: {session_proxy}"
+                                f"[S{session_idx}] Using proxy: {_mask_proxy_for_log(session_proxy)}"
                             )
                         tasks.append(
                             self._run_gateway_session(
@@ -1576,16 +1597,12 @@ class StandaloneScraper:
                     },
                 )
 
-            if (
-                bio_queue is not None
-                and bio_task is not None
-                and not self._stop_event.is_set()
-            ):
+            if bio_queue is not None and bio_tasks and not self._stop_event.is_set():
                 self._progress(len(self._members), member_count)
-                await self._finish_bios(bio_queue, bio_task)
+                await self._finish_bios(bio_queue, bio_tasks)
             bio_stop.set()
-            await self._close_bios(bio_task, bio_session)
-            bio_task = bio_session = None
+            await self._close_bios(bio_tasks)
+            bio_tasks = []
 
             elapsed = time.perf_counter() - t0
             members_list = list(self._members.values())
@@ -1644,28 +1661,23 @@ class StandaloneScraper:
                 elapsed_seconds=elapsed,
             )
         finally:
-            # A cancel or an error before the bio phase ended leaves the worker running.
-            await self._close_bios(bio_task, bio_session)
+            # A cancel or an error before the bio phase ended leaves the workers running.
+            await self._close_bios(bio_tasks)
+            await self._close_http()
             self._running = False
 
-    async def _close_bios(
-        self,
-        bio_task: Optional[asyncio.Task],
-        bio_session: Optional[aiohttp.ClientSession],
-    ):
-        if bio_task is not None:
-            bio_task.cancel()
-            try:
-                await asyncio.wait({bio_task}, timeout=0.5)
-            except BaseException:
-                pass
-            if bio_task.done() and not bio_task.cancelled():
-                bio_task.exception()
-        if bio_session is not None:
-            try:
-                await bio_session.close()
-            except Exception:
-                pass
+    async def _close_bios(self, bio_tasks: List[asyncio.Task]):
+        if not bio_tasks:
+            return
+        for task in bio_tasks:
+            task.cancel()
+        try:
+            await asyncio.wait(set(bio_tasks), timeout=0.5)
+        except BaseException:
+            pass
+        for task in bio_tasks:
+            if task.done() and not task.cancelled():
+                task.exception()
 
     def stop(self):
         """Stop the scraping operation."""
