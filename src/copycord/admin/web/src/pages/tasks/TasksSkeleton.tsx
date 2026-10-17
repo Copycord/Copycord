@@ -311,7 +311,7 @@ export function StepsHead({ filter, onFilter, id }: StepsHeadProps) {
 
 /** A collapsed disclosure's row (Inputs, Report (JSON)): 48 px like a card head, the chevron and the title. */
 export const DISCLOSURE_SUMMARY =
-  "flex min-h-12 cursor-pointer list-none items-center gap-x-3 px-4 py-1.5 text-sm marker:hidden [&::-webkit-details-marker]:hidden";
+  "flex min-h-12 cursor-pointer list-none items-center gap-x-3 px-4 py-1.5 text-sm transition-colors hover:bg-white/5 marker:hidden [&::-webkit-details-marker]:hidden";
 /** What an opened disclosure shows, under a hairline. */
 export const DISCLOSURE_BODY = "border-t border-border px-4 py-3";
 
@@ -322,7 +322,7 @@ export const DISCLOSURE_BODY = "border-t border-border px-4 py-3";
 export function DisclosureTitle({ title, open }: { title: string; open?: boolean }) {
   return (
     <>
-      <span aria-hidden="true" className={cx("inline-block w-2 text-muted transition-transform group-open:rotate-90", open && "rotate-90")}>
+      <span aria-hidden="true" className={cx("inline-flex w-3 justify-center text-lg leading-none text-text-2 transition-transform group-open:rotate-90", open && "rotate-90")}>
         ›
       </span>
       <span className={CARD_TITLE}>{title}</span>
