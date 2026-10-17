@@ -78,6 +78,7 @@ describe("ScrapeMembersForm", () => {
     expect(screen.getByRole("switch", { name: "Roles" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("switch", { name: "Use proxies" })).toHaveAttribute("aria-checked", "true");
     expect(await screen.findByText("4 saved proxies.")).toBeInTheDocument();
+    expect(screen.getByText("Highly recommended.")).toBeInTheDocument();
     expect(screen.queryByText(/valid/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /validate/i })).not.toBeInTheDocument();
   });

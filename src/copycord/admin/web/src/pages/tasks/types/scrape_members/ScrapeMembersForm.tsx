@@ -211,7 +211,12 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
           <Toggle
             label="Use proxies"
             description={
-              pending ? "Spreads the requests over the saved proxies." : proxies ? `${formatCount(proxies)} saved ${proxies === 1 ? "proxy" : "proxies"}.` : "No proxies saved, so none are used."
+              <>
+                <span className="font-medium text-accent">Highly recommended.</span>{" "}
+                <span>
+                  {pending ? "Spreads the requests over the saved proxies." : proxies ? `${formatCount(proxies)} saved ${proxies === 1 ? "proxy" : "proxies"}.` : "No proxies saved, so none are used."}
+                </span>
+              </>
             }
             checked={useProxies}
             onChange={(v) => changed(() => setUseProxies(v))}
