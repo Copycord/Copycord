@@ -167,7 +167,7 @@ function runWith(path: string | null): TaskRun {
     status: "success",
     inputs: { guild_id: "111", include_username: true, include_avatar_url: false, include_bio: false, include_roles: true, use_proxies: true },
     context: { label: "Alpha", guild_id: "111" },
-    summary: { members: 1204, tokens: 2, tokens_missing: 1 },
+    summary: { members: 1204, tokens: 2, tokens_skipped: 1 },
     report: { output: { path, size: 4096 } },
   } as unknown as TaskRun;
 }

@@ -130,7 +130,7 @@ export const SCRAPE_MEMBERS_ENTRY: TaskTypeEntry = {
   icon: ScrapeIcon,
   Form: ScrapeMembersForm,
   describeInputs: describeScrape,
-  summaryLabels: { members: "Members found", tokens: "Tokens used", tokens_missing: "Tokens skipped" },
+  summaryLabels: { members: "Members found", tokens: "Tokens used", tokens_skipped: "Tokens skipped" },
   hero: { key: "members", label: "members found" },
   RunCard: ScrapeDownloadCard,
 };

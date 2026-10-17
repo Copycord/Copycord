@@ -28,8 +28,8 @@ export interface ScrapeGuild {
 
 export interface ScrapeOptions {
   guilds?: ScrapeGuild[];
-  /** {valid, total} today; a bare count is read the same. */
-  tokens?: { total?: number; valid?: number } | number;
+  /** {total, skipped}; a bare count is read the same. */
+  tokens?: { total?: number; skipped?: number; valid?: number } | number;
   proxies?: number;
   error?: string;
 }
