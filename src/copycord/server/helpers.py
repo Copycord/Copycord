@@ -690,9 +690,179 @@ class VerifyController:
 
 
 class PurgeAssetHelper:
+    """Purge assets for the admin Tasks page. purge_assets_list names what a clone guild holds
+    (with whether Copycord cloned it); purge_assets_delete deletes one asset and drops its mapping.
+    The admin task asks for one delete at a time, so it shows progress and stops on a cancel."""
+
+    KINDS = ("emojis", "stickers", "roles")
+    SCOPES = ("cloned", "unmapped", "all")
+    _MAPPINGS = {
+        "emojis": ("emoji_mappings", "cloned_emoji_id"),
+        "stickers": ("sticker_mappings", "cloned_sticker_id"),
+        "roles": ("role_mappings", "cloned_role_id"),
+    }
+
     def __init__(self, cog: commands.Cog):
         self.cog = cog
         self.logger = getattr(cog, "logger", None)
+        self.db = getattr(cog, "db", None)
+
+    def _mapped_ids(self, kind: str) -> set[int]:
+        table, col = self._MAPPINGS[kind]
+        rows = self.db.conn.execute(
+            f"SELECT {col} FROM {table} WHERE {col} IS NOT NULL"
+        ).fetchall()
+        out: set[int] = set()
+        for r in rows:
+            try:
+                out.add(int(r[0]))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def _forget_mapping(self, kind: str, cloned_id: int) -> None:
+        table, col = self._MAPPINGS[kind]
+        self.db.conn.execute(f"DELETE FROM {table} WHERE {col} = ?", (int(cloned_id),))
+        self.db.conn.commit()
+
+    @staticmethod
+    def _undeletable(role: discord.Role) -> bool:
+        prem = getattr(role, "is_premium_subscriber", None)
+        return bool(
+            role.is_default() or role.managed or (prem() if callable(prem) else False)
+        )
+
+    def _guild(self, data: dict):
+        try:
+            gid = int(data.get("guild_id") or 0)
+        except (TypeError, ValueError):
+            gid = 0
+        return self.cog.bot.get_guild(gid) if gid else None
+
+    async def _stickers(self, guild: discord.Guild) -> list:
+        stickers = list(getattr(guild, "stickers", None) or [])
+        if not stickers:
+            try:
+                stickers = list(await guild.fetch_stickers())
+            except Exception:
+                stickers = []
+        return stickers
+
+    async def list_assets(self, data: dict) -> dict:
+        """{ok, guild_name, kinds: {kind: {items: [{id, name, mapped}], error, above_bot}}}.
+        Roles leave out @everyone, managed and booster roles; roles at or above the bot's top role
+        are left out too and counted in above_bot."""
+        guild = self._guild(data)
+        if guild is None:
+            return {"ok": False, "error": "The server bot is not in the clone guild"}
+        kinds = [k for k in (data.get("kinds") or self.KINDS) if k in self.KINDS]
+        out: dict = {}
+        for kind in kinds:
+            mapped = self._mapped_ids(kind)
+            entry: dict = {"items": [], "error": None}
+            if kind == "emojis":
+                objs = list(guild.emojis)
+            elif kind == "stickers":
+                objs = await self._stickers(guild)
+            else:
+                me, top_role, roles = await self._resolve_me_and_top(guild)
+                if not me or not top_role:
+                    entry["error"] = "Could not find the bot's top role"
+                    out[kind] = entry
+                    continue
+                if not me.guild_permissions.manage_roles:
+                    entry["error"] = "The bot needs the Manage Roles permission"
+                    out[kind] = entry
+                    continue
+                roles = [r for r in roles if not self._undeletable(r)]
+                objs = sorted((r for r in roles if r < top_role), key=lambda r: r.position)
+                entry["above_bot"] = len(roles) - len(objs)
+            entry["items"] = [
+                {"id": str(o.id), "name": o.name, "mapped": int(o.id) in mapped}
+                for o in objs
+            ]
+            out[kind] = entry
+        return {"ok": True, "guild_name": guild.name, "kinds": out}
+
+    async def delete_asset(self, data: dict) -> dict:
+        """Delete one asset: {ok, outcome: deleted | skipped | failed | rate_limited, error,
+        retry_after}. The scope is checked again here, so a cloned-only purge never deletes an
+        asset Copycord did not clone."""
+        guild = self._guild(data)
+        if guild is None:
+            return {"ok": False, "outcome": "failed", "error": "The server bot is not in the clone guild"}
+        kind = data.get("kind")
+        scope = data.get("scope") or "cloned"
+        if kind not in self.KINDS or scope not in self.SCOPES:
+            return {"ok": False, "outcome": "failed", "error": "Unknown asset kind or scope"}
+        try:
+            obj_id = int(data.get("id") or 0)
+        except (TypeError, ValueError):
+            obj_id = 0
+        if not obj_id:
+            return {"ok": False, "outcome": "failed", "error": "Missing asset id"}
+
+        mapped = obj_id in self._mapped_ids(kind)
+        if (scope == "cloned" and not mapped) or (scope == "unmapped" and mapped):
+            return {"ok": True, "outcome": "skipped",
+                    "error": "Not cloned by Copycord" if scope == "cloned" else "Cloned by Copycord"}
+
+        obj = None
+        try:
+            if kind == "emojis":
+                obj = discord.utils.get(guild.emojis, id=obj_id) or await guild.fetch_emoji(obj_id)
+            elif kind == "stickers":
+                obj = discord.utils.get(await self._stickers(guild), id=obj_id)
+            else:
+                obj = guild.get_role(obj_id)
+        except discord.NotFound:
+            obj = None
+        except Exception:
+            obj = None
+        if obj is None:
+            if mapped:
+                self._forget_mapping(kind, obj_id)
+            return {"ok": True, "outcome": "skipped", "error": "Already gone"}
+
+        if kind == "roles":
+            me = getattr(guild, "me", None)
+            top = getattr(me, "top_role", None)
+            if self._undeletable(obj) or top is None or not obj < top:
+                return {"ok": True, "outcome": "skipped", "error": "The bot cannot delete this role"}
+
+        name = getattr(obj, "name", None)
+        try:
+            await obj.delete(reason="Copycord purge assets task")
+        except discord.NotFound:
+            if mapped:
+                self._forget_mapping(kind, obj_id)
+            return {"ok": True, "outcome": "skipped", "error": "Already gone"}
+        except discord.Forbidden as e:
+            self._log_purge_event(kind=kind, outcome="skipped", guild_id=guild.id,
+                                  obj_id=obj_id, name=name, reason=f"Purge assets task: {e}")
+            return {"ok": True, "outcome": "skipped", "error": f"Missing permission: {e.text or e}"}
+        except discord.HTTPException as e:
+            if getattr(e, "status", None) == 429:
+                headers = getattr(getattr(e, "response", None), "headers", None) or {}
+                try:
+                    retry_after = float(headers.get("Retry-After") or 1)
+                except (TypeError, ValueError):
+                    retry_after = 1.0
+                return {"ok": True, "outcome": "rate_limited", "retry_after": retry_after,
+                        "error": "Rate limited by Discord"}
+            self._log_purge_event(kind=kind, outcome="failed", guild_id=guild.id,
+                                  obj_id=obj_id, name=name, reason=f"Purge assets task: {e}")
+            return {"ok": True, "outcome": "failed", "error": str(e)[:200] or type(e).__name__}
+        except Exception as e:
+            self._log_purge_event(kind=kind, outcome="failed", guild_id=guild.id,
+                                  obj_id=obj_id, name=name, reason=f"Purge assets task: {e}")
+            return {"ok": True, "outcome": "failed", "error": str(e)[:200] or type(e).__name__}
+
+        if mapped:
+            self._forget_mapping(kind, obj_id)
+        self._log_purge_event(kind=kind, outcome="deleted", guild_id=guild.id,
+                              obj_id=obj_id, name=name, reason=f"Purge assets task (scope={scope})")
+        return {"ok": True, "outcome": "deleted"}
 
     def _log_purge_event(
         self,

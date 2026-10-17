@@ -7,35 +7,12 @@ title: Assets
 
 Manage emojis, stickers, and roles in your clone server.
 
-## `/purge_assets`
-
-Bulk delete emojis, stickers, or roles from the current guild. This is a **destructive** operation.
-
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `kind` | Yes | What to purge: `emojis`, `stickers`, or `roles` |
-| `confirm` | Yes | Must type `confirm` to execute |
-| `unmapped_only` | No | Only delete assets **not** tracked in the database |
-| `cloned_only` | No | Only delete assets that **were** cloned by Copycord |
-
-:::warning
-`unmapped_only` and `cloned_only` are mutually exclusive — you can only use one at a time.
+:::info
+Bulk deleting emojis, stickers, or roles is now the **Purge assets** task on the dashboard's Tasks page. Pick a
+mapping, the kinds of asset, and whether to delete only what Copycord cloned (the default), only what it did not
+clone, or everything. A dry run counts without deleting, and the run page shows each delete as it happens.
+Roles at or above the Copycord bot's role are left alone, so keep the bot role at the top of the role list.
 :::
-
-**Usage:**
-```
-/purge_assets roles confirm
-/purge_assets emojis confirm unmapped_only:true
-/purge_assets stickers confirm cloned_only:true
-```
-
-:::tip
-Make sure the Copycord bot role is positioned **at the top** of the role list to be able to delete roles above it.
-:::
-
----
 
 ## `/pull_assets`
 

@@ -23,7 +23,7 @@ Copycord provides a comprehensive set of slash commands for managing your clone 
 | [Filtering](/docs/commands/filtering) | `block_add`, `block_list` | Block messages by keyword |
 | [Announcements](/docs/commands/announcements) | `announcement_trigger_add`, `announce_subscription_toggle`, etc. | Keyword-triggered notifications |
 | [Roles](/docs/commands/roles) | `onjoin_role`, `onjoin_dm`, `role_block`, `role_mention`, etc. | Role management and auto-assignment |
-| [Assets](/docs/commands/assets) | `purge_assets`, `pull_assets` | Manage emojis, stickers, and roles |
+| [Assets](/docs/commands/assets) | `pull_assets` | Export emojis and stickers (purging is a Tasks page task) |
 | [Webhooks](/docs/commands/webhooks) | `channel_webhook set/view/clear/list` | Custom webhook identities per channel |
 | [Exports](/docs/commands/exports) | `export_dms`, `mapping_debug` | Export DM history and debug info |
 | [Rewrites](/docs/commands/rewrites) | `rewrite add/list/remove` | Find-and-replace rules for messages |
@@ -47,7 +47,6 @@ All commands at a glance:
 /onjoin_role <role>                       — Toggle on-join role
 /onjoin_roles                             — List on-join roles
 /onjoin_sync                              — Sync on-join roles to members
-/purge_assets <type> <confirm>            — Bulk delete assets
 /pull_assets <asset>                      — Export emojis/stickers to ZIP
 /role_block <role|roleid>                 — Block role from cloning
 /role_block_clear                         — Clear all role blocks

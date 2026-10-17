@@ -68,6 +68,7 @@ from copycord.server.roles import RoleManager
 from copycord.server.backfill import BackfillManager
 from copycord.server.helpers import (
     OnJoinService,
+    PurgeAssetHelper,
     VerifyController,
     WebhookDMExporter,
     OnCloneJoin,
@@ -1643,6 +1644,12 @@ class ServerReceiver:
 
             elif typ == "announce":
                 asyncio.create_task(self.handle_announce(data))
+
+            elif typ == "purge_assets_list":
+                return await PurgeAssetHelper(self).list_assets(data or {})
+
+            elif typ == "purge_assets_delete":
+                return await PurgeAssetHelper(self).delete_asset(data or {})
 
             elif typ == "backfill_started":
                 data = msg.get("data") or {}
