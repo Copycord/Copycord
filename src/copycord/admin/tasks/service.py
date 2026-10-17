@@ -77,6 +77,10 @@ class TaskRun:
     updated_at: Optional[str] = None
     error: Optional[str] = None
     seq: int = 0
+    # Queued behind a concurrency slot: the oldest running run of the type holding it, and this run's
+    # place in line when more than one waits. Live only (the service sets them), never stored.
+    waiting_for: Optional[dict] = None
+    queue_position: Optional[int] = None
 
     def progress(self) -> dict:
         """What goes in progress_json."""
@@ -115,6 +119,8 @@ class TaskRun:
             "step_count": len(self.steps),
             "log_count": self.log_count,
             "seq": self.seq,
+            "waiting_for": None if self.waiting_for is None else dict(self.waiting_for),
+            "queue_position": self.queue_position,
         }
         if not include_inputs:
             del wire["inputs"]
@@ -262,7 +268,31 @@ class TaskService:
         await ctx.flush()
         task = asyncio.ensure_future(self._execute(task_type, ctx, inputs))
         self._active[run.id] = (ctx, task)
+        await self._refresh_queue(task_type)
         return run
+
+    async def _refresh_queue(self, task_type: TaskType) -> None:
+        """Queued runs of a type whose slots are all taken say which run they wait for and, when more
+        than one waits, their place in line; a change publishes. While a slot is free the next run
+        is about to start, so nothing changes (no flicker between the blocker ending and it starting)."""
+        if task_type.concurrency is None:
+            return
+        mine = [ctx for ctx, _ in self._active.values() if ctx.run.type == task_type.key]
+        running = sorted((c.run for c in mine if c.run.status == "running"),
+                         key=lambda r: (r.started_at or "", r.number))
+        if len(running) < task_type.concurrency:
+            return
+        blocker = running[0]
+        waiting_for = {"id": str(blocker.id), "number": blocker.number, "type": blocker.type,
+                       "title": blocker.title}
+        queued = sorted((c for c in mine if c.run.status == "queued" and not c.cancelled.is_set()),
+                        key=lambda c: c.run.number)
+        for i, ctx in enumerate(queued):
+            position = i + 1 if len(queued) > 1 else None
+            if ctx.run.waiting_for != waiting_for or ctx.run.queue_position != position:
+                ctx.run.waiting_for = waiting_for
+                ctx.run.queue_position = position
+                await ctx.flush()
 
     def _slot(self, task_type: TaskType) -> Optional[asyncio.Semaphore]:
         if task_type.concurrency is None:
@@ -308,7 +338,10 @@ class TaskService:
                 return
             run.status = "running"
             run.started_at = iso(self._clock())
+            run.waiting_for = None
+            run.queue_position = None
             await ctx.flush()
+            await self._refresh_queue(task_type)
             outcome, error = "success", None
             try:
                 await task_type.run(ctx, inputs)
@@ -329,6 +362,7 @@ class TaskService:
                 slot.release()
             self._active.pop(run.id, None)
             ctx.close()
+            await self._refresh_queue(task_type)
 
     async def _finish(self, ctx: RunContext, outcome: str, error: Optional[str],
                       note: Optional[str] = None) -> None:
@@ -342,6 +376,8 @@ class TaskService:
             ctx._settle_steps(outcome, note)
         run.status = outcome
         run.error = error
+        run.waiting_for = None
+        run.queue_position = None
         run.finished_at = iso(self._clock())
         await ctx.flush()
 
