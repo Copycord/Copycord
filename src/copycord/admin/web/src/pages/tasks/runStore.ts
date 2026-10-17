@@ -1,6 +1,6 @@
-// Task runs for the Tasks page: one list page per filter set and the open run, kept live by
-// task.run.updated frames on /ws/out. A frame patches the row it names when its seq is newer, a run
-// the list does not hold goes to the top when it matches the filters (first page only); a new run or a
+// Task runs for the Tasks page: the run list per filter set, scrolled in a page at a time, and the open
+// run, kept live by task.run.updated frames on /ws/out. A frame patches the row it names when its seq is
+// newer, a run the list does not hold goes to the top when it matches the filters; a new run or a
 // status change also refetches the page quietly so the totals and tab counts follow. On a socket reconnect the page and the open run are fetched again, since frames sent
 // while it was down are gone.
 //   const { runs, total, loading } = useTaskRuns({ type: "backfill_channels" });
@@ -20,7 +20,7 @@ export const RUN_UPDATED = "task.run.updated";
 export const FINAL_FETCH_ATTEMPTS = 3;
 export const FINAL_FETCH_BACKOFF_MS = 1000;
 
-export function runsUrl(filters: RunFilters): string {
+export function runsUrl(filters: RunFilters, perPage = PER_PAGE): string {
   const qs = new URLSearchParams();
   if (filters.type) qs.set("type", filters.type);
   if (filters.status) qs.set("status", filters.status);
@@ -28,8 +28,52 @@ export function runsUrl(filters: RunFilters): string {
   if (filters.context) qs.set("context", filters.context);
   if (filters.q) qs.set("q", filters.q);
   qs.set("page", String(filters.page ?? 1));
-  qs.set("per_page", String(PER_PAGE));
+  qs.set("per_page", String(perPage));
   return `/api/tasks/runs?${qs.toString()}`;
+}
+
+/** The server's per_page cap (MAX_PER_PAGE in tasks/routes.py): a refetch of every loaded page asks for at most this many. */
+export const MAX_PER_PAGE = 200;
+
+/**
+ * The mapping choices as objects with a readable label. The server sends the distinct context labels as
+ * plain strings; an object without a label falls back to its mapping id, then its guild id.
+ */
+export function normalizeContexts(raw: unknown): TaskContext[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TaskContext[] = [];
+  const seen = new Set<string>();
+  for (const c of raw) {
+    let ctx: TaskContext | null = null;
+    if (typeof c === "string") ctx = c.trim() ? { label: c.trim() } : null;
+    else if (c && typeof c === "object") {
+      const o = c as Partial<TaskContext>;
+      const mappingId = o.mapping_id != null && String(o.mapping_id).trim() ? String(o.mapping_id) : null;
+      const label = (typeof o.label === "string" && o.label.trim()) || mappingId || (o.guild_id != null ? String(o.guild_id).trim() : "");
+      ctx = label ? { ...o, label, mapping_id: mappingId } : null;
+    }
+    if (!ctx) continue;
+    const key = ctx.mapping_id ?? ctx.label;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ctx);
+  }
+  return out;
+}
+
+/** The held rows then `more`, a run already held kept once (a live insert shifts the pages by a row). */
+export function appendRuns(held: TaskRun[], more: TaskRun[]): TaskRun[] {
+  const ids = new Set(held.map((r) => r.id));
+  return [...held, ...more.filter((r) => !ids.has(r.id))];
+}
+
+/**
+ * A refetch of the loaded pages over the held rows: the fresh rows in server order, then any held row
+ * past them the refetch did not reach (more than MAX_PER_PAGE loaded), so scrolled-in rows stay.
+ */
+export function refreshRuns(held: TaskRun[], fresh: TaskRun[]): TaskRun[] {
+  if (held.length <= fresh.length) return fresh;
+  return appendRuns(fresh, held.slice(fresh.length));
 }
 
 export function runUrl(id: string): string {
@@ -94,10 +138,10 @@ export function mergeIntoList(state: ListState, frame: TaskRunUpdated, filters: 
     runs[i] = next;
     return { ...state, runs };
   }
-  if ((filters.page ?? 1) !== 1 || !matchesFilters(frame.run, filters)) return state;
+  if (!matchesFilters(frame.run, filters)) return state;
   // List rows do not carry steps.
   const row: TaskRun = { ...frame.run, steps: undefined };
-  return { runs: [row, ...state.runs].slice(0, PER_PAGE), total: state.total + 1 };
+  return { runs: [row, ...state.runs], total: state.total + 1 };
 }
 
 /** After a frame the list refetches this long after, so a burst of frames costs one fetch. */
@@ -132,7 +176,7 @@ function useReconnectRefetch(connected: boolean, refetch: () => void) {
 export interface TaskRunsState extends ListState {
   /** No page has landed yet since the list mounted: show the skeleton. Never true again after that. */
   loading: boolean;
-  /** A fetch is out while the held rows stay on screen (search, filters, paging, reconnect, reload); not for a live refetch. */
+  /** A fetch is out while the held rows stay on screen (search, filters, reconnect, reload); not for a live refetch or a next page. */
   refreshing: boolean;
   /** The held page answers the current filters; until then an empty page is not news (no empty state). */
   settled: boolean;
@@ -149,17 +193,32 @@ export interface TaskRunsState extends ListState {
   patchRun: (run: TaskRun) => void;
   /** Drop a deleted run from the page. */
   removeRun: (id: string) => void;
+  /** More runs than the held rows match the filters. */
+  hasMore: boolean;
+  /** The next page is out. */
+  loadingMore: boolean;
+  /** Fetch the next page and append it; a no-op while one is out, while new filters load, or at the end. */
+  loadMore: () => void;
 }
 
 /**
- * The list page for `filters`, live. Stale while revalidate: only the first fetch after mount loads (the
+ * The run list for `filters`, live, a page at a time: the first page, then `loadMore` appends the next
+ * one (rows already held are kept, never replaced). New filters (a status tab, a dropdown, a search) start
+ * again from the first page; `filters.page` is ignored. A reload or live refetch asks for every loaded page
+ * at once, so the scrolled-in rows stay. Stale while revalidate: only the first fetch after mount loads (the
  * skeleton); every later one, for new filters too, keeps the held rows with `refreshing` set until its
  * answer replaces them. A fetch made stale by a newer one is aborted and its answer ignored. A frame
  * for a run the page has not seen, or one that changes a run's status, also refetches the page (and its
  * counts) LIVE_REFETCH_MS later, quietly: no refreshing mark; `onCountsChange` is called with it.
  */
 export function useTaskRuns(filters: RunFilters, onCountsChange?: () => void): TaskRunsState {
-  const url = runsUrl(filters);
+  const listFilters: RunFilters = { ...filters };
+  delete listFilters.page;
+  const url = runsUrl(listFilters);
+  // The first-page URL and how many pages the held rows came from; new filters go back to one page.
+  const pagesRef = useRef({ url, pages: 1 });
+  const moreCtl = useRef<AbortController | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const stateRef = useRef<ListState>({ runs: [], total: 0 });
   // The next fetch is a live refetch: no refreshing mark, the rows just change when it lands.
   const quiet = useRef(false);
@@ -178,20 +237,28 @@ export function useTaskRuns(filters: RunFilters, onCountsChange?: () => void): T
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<Error | undefined>(undefined);
   const [tick, setTick] = useState(0);
-  const filtersRef = useRef(filters);
-  filtersRef.current = filters;
+  const filtersRef = useRef<RunFilters>(listFilters);
+  filtersRef.current = listFilters;
   stateRef.current = state;
 
   useEffect(() => {
     const ctl = new AbortController();
     if (!quiet.current) setRefreshing(true);
     quiet.current = false;
+    // A next page for other filters, or one this refetch covers, is dropped.
+    moreCtl.current?.abort();
+    moreCtl.current = null;
+    setLoadingMore(false);
+    const same = pagesRef.current.url === url;
+    if (!same) pagesRef.current = { url, pages: 1 };
+    const perPage = Math.min(MAX_PER_PAGE, pagesRef.current.pages * PER_PAGE);
     api
-      .get<TaskRunsResponse>(url, { signal: ctl.signal })
+      .get<TaskRunsResponse>(perPage === PER_PAGE ? url : runsUrl(filtersRef.current, perPage), { signal: ctl.signal })
       .then((d) => {
         if (ctl.signal.aborted) return;
-        setState({ runs: (d.runs ?? []).map((r) => ({ ...r, id: String(r.id) })), total: d.total ?? 0 });
-        setChoices({ actors: d.actors ?? [], contexts: d.contexts ?? [], counts: d.counts ?? null });
+        const fresh = (d.runs ?? []).map((r) => ({ ...r, id: String(r.id) }));
+        setState((s) => ({ runs: same ? refreshRuns(s.runs, fresh) : fresh, total: d.total ?? 0 }));
+        setChoices({ actors: d.actors ?? [], contexts: normalizeContexts(d.contexts), counts: d.counts ?? null });
         setError(undefined);
       })
       .catch((e: unknown) => {
@@ -245,7 +312,49 @@ export function useTaskRuns(filters: RunFilters, onCountsChange?: () => void): T
 
   const loading = loadedUrl === null;
   const settled = loadedUrl === url;
-  return { ...state, ...choices, loading, refreshing: (refreshing || !settled) && !loading, settled, error, connected, reload, patchRun, removeRun };
+  const hasMore = settled && state.runs.length < state.total;
+  const canMore = useRef(false);
+  canMore.current = hasMore && !refreshing;
+  useEffect(() => () => moreCtl.current?.abort(), []);
+  const loadMore = useCallback(() => {
+    if (moreCtl.current || !canMore.current) return;
+    const ctl = new AbortController();
+    moreCtl.current = ctl;
+    const at = pagesRef.current;
+    const next = at.pages + 1;
+    setLoadingMore(true);
+    api
+      .get<TaskRunsResponse>(runsUrl({ ...filtersRef.current, page: next }), { signal: ctl.signal })
+      .then((d) => {
+        if (ctl.signal.aborted || pagesRef.current !== at) return;
+        const more = (d.runs ?? []).map((r) => ({ ...r, id: String(r.id) }));
+        pagesRef.current = { url: at.url, pages: next };
+        setState((s) => ({ runs: appendRuns(s.runs, more), total: d.total ?? s.total }));
+      })
+      .catch((e: unknown) => {
+        if (!ctl.signal.aborted) setError(e instanceof Error ? e : new Error(String(e)));
+      })
+      .finally(() => {
+        if (moreCtl.current !== ctl) return;
+        moreCtl.current = null;
+        setLoadingMore(false);
+      });
+  }, []);
+  return {
+    ...state,
+    ...choices,
+    loading,
+    refreshing: (refreshing || !settled) && !loading,
+    settled,
+    error,
+    connected,
+    reload,
+    patchRun,
+    removeRun,
+    hasMore,
+    loadingMore,
+    loadMore,
+  };
 }
 
 export interface TaskRunState {

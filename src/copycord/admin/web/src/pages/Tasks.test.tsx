@@ -66,6 +66,48 @@ function serve(runs: TaskRun[], opts: { total?: number; handle?: Handler } = {})
   return fn;
 }
 
+/** Observers the LoadMore sentinel made; scrollToEnd tells the live ones their target came into view. */
+let observers: Array<{ cb: IntersectionObserverCallback; el: Element | null; live: boolean }> = [];
+
+class FakeObserver {
+  entry: { cb: IntersectionObserverCallback; el: Element | null; live: boolean };
+  constructor(cb: IntersectionObserverCallback) {
+    this.entry = { cb, el: null, live: true };
+    observers.push(this.entry);
+  }
+  observe(el: Element) {
+    this.entry.el = el;
+  }
+  unobserve() {}
+  disconnect() {
+    this.entry.live = false;
+  }
+  takeRecords() {
+    return [];
+  }
+}
+
+function scrollToEnd() {
+  for (const o of observers.filter((x) => x.live && x.el))
+    o.cb([{ isIntersecting: true, target: o.el } as unknown as IntersectionObserverEntry], {} as IntersectionObserver);
+}
+
+/** `count` runs r1..rN served a page at a time by ?page= and ?per_page=; `wait` can hold a page. */
+function servePaged(count: number, wait?: (page: number) => Promise<void> | void) {
+  const all = Array.from({ length: count }, (_, i) => run({ id: `r${i + 1}`, number: count - i }));
+  return serve(all, {
+    handle: (url) => {
+      if (!url.startsWith("/api/tasks/runs?")) return undefined;
+      const qs = new URL(url, "http://x").searchParams;
+      const page = Number(qs.get("page"));
+      const per = Number(qs.get("per_page"));
+      const body = { runs: all.slice((page - 1) * per, page * per), total: count, page, actors: ["admin", "bot"], contexts: [] };
+      const w = wait?.(page);
+      return (w ? w.then(() => Response.json(body)) : Response.json(body)) as unknown as Response;
+    },
+  });
+}
+
 /** The native select a ToolbarSelect keeps in the DOM, by filter key. */
 const sel = (key: string) => document.getElementById(`tasks-filter-${key}`) as HTMLSelectElement;
 
@@ -97,6 +139,8 @@ async function openMenu(rowTitle: string) {
 
 beforeEach(() => {
   vi.stubGlobal("WebSocket", FakeWs);
+  observers = [];
+  vi.stubGlobal("IntersectionObserver", FakeObserver);
   localStorage.clear();
 });
 
@@ -201,7 +245,8 @@ describe("Tasks page", () => {
     renderAt("/tasks?status=failed&actor=admin&q=general&context=m1&page=2");
     await screen.findByRole("link", { name: "Backfill channels #12" });
     const first = new URL(listCalls(fn)[0]!, "http://x").searchParams;
-    expect(Object.fromEntries(first)).toMatchObject({ status: "failed", actor: "admin", q: "general", context: "m1", page: "2" });
+    // A ?page= left in an old link is ignored: the list always starts at the first page.
+    expect(Object.fromEntries(first)).toMatchObject({ status: "failed", actor: "admin", q: "general", context: "m1", page: "1" });
     expect(screen.getByRole("searchbox", { name: "Search runs" })).toHaveValue("general");
 
     fireEvent.change(sel("actor"), { target: { value: "bot" } });
@@ -242,18 +287,95 @@ describe("Tasks page", () => {
     expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull();
   });
 
-  it("pages with Previous and Next, 25 per page", async () => {
-    const fn = serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })], { total: 60 });
+  it("loads the next page when the end of the list scrolls into view, appending the rows", async () => {
+    const fn = servePaged(60);
     renderAt("/tasks");
-    await screen.findByText("Page 1 of 3");
-    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText("Page 2 of 3");
+    const list = await screen.findByRole("list", { name: "Task runs" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(25);
+    expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+    await act(async () => scrollToEnd());
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(50));
     expect(listCalls(fn).at(-1)).toContain("page=2");
     expect(listCalls(fn).at(-1)).toContain("per_page=25");
-    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
-    await screen.findByText("Page 1 of 3");
+    // The first page's rows are still there, in order, the second page under them.
+    const ids = within(list).getAllByRole("listitem").map((li) => li.getAttribute("data-run-id"));
+    expect(ids.slice(0, 2)).toEqual(["r1", "r2"]);
+    expect(ids.at(-1)).toBe("r50");
+  });
+
+  it("shows Loading more while the next page is out and fetches it once however often the sentinel fires", async () => {
+    const held: { answer?: () => void } = {};
+    const fn = servePaged(60, async (page) => {
+      if (page === 2) await new Promise<void>((r) => (held.answer = r));
+    });
+    renderAt("/tasks");
+    await screen.findByRole("list", { name: "Task runs" });
+    await act(async () => scrollToEnd());
+    await waitFor(() => expect(held.answer).toBeDefined());
+    expect(screen.getByRole("status")).toHaveTextContent("Loading more");
+    await act(async () => {
+      scrollToEnd();
+      scrollToEnd();
+    });
+    expect(listCalls(fn).filter((u) => u.includes("page=2"))).toHaveLength(1);
+    await act(async () => held.answer!());
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(50));
+    expect(screen.queryByText("Loading more")).toBeNull();
+  });
+
+  it("stops at the end of the list: no sentinel and no fetch past the last run", async () => {
+    const fn = servePaged(30);
+    renderAt("/tasks");
+    await screen.findByRole("list", { name: "Task runs" });
+    await act(async () => scrollToEnd());
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(30));
+    expect(document.querySelector("[data-load-more]")).toBeNull();
+    const n = listCalls(fn).length;
+    await act(async () => scrollToEnd());
+    expect(listCalls(fn)).toHaveLength(n);
+    expect(screen.queryByText("Loading more")).toBeNull();
+  });
+
+  it("a filter or status tab change starts again from the first page", async () => {
+    const fn = servePaged(60);
+    renderAt("/tasks");
+    await screen.findByRole("list", { name: "Task runs" });
+    await act(async () => scrollToEnd());
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(50));
+    fireEvent.change(sel("actor"), { target: { value: "bot" } });
+    await waitFor(() => expect(listCalls(fn).at(-1)).toContain("actor=bot"));
     expect(listCalls(fn).at(-1)).toContain("page=1");
+    expect(listCalls(fn).at(-1)).toContain("per_page=25");
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(25));
+    // The next page after the change is page 2 of the new filters.
+    await act(async () => scrollToEnd());
+    await waitFor(() => expect(listCalls(fn).at(-1)).toMatch(/actor=bot.*page=2/));
+  });
+
+  it("names every Mapping option: plain string contexts and ones without a label fall back to the mapping id", async () => {
+    serve([run({ id: "1", number: 12 })], {
+      handle: (url) =>
+        url.startsWith("/api/tasks/runs?")
+          ? Response.json({
+              runs: [run({ id: "1", number: 12 })],
+              total: 1,
+              page: 1,
+              actors: [],
+              contexts: ["Main mapping", "", { label: "", mapping_id: "m9" }, { label: "Other", mapping_id: "m2" }],
+            })
+          : undefined,
+    });
+    renderAt("/tasks");
+    await screen.findByRole("link", { name: "Backfill channels #12" });
+    const opts = Array.from(sel("context").options).map((o) => [o.value, o.text]);
+    expect(opts).toEqual([
+      ["", "All"],
+      ["Main mapping", "Main mapping"],
+      ["m9", "m9"],
+      ["m2", "Other"],
+    ]);
+    for (const [, text] of opts) expect(text.trim()).not.toBe("");
   });
 
   it("shows No runs match these filters with Clear filters when a filtered list is empty", async () => {

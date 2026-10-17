@@ -72,7 +72,6 @@ describe("runStore merging", () => {
     expect(added.runs.map((r) => r.id)).toEqual(["2", "1"]);
     expect(added.total).toBe(2);
     expect(mergeIntoList(state, { run: makeRun({ id: "3", type: "noop" }) }, { type: "backfill_channels" })).toBe(state);
-    expect(mergeIntoList(state, { run: makeRun({ id: "3" }) }, { page: 2 })).toBe(state);
   });
 });
 

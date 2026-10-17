@@ -43,8 +43,6 @@ export const FRAME_HEAD_LEFT = "flex items-center gap-4";
 /** Right of the frame head: the filter dropdowns. */
 export const FRAME_HEAD_FILTERS = "flex flex-wrap items-center gap-3";
 export const RUN_COUNT = "font-semibold text-text";
-/** The pager under the runs (RunPager). */
-export const PAGER = "flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-sm text-muted";
 /** The box of a run row; ROW adds the hover tint. The skeleton row uses the box alone so both stand equally tall. */
 export const ROW_BOX = "relative flex min-h-16 items-center gap-3 border-b border-border px-4 py-2.5 last:rounded-b-card last:border-b-0";
 export const ROW = `${ROW_BOX} transition-colors duration-150 hover:bg-rail-hover`;
@@ -346,17 +344,10 @@ export function InputsDisclosure({ children }: { children?: ReactNode }) {
 
 export const ALL_TASKS_DESCRIPTION = "Showing runs from all task types";
 
-/** Runs per page (runStore.ts asks for this many). */
+/** Runs per page: the first page, and each one scrolling to the end adds (runStore.ts). */
 export const PER_PAGE = 25;
 /** The rows the run list showed last time (lastCount.ts), so the loading list stands as tall. */
 export const RUNS_COUNT_KEY = "tasks.runs";
-/** The pages the run list had last time: the loading list draws the pager only when there was more than one. */
-export const RUN_PAGES_KEY = "tasks.pages";
-
-/** Whether the loading list draws the pager: the list had more than one page last time. */
-export function readPagerShown(): boolean {
-  return readLastCount(RUN_PAGES_KEY, 1, 10000) > 1;
-}
 
 /** The filter dropdowns of the frame head in order; Task type shows on All tasks only. */
 export const FILTER_LABELS = { type: "Task type", status: "Status", context: "Mapping", actor: "Actor" } as const;
@@ -413,25 +404,6 @@ export function SearchGlyph() {
       <circle cx="7" cy="7" r="4.5" />
       <path d="M10.5 10.5 14 14" strokeLinecap="round" />
     </svg>
-  );
-}
-
-/**
- * Previous, the page label and Next under the runs, only when there is more than one page (the loading
- * list draws it when the last list had more, readPagerShown); pages is null until the first page lands
- * (a bar on the label, both buttons disabled).
- */
-export function RunPager({ page, pages, onPage = noop }: { page: number; pages: number | null; onPage?: (p: number) => void }) {
-  return (
-    <nav aria-label="Pagination" className={PAGER}>
-      <Button variant="ghost" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-        Previous
-      </Button>
-      {pages === null ? <Skeleton.Text>Page 1 of 1</Skeleton.Text> : <span>{`Page ${page} of ${pages}`}</span>}
-      <Button variant="ghost" size="sm" disabled={pages === null || page >= pages} onClick={() => onPage(page + 1)}>
-        Next
-      </Button>
-    </nav>
   );
 }
 
@@ -821,7 +793,6 @@ export function TasksSkeleton() {
                   </div>
                 </div>
                 <RunRowsLoading />
-                {readPagerShown() ? <RunPager page={Number(params.get("page")) || 1} pages={null} /> : null}
               </div>
             </>
           )}

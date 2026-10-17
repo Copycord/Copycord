@@ -7,6 +7,7 @@ import { useToast } from "../components/Toast";
 import { Button } from "../components/ui/Button";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import { EmptyState } from "../components/ui/EmptyState";
+import { LoadMore } from "../components/ui/LoadMore";
 import { useLastCount } from "../components/ui/lastCount";
 import { useApi } from "../hooks/useApi";
 import { ApiError, api, errorText } from "../lib/api";
@@ -14,7 +15,7 @@ import type { TaskRun, TaskRunResponse, TaskType, TaskTypesResponse } from "../t
 import { RunDetail } from "./tasks/RunDetail";
 import { RunFilterSelects, RunSearch, useRunFilters } from "./tasks/RunFilters";
 import { RunList, RunMenu, runConfirm, type RunAction } from "./tasks/RunList";
-import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
+import { runUrl, useTaskRuns } from "./tasks/runStore";
 import { ScraperSettingsCard } from "./tasks/types/scrape_members/ScraperSettingsCard";
 import {
   ALL_TASKS_DESCRIPTION,
@@ -22,13 +23,10 @@ import {
   PAGE,
   RUNS_COUNT_KEY,
   RUNS_EMPTY,
-  RUN_PAGES_KEY,
-  RunPager,
   RunsEmptyIcon,
   StatusTabs,
   TasksHeader,
   TasksHeading,
-  readPagerShown,
 } from "./tasks/TasksSkeleton";
 import { TypeRail } from "./tasks/TypeRail";
 import { rememberRunTypes, rememberTypes, typeLabel } from "./tasks/typeLabels";
@@ -131,19 +129,29 @@ interface RunsViewProps {
 }
 
 function RunsView({ types, typeTitle, onCountsChange }: RunsViewProps) {
-  const { filters, active, set, setPage, clear } = useRunFilters();
-  const { runs, total, counts, loading, refreshing, settled, connected, reload, actors, contexts, patchRun, removeRun } = useTaskRuns(
-    filters,
-    onCountsChange,
-  );
+  const { filters, active, set, clear } = useRunFilters();
+  const {
+    runs,
+    total,
+    counts,
+    loading,
+    refreshing,
+    settled,
+    connected,
+    reload,
+    actors,
+    contexts,
+    patchRun,
+    removeRun,
+    hasMore,
+    loadingMore,
+    loadMore,
+  } = useTaskRuns(filters, onCountsChange);
   const navigate = useNavigate();
   const confirm = useConfirm();
   const toast = useToast();
-  const page = filters.page ?? 1;
-  const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   const onSearch = useCallback((q: string) => set("q", q), [set]);
   useLastCount(RUNS_COUNT_KEY, settled ? runs.length : undefined);
-  useLastCount(RUN_PAGES_KEY, settled ? pages : undefined);
   // So a run opened from this list names its type before it loads.
   useEffect(() => rememberRunTypes(runs), [runs]);
 
@@ -210,9 +218,8 @@ function RunsView({ types, typeTitle, onCountsChange }: RunsViewProps) {
     />
   );
 
-  // One page needs no pager; while the first page loads, the pager stands only if the last list had more.
-  const pagerShown = loading ? readPagerShown() : pages > 1;
-  const footer = pagerShown ? <RunPager page={page} pages={loading ? null : pages} onPage={setPage} /> : null;
+  // Scrolling to the end loads the next page; nothing stands there once every run is in.
+  const footer = loading ? null : <LoadMore hasMore={hasMore} loading={loadingMore} onMore={loadMore} />;
 
   return (
     <>
