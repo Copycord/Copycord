@@ -216,6 +216,7 @@ async def test_scrape_uses_each_tokens_own_session_headers_and_gateway_identity(
         # REST and gateway carry one fingerprint per token.
         super_props = json.loads(base64.b64decode(build_headers(token)["X-Super-Properties"]))
         assert super_props["client_launch_id"] == d["properties"]["client_launch_id"]
+        assert super_props["client_heartbeat_session_id"]
     assert sockets[0].identify()["d"]["properties"]["installation_id"] != \
         sockets[1].identify()["d"]["properties"]["installation_id"]
 
