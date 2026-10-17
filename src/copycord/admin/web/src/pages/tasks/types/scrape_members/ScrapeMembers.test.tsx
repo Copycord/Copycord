@@ -68,6 +68,20 @@ beforeEach(() => localStorage.clear());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ScrapeMembersForm", () => {
+  it("explains the task, starts on today's include defaults and shows the saved proxy count", async () => {
+    serveForm();
+    renderForm();
+    expect(screen.getByText(SCRAPE_EXPLAINER)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Username" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Avatar URL" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Bio" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Roles" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Use proxies" })).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByText("4 saved proxies.")).toBeInTheDocument();
+    expect(screen.queryByText(/valid/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /validate/i })).not.toBeInTheDocument();
+  });
+
   it("asks for a server before any start", async () => {
     const calls = serveForm();
     renderForm();
@@ -231,6 +245,20 @@ function runWith(path: string | null): TaskRun {
 }
 
 describe("Scrape members run page", () => {
+  it("is registered with its words, hero count and download card", () => {
+    const entry = entryFor("scrape_members");
+    expect(entry.RunCard).toBe(ScrapeDownloadCard);
+    expect(heroStat(runWith("111/x.json"))).toEqual({ key: "members", label: "members found", value: 1204 });
+    expect(describeRunInputs(runWith("111/x.json"))).toEqual([
+      { label: "Server", value: "Alpha (111)" },
+      { label: "Include", value: "Usernames, Roles" },
+      { label: "Proxies", value: "Yes" },
+    ]);
+    expect(includeWords({})).toBe("IDs only");
+    expect(typeLabel("scrape_members").title).toBe("Scrape members");
+    expect(scrapePathOf(runWith(null))).toBeNull();
+  });
+
   it("shows the file name, member count and size with a Download JSON button", async () => {
     const calls = serve({
       "GET /api/tasks/scrape-members/r9": () => ({ body: { file: { filename: "scrape_111_20261016_101500.json", size: 2048, members: 1204 } } }),
@@ -247,6 +275,13 @@ describe("Scrape members run page", () => {
     fireEvent.click(button);
     expect(clicked).toEqual([`${scrapeFileUrl("r9")} scrape_111_20261016_101500.json`]);
     click.mockRestore();
+  });
+
+  it("says File no longer on disk when the file was deleted", async () => {
+    serve({ "GET /api/tasks/scrape-members/r9": () => ({ status: 404, body: { detail: GONE } }) });
+    render(<ScrapeDownloadCard run={runWith("111/x.json")} />);
+    expect(await screen.findByText(GONE)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download JSON" })).not.toBeInTheDocument();
   });
 
   it("shows nothing when the run saved no file or the reply is another 404", async () => {
@@ -432,6 +467,17 @@ describe("ScraperSettingsCard", () => {
     expect(puts(calls)).toEqual([]);
   });
 
+  it("shows an empty textbox with its hint when no tokens are saved", async () => {
+    serveSettings([]);
+    renderSettings();
+    expect(await screen.findByText("0 tokens, 1 proxy")).toBeInTheDocument();
+    expand();
+    expect(screen.getByText("0 tokens saved")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "One Discord token per line");
+  });
+
   it("says so when the tokens cannot be loaded and never saves over the file", async () => {
     const calls = serveSettings(undefined, ["1.2.3.4:80"], 500);
     renderSettings();
@@ -500,6 +546,32 @@ describe("ScraperSettingsCard", () => {
     expect(input).toHaveValue("a\nb\nc");
   });
 
+  it("shimmers only the counts and the lines while loading, in the textbox's own box", async () => {
+    let answer: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        url === TOKENS_URL ? new Promise<Response>((r) => (answer = r)) : Promise.resolve(Response.json({ ok: true, proxies: [] })),
+      ),
+    );
+    const { container } = renderSettings();
+    await screen.findByText("0 proxies saved");
+    // Collapsed: the head's counts and the hidden token count and lines.
+    expect(container.querySelectorAll("[data-skeleton]").length).toBe(5);
+    expand();
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    expect(input).toHaveAttribute("readonly");
+    expect(input).not.toHaveAttribute("placeholder");
+    expect(input.parentElement).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByText("Tokens")).toBeInTheDocument();
+    expect(container.querySelectorAll("[data-skeleton]").length).toBe(4);
+    answer(Response.json({ ok: true, tokens: ["a.b.c"] }));
+    expect(await screen.findByText("1 token saved")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Tokens" })).toBe(input);
+    expect(input).toHaveValue("a.b.c");
+    expect(input).not.toHaveAttribute("readonly");
+    expect(container.querySelectorAll("[data-skeleton]").length).toBe(0);
+  });
 });
 
 const OPTIONS_URL = "/api/tasks/types/scrape_members/options";

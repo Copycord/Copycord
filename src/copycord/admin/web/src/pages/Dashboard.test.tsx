@@ -247,6 +247,18 @@ describe("Dashboard log modal", () => {
     return { user, modal, src: FakeSource.instances.at(-1)! };
   }
 
+  it("locks the page scroll only while the log modal is open", async () => {
+    server({ "/api/status": () => json(STOPPED), "/version": () => json(NO_UPDATE) });
+    renderPage();
+    expect(document.getElementById("log-modal")).toBeNull();
+    expect(document.body.style.overflow).not.toBe("hidden");
+    const { user, modal } = await openLogs("server");
+    expect(document.body.style.overflow).toBe("hidden");
+    await user.click(within(modal).getByRole("button", { name: /close/i }));
+    await waitFor(() => expect(document.getElementById("log-modal")).toBeNull());
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
+
   it("tails /logs/stream/{which} and renders lines as text", async () => {
     server({ "/api/status": () => json(STOPPED), "/version": () => json(NO_UPDATE) });
     renderPage();
@@ -305,6 +317,26 @@ describe("Dashboard log modal", () => {
     expect(await screen.findByText("Server logs cleared")).toBeInTheDocument();
   });
 
+  it("closes with X, backdrop and Escape, closing the stream each time", async () => {
+    server({ "/api/status": () => json(STOPPED), "/version": () => json(NO_UPDATE) });
+    renderPage();
+    let { user, src } = await openLogs("server");
+    await user.click(document.getElementById("log-close")!);
+    expect(document.getElementById("log-modal")).toBeNull();
+    expect(src.closed).toBe(true);
+
+    ({ user, src } = await openLogs("client"));
+    await user.click(screen.getByTestId("log-backdrop"));
+    expect(document.getElementById("log-modal")).toBeNull();
+    expect(src.closed).toBe(true);
+
+    ({ user, src } = await openLogs("server"));
+    // A fresh open starts empty.
+    expect(document.getElementById("log-body")!.textContent).toBe("");
+    await user.keyboard("{Escape}");
+    expect(document.getElementById("log-modal")).toBeNull();
+    expect(src.closed).toBe(true);
+  });
 });
 
 describe("dashboard model", () => {
@@ -316,6 +348,11 @@ describe("dashboard model", () => {
 
   it("caps the buffer at the newest lines", () => {
     expect(appendCapped(["a", "b"], ["c", "d"], 3)).toEqual(["b", "c", "d"]);
+  });
+
+  it("formats uptime", () => {
+    expect(formatUptime(0)).toBe("0s");
+    expect(formatUptime(90061)).toBe("1d 1h 1m 1s");
   });
 
   it("ignores non status messages", () => {
@@ -353,4 +390,29 @@ describe("dashboard model", () => {
 });
 
 describe("Dashboard loading", () => {
+  it("shows mapping card skeletons until the mapping list arrives", async () => {
+    server({ "/api/guild-mappings": () => json({ mappings: [] }) });
+    const release = holdFetch("/api/guild-mappings");
+    renderPage();
+    expect(await screen.findAllByTestId("mapping-skeleton")).toHaveLength(mappingSkeletons());
+    expect(document.getElementById("new-mapping-card")).not.toBeNull();
+    release();
+    await waitFor(() => expect(screen.queryByTestId("mapping-skeleton")).toBeNull());
+  });
+
+  it("the chunk skeleton has the loaded page's cards, titles and order", async () => {
+    const shape = (root: Element) =>
+      Array.from(root.children).map((el) => `${el.tagName} ${el.querySelector("h2, h3")?.textContent ?? ""}`);
+    const skel = render(<DashboardSkeleton />);
+    expect(screen.getByRole("heading", { level: 1, name: "Configuration" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Bots" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("card-skeleton")).toHaveLength(6);
+    expect(screen.getAllByTestId("mapping-skeleton")).toHaveLength(mappingSkeletons());
+    const skelShape = shape(screen.getByRole("heading", { level: 1, name: "Configuration" }).parentElement!);
+    skel.unmount();
+    server({});
+    renderPage();
+    await screen.findByRole("heading", { name: "Bots" });
+    expect(shape(screen.getByRole("heading", { level: 1, name: "Configuration" }).parentElement!)).toEqual(skelShape);
+  });
 });
