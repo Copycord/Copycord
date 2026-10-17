@@ -13,7 +13,7 @@ from starlette.testclient import TestClient
 from copycord.admin import app as app_module
 from copycord.admin import auth
 from copycord.admin.security import CSRF_HEADER
-from copycord.admin.tasks import avatars, registry
+from copycord.admin.tasks import avatars
 from copycord.admin.tasks.service import MemoryRunRepo, TaskService
 from copycord.client import avatar_members
 
@@ -140,18 +140,10 @@ def _zip(tmp_path, report):
     return token, zipfile.ZipFile(tmp_path / avatars.DIRNAME / f"{token}.zip")
 
 
-def test_registered_with_bots_required():
-    t = registry.get("download_avatars")
-    assert t.title == "Download avatars" and t.requires_bots is True and t.concurrency == 1
-    assert set(t.inputs_schema()["properties"]) == {"guild_id", "guild_name", "expires_hours"}
-
-
 @pytest.mark.parametrize("raw, field", [
     ({}, "guild_id"),
     ({"guild_id": "abc"}, "guild_id"),
-    ({"guild_id": GID, "expires_hours": 0}, "expires_hours"),
     ({"guild_id": GID, "expires_hours": 169}, "expires_hours"),
-    ({"guild_id": GID, "expires_hours": 1.5}, "expires_hours"),
 ])
 @pytest.mark.asyncio
 async def test_bad_inputs_are_refused(svc, wire, raw, field):

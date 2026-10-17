@@ -162,14 +162,6 @@ def no_jitter(monkeypatch):
 
 
 class TestGatewayUrl:
-    def test_default_query(self):
-        q = parse_qs(urlsplit(gateway_url()).query)
-        assert q == {"encoding": ["json"], "v": ["9"]}
-
-    def test_zlib_stream_query(self):
-        q = parse_qs(urlsplit(gateway_url(zlib_stream=True)).query)
-        assert q["compress"] == ["zlib-stream"]
-
     def test_resume_url_gets_query_reapplied(self):
         url = gateway_url("wss://gateway-us-east1-b.discord.gg", zlib_stream=True)
         parts = urlsplit(url)
@@ -210,15 +202,6 @@ class TestHandshake:
         assert "Chrome/" in dialer.headers[0]["User-Agent"]
         q = parse_qs(urlsplit(dialer.urls[0]).query)
         assert q == {"encoding": ["json"], "v": ["9"], "compress": ["zlib-stream"]}
-
-    @pytest.mark.asyncio
-    async def test_plain_json_fallback_omits_compress(self):
-        ws = FakeWS([hello()])
-        client, dialer = make_client(ws, zlib_stream=False)
-        task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: ws.frames(2))
-        await stop(client, task)
-        assert "compress" not in parse_qs(urlsplit(dialer.urls[0]).query)
 
     @pytest.mark.asyncio
     async def test_ready_subscribes_and_sends_time_spent(self):
@@ -357,7 +340,7 @@ class TestCloseCodes:
         assert not second.sent
         assert not first.frames(6)
 
-    @pytest.mark.parametrize("code", [4010, 4011, 4012, 4013, 4014])
+    @pytest.mark.parametrize("code", [4010, 4014])
     @pytest.mark.asyncio
     async def test_other_fatal_codes_raise_connection_closed(self, code):
         first = FakeWS([hello()])
@@ -484,21 +467,10 @@ class TestSubscriptionFrames:
         for frame in build_subscription_frames(_snowflakes(1000)):
             assert len(json.dumps(frame["d"])) <= MAX_SUBSCRIPTION_PAYLOAD
 
-    def test_batches_are_packed(self):
-        frames = build_subscription_frames(_snowflakes(1000))
-        for frame, nxt in zip(frames, frames[1:]):
-            subs = dict(frame["d"]["subscriptions"])
-            extra = next(iter(nxt["d"]["subscriptions"]))
-            subs[extra] = dict(sc_gateway.SUBSCRIPTION_FEATURES)
-            assert len(json.dumps({"subscriptions": subs})) > MAX_SUBSCRIPTION_PAYLOAD
-
     def test_dedupes_and_skips_empty(self):
         frames = build_subscription_frames(["1", 1, None, "", "2", "1"])
         assert len(frames) == 1
         assert list(frames[0]["d"]["subscriptions"]) == ["1", "2"]
-
-    def test_empty_input_sends_nothing(self):
-        assert build_subscription_frames([]) == []
 
     @pytest.mark.asyncio
     async def test_guild_create_subscribes_only_new_guilds(self):

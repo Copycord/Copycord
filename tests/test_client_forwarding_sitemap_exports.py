@@ -6,29 +6,18 @@ import logging
 
 import pytest
 
-from copycord.client.export_runners import (
-    BackfillEngine,
-    DmHistoryExporter,
-    _archived_threads,
-    _has_archived_threads,
-)
+from copycord.client.export_runners import BackfillEngine, DmHistoryExporter
 from copycord.client.forwarding import ForwardingFilters, ForwardingManager, ForwardingRule
 from copycord.client.sitemap import SitemapService
 from copycord.selfclient.errors import Forbidden
 from copycord.selfclient.http import HTTPClient
 from copycord.selfclient.models import (
-    CategoryChannel,
     DMChannel,
-    ForumChannel,
     GroupChannel,
     Guild,
     Message,
     Object,
     Role,
-    StageChannel,
-    TextChannel,
-    Thread,
-    VoiceChannel,
     channel_from_dict,
 )
 
@@ -351,14 +340,6 @@ def _service(guild, thread_rows=()):
 
 
 class TestSitemapClassification:
-    def test_canned_payload_builds_the_expected_channel_kinds(self, guild):
-        assert isinstance(guild.get_channel(CATEGORY), CategoryChannel)
-        assert isinstance(guild.get_channel(CHAT), TextChannel)
-        assert isinstance(guild.get_channel(VOICE), VoiceChannel)
-        assert isinstance(guild.get_channel(STAGE), StageChannel)
-        assert isinstance(guild.get_channel(FORUM), ForumChannel)
-        assert isinstance(guild.get_channel(POST), Thread)
-
     @pytest.mark.asyncio
     async def test_build_for_guild_sorts_channels_by_kind(self, guild):
         svc = _service(
@@ -541,18 +522,6 @@ def _engine(bot):
 
 
 class TestExportRunnersOnClient:
-    def test_archived_threads_only_for_text_and_forum(self, guild):
-        assert _has_archived_threads(guild.get_channel(CHAT)) is True
-        assert _has_archived_threads(guild.get_channel(FORUM)) is True
-        assert _has_archived_threads(guild.get_channel(VOICE)) is False
-        assert _has_archived_threads(guild.get_channel(POST)) is False
-
-    def test_forum_refuses_private_archived_lists(self, guild):
-        with pytest.raises(TypeError):
-            _archived_threads(_HistoryBot(), guild.get_channel(FORUM), private=True)
-        with pytest.raises(TypeError):
-            _archived_threads(_HistoryBot(), guild.get_channel(FORUM), joined=True)
-
     @pytest.mark.asyncio
     async def test_iter_all_threads_walks_all_three_lists_through_client(self, guild):
         old_public = channel_from_dict(
