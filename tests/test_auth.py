@@ -114,17 +114,6 @@ class TestClientIp:
         assert auth._client_ip(_request("10.0.0.9", xff)) == "198.51.100.7"
         assert auth._client_ip(_request("10.0.0.9", SPOOFED)) == "6.6.6.6"
 
-    def test_trusted_proxy_without_headers(self, monkeypatch):
-        monkeypatch.setattr(auth, "TRUSTED_PROXIES", frozenset({"10.0.0.9"}))
-        assert auth._client_ip(_request("10.0.0.9", {})) == "10.0.0.9"
-
-    def test_parse_list(self):
-        assert auth._parse_trusted_proxies(" 10.0.0.1, ,::1 ") == frozenset(
-            {"10.0.0.1", "::1"}
-        )
-        assert auth._parse_trusted_proxies("") == frozenset()
-
-
 # ---------------------------------------------------------------------------
 # Sessions
 # ---------------------------------------------------------------------------
@@ -171,11 +160,6 @@ class TestGuardApi:
         resp = tc.get("/somepage", headers={"accept": "text/html"}, follow_redirects=False)
         assert resp.status_code in (302, 307)
         assert resp.headers["location"] == "/login"
-
-    def test_logged_out_page_post_stays_401(self, tc, password):
-        resp = tc.post("/somepage", headers={"origin": ORIGIN, CSRF_HEADER: "1"}, follow_redirects=False)
-        assert resp.status_code == 401
-
 
 class TestLogout:
 

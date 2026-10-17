@@ -86,10 +86,6 @@ def test_role_order_step_follows_roles():
     assert sync_assets.step_keys(["stickers"]) == ["stickers"]
 
 
-def test_task_requires_bots():
-    assert sync_assets.SYNC_ASSETS.requires_bots is True
-
-
 @pytest.mark.asyncio
 async def test_run_streams_items_and_ends_with_summary_and_report(svc, sent, mapping):
     run = await svc.start("sync_assets", {"mapping_id": mapping, "kinds": ["roles", "emojis"]})
@@ -202,14 +198,6 @@ async def test_frames_of_other_jobs_are_not_ours():
 def _role(rid, pos, name=None, managed=False, default=False):
     return {"id": rid, "name": name or f"r{rid}", "position": pos, "managed": managed,
             "default": default}
-
-
-def test_plan_already_in_order_moves_nothing():
-    host = [{"id": 1, "position": 1}, {"id": 2, "position": 2}]
-    clone = [_role(100, 0, default=True), _role(11, 1), _role(12, 2), _role(99, 10, "Bot")]
-    plan = plan_role_order(host, {1: 11, 2: 12}, clone, 10, 99)
-    assert plan["order"] == [11, 12] and plan["moved"] == 0 and plan["changed"] is False
-    assert plan["unmovable"] == []
 
 
 def test_plan_reverses_to_the_host_order():

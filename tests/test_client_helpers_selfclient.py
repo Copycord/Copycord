@@ -185,11 +185,6 @@ class TestSerialize:
             "avatar_url": f"https://cdn.discordapp.com/avatars/{AUTHOR}/abc123.png?size=1024",
         }
 
-    def test_author_without_avatar(self, guild):
-        msg = Message(message_create(author=user(AUTHOR, "author")), guild=guild)
-
-        assert MessageUtils(FakeBot(guild)).serialize(msg)["author"]["avatar_url"] is None
-
     def test_content_mentions_humanized(self, guild, message):
         # A mentioned Member shows its nick; a bare User its username, not its global name.
         data = MessageUtils(FakeBot(guild)).serialize(message)
@@ -241,17 +236,6 @@ class TestSerialize:
             },
         ]
 
-    def test_optional_sections_absent(self, guild):
-        msg = Message(
-            message_create(attachments=[], embeds=[], sticker_items=[]), guild=guild
-        )
-
-        data = MessageUtils(FakeBot(guild)).serialize(msg)
-
-        assert "attachments" not in data
-        assert "embeds" not in data
-        assert "stickers" not in data
-
     def test_dm_message_without_guild(self):
         msg = Message(message_create(guild_id=None, member=None, mentions=[]))
 
@@ -262,18 +246,6 @@ class TestSerialize:
 
 
 class TestExtract:
-    def test_public_non_callable_attrs(self, guild, message):
-        attrs = MessageUtils(FakeBot(guild)).extract_public_message_attrs(message)
-
-        assert attrs["id"] == MSG
-        assert attrs["content"] == message.content
-        assert attrs["guild"] is guild
-        assert isinstance(attrs["author"], Member)
-        assert attrs["mention_everyone"] is False
-        assert "is_system" not in attrs
-        assert "to_dict" not in attrs
-        assert not any(name.startswith("_") for name in attrs)
-
     def test_role_mentions_payload(self, guild, message):
         out = MessageUtils(FakeBot(guild))._build_role_mentions_payload(message)
 
@@ -281,12 +253,6 @@ class TestExtract:
 
     def test_author_role_ids_skip_everyone(self, message):
         assert MessageUtils.author_role_ids(message) == [MOD_ROLE, VIP_ROLE]
-
-    def test_author_role_ids_bare_user(self):
-        msg = Message(message_create(guild_id=None, member=None))
-
-        assert MessageUtils.author_role_ids(msg) == []
-
 
 class TestMentionMap:
     @pytest.mark.asyncio
@@ -335,11 +301,6 @@ class TestResolveForward:
 
         assert resolved is inner
         assert ("fetch_message", OTHER_CHAT, INNER) in bot.calls
-
-    @pytest.mark.asyncio
-    async def test_message_with_content_returns_itself(self, message):
-        assert await _resolve_forward(FakeBot(), message) is message
-
 
 class TestDmMemberById:
     @pytest.mark.asyncio

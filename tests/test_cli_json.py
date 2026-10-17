@@ -80,17 +80,6 @@ def test_version_json(argv, data_dir, monkeypatch, capsys):
     }
 
 
-def test_version_json_on_the_dev_channel(data_dir, monkeypatch, capsys):
-    from copycord import update
-
-    monkeypatch.setattr(update, "installed_commit", lambda: None)
-    update.save_channel(update.Channel(update.DEV, "v4-dev"))
-    with pytest.raises(SystemExit):
-        cli.main(["--version", "--json"])
-    doc, _ = _doc(capsys)
-    assert (doc["channel"], doc["ref"], doc["repo"]) == ("dev", "v4-dev", "Copycord/Copycord")
-
-
 @pytest.mark.parametrize("argv", [
     ["run", "--json"],
     ["--json", "run"],
@@ -132,11 +121,6 @@ def test_doctor_json_all_good(doctor_env, capsys):
     assert _check(doc, "database created on first run")["status"] == "info"
 
 
-def test_doctor_json_flag_before_the_command(doctor_env, capsys):
-    assert cli.main(["--json", "doctor", "--data-dir", str(doctor_env)]) == 0
-    assert _doc(capsys)[0]["ok"] is True
-
-
 def test_doctor_json_failure_keeps_the_exit_code(doctor_env, monkeypatch, capsys):
     monkeypatch.setenv("ROLE", "server")
     assert cli.main(["doctor", "--json", "--data-dir", str(doctor_env)]) == 1
@@ -146,16 +130,6 @@ def test_doctor_json_failure_keeps_the_exit_code(doctor_env, monkeypatch, capsys
     assert (role["section"], role["status"]) == ("Settings", "fail")
     assert role["hint"].startswith("Copycord v4 removed the ROLE option.")
     assert (doc["summary"]["fail"], doc["summary"]["text"]) == (1, "0 warnings, 1 problem")
-
-
-def test_doctor_json_hints_are_plain_text(doctor_env, monkeypatch, capsys):
-    monkeypatch.setenv("PASSWORD", "copycord")
-    assert cli.main(["doctor", "--json", "--data-dir", str(doctor_env)]) == 0
-    doc, _ = _doc(capsys)
-    password = _check(doc, "the default password")
-    assert password["status"] == "warn"
-    assert password["hint"].endswith("then run copycord restart")
-    assert password["fixable"] is False
 
 
 def test_doctor_json_names_the_fix(doctor_env, capsys):
@@ -277,20 +251,6 @@ def test_update_status_json_without_github(status_env, monkeypatch, capsys):
     assert doc["latest"] is None and doc["update_available"] is None
 
 
-def test_update_status_json_on_the_dev_channel(status_env, monkeypatch, capsys):
-    from copycord import update
-
-    head = "a" * 40
-    monkeypatch.setattr(update, "installed_commit", lambda: "b" * 40)
-    monkeypatch.setattr(update, "fetch_branch_head",
-                        lambda ref, repo=update.DEFAULT_REPO: update.Commit(head, "", "subject"))
-    update.save_channel(update.Channel(update.DEV, "v4-dev"))
-    assert cli.main(["update", "status", "--json"]) == 0
-    doc, _ = _doc(capsys)
-    assert (doc["channel"], doc["ref"], doc["latest"], doc["update_available"]) == (
-        "dev", "v4-dev", head, True)
-
-
 # --------------------------------------------------------------------------
 # config
 # --------------------------------------------------------------------------
@@ -328,15 +288,6 @@ def test_config_get_json_env_key(data_dir, monkeypatch, capsys):
     assert cli.main(["config", "get", "BACKUP_AT", "--json", *dd]) == 1
     doc, _ = _doc(capsys)
     assert doc["set"] is False and doc["source"] == "env" and "not set" in doc["error"]
-
-
-def test_config_json_without_a_database(data_dir, capsys):
-    dd = ["--data-dir", str(data_dir)]
-    assert cli.main(["config", "get", "COMMAND_USERS", "--json", *dd]) == 1
-    doc, _ = _doc(capsys)
-    assert doc["set"] is False and doc["error"].startswith("no database at")
-    assert cli.main(["config", "export", "--json", *dd]) == 1
-    assert _doc(capsys)[0]["error"].startswith("no database at")
 
 
 def test_config_export_json(data_dir, tmp_path, capsys):

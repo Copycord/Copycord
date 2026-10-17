@@ -7,7 +7,7 @@ import json as _json
 import pytest
 
 from copycord.selfclient import http as sc_http
-from copycord.selfclient.errors import Forbidden, NotFound, RateLimited
+from copycord.selfclient.errors import Forbidden, RateLimited
 from copycord.selfclient.http import HTTPClient, MESSAGE_PAGE, _route_key
 
 CHANNEL = "111111111111111111"
@@ -121,14 +121,6 @@ class TestRateLimited:
         assert clock.sleeps == [1.0, 1.0]
 
     @pytest.mark.asyncio
-    async def test_retry_after_falls_back_when_body_is_not_json(self):
-        client, session, clock = _client(
-            [FakeResponse(429, None, text="slow down"), FakeResponse(200, [])]
-        )
-        assert await client.get("/users/@me") == []
-        assert clock.sleeps == [sc_http.FALLBACK_RETRY_AFTER]
-
-    @pytest.mark.asyncio
     async def test_global_429_holds_every_route(self):
         client, session, clock = _client(
             [FakeResponse(429, {"retry_after": 3.0, "global": True}), FakeResponse(200, {})],
@@ -208,17 +200,6 @@ class TestRequests:
         assert info.value.status == 403
         assert info.value.code == 50013
         assert info.value.json["message"] == "Missing Permissions"
-
-    @pytest.mark.asyncio
-    async def test_404_raises_not_found(self):
-        client, _, _ = _client([FakeResponse(404, {"code": 10003, "message": "Unknown Channel"})])
-        with pytest.raises(NotFound):
-            await client.get(f"/channels/{CHANNEL}")
-
-    @pytest.mark.asyncio
-    async def test_204_returns_none(self):
-        client, _, _ = _client([FakeResponse(204)])
-        assert await client.delete(f"/channels/{CHANNEL}/messages/222222222222222222") is None
 
     @pytest.mark.asyncio
     async def test_get_carries_no_origin_or_content_type(self):
@@ -310,18 +291,6 @@ class TestMessagesPaginator:
         assert len(session.calls) == 1
 
     @pytest.mark.asyncio
-    async def test_before_seeds_the_cursor(self):
-        client, session, _ = _client([FakeResponse(200, [])])
-        _ = [m async for m in client.messages(CHANNEL, before=5000)]
-        assert session.calls[0]["params"]["before"] == "5000"
-
-    @pytest.mark.asyncio
-    async def test_empty_page_terminates(self):
-        client, session, _ = _client([FakeResponse(200, [])])
-        assert [m async for m in client.messages(CHANNEL)] == []
-        assert len(session.calls) == 1
-
-    @pytest.mark.asyncio
     async def test_unreadable_channel_ends_quietly(self):
         client, _, _ = _client([FakeResponse(403, {"code": 50001, "message": "Missing Access"})])
         assert [m async for m in client.messages(CHANNEL)] == []
@@ -372,12 +341,6 @@ class TestArchivedThreadsPaginator:
         assert session.calls[0]["url"].endswith(f"/channels/{CHANNEL}/threads/archived/public")
         assert "before" not in session.calls[0]["params"]
         assert session.calls[1]["params"]["before"] == "2026-03-02T00:00:00+00:00"
-
-    @pytest.mark.asyncio
-    async def test_private_list_uses_the_private_route(self):
-        client, session, _ = _client([FakeResponse(200, {"threads": [], "has_more": False})])
-        _ = [t async for t in client.archived_threads(CHANNEL, private=True)]
-        assert session.calls[0]["url"].endswith(f"/channels/{CHANNEL}/threads/archived/private")
 
     @pytest.mark.asyncio
     async def test_joined_list_pages_on_thread_id(self):

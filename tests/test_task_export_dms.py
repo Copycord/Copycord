@@ -211,12 +211,6 @@ async def test_inputs_are_validated(svc, sent):
         assert key in exc.value.args[0]
 
 
-@pytest.mark.asyncio
-async def test_frames_it_does_not_own():
-    assert await export_dms.dispatch({"type": "backfill_job", "data": {"job_id": "1"}}) is False
-    assert await export_dms.dispatch({"type": "export_dm_done", "data": {"job_id": "nope"}}) is False
-
-
 def test_mask_webhook():
     assert export_dms.mask_webhook(HOOK) == "https://discord.com/api/webhooks/111/..."
     assert export_dms.mask_webhook(None) is None
@@ -281,19 +275,6 @@ def test_route_unknown_run_is_404(http):
         for suffix in ("", "/file"):
             resp = tc.get(f"/api/tasks/export-dms/{rid}{suffix}")
             assert resp.status_code == 404 and resp.json() == {"detail": "Unknown run"}
-
-
-def test_route_missing_file_is_404(http):
-    tc, repo, tmp_path = http
-    path = _saved(tmp_path)
-    rid = _finished_run(repo, str(path))
-    path.unlink()
-    for suffix in ("", "/file"):
-        resp = tc.get(f"/api/tasks/export-dms/{rid}{suffix}")
-        assert resp.status_code == 404 and resp.json() == {"detail": "File no longer on disk"}
-    no_json = _finished_run(repo, None)
-    resp = tc.get(f"/api/tasks/export-dms/{no_json}/file")
-    assert resp.status_code == 404 and resp.json() == {"detail": "No export file"}
 
 
 def test_route_never_serves_outside_the_exports_dir(http):

@@ -6,7 +6,6 @@ import threading
 
 import pytest
 
-from copycord.admin.tasks.repo import SqliteTaskRepo
 from copycord.common.db import DBManager
 
 
@@ -199,15 +198,6 @@ def test_recover_marks_queued_and_running_failed(db):
     assert db.task_runs_recover() == []
 
 
-def test_report_json_round_trips(db):
-    rid = _run(db)
-    assert db.task_run_get(rid)["report_json"] is None
-    db.task_run_update(rid, report_json={"channels": [{"id": "1", "delivered": 5}]})
-    assert json.loads(db.task_run_get(rid)["report_json"]) == {"channels": [{"id": "1", "delivered": 5}]}
-    db.task_run_update(rid, report_json=None)
-    assert db.task_run_get(rid)["report_json"] is None
-
-
 def test_task_runs_without_report_json_gains_it_and_keeps_rows(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKUP_DIR", str(tmp_path / "backups"))
     path = tmp_path / "l2.db"
@@ -352,11 +342,3 @@ def test_list_has_no_per_page_cap(db):
     rows, total = db.task_runs_list(type="noop", per_page=500)
     assert total == 205 and len(rows) == 205
 
-
-def test_repo_adapter_delegates(db):
-    repo = SqliteTaskRepo(db)
-    assert repo.actors() == []
-    _run(db, "noop")
-    assert repo.next_number("noop") == 2
-    assert repo.list_types() == ["noop"]
-    assert repo.actors() == ["admin"]

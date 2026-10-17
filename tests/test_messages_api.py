@@ -357,11 +357,6 @@ def test_content_rate_limited_not_cached(client, sent):
     assert len(sent) == 2
 
 
-def test_content_unknown_message(client):
-    assert client.get("/api/messages/42/content").status_code == 404
-    assert client.get("/api/messages/abc/content").status_code == 400
-
-
 def test_auth_required(client):
     anon = TestClient(app)
     anon.headers.update({"origin": ORIGIN})

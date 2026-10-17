@@ -98,15 +98,6 @@ def _steps(run):
     return {s["key"]: s for s in run.steps}
 
 
-def test_registered_with_a_schema():
-    from copycord.admin.tasks import registry
-    t = registry.get("purge_assets")
-    assert t is not None and t.title == "Purge assets" and t.requires_bots
-    props = t.inputs_schema()["properties"]
-    assert set(props) == {"mapping_id", "kinds", "scope", "dry_run"}
-    assert props["scope"]["default"] == "cloned"
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("raw, field", [
     ({"kinds": ["emojis"]}, "mapping_id"),

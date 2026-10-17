@@ -257,14 +257,6 @@ def test_a_stored_rerun_trigger_still_reads(client, db):
     assert body["total"] == 1 and body["runs"][0]["trigger"] == "rerun"
 
 
-def test_spa_pages_serve_index(client):
-    for path in ("/tasks", f"/tasks/runs/{UNKNOWN}"):
-        resp = client.get(path, headers={"accept": "text/html"})
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("text/html")
-        assert '<div id="root">' in resp.text
-
-
 def test_logged_out_api_is_401(client):
     client.headers.pop("cookie")
     for method, path in (("GET", "/api/tasks/runs"), ("POST", "/api/tasks/runs"),

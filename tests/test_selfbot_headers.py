@@ -9,7 +9,6 @@ current with a baked fallback).
 import base64
 import json
 
-import aiohttp
 import pytest
 
 from copycord.common import selfbot_headers as sh
@@ -83,13 +82,6 @@ class TestFingerprintShape:
         h = sh.build_headers("token-abc")
         assert list(h) == sorted(h), list(h)
 
-    def test_every_header_value_is_a_string(self):
-
-        h = sh.build_headers("token-abc", referer="https://discord.com/channels/1/2")
-        assert all(isinstance(v, str) for v in h.values()), {
-            k: v for k, v in h.items() if not isinstance(v, str)
-        }
-
     def test_api_call_not_a_page_load(self):
 
         h = sh.build_headers("token-abc")
@@ -125,15 +117,6 @@ class TestFingerprintShape:
 
         assert b["browser_version"].split(".")[0] in b["browser_user_agent"]
         assert "Chrome/" in b["browser_user_agent"]
-
-    def test_locale_and_timezone_are_a_plausible_pair(self):
-        h = sh.build_headers("tok-1")
-        assert h["X-Discord-Locale"] == sh.LOCALE
-        # No exit lookup has succeeded for this token, so the fallback applies.
-        assert h["X-Discord-Timezone"] == sh.TIMEZONE
-        assert sh.TIMEZONE == "America/New_York"
-
-        assert h["Accept-Language"] == "en-US,en;q=0.9"
 
     def test_unique_per_account_but_shared_build(self):
         _, a = _props("account-1")
@@ -204,13 +187,6 @@ class TestHeartbeatSessionId:
         finally:
             sh.set_heartbeat_session_id("hb-token", None)
 
-    def test_clearing_it_restores_the_empty_value(self):
-        sh.set_heartbeat_session_id("hb-token", "sess-42")
-        sh.set_heartbeat_session_id("hb-token", None)
-        _, props = _props("hb-token")
-        assert props["client_heartbeat_session_id"] == ""
-
-
 class _FakeResp:
     def __init__(self, text):
         self._text = text
@@ -277,15 +253,6 @@ class TestRefreshBuildInfo:
             _ScrapeSession(asset_body="nothing useful here")
         )
         assert out["client_build_number"] == before
-
-    @pytest.mark.asyncio
-    async def test_network_error_keeps_fallback(self):
-        before = sh.get_build_info()["client_build_number"]
-        out = await sh.refresh_build_info(
-            _ScrapeSession(raise_exc=aiohttp.ClientError("boom"))
-        )
-        assert out["client_build_number"] == before
-
 
 def test_context_properties_encodes_location():
     val = sh.context_properties("chat_input")

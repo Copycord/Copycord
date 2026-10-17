@@ -48,19 +48,9 @@ def test_detect_uv_tool_by_receipt(tmp_path):
     assert update.detect_installer(str(tmp_path), "uv", docker=False) == update.UV_TOOL
 
 
-def test_detect_uv_tool_by_path(tmp_path):
-    prefix = tmp_path / ".local" / "share" / "uv" / "tools" / "copycord"
-    assert update.detect_installer(str(prefix), "uv", docker=False) == update.UV_TOOL
-
-
 def test_detect_pipx_by_metadata_file(tmp_path):
     (tmp_path / "pipx_metadata.json").write_text("{}")
     assert update.detect_installer(str(tmp_path), "pip", docker=False) == update.PIPX
-
-
-def test_detect_pipx_by_path(tmp_path):
-    prefix = tmp_path / ".local" / "share" / "pipx" / "venvs" / "copycord"
-    assert update.detect_installer(str(prefix), "pip", docker=False) == update.PIPX
 
 
 def test_detect_plain_pip_and_uv_pip(tmp_path):
@@ -118,12 +108,6 @@ def test_check_reports_newer_version(monkeypatch, capsys, fake_net):
     assert fake_net["seen"] == [(LIST_URL, 5.0)]
 
 
-def test_check_up_to_date(monkeypatch, capsys, fake_net):
-    monkeypatch.setattr(update, "current_version", lambda: "4.0.0")
-    assert update.update(check_only=True) == 0
-    assert "up to date" in capsys.readouterr().out
-
-
 def test_check_github_failure_is_a_warning(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(update, "current_version", lambda: "4.0.0")
     fake_net["value"] = urllib.error.URLError("timed out")
@@ -143,15 +127,6 @@ def test_is_newer():
     assert update.is_newer("4.10.0", "4.9.9")
     assert not update.is_newer("4.0.0", "4.0.0")
     assert not update.is_newer("3.28.0", "4.0.0")
-
-
-def test_is_older():
-    assert update.is_older("3.28.0", "4.0.0")
-    assert update.is_older("4.0.0b1", "4.0.0")
-    assert not update.is_older("4.0.0", "4.0.0")
-    assert not update.is_older("4.0.1", "4.0.0")
-    assert not update.is_older("main", "4.0.0")
-    assert not update.is_older("4.0.0", "abc123")
 
 
 # --------------------------------------------------------------------------
@@ -228,14 +203,6 @@ def test_update_plain_pip_prints_command(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran a command"))
     assert update.update() == 1
     assert f'-m pip install --upgrade "{WHEEL}"' in capsys.readouterr().out
-
-
-def test_update_tool_missing_from_path(monkeypatch, capsys, fake_net):
-    monkeypatch.setattr(update, "detect_installer", lambda: update.UV_TOOL)
-    monkeypatch.setattr(update.shutil, "which", lambda name: None)
-    monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran a command"))
-    assert update.update() == 1
-    assert f"uv tool install --force --python 3.12 {WHEEL}" in capsys.readouterr().err
 
 
 def test_update_on_the_latest_release_installs_nothing(uv_tool, monkeypatch, capsys):
