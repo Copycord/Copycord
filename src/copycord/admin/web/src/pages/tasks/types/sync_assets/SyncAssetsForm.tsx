@@ -118,6 +118,11 @@ export function SyncAssetsForm({ type, open, onClose }: TaskFormProps) {
               {errors.kinds}
             </p>
           ) : null}
+          <p className="m-0 rounded-md bg-caution-a15 px-3 py-2 text-xs text-text">
+            <span className="font-semibold text-caution">Role order:</span> make sure the Copycord bot's role is
+            the highest role in the clone server, or one below your admin role, or it cannot move the roles. Roles
+            that are not cloned from the host end up above the cloned roles.
+          </p>
         </div>
 
         <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
