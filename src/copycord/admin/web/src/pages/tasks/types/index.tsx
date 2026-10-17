@@ -13,6 +13,7 @@ import type { TaskRun, TaskStep } from "../../../types/tasks";
 import { formatCount } from "../StepList";
 import { BackfillForm } from "./backfill/BackfillForm";
 import { PurgeForm } from "./purge/PurgeForm";
+import { PURGE_ASSETS } from "./purge_assets/entry";
 import { useStartRun, type TaskFormProps } from "./start";
 
 export type { TaskFormProps } from "./start";
@@ -201,6 +202,7 @@ export const TASK_TYPES: Record<string, TaskTypeEntry> = {
     summaryLabels: PURGE_SUMMARY,
     hero: { key: "deleted", label: "message records deleted" },
   },
+  purge_assets: PURGE_ASSETS,
 };
 
 function formatValue(v: unknown): string {
