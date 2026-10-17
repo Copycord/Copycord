@@ -62,11 +62,14 @@ export function rememberTypes(list: TaskType[]): void {
   if (JSON.stringify(next) !== JSON.stringify(read<TypeLabel>(TYPES_KEY))) write(TYPES_KEY, next);
 }
 
+/** First visit titles the id in words gets wrong ("Export dms"). */
+const FIRST_TITLES: Record<string, string> = { export_dms: "Export DMs" };
+
 /** The known type's title and description, else the id in words and no description. */
 export function typeLabel(key: string): TypeLabel {
   const held = read<TypeLabel>(TYPES_KEY)[key];
   if (held && typeof held.title === "string") return { title: held.title, description: held.description ?? "" };
-  return { title: humanizeTypeKey(key), description: "" };
+  return { title: FIRST_TITLES[key] ?? humanizeTypeKey(key), description: "" };
 }
 
 /** Keep which type each run is, for the run page's first paint. */
