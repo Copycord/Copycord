@@ -104,9 +104,7 @@ def _format_discord_timestamp(value) -> str:
 
 
 class CloneCommands(commands.Cog):
-    """
-    Collection of slash commands for the Clone bot, restricted to allowed users.
-    """
+    """Slash commands for the clone bot, restricted to allowed users."""
 
     role_mention_group = discord.SlashCommandGroup(
         "role_mention",
@@ -226,9 +224,7 @@ class CloneCommands(commands.Cog):
         footer: str | None = None,
         show_timestamp: bool = True,
     ) -> discord.Embed:
-        """
-        Build a standard success/info embed.
-        """
+        """Build a standard success/info embed."""
         if description is None:
             if title_or_desc is None:
                 raise ValueError("description is required")
@@ -1073,12 +1069,9 @@ class CloneCommands(commands.Cog):
             str, "CLONED role ID to block", required=False, min_length=17, max_length=20
         ),
     ):
-        """
-        Adds a role to the block list using its original_role_id from the DB,
-        scoped to this cloned guild.
+        """Block a role by its original_role_id for this clone guild only.
 
-        If a clone exists in this guild, it is deleted and its mapping removed
-        to enforce the block for THIS clone only.
+        A clone of the role in this guild is deleted and its mapping removed.
         """
         await ctx.defer(ephemeral=True)
 
@@ -1197,11 +1190,10 @@ class CloneCommands(commands.Cog):
         description=("Clear the role block list for this clone guild "),
     )
     async def role_block_clear(self, ctx: discord.ApplicationContext):
-        """
-        Clears all entries in the role block list for this cloned guild.
+        """Clear the role block list for this clone guild.
 
-        This does NOT recreate any roles automatically; it only removes the block entries.
-        Future role syncs for this clone may recreate those roles if they exist on the source.
+        Only the block entries are removed; later role syncs may recreate those roles if they
+        exist on the source.
         """
         await ctx.defer(ephemeral=True)
 
@@ -2688,9 +2680,7 @@ class CloneCommands(commands.Cog):
         description="Show debug info and settings for this clone's guild mapping.",
     )
     async def mapping_debug(self, ctx: discord.ApplicationContext):
-        """
-        Ephemeral debug view of the guild_mapping row + settings for THIS cloned guild.
-        """
+        """Ephemeral debug view of this clone guild's guild_mapping row and settings."""
         guild = ctx.guild
         if not guild:
             return await ctx.respond(
@@ -2868,13 +2858,11 @@ class CloneCommands(commands.Cog):
             required=True,
         ),
     ):
-        """
+        """Add or update a case-insensitive rewrite for this mapping, applied after other sanitization.
+
         Example:
             /rewrite add source_text: hello replacement_text: yo
             /rewrite add source_text: team rocket replacement_text: team valor
-
-        All cloned messages for THIS mapping will replace those phrases
-        (case-insensitive) after other sanitization.
         """
         guild = ctx.guild
         if not guild:

@@ -1554,7 +1554,7 @@ class DBManager:
             required_columns=set(TASK_RUN_COLUMNS),
             copy_map={c: (id_expr if c == "id" else c) for c in TASK_RUN_COLUMNS},
             post_sql=[
-                # ids are random, so lists page by created_at; the old (type, id) index is gone with the rebuild
+                # ids are random, so lists page by created_at; the (type, id) index from INTEGER ids is dropped
                 "DROP INDEX IF EXISTS idx_task_runs_type_id;",
                 "CREATE INDEX IF NOT EXISTS idx_task_runs_type_created ON task_runs(type, created_at DESC);",
                 "CREATE INDEX IF NOT EXISTS idx_task_runs_status ON task_runs(status);",
@@ -1563,9 +1563,10 @@ class DBManager:
         )
 
     def _migrate_task_run_ids(self) -> None:
-        """task_runs.id was INTEGER AUTOINCREMENT; it is now a uuid4 hex string.
-        Each old run gets a fresh id, backfill_runs.task_run_id follows it, and the
-        table is rebuilt with every other column copied as is, all in one transaction."""
+        """Give INTEGER task_runs ids a uuid4 hex id each; a no-op once id is TEXT.
+
+        backfill_runs.task_run_id follows the new ids, and the table is rebuilt with every
+        other column copied as is, all in one transaction."""
         if self._column_type("task_runs", "id") != "INTEGER":
             return
         id_map = [
@@ -3340,7 +3341,7 @@ class DBManager:
         )
         return cur.rowcount
 
-    # ---- task_runs (Tasks framework) ----
+    # task_runs (Tasks framework)
 
     @staticmethod
     def _task_now() -> str:
