@@ -250,7 +250,7 @@ describe("ScraperSettingsCard", () => {
     expect(input).toHaveAttribute("rows", "6");
     expect(input).toHaveAttribute("spellcheck", "false");
     expect(input).toHaveValue("MTAxMjM0.tok.one\nOTg3NjU0.tok.two");
-    expect(screen.getByText(/They are not validated: one that fails or is not in the server is skipped/)).toBeInTheDocument();
+    expect(screen.queryByText(/not validated/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save tokens" })).toBeDisabled();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add token|edit|delete|validate/i })).not.toBeInTheDocument();

@@ -1,9 +1,8 @@
 // "Scraper tokens and proxies" card on the Scrape members type page, moved off the old Scraper page:
 // the saved tokens and the proxy list, each a plain textbox with one entry per line, saved as a whole
-// list (JSON PUT, a text file on the server). Tokens are not validated here; a run skips a token that
-// fails or is not in the server.
+// list (JSON PUT, a text file on the server).
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { Button, cx, Skeleton, Textarea, useReveal } from "../../../../components/ui";
 import { api, errorText } from "../../../../lib/api";
 import { useNotify } from "../../../system/providers";
@@ -48,14 +47,13 @@ interface LineListProps {
   /** The saved count, "1 token saved" or "3 tokens saved". */
   one: string;
   many: string;
-  help?: ReactNode;
   placeholder: string;
   rows: number;
   className?: string;
 }
 
 /** One section of the card: a textbox with one entry per line, its saved count and a Save button. */
-function LineList({ field, url, title, one, many, help, placeholder, rows, className }: LineListProps) {
+function LineList({ field, url, title, one, many, placeholder, rows, className }: LineListProps) {
   const notify = useNotify();
   const noun = title.toLowerCase();
   const [text, setText] = useState("");
@@ -119,7 +117,6 @@ function LineList({ field, url, title, one, many, help, placeholder, rows, class
           <span className={cx("text-xs text-muted", reveal)}>{plural(saved?.length ?? 0, one, many)}</span>
         )}
       </div>
-      {help ? <p className="m-0 text-xs text-muted">{help}</p> : null}
       <div className="relative" aria-busy={loading || undefined}>
         <Textarea
           aria-label={title}
@@ -161,7 +158,6 @@ export function ScraperSettingsCard() {
         title="Tokens"
         one="token saved"
         many="tokens saved"
-        help="Discord user tokens the scrape uses. They are not validated: one that fails or is not in the server is skipped."
         placeholder="One Discord token per line"
         rows={6}
         className="border-b border-border"
