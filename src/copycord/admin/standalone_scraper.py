@@ -27,6 +27,7 @@ from enum import IntEnum
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlsplit
 
+from copycord.common.exit_timezone import note_token_proxy
 from copycord.admin.scrape_debug import (
     BIO,
     GUILD_INFO,
@@ -1414,6 +1415,10 @@ class StandaloneScraper:
         self._heartbeat_ids = {t: str(uuid.uuid4()) for t in self.config.tokens}
         for t, hb in self._heartbeat_ids.items():
             set_heartbeat_session_id(t, hb)
+        # X-Discord-Timezone comes from the exit IP of each token's REST proxy, as elsewhere.
+        await asyncio.gather(
+            *(note_token_proxy(t, self._proxy_for(t, 0)) for t in self.config.tokens)
+        )
 
         guild_id = self.config.guild_id
         guild_name = None

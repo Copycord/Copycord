@@ -295,6 +295,25 @@ async def test_gateway_reconnect_rotates_to_another_proxy(fakes, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_rest_timezone_is_each_tokens_proxy_exit_zone(fakes, monkeypatch):
+    from copycord.common import exit_timezone
+
+    sessions, _, _ = fakes
+    zones = {PROXY_URLS[0]: "Europe/Berlin", PROXY_URLS[2]: "Asia/Tokyo"}
+
+    async def lookup(proxy, timeout):
+        return {"timezone": zones.get(proxy, "America/Chicago")}
+
+    monkeypatch.setattr(exit_timezone, "_fetch_json", lookup)
+    result = await asyncio.wait_for(_scraper([]).scrape(), timeout=30)
+
+    assert result.success, result.error
+    by_token = _by_token(sessions)
+    for token, zone in (("tok-a", "Europe/Berlin"), ("tok-b", "Asia/Tokyo")):
+        assert {h["X-Discord-Timezone"] for sess in by_token[token] for _u, h in sess.calls} == {zone}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("ready,error", [
     (0, "No gateway session connected to Discord (2 tried)"),
     (1, "The Discord gateway returned no members"),
