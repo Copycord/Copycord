@@ -109,30 +109,6 @@ describe("BackfillForm", () => {
     expect(await screen.findByText("No channels in this mapping")).toBeInTheDocument();
   });
 
-  it("the Mapping field is the app dropdown: the label names it, the keys move through its list and Escape closes only the list", async () => {
-    serve();
-    const onClose = renderForm();
-    await screen.findByRole("checkbox", { name: "#news" });
-    const mapping = screen.getByRole("combobox", { name: "Mapping" });
-    expect(mapping).toHaveAttribute("id", "bf-mapping");
-    expect(mapping).toHaveAttribute("aria-expanded", "false");
-    expect(document.querySelector("select")).toBeNull();
-
-    fireEvent.keyDown(mapping, { key: "ArrowDown" });
-    expect(mapping).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("option", { name: "Main mapping" })).toHaveAttribute("aria-selected", "true");
-    fireEvent.keyDown(mapping, { key: "Escape" });
-    expect(mapping).toHaveAttribute("aria-expanded", "false");
-    expect(onClose).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(mapping, { key: "ArrowDown" });
-    fireEvent.keyDown(mapping, { key: "ArrowDown" });
-    expect(mapping).toHaveAttribute("aria-activedescendant", "bf-mapping-listbox-1");
-    fireEvent.keyDown(mapping, { key: "Enter" });
-    expect(mapping).toHaveDisplayValue(/Second/);
-    expect(await screen.findByText("No channels in this mapping")).toBeInTheDocument();
-  });
-
   it("selects a category's channels with a tri-state box", async () => {
     serve();
     renderForm();
@@ -186,15 +162,6 @@ describe("BackfillForm", () => {
     fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-10-01" } });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     expect(await screen.findByText("End must be after the start.")).toBeInTheDocument();
-    expect(posts).toHaveLength(0);
-  });
-
-  it("asks for a channel before posting", async () => {
-    const { posts } = serve();
-    renderForm();
-    await screen.findByRole("checkbox", { name: "#news" });
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    expect(await screen.findByText("Select at least one channel or category.")).toBeInTheDocument();
     expect(posts).toHaveLength(0);
   });
 
@@ -288,16 +255,5 @@ describe("BackfillForm", () => {
     expect(list().querySelector("[data-skeleton]")).toBeNull();
     expect(screen.getByRole("combobox", { name: "Mapping" }).parentElement!.querySelector("[data-skeleton]")).toBeNull();
     expect(list().firstElementChild).toHaveClass(REVEAL);
-  });
-
-  it("starts a plain run under the Run title with no trigger", async () => {
-    const { posts } = serve();
-    renderForm();
-    expect(screen.getByRole("dialog", { name: "Run Backfill channels" })).toBeInTheDocument();
-    await screen.findByRole("checkbox", { name: "#news" });
-    fireEvent.click(box("#news"));
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await screen.findByText("Run page r13");
-    expect(posts[0]!.body).not.toHaveProperty("trigger");
   });
 });

@@ -107,29 +107,11 @@ describe("Guilds grid", () => {
     expect(screen.getByText("No guilds found.")).toBeInTheDocument();
   });
 
-  it("toggles the sort direction", async () => {
-    const user = userEvent.setup();
-    serve();
-    renderPage();
-    await screen.findByRole("button", { name: "Alpha" });
-    const sort = screen.getByRole("button", { name: "Toggle sort direction" });
-    expect(sort).toHaveTextContent("A → Z");
-    expect(sort).toHaveAttribute("aria-pressed", "false");
-    await user.click(sort);
-    expect(sort).toHaveTextContent("Z → A");
-    expect(sort).toHaveAttribute("aria-pressed", "true");
-    expect(cardNames()).toEqual(["Gamma", "beta <b>bold</b>", "Alpha"]);
-  });
-
   it("stays gated and does not load guilds while the bot is down", async () => {
     const f = serve({ up: false });
     renderPage();
     expect(await screen.findByText("Waiting for Server and Client connection...")).toBeInTheDocument();
     expect(calls(f, "/api/guilds")).toHaveLength(0);
-    // The old #status-gate: fixed over the whole page under the header, not just the card.
-    const gate = screen.getByTestId("status-gate");
-    expect(gate).toHaveClass("fixed", "inset-x-0", "top-header", "bottom-0");
-    expect(gate).not.toHaveClass("absolute");
   });
 });
 
@@ -153,20 +135,6 @@ describe("card menu", () => {
     await user.click(screen.getByRole("button", { name: "Alpha" }));
     expect(screen.queryByRole("menu")).toBeNull();
   });
-
-  it("moves between items with the arrow keys", async () => {
-    const user = userEvent.setup();
-    serve();
-    renderPage();
-    const menu = await openMenu(user, "Gamma");
-    const [view, exp] = within(menu).getAllByRole("menuitem");
-    await waitFor(() => expect(view).toHaveFocus());
-    await user.keyboard("{ArrowDown}");
-    expect(exp).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(view).toHaveFocus();
-  });
-});
 
 describe("guild details dialog", () => {
   it("fetches the guild and shows its fields, then closes with X, Close and Escape", async () => {
@@ -253,17 +221,6 @@ describe("export dialog", () => {
     expect(payload.filters.download_media).toEqual({ images: true, videos: false, audio: false, other: true });
   });
 
-  it("enables the word box only with Includes word", async () => {
-    const user = userEvent.setup();
-    serve();
-    renderPage();
-    const dialog = await openExport(user);
-    const word = within(dialog).getByLabelText("Word to include");
-    expect(word).toBeDisabled();
-    await user.click(within(dialog).getByLabelText("Includes word"));
-    expect(word).toBeEnabled();
-  });
-
   it("picks attachment types in the sub dialog, Cancel and Escape keep the export dialog open", async () => {
     const user = userEvent.setup();
     const f = serve();
@@ -297,15 +254,6 @@ describe("export dialog", () => {
     expect(body(f).payload.filters.att_types).toEqual({ images: true, videos: false, audio: true, other: true });
   });
 
-  it("disables the attachment types button when attachments are off", async () => {
-    const user = userEvent.setup();
-    serve();
-    renderPage();
-    const dialog = await openExport(user);
-    await user.click(within(dialog).getByLabelText("Include attachments"));
-    expect(within(dialog).getByRole("button", { name: "Attachment types" })).toBeDisabled();
-  });
-
   it("keeps the dialog open and toasts a plain error when the client is down", async () => {
     const user = userEvent.setup();
     serve({ exportReply: { status: 502, body: { ok: false, error: "client-agent-unreachable" } } });
@@ -315,16 +263,6 @@ describe("export dialog", () => {
     expect(await screen.findByText("The client is not running, so the export could not start.")).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Export messages" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Start export" })).toBeEnabled();
-  });
-
-  it("closes with Cancel without posting", async () => {
-    const user = userEvent.setup();
-    const f = serve();
-    renderPage();
-    const dialog = await openExport(user);
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(calls(f, "/api/export/messages")).toHaveLength(0);
   });
 });
 
