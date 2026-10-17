@@ -65,6 +65,7 @@ from copycord.server.token_identity import TokenIdentityManager
 from copycord.server.emojis import EmojiManager
 from copycord.server.stickers import StickerManager
 from copycord.server.roles import RoleManager
+from copycord.server.asset_sync import AssetSync
 from copycord.server.backfill import BackfillManager
 from copycord.server.helpers import (
     OnJoinService,
@@ -305,6 +306,7 @@ class ServerReceiver:
             guild_resolver=self.guild_resolver,
             emit_event_log=self._emit_event_log,
         )
+        self.asset_sync = AssetSync(self)
         self.perms = ChannelPermissionSync(
             config=self.config,
             db=self.db,
@@ -1799,6 +1801,12 @@ class ServerReceiver:
 
             elif typ == "fetch_message":
                 return await self._fetch_message_live(data or {})
+
+            elif typ == "sync_assets":
+                return await self.asset_sync.start(data or {})
+
+            elif typ == "sync_assets_cancel":
+                return self.asset_sync.cancel(str((data or {}).get("job_id") or ""))
         finally:
             if token is not None:
                 logctx.guild_name.reset(token)

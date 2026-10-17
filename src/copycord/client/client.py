@@ -609,6 +609,25 @@ class ClientListener:
 
             return {"ok": True, **res}
 
+        elif typ == "asset_snapshot":
+            # The server's Sync assets job (server/asset_sync.py) asks for the host's roles,
+            # emojis and stickers as the sitemap builds them for this clone.
+            try:
+                gid = int((data or {}).get("guild_id") or 0)
+                clone_gid = int((data or {}).get("cloned_guild_id") or 0)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "Bad guild id"}
+            guild = self.bot.get_guild(gid) if gid else None
+            if guild is None:
+                return {"ok": False, "error": "The client account is not in the host server"}
+            sm = await self.sitemap.build_for_guild(guild, cloned_guild_id=clone_gid or None)
+            return {
+                "ok": True,
+                "roles": (sm or {}).get("roles") or [],
+                "emojis": (sm or {}).get("emojis") or [],
+                "stickers": (sm or {}).get("stickers") or [],
+            }
+
         return None
 
     async def _resolve_accessible_host_channel(self, orig_channel_id: int):
