@@ -29,7 +29,6 @@ log = logging.getLogger("copycord.tasks")
 WRITE_INTERVAL = 1.0
 LOG_KEEP = 500
 PUBLISH_INTERVAL = 0.5
-STEP_STATES = ("queued", "running", "success", "failed", "skipped", "cancelled")
 STEP_FINAL = ("success", "failed", "skipped", "cancelled")
 
 

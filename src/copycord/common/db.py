@@ -2372,21 +2372,8 @@ class DBManager:
         ).fetchall()
         return [r["user_id"] for r in rows]
 
-    def get_onjoin_guilds_for_user(self, user_id: int) -> list[int]:
-        rows = self.conn.execute(
-            "SELECT guild_id FROM join_dm_subscriptions WHERE user_id = ?",
-            (user_id,),
-        ).fetchall()
-        return [r["guild_id"] for r in rows]
-
     def get_all_sticker_mappings(self) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM sticker_mappings").fetchall()
-
-    def get_sticker_mapping(self, original_id: int) -> sqlite3.Row | None:
-        return self.conn.execute(
-            "SELECT * FROM sticker_mappings WHERE original_sticker_id = ?",
-            (original_id,),
-        ).fetchone()
 
     @_in_tx
     def upsert_sticker_mapping(
@@ -2545,45 +2532,6 @@ class DBManager:
             out[row["kind"]][row["scope"]].add(int(row["obj_id"]))
 
         return out
-
-    @_in_tx
-    def replace_filters(
-        self,
-        whitelist_categories: list[int],
-        whitelist_channels: list[int],
-        exclude_categories: list[int],
-        exclude_channels: list[int],
-    ) -> None:
-        """Overwrite the global (NULL/NULL scope) filters, leaving guild-scoped ones untouched."""
-        cur = self.conn.cursor()
-
-        cur.execute(
-            """
-            DELETE FROM filters
-            WHERE original_guild_id IS NULL
-              AND cloned_guild_id   IS NULL
-            """
-        )
-
-        def ins(kind: str, scope: str, ids: list[int]):
-            cur.executemany(
-                """
-                INSERT OR IGNORE INTO filters(
-                    kind,
-                    scope,
-                    obj_id,
-                    original_guild_id,
-                    cloned_guild_id
-                )
-                VALUES(?,?,?,?,?)
-                """,
-                [(kind, scope, int(i), None, None) for i in ids if str(i).strip()],
-            )
-
-        ins("whitelist", "category", whitelist_categories)
-        ins("whitelist", "channel", whitelist_channels)
-        ins("exclude", "category", exclude_categories)
-        ins("exclude", "channel", exclude_channels)
 
 
     def add_filter(
@@ -2786,43 +2734,6 @@ class DBManager:
                 (int(original_role_id), int(cloned_guild_id)),
             )
             return cur.rowcount > 0
-
-    def remove_role_block(
-        self, original_role_id: int, cloned_guild_id: int | None = None
-    ) -> bool:
-        """Remove a block for the clone guild, or for all clones when cloned_guild_id is None. True if any row was removed."""
-        with self._tx():
-            if cloned_guild_id is None:
-                cur = self.conn.execute(
-                    "DELETE FROM role_blocks WHERE original_role_id = ?",
-                    (int(original_role_id),),
-                )
-            else:
-                cur = self.conn.execute(
-                    "DELETE FROM role_blocks WHERE original_role_id = ? AND cloned_guild_id = ?",
-                    (int(original_role_id), int(cloned_guild_id)),
-                )
-            return cur.rowcount > 0
-
-    def is_role_blocked(
-        self, original_role_id: int, cloned_guild_id: int | None = None
-    ) -> bool:
-        """Whether a role is blocked, scoped to the clone guild when given, otherwise any block."""
-        if cloned_guild_id is None:
-            row = self.conn.execute(
-                "SELECT 1 FROM role_blocks WHERE original_role_id = ?",
-                (int(original_role_id),),
-            ).fetchone()
-        else:
-            row = self.conn.execute(
-                """
-                SELECT 1
-                FROM role_blocks
-                WHERE original_role_id = ? AND cloned_guild_id = ?
-                """,
-                (int(original_role_id), int(cloned_guild_id)),
-            ).fetchone()
-        return bool(row)
 
     def get_blocked_role_ids(self, cloned_guild_id: int | None = None) -> list[int]:
         """Blocked original_role_id values, only for the clone when cloned_guild_id is given."""
@@ -3371,14 +3282,6 @@ class DBManager:
         self.conn.execute(
             "UPDATE backfill_runs SET status='failed', error=?, updated_at=? WHERE run_id=?",
             (error, now, run_id),
-        )
-
-    @_in_tx
-    def backfill_abandon_running_on_boot(self):
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
-        self.conn.execute(
-            "UPDATE backfill_runs SET status='aborted', updated_at=? WHERE status='running'",
-            (now,),
         )
 
     def backfill_get_incomplete_for_channel(self, original_channel_id: int):
@@ -4464,24 +4367,6 @@ class DBManager:
             bulk_insert("exclude", "category", ex_categories)
             bulk_insert("exclude", "channel", ex_channels)
 
-    def get_mapping_name_for_original(self, original_guild_id: int) -> str | None:
-        row = self.conn.execute(
-            "SELECT mapping_name FROM guild_mappings WHERE original_guild_id = ? LIMIT 1",
-            (int(original_guild_id),),
-        ).fetchone()
-        if row and row[0]:
-            return row[0]
-        return None
-
-    def get_mapping_name_for_clone(self, cloned_guild_id: int) -> str | None:
-        row = self.conn.execute(
-            "SELECT mapping_name FROM guild_mappings WHERE cloned_guild_id = ? LIMIT 1",
-            (int(cloned_guild_id),),
-        ).fetchone()
-        if row and row[0]:
-            return row[0]
-        return None
-
     def replace_blocked_keywords_for_mapping(
         self,
         mapping_id: str,
@@ -4665,37 +4550,6 @@ class DBManager:
         rows = cur.fetchall() or []
         return [dict(r) for r in rows]
 
-    def get_thread_mapping_pair(
-        self, original_thread_id: int, cloned_guild_id: int
-    ) -> sqlite3.Row | None:
-        """The row for (original_thread_id, cloned_guild_id)."""
-        return self.conn.execute(
-            "SELECT * FROM threads WHERE original_thread_id = ? AND cloned_guild_id = ? LIMIT 1",
-            (int(original_thread_id), int(cloned_guild_id)),
-        ).fetchone()
-
-    def delete_forum_thread_mapping_for_clone(
-        self, original_thread_id: int, cloned_guild_id: int
-    ) -> None:
-        with self._tx():
-            self.conn.execute(
-                """
-                DELETE FROM threads
-                WHERE original_thread_id = ? AND cloned_guild_id = ?
-                """,
-                (int(original_thread_id), int(cloned_guild_id)),
-            )
-
-    def delete_message_mapping_pair(
-        self, original_message_id: int, cloned_guild_id: int
-    ) -> int:
-        with self._tx():
-            cur = self.conn.execute(
-                "DELETE FROM messages WHERE original_message_id=? AND cloned_guild_id=?",
-                (int(original_message_id), int(cloned_guild_id)),
-            )
-            return cur.rowcount or 0
-
     def get_emoji_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
         return self.conn.execute(
             "SELECT * FROM emoji_mappings WHERE original_emoji_id = ? AND cloned_guild_id = ? LIMIT 1",
@@ -4717,12 +4571,6 @@ class DBManager:
                 continue
         return out
 
-    def get_emoji_mappings_for_original(self, original_id: int) -> list:
-        return self.conn.execute(
-            "SELECT * FROM emoji_mappings WHERE original_emoji_id = ? ORDER BY cloned_guild_id",
-            (int(original_id),),
-        ).fetchall()
-
     @_in_tx
     def delete_emoji_mapping_for_clone(
         self, original_id: int, cloned_guild_id: int
@@ -4731,25 +4579,6 @@ class DBManager:
             "DELETE FROM emoji_mappings WHERE original_emoji_id = ? AND cloned_guild_id = ?",
             (int(original_id), int(cloned_guild_id)),
         )
-
-    @_in_tx
-    def delete_emoji_mapping(self, original_id: int) -> None:
-        self.conn.execute(
-            "DELETE FROM emoji_mappings WHERE original_emoji_id = ?",
-            (int(original_id),),
-        )
-
-    def get_sticker_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
-        return self.conn.execute(
-            "SELECT * FROM sticker_mappings WHERE original_sticker_id = ? AND cloned_guild_id = ? LIMIT 1",
-            (int(original_id), int(cloned_guild_id)),
-        ).fetchone()
-
-    def get_sticker_mappings_for_original(self, original_id: int) -> list:
-        return self.conn.execute(
-            "SELECT * FROM sticker_mappings WHERE original_sticker_id = ? ORDER BY cloned_guild_id",
-            (int(original_id),),
-        ).fetchall()
 
     @_in_tx
     def delete_sticker_mapping_for_clone(
@@ -4772,12 +4601,6 @@ class DBManager:
             (int(cloned_role_id),),
         ).fetchone()
 
-    def get_role_mappings_for_original(self, original_id: int) -> list:
-        return self.conn.execute(
-            "SELECT * FROM role_mappings WHERE original_role_id = ? ORDER BY cloned_guild_id",
-            (int(original_id),),
-        ).fetchall()
-
     @_in_tx
     def delete_role_mapping_for_clone(
         self, original_id: int, cloned_guild_id: int
@@ -4794,77 +4617,6 @@ class DBManager:
             "SELECT * FROM category_mappings WHERE original_category_id = ? AND cloned_guild_id = ? LIMIT 1",
             (int(original_category_id), int(cloned_guild_id)),
         ).fetchone()
-
-    def get_category_mapping_for_clone(
-        self, original_category_id: int, cloned_guild_id: int
-    ) -> Optional[sqlite3.Row]:
-        """The category_mappings row for (original_category_id, cloned_guild_id), or None."""
-        with self._tx():
-            return self.conn.execute(
-                """
-                SELECT *
-                FROM category_mappings
-                WHERE original_category_id=? AND cloned_guild_id=?
-                LIMIT 1
-                """,
-                (int(original_category_id), int(cloned_guild_id)),
-            ).fetchone()
-
-    def iter_child_channel_mappings_for_clone_category(
-        self, original_category_id: int, cloned_guild_id: int
-    ) -> list[sqlite3.Row]:
-        """All channel_mappings in this clone whose original parent is the given category."""
-        with self._tx():
-            rows = self.conn.execute(
-                """
-                SELECT *
-                FROM channel_mappings
-                WHERE original_parent_category_id=? AND cloned_guild_id=?
-                """,
-                (int(original_category_id), int(cloned_guild_id)),
-            ).fetchall()
-            return list(rows)
-
-    def delete_channel_mapping_for_clone(
-        self, original_channel_id: int, cloned_guild_id: int
-    ) -> Optional[int]:
-        """Delete the mapping for (original_channel_id, cloned_guild_id); returns the cloned_channel_id if one existed."""
-        with self._tx():
-            row = self.conn.execute(
-                """
-                SELECT cloned_channel_id
-                FROM channel_mappings
-                WHERE original_channel_id=? AND cloned_guild_id=?
-                LIMIT 1
-                """,
-                (int(original_channel_id), int(cloned_guild_id)),
-            ).fetchone()
-            cloned_id = (
-                int(row["cloned_channel_id"])
-                if row and row["cloned_channel_id"] is not None
-                else None
-            )
-
-            self.conn.execute(
-                "DELETE FROM channel_mappings WHERE original_channel_id=? AND cloned_guild_id=?",
-                (int(original_channel_id), int(cloned_guild_id)),
-            )
-            return cloned_id
-
-    def reparent_children_to_root_for_clone(
-        self, original_category_id: int, cloned_guild_id: int
-    ) -> int:
-        """Set cloned_parent_category_id to NULL for channels under the category in this clone only. Returns rows affected."""
-        with self._tx():
-            cur = self.conn.execute(
-                """
-                UPDATE channel_mappings
-                SET cloned_parent_category_id=NULL
-                WHERE original_parent_category_id=? AND cloned_guild_id=?
-                """,
-                (int(original_category_id), int(cloned_guild_id)),
-            )
-            return cur.rowcount or 0
 
     def delete_category_mapping_pair(
         self, original_category_id: int, cloned_guild_id: int
@@ -5042,59 +4794,6 @@ class DBManager:
                 except (ValueError, TypeError):
                     continue
 
-    def is_user_filtered(
-        self,
-        user_id: int,
-        original_guild_id: int,
-        cloned_guild_id: int,
-    ) -> tuple[bool, str | None]:
-        """Returns (is_filtered, reason). Filtered if a whitelist exists and the user is not in it, or the user is in the blacklist."""
-        whitelist_count = self.conn.execute(
-            """
-            SELECT COUNT(*) FROM user_filters
-            WHERE filter_type = 'whitelist'
-            AND original_guild_id = ?
-            AND cloned_guild_id = ?
-            """,
-            (int(original_guild_id), int(cloned_guild_id)),
-        ).fetchone()[0]
-
-        has_whitelist = whitelist_count > 0
-
-        if has_whitelist:
-
-            in_whitelist = self.conn.execute(
-                """
-                SELECT 1 FROM user_filters
-                WHERE filter_type = 'whitelist'
-                AND user_id = ?
-                AND original_guild_id = ?
-                AND cloned_guild_id = ?
-                LIMIT 1
-                """,
-                (int(user_id), int(original_guild_id), int(cloned_guild_id)),
-            ).fetchone()
-
-            if not in_whitelist:
-                return (True, "user_not_in_whitelist")
-
-        in_blacklist = self.conn.execute(
-            """
-            SELECT 1 FROM user_filters
-            WHERE filter_type = 'blacklist'
-            AND user_id = ?
-            AND original_guild_id = ?
-            AND cloned_guild_id = ?
-            LIMIT 1
-            """,
-            (int(user_id), int(original_guild_id), int(cloned_guild_id)),
-        ).fetchone()
-
-        if in_blacklist:
-            return (True, "user_in_blacklist")
-
-        return (False, None)
-
     def add_role_mention(
         self,
         original_guild_id: int,
@@ -5118,36 +4817,6 @@ class DBManager:
                     int(cloned_guild_id),
                     int(cloned_channel_id) if cloned_channel_id is not None else None,
                     int(cloned_role_id),
-                ),
-            )
-            return cur.rowcount > 0
-
-    def remove_role_mention(
-        self,
-        original_guild_id: int,
-        cloned_guild_id: int,
-        cloned_role_id: int,
-        cloned_channel_id: int | None = None,
-    ) -> bool:
-        """Remove a role mention configuration."""
-        with self._tx():
-            cur = self.conn.execute(
-                """
-                DELETE FROM role_mentions
-                WHERE original_guild_id = ?
-                AND cloned_guild_id = ?
-                AND cloned_role_id = ?
-                AND (
-                    (cloned_channel_id IS NULL AND ? IS NULL)
-                    OR cloned_channel_id = ?
-                )
-                """,
-                (
-                    int(original_guild_id),
-                    int(cloned_guild_id),
-                    int(cloned_role_id),
-                    int(cloned_channel_id) if cloned_channel_id is not None else None,
-                    int(cloned_channel_id) if cloned_channel_id is not None else None,
                 ),
             )
             return cur.rowcount > 0
@@ -5865,20 +5534,6 @@ class DBManager:
         )
         return [dict(row) for row in cur.fetchall()]
 
-    @_in_tx
-    def add_scraper_token(self, token_value: str, label: str = None) -> str:
-        """Add a new scraper token and return its token_id."""
-        token_id = str(uuid.uuid4())
-        with self.lock:
-            self.conn.execute(
-                """
-                INSERT INTO scraper_tokens (token_id, token_value, label)
-                VALUES (?, ?, ?)
-                """,
-                (token_id, token_value, label),
-            )
-        return token_id
-
     def list_scraper_tokens(self) -> list[dict]:
         """Return all scraper tokens with metadata."""
         with self.lock:
@@ -5891,85 +5546,6 @@ class DBManager:
                 """
             )
             return [dict(row) for row in cur.fetchall()]
-
-    def get_scraper_token(self, token_id: str) -> dict | None:
-        """Get a single scraper token by ID."""
-        with self.lock:
-            cur = self.conn.execute(
-                """
-                SELECT token_id, token_value, label, is_valid, last_validated,
-                       username, user_id, added_at, last_used, use_count
-                FROM scraper_tokens
-                WHERE token_id = ?
-                """,
-                (token_id,),
-            )
-            row = cur.fetchone()
-            return dict(row) if row else None
-
-    @_in_tx
-    def update_scraper_token(
-        self,
-        token_id: str,
-        *,
-        label: str = None,
-        is_valid: bool = None,
-        username: str = None,
-        user_id: str = None,
-    ) -> bool:
-        """Update scraper token metadata."""
-        updates = []
-        params = []
-
-        if label is not None:
-            updates.append("label = ?")
-            params.append(label)
-        if is_valid is not None:
-            updates.append("is_valid = ?")
-            updates.append("last_validated = ?")
-            params.append(1 if is_valid else 0)
-            params.append(int(time.time()))
-        if username is not None:
-            updates.append("username = ?")
-            params.append(username)
-        if user_id is not None:
-            updates.append("user_id = ?")
-            params.append(user_id)
-
-        if not updates:
-            return False
-
-        params.append(token_id)
-
-        with self.lock:
-            self.conn.execute(
-                f"UPDATE scraper_tokens SET {', '.join(updates)} WHERE token_id = ?",
-                params,
-            )
-        return True
-
-    @_in_tx
-    def delete_scraper_token(self, token_id: str) -> bool:
-        """Delete a scraper token."""
-        with self.lock:
-            cur = self.conn.execute(
-                "DELETE FROM scraper_tokens WHERE token_id = ?", (token_id,)
-            )
-            return cur.rowcount > 0
-
-    @_in_tx
-    def increment_scraper_token_usage(self, token_id: str) -> None:
-        """Increment usage counter and update last_used timestamp."""
-        with self.lock:
-            self.conn.execute(
-                """
-                UPDATE scraper_tokens 
-                SET use_count = use_count + 1,
-                    last_used = ?
-                WHERE token_id = ?
-                """,
-                (int(time.time()), token_id),
-            )
 
     # mapping_user_tokens CRUD
 
@@ -6321,19 +5897,6 @@ class DBManager:
         with self.lock:
             cur = self.conn.execute("DELETE FROM event_logs")
             return cur.rowcount
-
-    def get_valid_scraper_tokens(self) -> list[dict]:
-        """Return only validated scraper tokens."""
-        with self.lock:
-            cur = self.conn.execute(
-                """
-                SELECT token_id, token_value, label, username, user_id
-                FROM scraper_tokens
-                WHERE is_valid = 1
-                ORDER BY use_count ASC, added_at ASC
-                """
-            )
-            return [dict(row) for row in cur.fetchall()]
 
     def add_backup_token(self, token_value: str, note: Optional[str] = None) -> str:
         """Insert a new backup token and return its token_id."""

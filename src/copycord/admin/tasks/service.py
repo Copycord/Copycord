@@ -32,7 +32,6 @@ from .registry import TaskType
 
 log = logging.getLogger("copycord.tasks")
 
-RUN_STATES = ("queued", "running", "success", "failed", "cancelled")
 ACTIVE = ("queued", "running")
 FINAL = ("success", "failed", "cancelled")
 CANCEL_GRACE = 30.0
