@@ -748,19 +748,6 @@ class _Tty:
         return True
 
 
-def _on_a_terminal(monkeypatch, columns=78):
-    import sys
-
-    from copycord import ui
-
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setattr(ui, "_columns", lambda: columns)
-    monkeypatch.setattr(ui, "brand", lambda stream=None: "Copycord v4.0.0 (abcdef1)")
-    out = _Tty()
-    monkeypatch.setattr(sys, "stdout", out)
-    return out
-
-
 def test_cli_status_json(status_svc, capsys):
     import json
 
