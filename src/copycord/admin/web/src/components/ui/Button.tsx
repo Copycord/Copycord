@@ -77,7 +77,7 @@ const VARIANT: Record<ButtonVariant, string> = {
     "border-accent bg-transparent text-accent enabled:hover:bg-accent-a10 enabled:hover:shadow-accent",
   "ghost-red": `${GHOST_TINT} ${GHOST_TINT_FILL} ${GHOST_RED_HOVER} ${GHOST_TINT_FOCUS}`,
   "ghost-purple":
-    `${GHOST_TINT} enabled:hover:bg-line-1 enabled:hover:border-primary-600` +
+    `${GHOST_TINT} enabled:hover:bg-line-1 enabled:hover:border-primary-600 ` +
     "enabled:hover:outline-2 enabled:hover:outline-offset-2 enabled:hover:outline-primary-600 " +
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 disabled:opacity-60",
   "ghost-green": `${GHOST_TINT} ${GHOST_TINT_FILL} ${GHOST_GREEN_HOVER} ${GHOST_TINT_FOCUS}`,

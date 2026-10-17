@@ -64,6 +64,20 @@ describe("Button", () => {
     expect(screen.getByRole("button").className).toContain("bg-[linear-gradient(180deg,var(--color-danger),var(--color-danger-deep))]");
   });
 
+  it("gives ghost the purple tint and keeps the ghost-purple hover classes apart", () => {
+    render(
+      <>
+        <Button variant="ghost">Clear</Button>
+        <Button variant="ghost-purple">Pick</Button>
+      </>,
+    );
+    const ghost = screen.getByRole("button", { name: "Clear" }).className.split(" ");
+    for (const c of ["border-primary-a30", "bg-primary-a10", "text-accent-soft", "enabled:hover:bg-primary-a20", "focus-visible:ring-2"])
+      expect(ghost).toContain(c);
+    const purple = screen.getByRole("button", { name: "Pick" }).className.split(" ");
+    for (const c of ["enabled:hover:bg-line-1", "enabled:hover:border-primary-600", "enabled:hover:outline-2"]) expect(purple).toContain(c);
+  });
+
   it("holds an attached button still on hover and press, other buttons keep the lift", () => {
     render(
       <>
