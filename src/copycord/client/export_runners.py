@@ -82,6 +82,15 @@ def _dt_from_snowflake(snow_id: int | str) -> datetime:
 
 
 class ExportMessagesRunner:
+    """Export a guild's messages; one export per guild at a time.
+
+    Started by the Export messages task with a job_id: the runner then sends
+    export_messages_progress frames (phase scan, json, media, forward), puts the
+    job_id on export_messages_done and can be cancelled through cancel(), which
+    still sends export_messages_done (error "cancelled") with its counts."""
+
+    PROGRESS_EVERY = 200
+
     def __init__(
         self,
         bot: Any,
@@ -106,6 +115,8 @@ class ExportMessagesRunner:
         self._emoji_re = re.compile(r"(<a?:\w+:\d+>)|([\U0001F300-\U0001FAFF])")
         self._active_guilds: set[int] = set()
         self._active_lock = asyncio.Lock()
+        # guild_id -> (task, job_id) of a running export, for cancel()
+        self._tasks: dict[int, tuple[asyncio.Task, Optional[str]]] = {}
 
     async def try_begin(self, guild_id: int) -> bool:
         """Mark a guild as running; False if already running."""
@@ -118,11 +129,64 @@ class ExportMessagesRunner:
     async def _end(self, guild_id: int) -> None:
         async with self._active_lock:
             self._active_guilds.discard(guild_id)
+            self._tasks.pop(guild_id, None)
+
+    def register_task(
+        self, guild_id: int, task: asyncio.Task, job_id: Optional[str] = None
+    ) -> None:
+        self._tasks[guild_id] = (task, job_id)
+
+    async def cancel(self, guild_id: int, job_id: Optional[str] = None) -> bool:
+        """Cancel the guild's running export (only the one with this job_id when given)."""
+        async with self._active_lock:
+            entry = self._tasks.get(guild_id)
+        if entry is None:
+            return False
+        task, running_job = entry
+        if job_id and running_job != str(job_id):
+            return False
+        if task.done():
+            return False
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return True
+
+    async def _progress(
+        self, job_id: Optional[str], guild_id: Any, phase: str, **fields: Any
+    ) -> None:
+        if not job_id:
+            return
+        try:
+            await self._ws_send(
+                {
+                    "type": "export_messages_progress",
+                    "data": {
+                        "job_id": job_id,
+                        "guild_id": guild_id,
+                        "phase": phase,
+                        **fields,
+                    },
+                }
+            )
+        except Exception as e:
+            self.log.debug(f"[export] progress send failed: {e}")
 
     async def run(self, d: DictLike, guild: Any, acquired: bool = False) -> None:
         """Run the export for `data` and `guild`, logging progress and emitting a final 'export_messages_done' ws event."""
         gid_log = getattr(guild, "id", None)
         gname = getattr(guild, "name", "") or "Unknown"
+        job_id = str(d.get("job_id") or "") or None
+        job_fields: DictLike = {"job_id": job_id} if job_id else {}
+
+        total_scanned = 0
+        total_matched = 0
+        forwarded = 0
+        json_file: Optional[str] = None
+        want_any_download = False
+        media_report: Optional[DictLike] = None
 
         if not acquired:
             ok = await self.try_begin(gid_log)
@@ -137,6 +201,7 @@ class ExportMessagesRunner:
                             "data": {
                                 "guild_id": gid_log,
                                 "error": "export-already-running",
+                                **job_fields,
                             },
                         }
                     )
@@ -361,7 +426,16 @@ class ExportMessagesRunner:
                 await self._ws_send(
                     {
                         "type": "export_messages_done",
-                        "data": {"guild_id": gid_log, "forwarded": 0, "scanned": 0},
+                        "data": {
+                            "guild_id": gid_log,
+                            "forwarded": 0,
+                            "scanned": 0,
+                            **(
+                                {"error": "no-readable-channels", **job_fields}
+                                if job_id
+                                else {}
+                            ),
+                        },
                     }
                 )
                 return
@@ -378,18 +452,29 @@ class ExportMessagesRunner:
                 f"[export] Scan targets: {len(scan_targets)} -> {preview}{more_note}"
             )
 
-            total_scanned = 0
-            total_matched = 0
-            forwarded = 0
             buffer_rows: List[DictLike] = []
+            targets_total = len(scan_targets)
 
-            for ch in scan_targets:
+            async def _scan_progress(targets_done: int, channel: Optional[str]) -> None:
+                await self._progress(
+                    job_id,
+                    gid_log,
+                    "scan",
+                    done=targets_done,
+                    total=targets_total,
+                    scanned=total_scanned,
+                    matched=total_matched,
+                    channel=channel,
+                )
+
+            for target_idx, ch in enumerate(scan_targets):
                 cid = getattr(ch, "id", None)
                 cname = getattr(ch, "name", "") or "unknown"
                 is_thread = _is_thread(ch)
                 label = f"{'#' if not is_thread else ''}{cname}{' [thread]' if is_thread else ''}"
 
                 self.log.info(f"[export] Scanning {label} ({cid}) …")
+                await _scan_progress(target_idx, label)
                 ch_scanned = 0
                 ch_matched = 0
 
@@ -405,6 +490,8 @@ class ExportMessagesRunner:
                     ):
                         ch_scanned += 1
                         total_scanned += 1
+                        if total_scanned % self.PROGRESS_EVERY == 0:
+                            await _scan_progress(target_idx, label)
 
                         if user_id and getattr(msg.author, "id", None) != user_id:
                             if self.scan_sleep:
@@ -543,8 +630,8 @@ class ExportMessagesRunner:
                 self.log.info(
                     f"[export] Done {label} ({cid}): scanned={ch_scanned}, matched={ch_matched}"
                 )
+            await _scan_progress(targets_total, None)
 
-            json_file: Optional[str] = None
             try:
                 ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
                 gid_str = str(getattr(guild, "id", "unknown"))
@@ -568,10 +655,16 @@ class ExportMessagesRunner:
                         indent=2,
                     )
                 self.log.info(f"[export] JSON saved: {json_file}")
+                await self._progress(
+                    job_id, gid_log, "json", matched=total_matched, json_path=json_file
+                )
 
             except Exception as e:
                 self.log.warning(f"[export] Failed to write JSON: {e}")
                 json_file = None
+                await self._progress(
+                    job_id, gid_log, "json", matched=total_matched, json_error=str(e)
+                )
 
             dl_cfg = F.get("download_media") or {}
             want_any_download = any(
@@ -588,6 +681,10 @@ class ExportMessagesRunner:
             if want_any_download and aiohttp is None:
                 self.log.warning(
                     "[export] Download requested but aiohttp not available. Skipping downloads."
+                )
+                await self._progress(
+                    job_id, gid_log, "media", done=0, total=0,
+                    media=media_report, media_error="aiohttp not available",
                 )
             elif want_any_download:
                 from urllib.parse import urlparse
@@ -666,6 +763,9 @@ class ExportMessagesRunner:
                     self.log.info(
                         "[export] No media matches selection; skipping download step."
                     )
+                    await self._progress(
+                        job_id, gid_log, "media", done=0, total=0, media=media_report
+                    )
                 else:
                     media_root = os.path.join(os.path.dirname(json_file or ""), "media")
                     os.makedirs(media_root, exist_ok=True)
@@ -698,10 +798,25 @@ class ExportMessagesRunner:
                         f"→ kinds_used={used_kinds} count={len(tasks)}"
                     )
 
+                    downloaded = 0
+
+                    async def _counted(session, kind, url, fname, dest):
+                        nonlocal downloaded
+                        res = await self._download_one(session, sem, kind, url, fname, dest)
+                        downloaded += 1
+                        if downloaded % 10 == 0 and downloaded < len(tasks):
+                            await self._progress(
+                                job_id, gid_log, "media", done=downloaded, total=len(tasks)
+                            )
+                        return res
+
+                    await self._progress(
+                        job_id, gid_log, "media", done=0, total=len(tasks)
+                    )
                     async with aiohttp.ClientSession() as session:
                         results = await asyncio.gather(
                             *[
-                                self._download_one(session, sem, kind, url, fname, dest)
+                                _counted(session, kind, url, fname, dest)
                                 for (kind, url, fname, dest) in tasks
                             ],
                             return_exceptions=False,
@@ -718,10 +833,17 @@ class ExportMessagesRunner:
                             )
 
                     self.log.info(f"[export] Media download complete: {media_report}")
+                    await self._progress(
+                        job_id, gid_log, "media", done=len(tasks), total=len(tasks),
+                        media=media_report,
+                    )
 
             if do_forward and buffer_rows:
                 self.log.info(
                     f"[export] Forwarding buffered messages: {len(buffer_rows)} → webhook(…{wh_tail})"
+                )
+                await self._progress(
+                    job_id, gid_log, "forward", done=0, total=len(buffer_rows)
                 )
                 for idx, row in enumerate(buffer_rows, 1):
                     try:
@@ -737,6 +859,10 @@ class ExportMessagesRunner:
                             }
                         )
                         forwarded += 1
+                        await self._progress(
+                            job_id, gid_log, "forward", done=forwarded,
+                            total=len(buffer_rows),
+                        )
                         if self.send_sleep:
                             await asyncio.sleep(self.send_sleep)
                     except Exception as e:
@@ -768,6 +894,7 @@ class ExportMessagesRunner:
                     "scanned": total_scanned,
                     "matched": total_matched,
                     **({"json_path": json_file} if json_file else {}),
+                    **job_fields,
                 }
                 if want_any_download:
                     done_payload["media_download"] = media_report
@@ -776,6 +903,35 @@ class ExportMessagesRunner:
                 )
             except Exception as e:
                 self.log.debug(f"[export] emit export_messages_done failed: {e}")
+
+        except (asyncio.CancelledError, Exception) as e:
+            cancelled = isinstance(e, asyncio.CancelledError)
+            if cancelled:
+                self.log.info(f"[export] Export cancelled for guild={gid_log}")
+            else:
+                self.log.exception(f"[export] Export failed for guild={gid_log}: {e}")
+            with contextlib.suppress(Exception):
+                await self._ws_send(
+                    {
+                        "type": "export_messages_done",
+                        "data": {
+                            "guild_id": gid_log,
+                            "forwarded": forwarded,
+                            "scanned": total_scanned,
+                            "matched": total_matched,
+                            "error": "cancelled" if cancelled else str(e),
+                            **({"json_path": json_file} if json_file else {}),
+                            **(
+                                {"media_download": media_report}
+                                if want_any_download and media_report is not None
+                                else {}
+                            ),
+                            **job_fields,
+                        },
+                    }
+                )
+            if cancelled:
+                raise
 
         finally:
             await self._end(gid_log)

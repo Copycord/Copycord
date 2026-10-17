@@ -1806,8 +1806,14 @@ class ServerReceiver:
                     return
                 await self.webhook_exporter.handle_ws_export_message(data)
 
+            elif typ == "export_messages_progress":
+                # Export messages task frames go to the admin bus, keyed by job_id.
+                await self.bus.publish("client", msg)
+
             elif typ == "export_messages_done":
                 await self.webhook_exporter.handle_ws_export_messages_done(data)
+                if (data or {}).get("job_id"):
+                    await self.bus.publish("client", msg)
             elif typ == "reload_channel_name_blacklist":
                 await self._load_channel_name_blacklist_cache()
                 logger.info("[chan-blacklist] Cache reloaded from DB")

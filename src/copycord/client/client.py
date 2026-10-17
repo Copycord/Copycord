@@ -556,8 +556,10 @@ class ClientListener:
             except Exception:
                 target_gid = None
 
+            job_id = str(d.get("job_id") or "") or None
             guild = self.bot.get_guild(target_gid) if target_gid else None
-            if guild is None and self.bot.guilds:
+            # The Export messages task names its guild: never fall back to another one.
+            if guild is None and self.bot.guilds and not job_id:
                 guild = self.bot.guilds[0]
             if guild is None:
                 return {"ok": False, "error": "Guild not found"}
@@ -570,8 +572,18 @@ class ClientListener:
             if not acquired:
                 return {"ok": False, "error": "Export already running for this guild"}
 
-            asyncio.create_task(self.runner.run(d, guild, acquired=True))
+            task = asyncio.create_task(self.runner.run(d, guild, acquired=True))
+            self.runner.register_task(g_id, task, job_id)
             return {"ok": True, "accepted": True}
+
+        elif typ == "export_messages_cancel":
+            d = data or {}
+            try:
+                g_id = int(d["guild_id"])
+            except (KeyError, TypeError, ValueError):
+                return {"ok": False, "error": "guild_id required"}
+            job_id = str(d.get("job_id") or "") or None
+            return {"ok": await self.runner.cancel(g_id, job_id), "guild_id": g_id}
 
         elif typ == "pull_assets":
             import logging
