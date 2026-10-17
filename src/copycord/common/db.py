@@ -4195,20 +4195,6 @@ class DBManager:
             (int(cloned_guild_id),),
         ).fetchone()
 
-    def get_blocked_keywords_by_origin(self) -> dict[int, list[str]]:
-        """{original_guild_id: [words]}; rows with a NULL original_guild_id are global, key 0."""
-        rows = self.conn.execute(
-            "SELECT original_guild_id, keyword FROM blocked_keywords"
-        ).fetchall()
-
-        out: dict[int, list[str]] = {}
-        for r in rows:
-            ogid = r["original_guild_id"]
-
-            key = int(ogid) if ogid is not None else 0
-            out.setdefault(key, []).append(str(r["keyword"]))
-        return out
-
     def get_blocked_keywords_for_origin(self, original_guild_id: int) -> list[str]:
         """Keywords for this origin guild plus global NULL/NULL ones; deduped, lowercased, sorted."""
         rows = self.conn.execute(
