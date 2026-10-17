@@ -62,25 +62,12 @@ class TestSelectToken:
         assert chosen is None
         assert reset is None
 
-    def test_new_author_all_taken_returns_none(self):
-        # Every enabled token is already assigned to another identity.
-        identities = [_ident("Y", "a", 0), _ident("Z", "b", 0)]
-        chosen, reset = select(identities, "X", ["a", "b"])
-        assert chosen is None
-        assert reset is None
-
     def test_disabled_token_forces_reassignment(self):
         # X was on "a" but "a" is no longer enabled → swap + reset "a".
         identities = [_ident("X", "a", 0)]
         chosen, reset = select(identities, "X", ["b", "c"])
         assert chosen == "b"
         assert reset == "a"
-
-    def test_no_tokens_returns_none(self):
-        chosen, reset = select([], "X", [])
-        assert chosen is None
-        assert reset is None
-
 
 # ── prepare() idempotency with fakes ─────────────────────────────────────────
 

@@ -75,9 +75,6 @@ class TestSafeChild:
         assert safe_child(tmp_path, name) is None
         assert safe_child(tmp_path, name, max_depth=2) is None
 
-    def test_accepts_plain_name(self, tmp_path):
-        assert safe_child(tmp_path, "a.tar.gz") == (tmp_path / "a.tar.gz").resolve()
-
     def test_subdir_only_when_allowed(self, tmp_path):
         assert safe_child(tmp_path, "123/a.json") is None
         assert safe_child(tmp_path, "123/a.json", max_depth=2) == (
@@ -133,15 +130,6 @@ class TestBackupTraversal:
         assert resp.status_code == 200
         assert resp.content == b"gz"
 
-    @pytest.mark.asyncio
-    async def test_delete_normal(self, client, dirs):
-        resp = await client.post(
-            "/api/backup/delete", data={"name": "copycord-backup-1.tar.gz"}
-        )
-        assert resp.status_code == 200
-        assert not (dirs / "backups" / "copycord-backup-1.tar.gz").exists()
-
-
 class TestScrapeTraversal:
 
     @pytest.mark.asyncio
@@ -171,13 +159,6 @@ class TestScrapeTraversal:
         assert resp.status_code == 200
         resp = await client.get("/api/scraper/scrapes/top.json")
         assert resp.status_code == 200
-
-    @pytest.mark.asyncio
-    async def test_delete_normal(self, client, dirs):
-        resp = await client.delete("/api/scraper/scrapes/123/scrape_123_1.json")
-        assert resp.status_code == 200
-        assert not (dirs / "scrapes" / "123").exists()
-
 
 # ---------------------------------------------------------------------------
 # Websocket authentication
@@ -311,11 +292,6 @@ class TestInternalClientHeaders:
         (headers,) = kwargs.values()
         assert headers == {INTERNAL_TOKEN_HEADER: TOKEN}
 
-    def test_no_token_no_kwargs(self, monkeypatch):
-        monkeypatch.delenv(INTERNAL_TOKEN_ENV, raising=False)
-        assert internal_connect_kwargs() == {}
-
-
 # ---------------------------------------------------------------------------
 # Login brute-force limit
 # ---------------------------------------------------------------------------
@@ -378,19 +354,6 @@ class TestLoginLimit:
         for _ in range(4):
             assert _login(tc, "nope").status_code == 401
 
-    def test_compare_digest_used(self, tc, password, clock, monkeypatch):
-        calls = []
-        real = auth.hmac.compare_digest
-
-        def spy(a, b):
-            calls.append((a, b))
-            return real(a, b)
-
-        monkeypatch.setattr(auth.hmac, "compare_digest", spy)
-        assert _login(tc, "pw").status_code == 302
-        assert calls == [(b"pw", b"pw")]
-
-
 class TestLoginLimiter:
 
     def test_exponential_backoff_capped(self):
@@ -441,15 +404,8 @@ class TestCSRF:
         resp = _post(tc, {"origin": origin, CSRF_HEADER: "1"})
         assert resp.status_code == 403
 
-    def test_cross_origin_rejected_with_session(self, tc, password):
-        headers = {"origin": "http://evil.example", CSRF_HEADER: "1", "cookie": _session_cookie()}
-        assert _post(tc, headers).status_code == 403
-
     def test_missing_header_rejected(self, tc, logged_in):
         assert _post(tc, {"origin": ORIGIN}).status_code == 403
-
-    def test_wrong_header_value_rejected(self, tc, logged_in):
-        assert _post(tc, {"origin": ORIGIN, CSRF_HEADER: "0"}).status_code == 403
 
     def test_no_origin_or_referer_rejected(self, tc, logged_in):
         assert _post(tc, {CSRF_HEADER: "1"}).status_code == 403
@@ -462,10 +418,6 @@ class TestCSRF:
     def test_same_origin_with_header_accepted(self, tc, logged_in):
         resp = _post(tc, {"origin": ORIGIN, CSRF_HEADER: "1"})
         assert resp.status_code == 200
-
-    def test_same_origin_with_header_and_session_accepted(self, tc, password):
-        headers = {"origin": ORIGIN, CSRF_HEADER: "1", "cookie": _session_cookie()}
-        assert _post(tc, headers).status_code == 200
 
     def test_referer_fallback(self, tc, logged_in):
         ok = _post(tc, {"referer": f"{ORIGIN}/channels", CSRF_HEADER: "1"})

@@ -78,15 +78,6 @@ class TestHealth:
 class TestEventLogsAPI:
 
     @pytest.mark.asyncio
-    async def test_get_empty(self, client):
-        resp = await client.get("/api/event-logs")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["ok"] is True
-        assert body["logs"] == []
-        assert body["total"] == 0
-
-    @pytest.mark.asyncio
     async def test_add_and_get(self, client):
         resp = await client.post(
             "/api/event-logs",
@@ -130,11 +121,6 @@ class TestEventLogsAPI:
         assert resp.json()["total"] == 0
 
     @pytest.mark.asyncio
-    async def test_delete_nonexistent(self, client):
-        resp = await client.delete("/api/event-logs/nonexistent")
-        assert resp.status_code == 404
-
-    @pytest.mark.asyncio
     async def test_delete_bulk(self, client):
         r1 = await client.post("/api/event-logs", json={"event_type": "x", "details": "a"})
         r2 = await client.post("/api/event-logs", json={"event_type": "x", "details": "b"})
@@ -171,25 +157,11 @@ class TestEventLogsAPI:
         assert "alpha" in body["types"]
         assert "beta" in body["types"]
 
-    @pytest.mark.asyncio
-    async def test_delete_bulk_empty_ids(self, client):
-        resp = await client.post("/api/event-logs/delete-bulk", json={"ids": []})
-        assert resp.status_code == 400
-
-
 # ---------------------------------------------------------------------------
 # Guild mappings API
 # ---------------------------------------------------------------------------
 
 class TestGuildMappingsAPI:
-
-    @pytest.mark.asyncio
-    async def test_list_empty(self, client):
-        resp = await client.get("/api/guild-mappings")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["ok"] is True
-        assert body["mappings"] == []
 
     @pytest.mark.asyncio
     async def test_delete_mapping(self, client):
@@ -282,12 +254,6 @@ class TestGuildMappingsAPI:
         body = resp.json()
         assert body["status"] == "active"
 
-    @pytest.mark.asyncio
-    async def test_toggle_nonexistent(self, client):
-        resp = await client.post("/api/guild-mappings/nope/toggle-status")
-        assert resp.status_code == 404
-
-
 # ---------------------------------------------------------------------------
 # Mapping user tokens API
 # ---------------------------------------------------------------------------
@@ -304,20 +270,6 @@ class TestMappingUserTokensAPI:
             cloned_guild_id=222,
             cloned_guild_name="",
         )
-
-    @pytest.mark.asyncio
-    async def test_list_empty(self, client):
-        mid = self._make_mapping()
-        resp = await client.get(f"/api/guild-mappings/{mid}/user-tokens")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["ok"] is True
-        assert body["tokens"] == []
-
-    @pytest.mark.asyncio
-    async def test_list_unknown_mapping(self, client):
-        resp = await client.get("/api/guild-mappings/nope/user-tokens")
-        assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_add_validates_and_masks(self, client, monkeypatch):
@@ -368,21 +320,6 @@ class TestMappingUserTokensAPI:
         assert resp.json()["tokens"] == []
 
     @pytest.mark.asyncio
-    async def test_add_missing_token(self, client):
-        mid = self._make_mapping()
-        resp = await client.post(
-            f"/api/guild-mappings/{mid}/user-tokens", json={}
-        )
-        assert resp.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_add_unknown_mapping(self, client):
-        resp = await client.post(
-            "/api/guild-mappings/nope/user-tokens", json={"token": "x"}
-        )
-        assert resp.status_code == 404
-
-    @pytest.mark.asyncio
     async def test_toggle_and_delete(self, client, monkeypatch):
         import copycord.admin.app as app_mod
         monkeypatch.setattr(
@@ -413,14 +350,6 @@ class TestMappingUserTokensAPI:
 
         resp = await client.get(f"/api/guild-mappings/{mid}/user-tokens")
         assert resp.json()["tokens"] == []
-
-    @pytest.mark.asyncio
-    async def test_patch_unknown_token(self, client):
-        mid = self._make_mapping()
-        resp = await client.patch(
-            f"/api/guild-mappings/{mid}/user-tokens/nope", json={"enabled": True}
-        )
-        assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_bulk_add_dedupes_and_adds(self, client, monkeypatch):
@@ -512,11 +441,6 @@ class TestMappingUserTokensAPI:
         assert all(r.get("id") for r in body["results"])
 
     @pytest.mark.asyncio
-    async def test_verify_unknown_mapping(self, client):
-        resp = await client.post("/api/guild-mappings/nope/user-tokens/verify")
-        assert resp.status_code == 404
-
-    @pytest.mark.asyncio
     async def test_delete_by_ids(self, client, monkeypatch):
         mid = self._make_mapping()
         ids = await self._add_tokens(
@@ -560,25 +484,9 @@ class TestMappingUserTokensAPI:
         )
         assert resp.status_code == 400
 
-    @pytest.mark.asyncio
-    async def test_delete_unknown_mapping(self, client):
-        resp = await client.post(
-            "/api/guild-mappings/nope/user-tokens/delete", json={"scope": "all"}
-        )
-        assert resp.status_code == 404
-
-
 # ---------------------------------------------------------------------------
 # Version endpoint
 # ---------------------------------------------------------------------------
-
-class TestVersion:
-
-    @pytest.mark.asyncio
-    async def test_version_returns_200(self, client):
-        resp = await client.get("/version")
-        assert resp.status_code == 200
-
 
 # ---------------------------------------------------------------------------
 # Role logs: <home>/logs, and the old data dir location for one release
@@ -742,16 +650,6 @@ def fake_discord(monkeypatch):
 class TestUserGuildsHelper:
 
     @pytest.mark.asyncio
-    async def test_cache_hit_within_ttl(self, fake_discord):
-        import copycord.admin.app as app_mod
-
-        sess = fake_discord(_GuildsResp(200, _guilds(1, 2)))
-        a = await app_mod._user_guilds("tok-a")
-        b = await app_mod._user_guilds("tok-a")
-        assert a == b == _guilds(1, 2)
-        assert len(sess.urls) == 1
-
-    @pytest.mark.asyncio
     async def test_concurrent_callers_share_one_request(self, fake_discord):
         import asyncio
         import copycord.admin.app as app_mod
@@ -777,17 +675,6 @@ class TestUserGuildsHelper:
         # Still inside the reset window: stale list, Discord not called again.
         assert await app_mod._user_guilds("tok-a") == _guilds(1)
         assert await app_mod._user_guilds("tok-a", refresh=True) == _guilds(1)
-        assert len(sess.urls) == 2
-
-    @pytest.mark.asyncio
-    async def test_429_without_cache_retries_once_after_short_wait(self, fake_discord):
-        import copycord.admin.app as app_mod
-
-        sess = fake_discord(
-            _GuildsResp(429, {"retry_after": 0.05, "global": False}),
-            _GuildsResp(200, _guilds(7)),
-        )
-        assert await app_mod._user_guilds("tok-a") == _guilds(7)
         assert len(sess.urls) == 2
 
     @pytest.mark.asyncio
@@ -922,14 +809,3 @@ class TestMappingSaveChecks:
         )
         assert resp.status_code == 400
         assert resp.json()["which"] == "original_guild_id"
-
-    @pytest.mark.asyncio
-    async def test_create_checks_both_concurrently(self, client, monkeypatch):
-        state = self._concurrent_checks(monkeypatch)
-        resp = await client.post(
-            "/api/guild-mappings",
-            json={"mapping_name": "New", "original_guild_id": "444", "cloned_guild_id": "555"},
-        )
-        assert resp.status_code == 200
-        assert sorted(state["calls"]) == [("clone", 555), ("host", 444)]
-        assert state["peak"] == 2

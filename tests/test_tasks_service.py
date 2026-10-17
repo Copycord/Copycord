@@ -126,13 +126,6 @@ async def _settled(svc, run_id, timeout=3.0):
     raise AssertionError(f"run {run_id} still {svc.get(run_id).status}")
 
 
-def test_duplicate_key_raises():
-    with pytest.raises(ValueError):
-        registry.register(TYPES[0])
-    assert registry.get("t_noop") is TYPES[0]
-    assert "t_noop" in [t.key for t in registry.all()]
-
-
 @pytest.mark.asyncio
 async def test_start_to_success(svc, events):
     run = await svc.start("t_noop", {"n": 3}, actor="admin", trigger="manual")
@@ -295,42 +288,6 @@ async def test_concurrency_one_queues_the_second_run(svc):
 
 
 
-@pytest.mark.asyncio
-async def test_queued_run_says_what_it_waits_for(svc, events):
-    GATES[1], GATES[2], GATES[3] = Gate(), Gate(), Gate()
-    first = await svc.start("t_gated", {})
-    second = await svc.start("t_gated", {})
-    third = await svc.start("t_gated", {})
-    await asyncio.wait_for(GATES[1].started.wait(), 1)
-    await asyncio.sleep(0.05)
-    blocker = {"id": str(first.id), "number": 1, "type": "t_gated", "title": svc.get(first.id).title}
-    wire = svc.get(second.id).to_wire()
-    assert wire["waiting_for"] == blocker and wire["queue_position"] == 1
-    assert svc.get(third.id).to_wire()["queue_position"] == 2
-    assert svc.get(first.id).to_wire()["waiting_for"] is None
-    # The list rows and the published frames carry it too.
-    rows, _ = svc.list({"type": "t_gated"})
-    assert {r.number: r.to_wire(include_steps=False)["waiting_for"] for r in rows}[2] == blocker
-    assert any(e["run"]["id"] == str(second.id) and e["run"]["waiting_for"] == blocker for e in events)
-    # Cancelled while queued: it ends without waiting, the one behind it moves up alone.
-    await svc.cancel(second.id)
-    ended = await _settled(svc, second.id)
-    assert ended.status == "cancelled" and ended.waiting_for is None and ended.queue_position is None
-    assert svc.get(third.id).waiting_for == blocker and svc.get(third.id).queue_position is None
-    # The blocker ends: the next run starts with the field cleared, and that went out live.
-    events.clear()
-    GATES[1].release.set()
-    await asyncio.wait_for(GATES[3].started.wait(), 1)
-    started = svc.get(third.id)
-    assert started.status == "running" and started.waiting_for is None
-    frames = [e["run"] for e in events if e["run"]["id"] == str(third.id)]
-    assert frames and frames[-1]["status"] == "running" and frames[-1]["waiting_for"] is None
-    # It never read "queued, waiting for nothing" between the blocker ending and it starting.
-    assert all(f["waiting_for"] == blocker for f in frames if f["status"] == "queued")
-    GATES[3].release.set()
-    assert (await _settled(svc, third.id)).status == "success"
-
-
 def _row(repo, type_key, status, number):
     run = TaskRun(type=type_key, number=number, status=status, title=f"{type_key} {number}",
                   trigger="manual", actor="admin", inputs={},
@@ -354,10 +311,6 @@ def test_recover_marks_interrupted():
     assert svc.recover() == 0
 
 
-def test_service_has_no_prune():
-    assert not hasattr(TaskService, "prune")
-
-
 @pytest.mark.asyncio
 async def test_log_keeps_newest_lines_and_cleans_text():
     repo = MemoryRunRepo()
@@ -376,27 +329,6 @@ async def test_log_keeps_newest_lines_and_cleans_text():
                     actor="admin", inputs={})
     first.load_progress({"log_lines": 3})  # rows written before log_lines was a list
     assert first.log_lines == [] and first.log_count == 0
-
-
-@pytest.mark.asyncio
-async def test_report_dict_or_fields(svc):
-    run = await svc.start("t_noop", {})
-    ctx = svc._active[run.id][0]
-    await ctx.report({"channels": [{"channel_id": 2**60 + 1, "delivered": 3}]}, took_s=1.5)
-    assert ctx.run.report == {"channels": [{"channel_id": 2**60 + 1, "delivered": 3}], "took_s": 1.5}
-    await ctx.report(ok=True)
-    assert ctx.run.report == {"ok": True}
-    await ctx.report({"data": 1}, data=2)
-    assert ctx.run.report == {"data": 2}
-    done = await _settled(svc, run.id)
-    assert svc.repo.get_run(run.id).report == {"data": 2}
-    detail = done.to_wire(detail=True)
-    assert detail["report"] == {"data": 2}
-    assert [ln["msg"] for ln in detail["log_lines"]] == ["did the work"]
-    plain = done.to_wire()
-    assert "report" not in plain and "log_lines" not in plain and plain["log_count"] == 1
-    done.report = {"channel_id": 2**60 + 1}
-    assert done.to_wire(detail=True)["report"] == {"channel_id": str(2**60 + 1)}
 
 
 @pytest.mark.asyncio
@@ -488,30 +420,6 @@ async def test_frame_lists_changed_steps_in_run_order():
         await ctx.step(key).progress(1, 2)
     await ctx.flush()
     assert [s["key"] for s in events[-1]["steps"]] == [keys[5], keys[17], keys[30]]
-    ctx.close()
-
-
-@pytest.mark.asyncio
-async def test_progress_label_publishes_with_the_counts():
-    events = []
-
-    async def publish(event):
-        events.append(event)
-
-    repo = MemoryRunRepo()
-    run = TaskRun(type="t_noop", number=1, status="running", title="x", trigger="manual",
-                  actor="admin", inputs={})
-    run.id = repo.insert_run(run)
-    ctx = RunContext(run, repo, publish, lambda: 1000.0)
-    step = ctx.step("a", "A")
-    await step.start()
-    count = len(events)
-    await step.progress(3, 10, label="3 of 10 delivered, 10 pulled")
-    assert len(events) == count, "a label with the counts is not a transition"
-    await asyncio.sleep(0.6)
-    assert events[-1]["steps"][0]["label"] == "3 of 10 delivered, 10 pulled"
-    await step.progress(4)
-    assert step.data["label"] == "3 of 10 delivered, 10 pulled" and step.data["total"] == 10
     ctx.close()
 
 

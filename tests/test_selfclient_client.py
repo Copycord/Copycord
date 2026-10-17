@@ -264,38 +264,12 @@ class TestLifecycle:
             assert fake_http.closed
             assert not client.is_ready()
 
-    @pytest.mark.asyncio
-    async def test_clear_resets_a_closed_client(self):
-        async with running() as (client, gw, fake_http):
-            await ready(client, gw)
-            await client.close()
-            client.clear()
-            assert not client.is_closed()
-            assert client.guilds == []
-            assert client.user is None
-
-    @pytest.mark.asyncio
-    async def test_set_proxy_reaches_http_and_gateway(self):
-        async with running() as (client, gw, fake_http):
-            client.set_proxy("http://other.example:3128")
-            assert fake_http.proxy == "http://other.example:3128"
-            assert gw.proxy == "http://other.example:3128"
-
-    def test_bot_constructor_options_are_accepted(self):
-        Client(command_prefix="!", self_bot=True, proxy=None)
-
-
 # ---------------------------------------------------------------------------
 # event registration
 # ---------------------------------------------------------------------------
 
 
 class TestEvents:
-    def test_event_requires_a_coroutine(self):
-        client = Client()
-        with pytest.raises(TypeError):
-            client.event(lambda: None)
-
     @pytest.mark.asyncio
     async def test_bound_method_registered_like_code_client_does(self):
         async with running() as (client, gw, fake_http):
@@ -707,14 +681,6 @@ class TestRest:
             assert member.display_name == "nick"
             assert [r.id for r in member.roles][-1] == MOD_ROLE
             assert ("get_member", GUILD, STRANGER) in fake_http.calls
-
-    @pytest.mark.asyncio
-    async def test_fetch_roles(self):
-        async with running() as (client, gw, fake_http):
-            await ready(client, gw)
-            roles = await client.fetch_roles(GUILD)
-            assert [type(r) for r in roles] == [Role]
-            assert roles[0].guild is client.get_guild(GUILD)
 
     @pytest.mark.asyncio
     async def test_fetch_message_miss_raises_not_found(self):

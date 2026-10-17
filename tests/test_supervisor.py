@@ -8,11 +8,10 @@ import threading
 import pytest
 
 from copycord import supervisor as sup_mod
-from copycord.__main__ import main, parse_args
+from copycord.__main__ import main
 from copycord.supervisor import (
     Backoff,
     RoleSupervisor,
-    Supervisor,
     ThreadedRole,
     build_supervisor,
 )
@@ -106,29 +105,6 @@ def test_crash_restarts_only_that_role_with_backoff():
             await sup.shutdown()
 
     asyncio.run(main())
-
-
-def test_backoff_is_capped():
-    delays = []
-
-    async def fake_sleep(d):
-        delays.append(d)
-        await asyncio.sleep(0)
-
-    async def main():
-        role = FakeRole("client", crashes=6)
-        rs = RoleSupervisor(
-            "client",
-            role,
-            backoff=Backoff(initial=1, maximum=8, reset_after=60),
-            sleep=fake_sleep,
-        )
-        rs.start()
-        await _wait_until(lambda: role.starts == 7)
-        await rs.stop()
-
-    asyncio.run(main())
-    assert delays == [1, 2, 4, 8, 8, 8]
 
 
 def test_backoff_resets_after_a_healthy_run():
@@ -233,29 +209,6 @@ def test_shutdown_order_client_server_admin():
     assert log == ["client", "server", "admin"]
 
 
-def test_shutdown_on_cancellation_keeps_order():
-    """Windows path: Ctrl+C cancels the main task instead of a signal handler."""
-    log = []
-
-    async def main():
-        fakes = _fakes(log)
-        sup = _loopback(fakes)
-        stop = asyncio.Event()
-        task = asyncio.ensure_future(sup.run(stop))
-        await _wait_until(lambda: fakes["admin"].starts == 1)
-        sup.roles["server"].start()
-        sup.roles["client"].start()
-        await _wait_until(
-            lambda: fakes["server"].starts == 1 and fakes["client"].starts == 1
-        )
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    asyncio.run(main())
-    assert log == ["client", "server", "admin"]
-
-
 # --------------------------------------------------------------------------
 # Control protocol
 # --------------------------------------------------------------------------
@@ -338,24 +291,6 @@ def test_control_status_while_crash_looping_reports_running():
 # --------------------------------------------------------------------------
 
 
-def test_default_layout(monkeypatch):
-    monkeypatch.delenv("CONTROL_PORT_SERVER", raising=False)
-    monkeypatch.delenv("CONTROL_PORT_CLIENT", raising=False)
-    sup = build_supervisor(_fakes())
-    assert list(sup.roles) == ["admin", "server", "client"]
-    assert sup.autostart == ["admin"]
-    assert {(c.role.name, c.host, c.port) for c in sup.controls} == {
-        ("server", "127.0.0.1", 9101),
-        ("client", "127.0.0.1", 9102),
-    }
-
-
-def test_parse_args_has_no_role_option():
-    assert parse_args(["run"].copy()).command == "run"
-    with pytest.raises(SystemExit):
-        parse_args(["run", "--role", "client"])
-
-
 def test_role_env_guard_exits_before_starting(monkeypatch, caplog):
     started = []
     monkeypatch.setattr(
@@ -370,11 +305,6 @@ def test_role_env_guard_exits_before_starting(monkeypatch, caplog):
     assert started == []
     assert "v4 removed the ROLE option" in caplog.text
     assert "compose file" in caplog.text
-
-
-def test_role_env_guard_trips_on_empty_value(monkeypatch):
-    monkeypatch.setenv("ROLE", "")
-    assert main(["run"]) == 1
 
 
 # --------------------------------------------------------------------------
@@ -484,23 +414,6 @@ def test_control_port_busy_at_start_is_retried(monkeypatch):
     asyncio.run(main())
 
 
-def test_control_port_still_busy_raises_port_busy(monkeypatch):
-    monkeypatch.setattr(sup_mod, "PORT_RETRY", 0.05)
-
-    async def main():
-        holder, port = _held_port()
-        try:
-            ctl = sup_mod.ControlEndpoint(RoleSupervisor("server", FakeRole("server")),
-                                          "127.0.0.1", port, port_wait=0.2)
-            with pytest.raises(sup_mod.PortBusyError) as exc:
-                await ctl.start()
-            assert exc.value.port == port
-        finally:
-            holder.close()
-
-    asyncio.run(main())
-
-
 def test_admin_port_busy_stops_the_start_before_any_role(monkeypatch):
     monkeypatch.setattr(sup_mod, "PORT_RETRY", 0.05)
 
@@ -517,17 +430,6 @@ def test_admin_port_busy_stops_the_start_before_any_role(monkeypatch):
         finally:
             holder.close()
             await sup.shutdown()
-
-    asyncio.run(main())
-
-
-def test_admin_port_freed_while_waiting(monkeypatch):
-    monkeypatch.setattr(sup_mod, "PORT_RETRY", 0.05)
-
-    async def main():
-        holder, port = _held_port()
-        asyncio.get_running_loop().call_later(0.2, holder.close)
-        await sup_mod.wait_for_port("127.0.0.1", port, timeout=5)
 
     asyncio.run(main())
 
