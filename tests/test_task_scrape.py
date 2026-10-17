@@ -159,6 +159,11 @@ def _steps(svc, run_id):
     return {s["key"]: s for s in svc.get(run_id).steps}
 
 
+def _found(svc, run_id):
+    """The Scrape members step's count (0 until the runner made the step)."""
+    return _steps(svc, run_id).get("scrape", {}).get("done") or 0
+
+
 def _msgs(run):
     return [ln["msg"] for ln in run.log_lines]
 
@@ -191,7 +196,7 @@ async def test_progress_then_success_saves_the_file(svc, env):
     assert run.title == "Scrape members of Zeta"
     assert run.context == {"label": "Zeta", "guild_id": GID}
 
-    await _until(lambda: _steps(svc, run.id)["scrape"]["done"] == 3)
+    await _until(lambda: _found(svc, run.id) == 3)
     await _until(lambda: _steps(svc, run.id)["scrape"]["label"] == "3 of about 10 members found")
     steps = _steps(svc, run.id)
     assert steps["tokens"]["state"] == "success"
@@ -305,7 +310,7 @@ async def test_no_valid_tokens(svc, env):
 async def test_cancel_stops_the_scraper_within_a_second(svc, env):
     env["opts"].update(endless=True, hint=None)
     run = await svc.start("scrape_members", {"guild_id": GID})
-    await _until(lambda: (_steps(svc, run.id)["scrape"]["done"] or 0) >= 5)
+    await _until(lambda: _found(svc, run.id) >= 5)
     scraper = env["built"][0]
     loop = asyncio.get_running_loop()
     t0 = loop.time()
@@ -338,7 +343,7 @@ async def test_cancel_does_not_wait_on_a_scraper_that_ignores_it(svc, env, monke
     monkeypatch.setattr(scrape, "CANCEL_WAIT", 0.3)
     env["opts"].update(endless=True, stubborn=True, hint=None)
     run = await svc.start("scrape_members", {"guild_id": GID})
-    await _until(lambda: (_steps(svc, run.id)["scrape"]["done"] or 0) >= 2)
+    await _until(lambda: _found(svc, run.id) >= 2)
     scraper = env["built"][0]
     loop = asyncio.get_running_loop()
     t0 = loop.time()
