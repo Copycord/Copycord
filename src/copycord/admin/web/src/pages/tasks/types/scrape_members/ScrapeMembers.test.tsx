@@ -319,8 +319,10 @@ describe("ScraperSettingsCard", () => {
     const save = screen.getByRole("button", { name: "Save proxies" });
     expect(save).toBeDisabled();
     const input = screen.getByRole("textbox", { name: "Proxies" });
-    fireEvent.change(input, { target: { value: "5.6.7.8:3128" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    // A plain textbox: one proxy per line, the saved list shown as its lines, blank lines dropped.
+    expect(input.tagName).toBe("TEXTAREA");
+    expect(input).toHaveValue("1.2.3.4:80");
+    fireEvent.change(input, { target: { value: "1.2.3.4:80\n\n  5.6.7.8:3128  \n" } });
     await waitFor(() => expect(save).toBeEnabled());
     fireEvent.click(save);
     await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ proxies: ["1.2.3.4:80", "5.6.7.8:3128"] }));

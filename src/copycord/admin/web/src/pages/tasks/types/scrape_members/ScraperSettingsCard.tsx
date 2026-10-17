@@ -4,7 +4,7 @@
 // Form(...) parameters expect; proxies are JSON.
 
 import { useEffect, useState } from "react";
-import { Button, ChipInput, cx, Input } from "../../../../components/ui";
+import { Button, cx, Input, Textarea } from "../../../../components/ui";
 import { useApi } from "../../../../hooks/useApi";
 import { api, errorText } from "../../../../lib/api";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
@@ -216,16 +216,26 @@ function AddToken({ onAdded }: { onAdded: () => void }) {
         onChange={(e) => setValue(e.target.value)}
       />
       <Input aria-label="Token label" placeholder="Label (optional)" className="min-w-0 flex-1" value={label} onChange={(e) => setLabel(e.target.value)} />
-      <Button type="submit" variant="primary" size="sm" loading={adding}>
+      <Button type="submit" variant="ghost" loading={adding}>
         Add token
       </Button>
     </form>
   );
 }
 
+/** The textbox's lines as a proxy list: trimmed, blank lines dropped. */
+export function proxyLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
 function Proxies() {
   const notify = useNotify();
-  const [proxies, setProxies] = useState<string[]>([]);
+  const [text, setText] = useState("");
+  const proxies = proxyLines(text);
+  const setProxies = (list: string[]) => setText(list.join("\n"));
   const [saved, setSaved] = useState<string[] | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -268,14 +278,17 @@ function Proxies() {
         <h3 className={SECTION_TITLE}>Proxies</h3>
         <span className="text-xs text-muted">{saved === null ? "" : plural(saved.length, "proxy saved", "proxies saved")}</span>
       </div>
-      <ChipInput
+      <Textarea
         aria-label="Proxies"
-        value={proxies}
-        onChange={setProxies}
-        placeholder="host:port or scheme://user:pass@host:port, Enter to add"
+        rows={8}
+        spellCheck={false}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={"One proxy per line: host:port or scheme://user:pass@host:port"}
+        className="max-h-64 overflow-y-auto font-mono text-xs leading-5 whitespace-pre"
       />
       <div className="flex justify-end">
-        <Button variant="primary" size="sm" loading={saving} disabled={!dirty} onClick={() => void onSave()}>
+        <Button variant="ghost" loading={saving} disabled={!dirty} onClick={() => void onSave()}>
           Save proxies
         </Button>
       </div>
