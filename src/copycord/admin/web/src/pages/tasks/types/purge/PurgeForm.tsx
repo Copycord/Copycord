@@ -1,4 +1,4 @@
-// Start form of Purge messages: how old (N hours, days or weeks), which mapping, Dry run, Preview
+// Start form of Purge messages: how old (N hours, days or weeks, or all records), which mapping, Dry run, Preview
 // count and a Start that confirms with the count before anything is deleted. The records are
 // Copycord's own message mappings, never Discord messages.
 
@@ -6,7 +6,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Modal } from "../../../../components/Modal";
 import { Button } from "../../../../components/ui/Button";
-import { Checkbox } from "../../../../components/ui/Checkbox";
+import { Checkbox, Radio } from "../../../../components/ui/Checkbox";
 import { useConfirm } from "../../../../components/ui/ConfirmDialog";
 import { Field, FieldSelect, Input } from "../../../../components/ui/Field";
 import { useApi } from "../../../../hooks/useApi";
@@ -46,6 +46,8 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
   const mappingsPending = open && !mappings.data && !mappings.error;
   const [olderThan, setOlderThan] = useState("30");
   const [unit, setUnit] = useState<PurgeUnit>("days");
+  // Every record whatever its age: the age fields are disabled and not sent.
+  const [allRecords, setAllRecords] = useState(false);
   const [mappingId, setMappingId] = useState(ALL);
   const [dryRun, setDryRun] = useState(false);
   const [preview, setPreview] = useState<PurgePreviewResponse | null>(null);
@@ -60,18 +62,23 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
     setErrors({});
   };
 
-  const inputs = () => ({ older_than: Number(olderThan), unit, mapping_id: mappingId || null, dry_run: dryRun });
+  const inputs = () =>
+    allRecords
+      ? { all_records: true, mapping_id: mappingId || null, dry_run: dryRun }
+      : { older_than: Number(olderThan), unit, mapping_id: mappingId || null, dry_run: dryRun };
+
+  const ageError = () => (allRecords ? undefined : olderThanError(olderThan));
 
   /** The count a run with these inputs would delete; null after an error (shown on its field). */
   const count = async (): Promise<PurgePreviewResponse | null> => {
-    const bad = olderThanError(olderThan);
+    const bad = ageError();
     if (bad) {
       setErrors({ older_than: bad });
       return null;
     }
     setPreviewing(true);
     try {
-      const qs = new URLSearchParams({ older_than: String(Number(olderThan)), unit });
+      const qs = new URLSearchParams(allRecords ? { all_records: "true" } : { older_than: String(Number(olderThan)), unit });
       if (mappingId) qs.set("mapping_id", mappingId);
       const res = await api.get<PurgePreviewResponse>(`/api/tasks/types/${type.key}/options?${qs}`);
       if (res.errors && Object.keys(res.errors).length) {
@@ -90,7 +97,7 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const bad = olderThanError(olderThan);
+    const bad = ageError();
     if (bad) {
       setErrors({ older_than: bad });
       return;
@@ -99,7 +106,7 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
       const p = preview ?? (await count());
       if (!p) return;
       const ok = await confirm({
-        title: `Delete ${recordWords(p.matched)}?`,
+        title: `Delete ${allRecords ? "all " : ""}${recordWords(p.matched)}?`,
         body: "Copycord forgets these links for good: edits and deletes of those messages are no longer mirrored, and a backfill with Ignore cloned may copy them again. Discord messages are not touched.",
         confirmLabel: "Delete",
         cancelLabel: "Keep",
@@ -139,11 +146,13 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
       <form id="purge-form" noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <p className="m-0 text-sm text-muted">{PURGE_EXPLAINER}</p>
 
-        <div className="flex flex-col gap-1.5">
-          <span id="purge-age-label" className="ml-0.5 text-xs text-muted">
-            Delete message records older than
-          </span>
-          <div role="group" aria-labelledby="purge-age-label" className="flex flex-wrap items-center gap-2">
+        <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+          <legend className="mb-1.5 ml-0.5 text-xs text-muted">Delete message records</legend>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
+              <Radio name="purge-scope" checked={!allRecords} onChange={() => changed(() => setAllRecords(false))} />
+              Older than
+            </label>
             <div className="w-28">
               <Input
                 type="number"
@@ -151,6 +160,7 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
                 step={1}
                 aria-label="Older than"
                 value={olderThan}
+                disabled={allRecords}
                 aria-invalid={errors.older_than ? true : undefined}
                 onChange={(e) => changed(() => setOlderThan(e.target.value))}
               />
@@ -159,7 +169,7 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
               <label htmlFor="purge-unit" className="sr-only">
                 Unit
               </label>
-              <FieldSelect id="purge-unit" value={unit} onChange={(v) => changed(() => setUnit(v as PurgeUnit))} options={UNIT_OPTIONS} />
+              <FieldSelect id="purge-unit" value={unit} disabled={allRecords} onChange={(v) => changed(() => setUnit(v as PurgeUnit))} options={UNIT_OPTIONS} />
             </div>
           </div>
           {errors.older_than || errors.unit ? (
@@ -167,7 +177,11 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
               {errors.older_than || errors.unit}
             </p>
           ) : null}
-        </div>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-text">
+            <Radio name="purge-scope" checked={allRecords} onChange={() => changed(() => setAllRecords(true))} />
+            All records
+          </label>
+        </fieldset>
 
         <Field label="Mapping" error={errors.mapping_id} id="purge-mapping">
           <FieldSelect
@@ -193,8 +207,8 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
         {preview ? (
           <div role="status" className="rounded-md bg-surface-deep px-3 py-2 text-sm text-text">
             <p className="m-0">
-              <span className="font-semibold tabular-nums">{recordWords(preview.matched)}</span> older than{" "}
-              {formatCount(Number(olderThan))} {unit} in {scopeName}.
+              <span className="font-semibold tabular-nums">{recordWords(preview.matched)}</span>
+              {allRecords ? "" : ` older than ${formatCount(Number(olderThan))} ${unit}`} in {scopeName}.
             </p>
             {preview.mappings.length > 1 ? (
               <ul className="m-0 mt-1 list-none p-0 text-xs text-muted">

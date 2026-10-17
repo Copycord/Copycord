@@ -160,7 +160,9 @@ export function ageWords(n: unknown, unit: unknown): string {
 
 function describePurge(inputs: Record<string, unknown>, run?: InputsRun): InputRow[] {
   return [
-    { label: "Older than", value: ageWords(inputs.older_than, inputs.unit) },
+    inputs.all_records
+      ? { label: "Records", value: "All records" }
+      : { label: "Older than", value: ageWords(inputs.older_than, inputs.unit) },
     { label: "Mapping", value: inputs.mapping_id ? run?.context?.label || formatValue(inputs.mapping_id) : "All mappings" },
     { label: "Dry run", value: inputs.dry_run ? "Yes, nothing deleted" : "No" },
   ];
