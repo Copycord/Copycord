@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import List, Mapping, NamedTuple, Optional, Sequence, Tuple
 from xml.sax.saxutils import escape, unescape
 
-SERVICE_NAME = "copycord"
 UNIT_NAME = "copycord.service"
 LAUNCHD_LABEL = "com.copycord"
 TASK_NAME = "Copycord"

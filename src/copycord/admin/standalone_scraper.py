@@ -110,12 +110,10 @@ class QueryPlanner:
         alphabet: str,
         limit: int = 100,
         max_repeat_run: int = 4,
-        allow_char: Optional[Callable[[str], bool]] = None,
     ) -> None:
         self.limit = limit
         self.alphabet_base = list(dict.fromkeys(alphabet))
         self.max_repeat_run = max_repeat_run
-        self.allow_char = allow_char
 
         self.visited: set[str] = set()
         self.dead: set[str] = set()
@@ -183,9 +181,6 @@ class QueryPlanner:
     def set_session_slots(self, n: int) -> None:
         self._session_slots = max(1, min(20, int(n or 1)))
 
-    def note_digit_lead(self) -> None:
-        self._saw_digit_lead = True
-
     def _sorted_alphabet(self) -> list[str]:
         base = self.alphabet_base
         return sorted(base, key=lambda c: (-self.char_freq.get(c, 1), base.index(c)))
@@ -233,26 +228,6 @@ class QueryPlanner:
         for ch in top_level:
             self._push_internal(ch)
 
-    def add_dynamic_lead(self, lead: str) -> None:
-        lead = (lead or "").casefold()
-        if not lead:
-            return
-        self._push_internal(lead)
-
-    def mark_observed_username(self, username: str) -> None:
-        if not username:
-            return
-        u = username.casefold()
-        for ch in u[:3]:
-            if ch not in self.char_freq:
-                self.char_freq[ch] = 1
-            self.char_freq[ch] += 1
-        for i in range(len(u) - 1):
-            a, b = u[i], u[i + 1]
-            self.bi_freq[(a, b)] = self.bi_freq.get((a, b), 0) + 1
-        if u and u[0].isdigit():
-            self._saw_digit_lead = True
-
     def mark_observed_usernames_bulk(self, usernames: list[str]) -> None:
         """Batch-update frequency tables; the caller holds the lock."""
         for username in usernames:
@@ -280,8 +255,6 @@ class QueryPlanner:
 
     def _class_gate(self, prefix: str, ch: str) -> bool:
         L = len(prefix)
-        if self.allow_char and not self.allow_char(ch):
-            return False
         is_letter = ch.isalpha()
         is_digit = ch.isdigit()
         is_punct = ch in "._-"
@@ -443,24 +416,10 @@ class SharedPlanner:
         async with self._lock:
             self.p.seed_top_level(s)
 
-    async def add_dynamic_lead(self, lead: str):
-        async with self._lock:
-            self.p.add_dynamic_lead(lead)
-            for ch in self.p._sorted_alphabet()[:8]:
-                self.p.push(lead + ch)
-
-    async def mark_observed_username(self, name: str):
-        async with self._lock:
-            self.p.mark_observed_username(name)
-
     async def mark_observed_usernames_bulk(self, usernames: list[str]):
         """Batch-update frequency tables under a single lock acquisition."""
         async with self._lock:
             self.p.mark_observed_usernames_bulk(usernames)
-
-    async def note_digit_lead(self):
-        async with self._lock:
-            self.p.note_digit_lead()
 
     async def on_chunk_result(self, prefix: str, size: int):
         async with self._lock:
@@ -496,10 +455,6 @@ class SharedPlanner:
     async def requeue(self, prefix: str):
         async with self._lock:
             self.p.requeue(prefix)
-
-    async def push(self, prefix: str):
-        async with self._lock:
-            self.p.push(prefix)
 
     async def has_work(self) -> bool:
         async with self._lock:
@@ -790,40 +745,6 @@ class StandaloneScraper:
             self._log(f"⚠️ Token validation error", "error")
             self._debug(f"Token validation error: {e}")
             return False, None, None
-
-    async def _check_guild_access(self, token: str, guild_id: int) -> bool:
-        """Paginate /users/@me/guilds to check membership (handles 200+ guilds and rate limits)."""
-        wanted = str(guild_id)
-        after = "0"
-        try:
-            while True:
-                url = f"{self.DISCORD_API}/users/@me/guilds?limit=200&after={after}"
-                resp = await self._get(token, url, 8, GUILD_LIST)
-                if resp.status_code == 429:
-                    try:
-                        retry_after = float(resp.json().get("retry_after", 2))
-                    except Exception:
-                        retry_after = 2.0
-                    self._debug(
-                        f"Rate limited on guild access check, retrying in {retry_after:.1f}s",
-                        "warn",
-                    )
-                    await asyncio.sleep(retry_after + 0.25)
-                    continue
-                if resp.status_code != 200:
-                    return False
-                guilds = resp.json()
-                if not guilds:
-                    return False
-                for g in guilds:
-                    if str(g.get("id")) == wanted:
-                        return True
-                after = str(guilds[-1].get("id", "0"))
-                if len(guilds) < 200:
-                    return False
-        except Exception as e:
-            self._debug(f"Guild access check error: {e}", "error")
-            return False
 
     async def _get_guild_info(
         self, token: str, guild_id: int
@@ -1537,10 +1458,8 @@ class StandaloneScraper:
             letters = "abcdefghijklmnopqrstuvwxyz"
             small_guild = member_count is not None and member_count <= 150
 
-            if small_guild:
-                await planner.seed_top_level(alphabet)
-            else:
-                await planner.seed_top_level(alphabet)
+            await planner.seed_top_level(alphabet)
+            if not small_guild:
                 letter_priority = list("etaoinrshlcmdupfgwybvkxjqz")
                 n_sessions = len(valid_tokens) * self.config.sessions_per_token
 
@@ -1785,6 +1704,3 @@ class StandaloneScraper:
         self._log("🛑 Cancelling scrape...", "info")
         self._stop_event.set()
 
-    @property
-    def is_running(self) -> bool:
-        return self._running

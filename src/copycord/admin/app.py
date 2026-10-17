@@ -86,8 +86,6 @@ from copycord.common.selfbot_headers import (
     build_headers as _selfbot_headers,
     refresh_build_info as _refresh_build_info,
 )
-from copycord.admin.web_config import router as links_router
-from copycord.admin.web_config import startup_links, shutdown_links
 import copycord.admin.tasks  # noqa: F401  task types register at import
 from copycord.admin import scraper_tokens
 from copycord.admin.tasks import backfill as task_backfill
@@ -273,14 +271,6 @@ BOOL_KEYS = [
     "SYNC_GUILD_DESCRIPTION",
 ]
 
-MSG_FEATURE_KEYS = [
-    "TAG_REPLY_MSG",
-    "ANONYMIZE_USERS",
-    "DISABLE_EVERYONE_MENTIONS",
-    "DISABLE_ROLE_MENTIONS",
-    "APPEND_TIMESTAMP",
-    "APPEND_AUTHOR",
-]
 DEFAULTS: Dict[str, Union[bool, str]] = {
     "DELETE_CHANNELS": True,
     "DELETE_THREADS": True,
@@ -416,7 +406,6 @@ async def app_redirect(request: Request, path: str = ""):
     return _root_redirect(request, path)
 
 
-app.include_router(links_router)
 app.include_router(task_routes.router)
 app.include_router(messages_api.router)
 messages_api.configure(
@@ -1343,95 +1332,6 @@ async def admin_bus(ws: WebSocket):
         bus_sockets.discard(ws)
 
 
-@app.get("/bus/stream")
-async def bus_stream(request: Request):
-
-    client = request.client
-    client_addr = f"{getattr(client, 'host', '?')}:{getattr(client, 'port', '?')}"
-    conn_id = uuid.uuid4().hex[:8]
-
-    local_log = get_logger("copycord.sse", conn_id=conn_id)
-    route_var.set("/bus/stream")
-    client_var.set(client_addr)
-
-    local_log.debug("Client connected")
-
-    async def gen():
-        q = hub.subscribe()
-        events_sent = 0
-        heartbeats_sent = 0
-
-        def _summarize(msg: str) -> str:
-            try:
-                obj = json.loads(msg)
-                kind = obj.get("kind") or obj.get("type") or "?"
-                role = obj.get("role") or obj.get("source") or "-"
-                return f"kind={kind} role={role} len={len(msg)}"
-            except Exception:
-                return f"kind=? (non-json) len={len(msg)}"
-
-        try:
-
-            initial = 0
-            for role, payload in hub.status.items():
-                if payload:
-                    data = json.dumps(
-                        {"kind": "status", "role": role, "payload": payload}
-                    )
-                    yield f"data: {data}\n\n"
-                    initial += 1
-                    events_sent += 1
-            local_log.debug("Initial status flush | entries=%d", initial)
-
-            while not shutdown_event.is_set():
-                if await request.is_disconnected():
-                    local_log.info(
-                        "Client disconnected",
-                        extra={
-                            "events_sent": events_sent,
-                            "heartbeats": heartbeats_sent,
-                        },
-                    )
-                    return
-                try:
-                    msg = await asyncio.wait_for(q.get(), timeout=1.0)
-                    local_log.debug(
-                        "Yield event | %s | qsize=%d", _summarize(msg), q.qsize()
-                    )
-                    yield f"data: {msg}\n\n"
-                    events_sent += 1
-                except asyncio.TimeoutError:
-                    yield ":ka\n\n"
-                    heartbeats_sent += 1
-                    if heartbeats_sent % 60 == 0:
-                        local_log.debug(
-                            "Heartbeat checkpoint",
-                            extra={"heartbeats": heartbeats_sent},
-                        )
-        except asyncio.CancelledError:
-            local_log.debug(
-                "Closed by client",
-                extra={"events_sent": events_sent, "heartbeats": heartbeats_sent},
-            )
-            return
-        finally:
-            hub.unsubscribe(q)
-            local_log.info(
-                "Closed",
-                extra={"events_sent": events_sent, "heartbeats": heartbeats_sent},
-            )
-
-    return StreamingResponse(
-        gen(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
-    )
-
-
 @app.websocket("/ws/ui")
 async def ws_ui(ws: WebSocket):
     if not await authorize_websocket(ws, browser=True):
@@ -2041,11 +1941,6 @@ async def logs(which: str, tail: int = 20000):
     return PlainTextResponse("No logs yet.", status_code=404)
 
 
-@_on_startup
-async def _startup_links():
-    await startup_links(app)
-
-
 async def _publish_task_event(event: dict) -> None:
     """task.run.updated on /ws/out; BusHub._normalize makes it
     {kind: "task.run.updated", role: "unknown", payload: {type, run, steps}}."""
@@ -2130,11 +2025,6 @@ async def _migrate_legacy_single_mapping():
         LOGGER.exception(
             "[migrate:v3] Legacy single-guild → multi-guild bootstrap failed"
         )
-
-
-@_on_shutdown
-async def _shutdown():
-    await shutdown_links(app)
 
 
 @_on_startup
