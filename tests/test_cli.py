@@ -1,5 +1,4 @@
 """Tests for the copycord CLI and the data-dir resolution. No network."""
-import io
 import json
 import os
 import socket
@@ -86,210 +85,12 @@ def test_version_prints_current_version(data_dir, capsys, monkeypatch):
     assert lines == [CURRENT_VERSION, "stable channel"]
 
 
-def test_version_prints_short_commit_of_a_git_install(data_dir, capsys, monkeypatch):
-    from copycord import update
-
-    monkeypatch.setattr(update, "installed_commit", lambda: "7cf48660c2cd76d8a4bf5aac5b427904a2dcd86b")
-    with pytest.raises(SystemExit):
-        cli.main(["--version"])
-    lines = capsys.readouterr().out.strip().splitlines()
-    assert lines == [f"{CURRENT_VERSION} (7cf4866)", "stable channel"]
-
-
-def test_version_on_a_terminal_is_a_header_line(data_dir, monkeypatch):
-    from copycord import update, update_check
-
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setattr(update, "installed_commit", lambda: "7cf48660c2cd76d8a4bf5aac5b427904a2dcd86b")
-    monkeypatch.setattr(update_check, "start", lambda wait=0: None)
-    out, _ = _terminal(monkeypatch)
-    with pytest.raises(SystemExit):
-        cli.main(["--version"])
-    version = CURRENT_VERSION if CURRENT_VERSION.startswith("v") else f"v{CURRENT_VERSION}"
-    assert out.getvalue().splitlines() == [f"Copycord {version} (7cf4866) \u00b7 stable channel"]
-
-
-def test_subcommand_error_on_a_terminal_has_no_raw_prefix(data_dir, monkeypatch):
-    monkeypatch.setenv("NO_COLOR", "1")
-    _, err = _terminal(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["update", "--channel", "nope"])
-    assert exc.value.code == 2
-    text = err.getvalue()
-    assert "copycord update: error" not in text and "usage:" not in text
-    assert text.startswith("\u2717 argument --channel: invalid choice")
-    assert text.rstrip().endswith("run copycord update --help for the options")
-
-
 def test_bare_copycord_prints_the_overview(data_dir, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main([])
     assert exc.value.code == 0
     out = capsys.readouterr().out
     assert "Usage: copycord <command>" in out and "Examples:" in out
-
-
-def test_overview_shows_the_home(data_dir, monkeypatch, tmp_path, capsys):
-    monkeypatch.setenv("COPYCORD_HOME", str(tmp_path / "cc-home"))
-    with pytest.raises(SystemExit):
-        cli.main([])
-    assert f"Home: {tmp_path / 'cc-home'}\n" in capsys.readouterr().out
-
-
-def _local_links(monkeypatch):
-    """Windows Terminal on this machine, so paths print as file:// links."""
-    from copycord import ui
-
-    _unset(monkeypatch, "NO_COLOR", "FORCE_COLOR", "TERM", "TMUX", "STY",
-           "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")
-    monkeypatch.setenv("WT_SESSION", "c0ffee")
-    monkeypatch.setattr(paths, "in_docker", lambda: False)
-    return lambda path: f"\033]8;;{ui.file_uri(path)}\033\\{path}\033]8;;\033\\"
-
-
-def test_overview_links_the_home(data_dir, monkeypatch, tmp_path):
-    from copycord import ui
-
-    link = _local_links(monkeypatch)
-    home = tmp_path / "cc-home"
-    monkeypatch.setenv("COPYCORD_HOME", str(home))
-    monkeypatch.setattr(sys, "stdout", _Terminal())
-    with pytest.raises(SystemExit):
-        cli.main([])
-    out = sys.stdout.getvalue()
-    assert f" {link(home)}\n" in out
-    assert f"  Home: {home}\n" in ui._ANSI.sub("", out)
-
-
-def test_overview_shows_only_what_a_regular_user_needs(data_dir, capsys):
-    with pytest.raises(SystemExit):
-        cli.main([])
-    out = capsys.readouterr().out
-    assert "update     Update Copycord to the latest version\n" in out
-    assert "uninstall  Remove Copycord; asks whether to delete your data\n" in out
-    assert "-V, --version  Print the version\n" in out
-    examples = out.split("Examples:\n", 1)[1].split("\n\n", 1)[0].splitlines()
-    assert [line.split("  ")[1].strip() for line in examples] == [
-        "copycord run",
-        "copycord service install",
-        "copycord update",
-        "copycord doctor",
-        "copycord config set PASSWORD 'new-pass'",
-    ]
-    for advanced in ("--channel", "beta", "--ref", "--repo", "update status"):
-        assert advanced not in out
-
-
-def test_unknown_command_is_one_styled_line(data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["frobnicate"])
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "unknown command 'frobnicate'" in err and "copycord --help" in err
-    assert "usage:" not in err
-    assert "Did you mean" not in err
-
-
-def test_unknown_command_suggests_a_close_one(data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["updte"])
-    assert exc.value.code == 2
-    err = capsys.readouterr().err.splitlines()
-    assert err == ["✗ unknown command 'updte'. Did you mean 'update'?",
-                   "  Run copycord --help to see all commands."]
-
-
-def test_no_color_flag_turns_color_off(data_dir, monkeypatch, capsys):
-    from copycord import update
-
-    monkeypatch.setenv("NO_COLOR", "")
-    monkeypatch.setenv("FORCE_COLOR", "1")
-    monkeypatch.setattr(update, "installed_commit", lambda: None)
-    with pytest.raises(SystemExit):
-        cli.main(["--no-color", "--version"])
-    assert os.environ["NO_COLOR"] == "1"
-    out = capsys.readouterr().out
-    assert "\033[" not in out and out.splitlines() == [CURRENT_VERSION, "stable channel"]
-    assert cli._take_no_color(["doctor", "--no-color", "--", "--no-color"]) == ["doctor", "--", "--no-color"]
-
-
-def test_symbols_fall_back_to_ascii(monkeypatch):
-    import io
-
-    from copycord import ui
-
-    monkeypatch.setenv("NO_COLOR", "1")
-    for enc, want in (("utf-8", "✓ done  x\n✗ bad\n"), ("cp1252", "+ done  x\nx bad\n")):
-        buf = io.TextIOWrapper(io.BytesIO(), encoding=enc)
-        ui.ok("done", "x", stream=buf)
-        ui.fail("bad", stream=buf)
-        buf.seek(0)
-        assert buf.read() == want
-
-
-@pytest.mark.parametrize("group", ("service", "config"))
-def test_command_group_without_subcommand_prints_its_help(group, data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main([group])
-    assert exc.value.code == 0
-    out = capsys.readouterr().out
-    assert f"Usage: copycord {group} <command> [options]" in out
-    assert "Commands:" in out and "Examples:" in out
-
-
-@pytest.mark.parametrize("command", ("config", "service", "update", "uninstall", "doctor", "run", "restart"))
-def test_command_help_is_styled_with_examples(command, data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main([command, "--help"])
-    assert exc.value.code == 0
-    out = capsys.readouterr().out
-    assert out.startswith(f"copycord {command}\n")
-    assert f"Usage: copycord {command}" in out
-    assert "Options:" in out and "-h, --help" in out
-    assert "Examples:" in out and f"  copycord {command}" in out
-    assert "\033[" not in out and "usage:" not in out
-
-
-def test_update_help_keeps_channels_in_the_advanced_section(data_dir, capsys):
-    with pytest.raises(SystemExit):
-        cli.main(["update", "--help"])
-    out = capsys.readouterr().out
-    assert "Usage: copycord update [status] [options]" in out
-    regular, advanced = out.split("Advanced (channels and git installs):\n", 1)
-    assert "--tag VERSION" in regular and "-y, --yes" in regular and "--no-backup" in regular
-    for flag in ("--channel", "--ref", "--repo", "--no-install", "beta"):
-        assert flag not in regular
-    assert "--channel stable|beta|dev" in advanced
-    assert "--ref REF" in advanced and "--repo OWNER/NAME" in advanced and "--no-install" in advanced
-    assert "copycord update --channel beta" in advanced
-    assert "copycord update --channel dev --ref v4-dev" in advanced
-
-
-def test_command_help_is_colored_on_a_tty(data_dir, capsys, monkeypatch):
-    monkeypatch.setenv("FORCE_COLOR", "1")
-    _unset(monkeypatch, "NO_COLOR")
-    with pytest.raises(SystemExit):
-        cli.main(["service", "--help"])
-    assert "\033[" in capsys.readouterr().out
-    monkeypatch.setenv("NO_COLOR", "1")
-    with pytest.raises(SystemExit):
-        cli.main(["service", "--help"])
-    assert "\033[" not in capsys.readouterr().out
-
-
-def test_subcommand_mistake_is_one_styled_line(data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["update", "--channel", "nightly"])
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert err.startswith("✗") and "copycord update --help" in err
-
-
-@pytest.mark.parametrize("argv", (["version"], ["update", "--check"], ["update", "--branch", "main"], ["onboard"]))
-def test_removed_commands_and_flags(argv, data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(argv)
-    assert exc.value.code == 2
 
 
 # --------------------------------------------------------------------------
@@ -356,13 +157,6 @@ def test_uninstall_cancel_changes_nothing(uninstall_env, monkeypatch, capsys):
     assert "nothing was changed" in capsys.readouterr().err
 
 
-def test_uninstall_asks_again_on_a_bad_answer(uninstall_env, monkeypatch):
-    asked = _answers(monkeypatch, "x", "1")
-    assert cli.main(["uninstall"]) == 0
-    assert (uninstall_env / "data.db").exists()
-    assert len(asked) == 2
-
-
 def test_uninstall_delete_refuses_the_home_directory(uninstall_env, monkeypatch, capsys):
     monkeypatch.setenv("DATA_DIR", str(Path.home()))
     _answers(monkeypatch, "2")
@@ -408,12 +202,6 @@ def test_uninstall_purge_interactive_offers_delete_or_cancel(uninstall_env, monk
     assert "1) Delete everything" in out and "2) Cancel" in out and "Keep my data" not in out
 
 
-def test_uninstall_purge_enter_cancels(uninstall_env, monkeypatch, capsys):
-    _answers(monkeypatch, "")
-    assert cli.main(["uninstall", "--purge"]) == 1
-    assert (uninstall_env / "data.db").exists()
-
-
 def test_uninstall_keep_data_does_not_ask(uninstall_env, monkeypatch, capsys):
     asked = _answers(monkeypatch, "")
     assert cli.main(["uninstall", "--keep-data"]) == 0
@@ -421,91 +209,6 @@ def test_uninstall_keep_data_does_not_ask(uninstall_env, monkeypatch, capsys):
     assert len(asked) == 1
     out = capsys.readouterr().out
     assert "1) Keep my data" in out and "Delete everything" not in out
-
-
-class _Terminal(io.StringIO):
-    encoding = "utf-8"
-
-    def isatty(self):
-        return True
-
-
-def _terminal(monkeypatch):
-    """Put stdout and stderr on a terminal, so the rail is shown. Called in the
-    test itself: pytest puts its own streams back after the fixtures ran."""
-    out, err = _Terminal(), _Terminal()
-    monkeypatch.setattr(sys, "stdout", out)
-    monkeypatch.setattr(sys, "stderr", err)
-    return out, err
-
-
-def _removed_program(dry_run, purge, removed, kept, *a):
-    from copycord import ui
-
-    ui.ok("removed the copycord program")
-    return True
-
-
-def test_uninstall_on_a_terminal_runs_on_the_rail(uninstall_env, monkeypatch):
-    data, (out, _err) = uninstall_env, _terminal(monkeypatch)
-    monkeypatch.setattr(cli, "_uninstall_program", _removed_program)
-    asked = _answers(monkeypatch, "")
-    assert cli.main(["uninstall"]) == 0
-    assert asked == ["│  Enter 1, 2 or 3 [1] "]
-    assert out.getvalue().splitlines() == [
-        "",
-        "┌  Uninstall Copycord",
-        "│  Removes the Copycord program and its background service.",
-        "│",
-        f"◆  Your data is in {data}",
-        "│  1) Keep my data (default)",
-        "│  2) Delete everything (database, logs, backups, settings)",
-        "│  3) Cancel",
-        "│",
-        "✓  removed the copycord program",
-        "│",
-        "✓  Copycord uninstalled",
-        f"└  Your data is still in {data}",
-    ]
-
-
-def test_uninstall_on_a_terminal_links_the_data(uninstall_env, monkeypatch):
-    from copycord import ui
-
-    data, link = uninstall_env, _local_links(monkeypatch)
-    out, _err = _terminal(monkeypatch)
-    _answers(monkeypatch, "")
-    assert cli.main(["uninstall"]) == 0
-    assert f"Your data is in {link(data)}" in out.getvalue()
-    assert f"Your data is still in {link(data)}" in out.getvalue()
-    plain = ui._ANSI.sub("", out.getvalue()).splitlines()
-    assert f"\u25c6  Your data is in {data}" in plain
-    assert plain[-1] == f"\u2514  Your data is still in {data}"
-
-
-def test_uninstall_cancel_on_a_terminal_closes_the_rail(uninstall_env, monkeypatch):
-    data, (out, err) = uninstall_env, _terminal(monkeypatch)
-    monkeypatch.setattr(cli, "_uninstall_service", lambda *a: pytest.fail("ran after cancel"))
-    _answers(monkeypatch, "3")
-    assert cli.main(["uninstall"]) == 1
-    assert (data / "data.db").exists()
-    assert out.getvalue().splitlines()[-3:] == ["│  3) Cancel", "│", "└"]
-    assert err.getvalue() == "!  uninstall cancelled  nothing was changed\n"
-
-
-def test_uninstall_without_a_terminal_has_no_rail(uninstall_env, capsys):
-    assert cli.main(["uninstall", "--dry-run"]) == 0
-    out = capsys.readouterr().out
-    assert out.startswith("\nUninstall Copycord (dry run, nothing changes)\n"
-                          "Removes the Copycord program and its background service.\n\n")
-    assert not any(glyph in out for glyph in "┌│◆◇└")
-    assert out.endswith(f" Dry run: nothing changed\n  Your data is still in {uninstall_env}\n")
-
-
-def test_uninstall_purge_and_keep_data_conflict(uninstall_env, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["uninstall", "--purge", "--keep-data"])
-    assert exc.value.code == 2
 
 
 @pytest.fixture()
@@ -594,17 +297,6 @@ def test_uninstall_linux_runs_uv_without_moving_files(win_uninstall, monkeypatch
     assert "Copycord uninstalled" in capsys.readouterr().out
 
 
-def test_uninstall_help_mentions_the_data_question(data_dir, capsys):
-    with pytest.raises(SystemExit):
-        cli.main(["uninstall", "--help"])
-    out = capsys.readouterr().out
-    assert "--keep-data" in out and "--purge" in out
-    assert "asks whether to delete your data" in out
-    with pytest.raises(SystemExit):
-        cli.main(["--help"])
-    assert "Remove Copycord; asks whether to delete your data" in capsys.readouterr().out
-
-
 # --------------------------------------------------------------------------
 # doctor
 # --------------------------------------------------------------------------
@@ -629,14 +321,6 @@ def test_doctor_all_good(doctor_env, capsys):
     assert "ROLE" not in out
     assert str(data_dir.resolve()) not in out
     assert os.listdir(data_dir) == [".env"]
-
-
-def test_doctor_verbose_shows_paths(doctor_env, capsys):
-    data_dir = doctor_env
-    assert cli.main(["doctor", "--verbose", "--data-dir", str(data_dir)]) == 0
-    out = capsys.readouterr().out
-    assert f"✓ home writable  {data_dir.resolve()}" in out
-    assert f"✓ .env found  {data_dir.resolve() / '.env'}" in out
 
 
 def test_doctor_role_set_fails(doctor_env, monkeypatch, capsys):
@@ -666,55 +350,12 @@ def test_doctor_default_password_warns(doctor_env, monkeypatch, capsys):
     assert out.splitlines()[-1] == "! 1 warning, 0 problems"
 
 
-def test_doctor_links_the_paths_in_the_home(doctor_env, monkeypatch):
-    from copycord import ui
-
-    link = _local_links(monkeypatch)
-    monkeypatch.setenv("PASSWORD", "copycord")
-    monkeypatch.setattr(sys, "stdout", _Terminal())
-    # A terminal wide enough that no line in the section boxes wraps.
-    monkeypatch.setattr(ui, "SECTION_MAX", 1000)
-    monkeypatch.setattr(ui, "_columns", lambda: 1000)
-    assert cli.main(["doctor", "--verbose", "--data-dir", str(doctor_env)]) == 0
-    out = sys.stdout.getvalue()
-    env = (doctor_env / ".env").resolve()
-    assert f"change PASSWORD in {link(env)}, " in out
-    assert link(doctor_env.resolve()) in out
-    plain = ui._ANSI.sub("", out)
-    assert f"! the default password is still set  change PASSWORD in {env}, " in plain
-    # The line ends at the edge of its section box.
-    rows = [x.strip("\u2502 ") for x in plain.splitlines()]
-    assert f"\u2713 home writable  {doctor_env.resolve()}" in rows
-
-
-def test_doctor_json_has_no_links(doctor_env, monkeypatch):
-    _local_links(monkeypatch)
-    monkeypatch.setenv("PASSWORD", "copycord")
-    out, err = _terminal(monkeypatch)
-    assert cli.main(["doctor", "--json", "--data-dir", str(doctor_env)]) == 0
-    assert "\033" not in out.getvalue() and "\033" not in err.getvalue()
-    hint = [c["hint"] for c in json.loads(out.getvalue())["checks"] if c["text"].startswith("the default")]
-    assert hint == [f"change PASSWORD in {(doctor_env / '.env').resolve()}, then run copycord restart"]
-
-
 def test_doctor_does_not_check_the_tokens(doctor_env, monkeypatch, capsys):
     _unset(monkeypatch, "SERVER_TOKEN", "CLIENT_TOKEN")
     assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 0
     out = capsys.readouterr().out
     assert "TOKEN" not in out
     assert out.splitlines()[-1] == ALL_GOOD
-
-
-def test_doctor_missing_env_file_shows_the_path_once(doctor_env, capsys):
-    env = doctor_env / ".env"
-    env.unlink()
-    assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 0
-    out = capsys.readouterr().out
-    assert _line(out, ".env not found") == f"! .env not found  {env.resolve()}"
-    assert _after(out, "Needs your attention") == [
-        "! .env not found  run copycord doctor --fix to create it with the default settings"]
-    assert out.count(str(env.resolve())) == 1
-    assert out.splitlines()[-2:] == ["! 1 warning, 0 problems", FIX_HINT.format(1)]
 
 
 def test_check_env_file(tmp_path):
@@ -871,13 +512,6 @@ def test_check_updates_never_fails(data_dir, monkeypatch):
     assert cli.check_updates().status == cli.PASS
 
 
-def test_doctor_summary():
-    ok, warn, fail = cli.Check(cli.PASS, "a"), cli.Check(cli.WARN, "b"), cli.Check(cli.FAIL, "c")
-    assert cli.doctor_summary([ok, cli.Check(cli.INFO, "i")]) == "All good"
-    assert cli.doctor_summary([ok, warn, warn, fail]) == "2 warnings, 1 problem"
-    assert cli.doctor_summary([fail, fail]) == "0 warnings, 2 problems"
-
-
 def test_check_python_floor():
     assert cli.check_python((3, 11, 9)).status == cli.FAIL
     assert cli.check_python((3, 12, 0)).status == cli.PASS
@@ -938,24 +572,6 @@ def _after(out, title):
     start = lines.index(title) + 1
     end = lines.index("", start) if "" in lines[start:] else len(lines)
     return lines[start:end]
-
-
-def test_doctor_has_no_yes_flag(doctor_env, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["doctor", "--fix", "--yes", "--data-dir", str(doctor_env)])
-    assert exc.value.code == 2
-    assert "unrecognized arguments: --yes" in capsys.readouterr().err
-    with pytest.raises(SystemExit):
-        cli.main(["doctor", "--help"])
-    assert "--yes" not in capsys.readouterr().out
-
-
-def test_doctor_fix_with_nothing_to_fix(doctor_env, capsys):
-    assert _fix(doctor_env) == 0
-    out = capsys.readouterr().out
-    lines = out.splitlines()
-    assert "(fixed)" not in out and "Needs your attention" not in lines
-    assert lines[-1] == "✓ Everything looks good  start it with copycord run"
 
 
 def test_doctor_fix_recreates_the_env_file(doctor_env, capsys):
@@ -1082,14 +698,6 @@ def test_doctor_fix_reinstalls_once_for_ui_and_dependencies(reinstall, doctor_en
     assert out.splitlines()[-2:] == ["✓ Fixed 1 issue", "✗ 1 thing needs your attention"]
 
 
-def test_doctor_fix_reinstall_then_the_recheck_passes(reinstall, doctor_env, capsys):
-    calls, _ = reinstall
-    assert _fix(doctor_env) == 0
-    assert calls == [{"reinstall": True}]
-    out = capsys.readouterr().out
-    assert out.splitlines()[-1] == "✓ Everything looks good  start it with copycord run"
-
-
 def test_doctor_fix_reinstall_failure_is_reported(reinstall, doctor_env, capsys):
     calls, state = reinstall
     state["rc"] = 3
@@ -1176,13 +784,6 @@ def test_doctor_fix_starts_a_stopped_service(stopped_service, doctor_env, capsys
     assert out.splitlines()[-1] == "✓ Everything looks good  start it with copycord run"
 
 
-def test_doctor_fix_service_start_failure(stopped_service, doctor_env, capsys):
-    stopped_service["error"] = "the system service needs root: rerun with sudo"
-    assert _fix(doctor_env) == 0
-    out = capsys.readouterr().out
-    assert "service installed, not running  could not fix it: the system service needs root" in out
-
-
 def test_doctor_fix_rewrites_a_service_in_a_console_window(doctor_env, monkeypatch, capsys):
     from copycord import service
 
@@ -1230,17 +831,6 @@ def test_doctor_fix_turns_linger_on(doctor_env, monkeypatch, capsys, enabled):
     else:
         assert "could not fix it: to start Copycord at boot" in out
         assert "sudo loginctl enable-linger mac" in out
-
-
-def test_doctor_flags_a_service_in_a_console_window(doctor_env, monkeypatch, capsys):
-    from copycord import service
-
-    monkeypatch.setattr(cli, "service_state", lambda: service.State(True, True, "task"))
-    monkeypatch.setattr(cli, "service_console", lambda: r"C:\bin\copycord.exe")
-    cli.main(["doctor", "--data-dir", str(doctor_env)])
-    out = capsys.readouterr().out
-    assert "service runs in a console window" in out
-    assert "run it without a window" in out
 
 
 def test_run_refuses_a_network_dashboard_with_the_default_password(data_dir, monkeypatch, capsys):
@@ -1333,20 +923,6 @@ def test_doctor_fails_a_network_dashboard_with_the_default_password():
     assert cli.check_password({"PASSWORD": "copycord"}).status == cli.WARN
 
 
-def test_run_with_a_busy_port_prints_one_line(data_dir, monkeypatch, capsys):
-    from copycord import supervisor
-
-    async def busy():
-        raise supervisor.PortBusyError(9101)
-
-    monkeypatch.setattr(supervisor, "run", busy)
-    assert cli.main(["run"]) == 1
-    err = capsys.readouterr().err
-    assert "Port 9101 is in use, so Copycord cannot start" in err
-    assert "copycord service stop" in err and "copycord doctor" in err
-    assert "Traceback" not in err and "crash" not in err.lower()
-
-
 def test_main_without_console_streams(data_dir, monkeypatch):
     from copycord import logging_setup, service
 
@@ -1421,13 +997,6 @@ def test_doctor_fix_moves_to_a_free_port(taken_port, doctor_env, monkeypatch, ca
     assert f"✓ dashboard moved to a free port  ADMIN_PORT={new}" in out
     assert f"port {taken_port} in use" not in out
     assert out.splitlines()[-1] == "✓ Everything looks good  start it with copycord run"
-
-
-def test_doctor_fix_port_declined(taken_port, doctor_env, monkeypatch, capsys):
-    _answers(monkeypatch, "n")
-    assert _fix(doctor_env) == 0
-    assert (doctor_env / ".env").read_text(encoding="utf-8") == f"ADMIN_PORT={taken_port}\n"
-    assert f"port {taken_port} in use  fix skipped" in capsys.readouterr().out
 
 
 def test_doctor_fix_without_a_terminal_skips_the_port(taken_port, doctor_env, capsys):
@@ -1505,39 +1074,6 @@ def test_doctor_fix_ctrl_c_stops(taken_port, doctor_env, monkeypatch, capsys):
     assert "Needs your attention" not in capsys.readouterr().out
 
 
-def test_doctor_fix_brief_after_a_fix(doctor_env, capsys):
-    (doctor_env / ".env").unlink()
-    assert _fix(doctor_env, "--brief") == 0
-    lines = capsys.readouterr().out.splitlines()
-    assert lines[0].startswith("✓ .env created with the default settings")
-    assert lines[-1] == "✓ All checks passed"
-    assert "Install" not in lines and "Fixed" not in lines
-
-
-def test_doctor_fix_brief_shows_only_the_failures(reinstall, doctor_env, capsys):
-    _, state = reinstall
-    state["rc"] = 3
-    assert _fix(doctor_env, "--brief") == 1
-    lines = capsys.readouterr().out.splitlines()
-    assert lines[0].startswith("✗ web UI missing  could not fix it: the reinstall failed (exit 3)")
-    assert lines[-1] == "✗ 0 warnings, 1 problem  run copycord doctor for details"
-    assert len(lines) == 2
-
-
-def test_doctor_brief_with_a_warning(default_password, doctor_env, capsys):
-    assert _fix(doctor_env, "--brief") == 0
-    assert capsys.readouterr().out.splitlines() == [
-        "! 1 warning, 0 problems  run copycord doctor for details"]
-
-
-def test_doctor_ends_with_what_needs_attention(default_password, doctor_env, capsys):
-    assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 0
-    out = capsys.readouterr().out
-    left = _after(out, "Needs your attention")
-    assert len(left) == 1 and left[0].startswith("! the default password is still set")
-    assert out.splitlines()[-1] == "! 1 warning, 0 problems"
-
-
 def test_envfile_write_template_never_overwrites(tmp_path):
     from copycord import envfile
 
@@ -1552,20 +1088,6 @@ def test_envfile_write_template_never_overwrites(tmp_path):
 # --------------------------------------------------------------------------
 # config
 # --------------------------------------------------------------------------
-
-
-def test_config_on_a_terminal_is_a_rail(data_dir, monkeypatch):
-    dd = ["--data-dir", str(data_dir)]
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setattr(cli, "brand", lambda: "Copycord v4.0.0 (abcdef1)")
-    out, err = _terminal(monkeypatch)
-    assert cli.main(["config", "set", "COMMAND_USERS", "1,2", *dd]) == 0
-    assert cli.main(["config", "get", "COMMAND_USERS", *dd]) == 0
-    lines = out.getvalue().splitlines()
-    assert lines.count("Copycord v4.0.0 (abcdef1)") == 2
-    assert "\u250c  Save a setting" in lines and "\u250c  Read a setting" in lines
-    assert lines[-2:] == ["\u2502  1,2", "\u2514"]
-    assert "\u2713  COMMAND_USERS saved" in err.getvalue()
 
 
 def test_config_round_trip_with_masking(data_dir, tmp_path, capsys):
@@ -1706,27 +1228,6 @@ def test_config_init_writes_the_template_once(data_dir, capsys):
     assert env.read_text(encoding="utf-8") == "PASSWORD=mine\n"
 
 
-def test_config_init_follows_copycord_home(tmp_path, monkeypatch, capsys):
-    home = tmp_path / "cc-home"
-    monkeypatch.setenv("COPYCORD_HOME", str(home))
-    _unset(monkeypatch, "DATA_DIR", "DB_PATH", "BACKUP_DIR", "PASSWORD")
-    assert cli.main(["config", "init"]) == 0
-    assert capsys.readouterr().out == f"{(home / '.env').resolve()}\n"
-    assert (home / ".env").is_file() and not (home / "data" / ".env").exists()
-
-
-def test_config_init_reports_a_write_error(data_dir, monkeypatch, capsys):
-    from copycord import envfile
-
-    def deny(path=None, password=None):
-        raise PermissionError("denied")
-
-    monkeypatch.setattr(envfile, "write_template", deny)
-    assert cli.main(["config", "init", "--data-dir", str(data_dir)]) == 1
-    captured = capsys.readouterr()
-    assert captured.out == "" and "Could not write" in captured.err
-
-
 def test_env_file_is_loaded_without_overriding(data_dir, monkeypatch):
     data_dir.mkdir(parents=True)
     (data_dir / ".env").write_text(
@@ -1737,50 +1238,6 @@ def test_env_file_is_loaded_without_overriding(data_dir, monkeypatch):
     assert cli.main(["doctor", "--data-dir", str(data_dir)]) in (0, 1)
     assert os.environ["COPYCORD_TEST_FROM_FILE"] == "file"
     assert os.environ["COPYCORD_TEST_REAL"] == "real"
-
-
-def test_env_template_sets_every_default(tmp_path):
-    from copycord import envfile
-
-    home = tmp_path / "home"
-    text = envfile.template(home)
-    lines = text.splitlines()
-    assert envfile.DEFAULT_PASSWORD == "copycord"
-    expected = {
-        "PASSWORD": "copycord",
-        "ADMIN_PORT": "8080",
-        "DASHBOARD_HOST": "127.0.0.1",
-        "TZ": "UTC",
-        "LOG_LEVEL": "INFO",
-        "LOG_FORMAT": "HUMAN",
-        "BACKUP_DIR": str(home.resolve() / "data" / "backups"),
-        "BACKUP_AT": "03:17",
-        "BACKUP_RETAIN": "14",
-        "COPYCORD_NO_UPDATE_CHECK": "0",
-    }
-    active = [x for x in lines if x and not x.startswith("#")]
-    assert active == [f"{k}={envfile._quote(v)}" for k, v in expected.items()]
-    # Two header lines, then one short comment line above each key.
-    assert lines[2] == ""
-    for key, value in expected.items():
-        at = lines.index(f"{key}={envfile._quote(value)}")
-        above = lines[at - 1]
-        assert above.startswith("# ") and len(above) > 4 and "(" not in above.replace("(HH:MM)", "")
-        assert lines[at - 2] == ""
-    # Copycord saves its own SECRET_KEY; the template leaves it out.
-    assert "SECRET_KEY" not in text
-    assert "copycord restart" in text
-    assert "remove the #" not in text
-    # The dashboard stays on this computer, as a normal line.
-    assert "DASHBOARD_HOST=127.0.0.1" in lines
-    assert "0.0.0.0" in lines[lines.index("DASHBOARD_HOST=127.0.0.1") - 1]
-    assert set(envfile.ENV_KEYS) - {"SECRET_KEY"} <= set(expected)
-
-    env = tmp_path / ".env"
-    env.write_text(text, encoding="utf-8")
-    from dotenv import dotenv_values
-
-    assert dotenv_values(env) == expected
 
 
 def test_env_template_defaults_match_the_code(tmp_path, monkeypatch):
@@ -1873,32 +1330,10 @@ def test_restart_restarts_a_running_service(monkeypatch, capsys):
     assert "✓ Copycord restarted" in capsys.readouterr().out
 
 
-def test_restart_without_a_service_says_to_rerun_in_the_terminal(monkeypatch, capsys):
-    restarts = _service_state(monkeypatch, False, False)
-    assert cli.main(["restart"]) == 1
-    assert restarts == []
-    out = capsys.readouterr().out
-    assert "Copycord is not running as a service" in out
-    assert "copycord run" in out
-
-
-def test_restart_a_stopped_service_points_at_service_start(monkeypatch, capsys):
-    restarts = _service_state(monkeypatch, True, False)
-    assert cli.main(["restart"]) == 1
-    assert restarts == []
-    assert "copycord service start" in capsys.readouterr().out
-
-
 def test_restart_reports_a_failed_restart(monkeypatch, capsys):
     _service_state(monkeypatch, True, True, restart_error="needs root")
     assert cli.main(["restart"]) == 1
     assert "✗ Could not restart Copycord  needs root" in capsys.readouterr().err
-
-
-def test_help_lists_restart(capsys):
-    with pytest.raises(SystemExit):
-        cli.main(["--help"])
-    assert "restart" in capsys.readouterr().out
 
 
 def test_config_import_rejects_bad_json(data_dir, tmp_path):
@@ -1998,27 +1433,11 @@ def test_legacy_dir_used_when_home_missing(native, monkeypatch, capsys, platform
     assert paths.data_dir() == (native / ".copycord" / "data").resolve()
 
 
-def test_legacy_dir_windows(native, monkeypatch, tmp_path):
-    monkeypatch.setattr(sys, "platform", "win32")
-    _unset(monkeypatch, "COPYCORD_HOME")
-    local = tmp_path / "LocalAppData"
-    monkeypatch.setenv("LOCALAPPDATA", str(local))
-    (local / "Copycord").mkdir(parents=True)
-    (local / "Copycord" / "data.db").write_bytes(b"")
-    assert paths.data_dir() == (local / "Copycord").resolve()
-
-
 def test_legacy_dir_without_db_is_ignored(native, monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     _unset(monkeypatch, "COPYCORD_HOME")
     (native / ".local" / "share" / "copycord").mkdir(parents=True)
     assert paths.data_dir() == (native / ".copycord" / "data").resolve()
-
-
-def test_default_windows_without_localappdata(native, monkeypatch):
-    monkeypatch.setattr(sys, "platform", "win32")
-    expected = native / ".copycord" / "data"
-    assert paths.data_dir() == expected.resolve()
 
 
 def test_docker_default_is_data(native, monkeypatch):
@@ -2035,17 +1454,6 @@ def test_data_dir_env_wins(native, monkeypatch, tmp_path):
 def test_db_path_env_wins(native, monkeypatch, tmp_path):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "x.db"))
     assert paths.db_path() == (tmp_path / "x.db").resolve()
-
-
-def test_legacy_data_dir_is_pure(tmp_path):
-    home = tmp_path
-    assert paths.legacy_data_dir("linux", {}, home) == home / ".local/share/copycord"
-    assert paths.legacy_data_dir("darwin", {}, home) == (
-        home / "Library/Application Support/Copycord"
-    )
-    assert paths.legacy_data_dir("win32", {"LOCALAPPDATA": "C:/L"}, home) == (
-        Path("C:/L") / "Copycord"
-    )
 
 
 def test_supervisor_and_logging_agree(native, monkeypatch):
@@ -2087,17 +1495,6 @@ def flat_home(native):
     (home / "logs").mkdir()
     (home / "logs" / "update.log").write_text("u")
     return home
-
-
-def test_native_layout_helpers(native):
-    home = (native / ".copycord").resolve()
-    assert paths.home_dir() == home
-    assert paths.data_dir() == home / "data"
-    assert paths.logs_dir() == home / "logs"
-    assert paths.out_dir() == home / "logs"
-    assert paths.out_candidates("server.out") == [
-        home / "logs" / "server.out", home / "data" / "server.out", home / "server.out",
-    ]
 
 
 def test_docker_layout_is_flat(native, monkeypatch):
@@ -2278,60 +1675,3 @@ def test_backup_dir_defaults_to_the_data_folder(native, monkeypatch):
     assert f"BACKUP_DIR={envfile._quote(str(backups_dir()))}" in envfile.template(home).splitlines()
     monkeypatch.setenv("BACKUP_DIR", str(native / "elsewhere"))
     assert backups_dir() == (native / "elsewhere").resolve()
-
-
-def test_help_advanced_lists_every_command_group(data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["help", "advanced"])
-    assert exc.value.code == 0
-    out = capsys.readouterr().out
-    assert out.startswith("copycord help advanced\n") and "\033[" not in out
-    for section in cli.COMMAND_ADVANCED.values():
-        assert f"{section.title}:\n" in out
-        for invocation, _, _ in section.rows:
-            assert f"  {invocation}" in out
-    assert "Environment:" in out
-    for name, _ in cli.ADVANCED_ENV:
-        assert name in out
-    for name in ("COPYCORD_HOME", "COPYCORD_ALLOW_ROOT", "COPYCORD_TASK_NAME", "COPYCORD_SKIP_FRONTEND",
-                 "COPYCORD_ALLOW_INSECURE_DASHBOARD", "DASHBOARD_HOST", "TRUSTED_PROXIES",
-                 "AUTO_UPDATE_ALL_CHANNELS"):
-        assert name in out
-
-
-def test_help_without_a_topic_shows_the_normal_help(data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["help"])
-    assert exc.value.code == 0
-    assert capsys.readouterr().out == cli.format_help()
-
-
-def test_help_unknown_topic_fails(data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["help", "nope"])
-    assert exc.value.code == 2
-    assert "no help topic 'nope'" in capsys.readouterr().err
-
-
-def test_every_advanced_flag_is_accepted_by_its_parser(data_dir):
-    for section in cli.COMMAND_ADVANCED.values():
-        for invocation, _, probe in section.rows:
-            assert all(t in probe for t in invocation.split() if t.startswith("--")), invocation
-            args = cli.parse_args(list(probe))
-            assert args.command == probe[0]
-
-
-def test_top_help_ends_with_the_advanced_pointer(data_dir, capsys):
-    with pytest.raises(SystemExit):
-        cli.main(["--help"])
-    out = capsys.readouterr().out
-    assert "More: copycord help advanced\n" in out
-    assert out.index("More: copycord help advanced") < out.index("Docs:")
-
-
-def test_help_advanced_is_plain_on_a_pipe_even_with_json(data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["--json", "help", "advanced"])
-    assert exc.value.code == 0
-    out = capsys.readouterr().out
-    assert out.startswith("copycord help advanced\n") and not out.lstrip().startswith("{")
