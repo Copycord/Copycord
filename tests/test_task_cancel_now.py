@@ -328,10 +328,9 @@ async def test_avatars_cancel_during_a_download_that_never_answers(svc, tmp_path
 
     monkeypatch.setattr(avatars, "_wiring", avatars._Wiring(
         send=client, data_dir=tmp_path, fetch=fetch, clock=time.time))
-    monkeypatch.setattr(avatars, "DOWNLOAD_INTERVAL", 0)
     monkeypatch.setattr(avatars, "STATUS_POLL", 0.05)
     avatars._jobs.clear()
-    run = await svc.start("download_avatars", {"guild_id": "1234567890123456789"})
+    run = await svc.start("download_avatars", {"guild_id": "1234567890123456789", "concurrency": 1})
     await _until(lambda: len(urls) == 2)
     done, took = await _cancel_and_time(svc, run.id)
     assert took < 1.0

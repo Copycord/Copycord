@@ -103,7 +103,6 @@ def wire(tmp_path, monkeypatch):
             fetch=cdn.fetch, clock=lambda: NOW))
         return client, cdn
 
-    monkeypatch.setattr(avatars, "DOWNLOAD_INTERVAL", 0)
     monkeypatch.setattr(avatars, "STATUS_POLL", 0.05)
     avatars._jobs.clear()
     avatars._guild_names.clear()
@@ -144,6 +143,10 @@ def _zip(tmp_path, report):
     ({}, "guild_id"),
     ({"guild_id": "abc"}, "guild_id"),
     ({"guild_id": GID, "expires_hours": 169}, "expires_hours"),
+    ({"guild_id": GID, "concurrency": 0}, "concurrency"),
+    ({"guild_id": GID, "concurrency": 33}, "concurrency"),
+    ({"guild_id": GID, "concurrency": 2.5}, "concurrency"),
+    ({"guild_id": GID, "concurrency": "many"}, "concurrency"),
 ])
 @pytest.mark.asyncio
 async def test_bad_inputs_are_refused(svc, wire, raw, field):
@@ -205,8 +208,12 @@ async def test_run_lists_members_downloads_and_zips(svc, wire, tmp_path, monkeyp
     assert zf.read("bob_222222222222222222.gif") == f"img:{avatars.avatar_url(MEMBERS[1])[0]}".encode()
     rows = list(csv.reader(io.StringIO(zf.read("members.csv").decode())))
     assert rows[0] == ["user_id", "username", "global_name", "file", "status"]
-    assert rows[1] == ["111111111111111111", "alice", "Alice", "alice_111111111111111111.png", "downloaded"]
-    assert rows[3][4] == "default avatar"
+    # Rows come in the order the downloads finish.
+    by_id = {r[0]: r for r in rows[1:]}
+    assert len(rows) == 5 and len(by_id) == 4
+    assert by_id["111111111111111111"] == ["111111111111111111", "alice", "Alice", "alice_111111111111111111.png",
+                                           "downloaded"]
+    assert by_id["333333333333333333"][4] == "default avatar"
     meta = json.loads((tmp_path / avatars.DIRNAME / f"{token}.json").read_text())
     assert meta["expires_at"] == NOW + 6 * 3600 and meta["run_id"] == run.id
     assert not list((tmp_path / avatars.DIRNAME).glob("*.part"))
@@ -223,11 +230,11 @@ async def test_progress_is_live_per_file(svc, wire):
 
     wire(cdn=FakeCdn(on_get=on_get))
     holder["svc"] = svc
-    run = await svc.start("download_avatars", {"guild_id": GID})
+    run = await svc.start("download_avatars", {"guild_id": GID, "concurrency": 1})
     holder["id"] = run.id
     run = await _settled(svc, run.id)
     assert run.status == "success"
-    # Before each fetch the step shows the files so far and the last name.
+    # One at a time: before each fetch the step shows the files so far and the last name.
     assert seen[0] == (0, 4, None)
     assert seen[1] == (1, 4, "alice")
     assert seen[2] == (2, 4, "bob")
@@ -275,7 +282,7 @@ async def test_rate_limit_waits_and_retries(svc, wire, monkeypatch):
     avatars._wiring.fetch = fetch
     run = await _settled(svc, (await svc.start("download_avatars", {"guild_id": GID})).id)
     assert run.status == "success" and run.summary["downloaded"] == 1
-    assert waits == [0.01]
+    assert calls["n"] == 2 and len(waits) == 1 and 0 < waits[0] <= 0.01
 
 
 @pytest.mark.asyncio
@@ -288,7 +295,7 @@ async def test_cancel_between_files_keeps_what_was_downloaded(svc, wire, tmp_pat
 
     wire(cdn=FakeCdn(on_get=on_get))
     holder["svc"] = svc
-    run = await svc.start("download_avatars", {"guild_id": GID})
+    run = await svc.start("download_avatars", {"guild_id": GID, "concurrency": 1})
     holder["id"] = run.id
     run = await _settled(svc, run.id)
     assert run.status == "cancelled"
@@ -297,6 +304,133 @@ async def test_cancel_between_files_keeps_what_was_downloaded(svc, wire, tmp_pat
     assert _steps(run)["avatars"]["note"] == "Cancelled after 2 of 4"
     _, zf = _zip(tmp_path, run.report)
     assert len([n for n in zf.namelist() if n != "members.csv"]) == 2
+
+
+def test_concurrency_defaults_to_8_and_takes_1_to_32():
+    assert avatars.AvatarInputs(guild_id=GID).concurrency == 8
+    assert avatars.AvatarInputs(guild_id=GID, concurrency=1).concurrency == 1
+    assert avatars.AvatarInputs(guild_id=GID, concurrency="32").concurrency == 32
+    for bad in (0, 33, -1, True, 1.5, None, "x"):
+        with pytest.raises(ValueError, match="parallel downloads from 1 to 32"):
+            avatars.AvatarInputs(guild_id=GID, concurrency=bad)
+
+
+def _crowd(n, avatar=True):
+    return [_member(10**17 + i, f"u{i}", f"h{i}" if avatar else None) for i in range(n)]
+
+
+@pytest.mark.asyncio
+async def test_downloads_overlap_up_to_the_concurrency(svc, wire, tmp_path):
+    state = {"now": 0, "max": 0}
+
+    async def fetch(url):
+        state["now"] += 1
+        state["max"] = max(state["max"], state["now"])
+        await asyncio.sleep(0.02)
+        state["now"] -= 1
+        return 200, url.encode(), {}
+
+    wire(FakeClient(members=_crowd(20)))
+    avatars._wiring.fetch = fetch
+    run = await _settled(svc, (await svc.start("download_avatars", {"guild_id": GID, "concurrency": 5})).id)
+    assert run.status == "success", run.error
+    assert state["max"] == 5
+    assert run.summary == {"members": 20, "downloaded": 20, "failed": 0, "skipped": 0}
+    assert _steps(run)["avatars"]["done"] == 20
+    _, zf = _zip(tmp_path, run.report)
+    rows = list(csv.reader(io.StringIO(zf.read("members.csv").decode())))[1:]
+    assert sorted(r[0] for r in rows) == sorted(m["id"] for m in _crowd(20))
+    assert len(zf.namelist()) == 21
+
+
+@pytest.mark.asyncio
+async def test_a_429_pauses_every_worker(svc, wire):
+    starts = []
+    first = {"hit": False}
+
+    async def fetch(url):
+        starts.append((url, asyncio.get_running_loop().time()))
+        if not first["hit"]:
+            first["hit"] = True
+            return 429, b"", {"Retry-After": "0.3"}
+        await asyncio.sleep(0.05)
+        return 200, b"x", {}
+
+    wire(FakeClient(members=_crowd(6)))
+    avatars._wiring.fetch = fetch
+    t0 = asyncio.get_running_loop().time()
+    run = await _settled(svc, (await svc.start("download_avatars", {"guild_id": GID, "concurrency": 2})).id)
+    assert run.status == "success" and run.summary["downloaded"] == 6
+    # The first two start at once; one is limited, so nothing else starts until the pause is over.
+    later = sorted(t for _, t in starts[2:])
+    assert len(starts) == 7 and later[0] - t0 >= 0.28
+
+
+@pytest.mark.asyncio
+async def test_default_avatars_are_fetched_once_under_concurrency(svc, wire, tmp_path):
+    urls = []
+
+    async def fetch(url):
+        urls.append(url)
+        await asyncio.sleep(0.02)
+        return 200, url.encode(), {}
+
+    crowd = _crowd(30, avatar=False)
+    wire(FakeClient(members=crowd))
+    avatars._wiring.fetch = fetch
+    run = await _settled(svc, (await svc.start("download_avatars", {"guild_id": GID, "concurrency": 16})).id)
+    assert run.status == "success" and run.summary["downloaded"] == 30
+    assert sorted(urls) == sorted({avatars.avatar_url(m)[0] for m in crowd})
+    _, zf = _zip(tmp_path, run.report)
+    rows = list(csv.reader(io.StringIO(zf.read("members.csv").decode())))[1:]
+    assert len(rows) == 30 and {r[4] for r in rows} == {"default avatar"}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_default_is_tried_again_by_the_next_member(svc, wire):
+    urls = []
+
+    async def fetch(url):
+        urls.append(url)
+        await asyncio.sleep(0.01)
+        return (404, b"", {}) if len(urls) == 1 else (200, b"d", {})
+
+    crowd = [_member(1 << 22, "a"), _member(7 << 22, "b")]
+    assert avatars.avatar_url(crowd[0]) == avatars.avatar_url(crowd[1])
+    wire(FakeClient(members=crowd))
+    avatars._wiring.fetch = fetch
+    run = await _settled(svc, (await svc.start("download_avatars", {"guild_id": GID, "concurrency": 2})).id)
+    # b waited on a's fetch, saw it fail and fetched the default itself.
+    assert run.status == "success" and len(urls) == 2
+    assert run.summary == {"members": 2, "downloaded": 1, "failed": 1, "skipped": 0}
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_run_skips_the_rest(svc, wire, tmp_path):
+    holder = {"n": 0}
+    never = asyncio.Event()
+
+    async def fetch(url):
+        holder["n"] += 1
+        if holder["n"] <= 3:
+            return 200, b"x", {}
+        if holder["n"] == 4:
+            await holder["svc"].cancel(holder["id"])
+        await never.wait()
+
+    wire(FakeClient(members=_crowd(40)))
+    avatars._wiring.fetch = fetch
+    holder["svc"] = svc
+    run = await svc.start("download_avatars", {"guild_id": GID, "concurrency": 4})
+    holder["id"] = run.id
+    run = await _settled(svc, run.id)
+    assert run.status == "cancelled"
+    assert run.summary == {"members": 40, "downloaded": 3, "failed": 0, "skipped": 37}
+    assert holder["n"] < 10
+    assert _steps(run)["avatars"]["note"] == "Cancelled after 3 of 40"
+    _, zf = _zip(tmp_path, run.report)
+    rows = list(csv.reader(io.StringIO(zf.read("members.csv").decode())))[1:]
+    assert len(rows) == 40 and sum(r[4] == "skipped" for r in rows) == 37
 
 
 @pytest.mark.asyncio

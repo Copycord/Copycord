@@ -51,8 +51,9 @@ FRAMES = ("avatars_members_progress", "avatars_members_end")
 CDN = "https://cdn.discordapp.com"
 # The largest size Discord serves without upscaling most avatars.
 AVATAR_SIZE = 1024
-# Seconds between two CDN requests, and the retries a 429 or a 5xx gets.
-DOWNLOAD_INTERVAL = 0.1
+# Avatars fetched at once by default and at most, and the retries a 429 or a 5xx gets.
+DEFAULT_CONCURRENCY = 8
+CONCURRENCY_MAX = 32
 RETRIES = 3
 RETRY_WAIT_MAX = 30.0
 # How long the client may take to list the members, and how often the run asks it directly
@@ -132,6 +133,7 @@ class AvatarInputs(BaseModel):
     guild_id: str = Field(title="Server")
     guild_name: Optional[str] = Field(None, title="Server name")
     expires_hours: int = Field(DEFAULT_EXPIRES_HOURS, title="Link expires after (hours)")
+    concurrency: int = Field(DEFAULT_CONCURRENCY, title="Parallel downloads")
 
     @field_validator("guild_id", mode="before")
     @classmethod
@@ -158,6 +160,20 @@ class AvatarInputs(BaseModel):
         except (TypeError, ValueError):
             raise ValueError(msg) from None
         if isinstance(value, float) and n != value or not 1 <= n <= EXPIRES_HOURS_MAX:
+            raise ValueError(msg)
+        return n
+
+    @field_validator("concurrency", mode="before")
+    @classmethod
+    def _concurrency(cls, value: Any) -> int:
+        msg = f"Enter a whole number of parallel downloads from 1 to {CONCURRENCY_MAX}"
+        if isinstance(value, bool):
+            raise ValueError(msg)
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise ValueError(msg) from None
+        if isinstance(value, float) and n != value or not 1 <= n <= CONCURRENCY_MAX:
             raise ValueError(msg)
         return n
 
@@ -478,12 +494,29 @@ async def _sleep(ctx: Any, seconds: float) -> None:
         pass
 
 
-async def _download(ctx: Any, url: str) -> bytes:
+class _Pause:
+    """A 429 on one avatar holds every worker until its Retry-After has passed."""
+
+    def __init__(self) -> None:
+        self.until = 0.0
+
+    def hold(self, seconds: float) -> None:
+        self.until = max(self.until, time.monotonic() + seconds)
+
+    async def wait(self, ctx: Any) -> None:
+        delay = self.until - time.monotonic()
+        if delay > 0:
+            await _sleep(ctx, delay)
+
+
+async def _download(ctx: Any, url: str, pause: Optional[_Pause] = None) -> bytes:
     """The avatar's bytes; TaskCancelled when the run is cancelled while the request is in
     flight (it is dropped) or before a retry."""
     fetch = _wiring.fetch or _http_get
+    pause = pause or _Pause()
     error = "Failed"
     for attempt in range(RETRIES + 1):
+        await pause.wait(ctx)
         ctx.check_cancelled()
         get = asyncio.ensure_future(fetch(url))
         cancel = asyncio.ensure_future(ctx.cancelled.wait())
@@ -512,12 +545,14 @@ async def _download(ctx: Any, url: str) -> bytes:
             except (TypeError, ValueError):
                 wait = 1.0
             error = "Rate limited"
-        else:
-            wait = float(2 ** attempt)
+            # The next attempt, here and in every other worker, waits on the pause.
+            pause.hold(min(wait, RETRY_WAIT_MAX))
+        elif attempt < RETRIES and not ctx.cancelled.is_set():
             if status:
                 error = f"HTTP {status}"
-        if attempt < RETRIES and not ctx.cancelled.is_set():
-            await _sleep(ctx, min(wait, RETRY_WAIT_MAX))
+            await _sleep(ctx, min(float(2 ** attempt), RETRY_WAIT_MAX))
+        elif status:
+            error = f"HTTP {status}"
         ctx.check_cancelled()
     raise RuntimeError(error)
 
@@ -614,53 +649,88 @@ async def _download_all(ctx: Any, inputs: AvatarInputs, name: str, members: list
     manifest = io.StringIO()
     writer = csv.writer(manifest)
     writer.writerow(["user_id", "username", "global_name", "file", "status"])
-    # The six default avatars are the same files for everyone: each comes from Discord once.
-    defaults: dict[str, bytes] = {}
+    pause = _Pause()
+    # The six default avatars are the same files for everyone: each comes from Discord once, the
+    # first worker to need one fetches it and the others wait on its future.
+    defaults: dict[str, asyncio.Future] = {}
+    pending = iter(members)
+    # One (member, file name, bytes or None, status) per member; only this coroutine writes the zip.
+    results: asyncio.Queue = asyncio.Queue()
+
+    async def fetch_default(url: str) -> tuple[bytes, bool]:
+        while True:
+            fut = defaults.get(url)
+            if fut is None:
+                fut = defaults[url] = asyncio.get_running_loop().create_future()
+                try:
+                    body = await _download(ctx, url, pause)
+                except BaseException:
+                    # A failed or cancelled fetch: whoever needs it next tries again.
+                    defaults.pop(url, None)
+                    fut.set_result(None)
+                    raise
+                fut.set_result(body)
+                return body, False
+            body = await asyncio.shield(fut)
+            if body is not None:
+                return body, True
+            ctx.check_cancelled()
+
+    async def worker() -> None:
+        for m in pending:
+            uid = str(m.get("id"))
+            username = str(m.get("username") or uid)
+            if ctx.cancelled.is_set():
+                results.put_nowait((m, uid, username, "", None, "skipped"))
+                continue
+            try:
+                url, ext = avatar_url(m)
+                fname = f"{_safe(username)}_{uid}.{ext}"
+                if "/embed/avatars/" in url:
+                    body, _ = await fetch_default(url)
+                    status = "default avatar"
+                else:
+                    body, status = await _download(ctx, url, pause), "downloaded"
+                results.put_nowait((m, uid, username, fname, body, status))
+            except TaskCancelled:
+                # Cancelled mid-download: this member and the rest are skipped, not failed.
+                results.put_nowait((m, uid, username, "", None, "skipped"))
+            except Exception as exc:
+                results.put_nowait((m, uid, username, "", None, f"failed: {str(exc) or type(exc).__name__}"))
+
+    workers = [asyncio.ensure_future(worker()) for _ in range(min(inputs.concurrency, total))]
     done = 0
     try:
         with zipfile.ZipFile(part, "w", compression=zipfile.ZIP_STORED) as zf:
-            for m in members:
-                uid = str(m["id"])
-                username = str(m.get("username") or uid)
-                if ctx.cancelled.is_set():
+            for _ in range(total):
+                m, uid, username, fname, body, status = await results.get()
+                writer.writerow([uid, username, m.get("global_name") or "", fname, status])
+                if status == "skipped":
                     counts["skipped"] += 1
-                    writer.writerow([uid, username, m.get("global_name") or "", "", "skipped"])
                     continue
-                url, ext = avatar_url(m)
-                fname = f"{_safe(username)}_{uid}.{ext}"
-                cached = url in defaults
-                try:
-                    body = defaults[url] if cached else await _download(ctx, url)
-                    if "/embed/avatars/" in url:
-                        defaults[url] = body
-                    zf.writestr(fname, body)
-                    counts["downloaded"] += 1
-                    writer.writerow([uid, username, m.get("global_name") or "", fname,
-                                     "default avatar" if "/embed/avatars/" in url else "downloaded"])
-                except TaskCancelled:
-                    # Cancelled mid-download: this member and the rest are skipped, not failed.
-                    counts["skipped"] += 1
-                    writer.writerow([uid, username, m.get("global_name") or "", "", "skipped"])
-                    continue
-                except Exception as exc:
-                    error = str(exc) or type(exc).__name__
+                if body is None:
+                    error = status.removeprefix("failed: ")
                     counts["failed"] += 1
-                    writer.writerow([uid, username, m.get("global_name") or "", "", f"failed: {error}"])
                     if len(failures) < REPORT_FAILURES:
                         failures.append({"user_id": uid, "username": username, "error": error})
                     await ctx.log(f"{username}: {error}", level="warning", step="avatars")
+                else:
+                    zf.writestr(fname, body)
+                    counts["downloaded"] += 1
                 done += 1
                 await step.progress(done, total, label=username)
                 await ctx.summary(**counts)
-                if not cached and done < total:
-                    await _sleep(ctx, DOWNLOAD_INTERVAL)
             zf.writestr("members.csv", manifest.getvalue())
-    except Exception:
+    except BaseException:
         try:
             part.unlink()
         except OSError:
             pass
         raise
+    finally:
+        for w in workers:
+            w.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
 
     download = None
     if counts["downloaded"]:
