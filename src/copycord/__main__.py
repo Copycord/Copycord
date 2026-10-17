@@ -242,6 +242,7 @@ ADVANCED_ENV = (
     ("DASHBOARD_HOST", "The address the dashboard listens on: 127.0.0.1, 0.0.0.0 or one IP"),
     ("TRUSTED_PROXIES", "Comma-separated proxy IPs whose client address headers the dashboard believes"),
     ("AUTO_UPDATE_ALL_CHANNELS", "Let auto-update run on every channel, not only stable (set to 1)"),
+    ("COPYCORD_ENV", "Developer options, such as the scraper's debug report (set to dev)"),
 )
 
 

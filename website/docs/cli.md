@@ -757,7 +757,7 @@ It lists:
 - **Run:** `--data-dir`, which most commands accept.
 - **Backup and restore:** `backup --json` and `restore --yes`.
 - **Uninstall:** `--purge`, `--keep-data`, `--keep-service` and `--dry-run`.
-- **Environment:** `COPYCORD_HOME`, `COPYCORD_ALLOW_ROOT`, `COPYCORD_TASK_NAME`, `COPYCORD_SKIP_FRONTEND`, `COPYCORD_ALLOW_INSECURE_DASHBOARD`, `COPYCORD_NO_UPDATE_CHECK`, `COPYCORD_NODE_VERSION`, `COPYCORD_PLAIN_PROMPTS`, `DASHBOARD_HOST`, `TRUSTED_PROXIES` and `AUTO_UPDATE_ALL_CHANNELS`.
+- **Environment:** `COPYCORD_HOME`, `COPYCORD_ALLOW_ROOT`, `COPYCORD_TASK_NAME`, `COPYCORD_SKIP_FRONTEND`, `COPYCORD_ALLOW_INSECURE_DASHBOARD`, `COPYCORD_NO_UPDATE_CHECK`, `COPYCORD_NODE_VERSION`, `COPYCORD_PLAIN_PROMPTS`, `DASHBOARD_HOST`, `TRUSTED_PROXIES`, `AUTO_UPDATE_ALL_CHANNELS` and `COPYCORD_ENV`.
 
 ## copycord uninstall {#copycord-uninstall}
 
