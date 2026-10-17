@@ -148,7 +148,7 @@ describe("tree", () => {
       ["Uncategorized", ["loose"]],
       ["Old stuff", []],
     ]);
-    // With orphans present the tree is never "empty", as render() did.
+    // With orphans present the tree is never "empty".
     expect(tree({ query: "nothing" }, orphans).empty).toBe(false);
   });
 });

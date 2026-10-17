@@ -71,10 +71,10 @@ describe("ChannelTree", () => {
     tree();
     expect(ids("401")).toHaveTextContent(/^401\s*→ 501$/);
     expect(ids("401").querySelector("[data-id-dash]")).toBeNull();
-    // Not cloned: host id → —
+    // Not cloned: host id, arrow, dash.
     expect(ids("403")).toHaveTextContent(/^403\s*→ —$/);
     expect(ids("403").lastElementChild!.querySelector("[data-id-dash]")).toHaveAttribute("title", "Not cloned yet");
-    // Orphan: — → its clone id
+    // Orphan: dash, arrow, its clone id.
     expect(ids("911")).toHaveTextContent(/^—\s*→ 911$/);
     expect(ids("911").firstElementChild!.querySelector("[data-id-dash]")).not.toBeNull();
   });

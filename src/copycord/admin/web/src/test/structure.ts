@@ -34,6 +34,7 @@ export interface Structure {
 }
 
 /**
+ * Returns the headings, controls, table columns and pagers of root.
  * rows: a selector matching the list rows of both states (loaded rows and skeleton rows).
  * data: text that comes from the API on the loaded page (a chosen mapping, a count); it compares as DATA.
  */
@@ -53,7 +54,7 @@ export function structure(root: Element, rows?: string, data: string[] = []): St
   };
 }
 
-/** The classes of el without the old hook classes (ch-card, sc-token-item, ...) that only real rows carry, nor the fade in. */
+/** The classes of el without the hook classes (ch-card, sc-token-item, ...) that only real rows carry, nor the fade in. */
 export function shared(el: Element, hooks: string[] = []): string {
   return (el.getAttribute("class") ?? "")
     .split(/\s+/)

@@ -231,7 +231,7 @@ describe("rule modal", () => {
     expect(input("fwd_label").value).toBe("Phone alerts");
     await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "Guild scope" })).toHaveDisplayValue(/Beta \(222\)/));
     expect(input("fwd_provider").value).toBe("pushover");
-    // The old modal shows provider secrets in plain text inputs, unmasked.
+    // Provider secrets show in plain text inputs, unmasked.
     expect(input("pushover_app_token")).toHaveAttribute("type", "text");
     expect(input("pushover_app_token").value).toBe("FAKE-app-token-123");
     expect(input("pushover_user_key").value).toBe("FAKE-user-key-456");
