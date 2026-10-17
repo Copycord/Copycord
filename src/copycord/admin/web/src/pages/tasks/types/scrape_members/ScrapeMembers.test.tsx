@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
@@ -428,11 +428,12 @@ describe("ScraperSettingsCard", () => {
     editWith(input, "a\nb\nc", () => fireEvent.blur(input));
     expect(puts(calls).map((c) => c.body)).toEqual([{ tokens: ["a", "b"] }, { tokens: ["a", "b", "c"] }]);
     // "Saving" takes the count's place in the same cell while a save is out.
-    expect(screen.getByText("Saving")).not.toHaveClass("invisible");
-    expect(screen.getByText("1 token saved")).toHaveClass("invisible");
+    const cell = within(screen.getByText("1 token saved").parentElement as HTMLElement);
+    expect(cell.getByText("Saving")).not.toHaveClass("invisible");
+    expect(cell.getByText("1 token saved")).toHaveClass("invisible");
     await act(async () => replies[1]?.(Response.json({ ok: true, tokens: ["a", "b", "c"] })));
-    expect(await screen.findByText("3 tokens saved")).not.toHaveClass("invisible");
-    expect(screen.getByText("Saving")).toHaveClass("invisible");
+    expect(await cell.findByText("3 tokens saved")).not.toHaveClass("invisible");
+    expect(cell.getByText("Saving")).toHaveClass("invisible");
     await act(async () => replies[0]?.(Response.json({ ok: true, tokens: ["a", "b"] })));
     expect(screen.getByText("3 tokens saved")).toBeInTheDocument();
     expect(screen.queryByText("2 tokens saved")).not.toBeInTheDocument();
