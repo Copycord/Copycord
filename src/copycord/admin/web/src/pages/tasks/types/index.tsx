@@ -12,6 +12,7 @@ import { Field, FieldSelect, Input } from "../../../components/ui/Field";
 import type { TaskRun, TaskStep } from "../../../types/tasks";
 import { formatCount } from "../StepList";
 import { BackfillForm } from "./backfill/BackfillForm";
+import { EXPORT_DMS_ENTRY } from "./export_dms/entry";
 import { PurgeForm } from "./purge/PurgeForm";
 import { useStartRun, type TaskFormProps } from "./start";
 
@@ -201,6 +202,7 @@ export const TASK_TYPES: Record<string, TaskTypeEntry> = {
     summaryLabels: PURGE_SUMMARY,
     hero: { key: "deleted", label: "message records deleted" },
   },
+  export_dms: EXPORT_DMS_ENTRY,
 };
 
 function formatValue(v: unknown): string {
