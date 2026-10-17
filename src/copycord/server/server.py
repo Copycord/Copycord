@@ -13416,7 +13416,7 @@ class ServerReceiver:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> tuple[bool, str | None]:
-        """(blocked, reason) for a user on a mapping; a whitelist, when set, blocks everyone not on it."""
+        """Return (blocked, reason) for a user on a mapping; a whitelist, when set, blocks everyone not on it."""
         if not user_id:
             return False, None
 
