@@ -101,7 +101,7 @@ export function RunMeta({ run }: { run: TaskRun }) {
         ),
         ran: (
           <span data-testid="run-duration" title={duration == null ? undefined : `${active ? "Running for" : "Ran for"} ${duration}`} className={cx("tabular-nums", FADE_IN)}>
-            {duration ?? (active ? "not started" : "-")}
+            {run.status === "queued" ? "Queued" : (duration ?? (active ? "not started" : "-"))}
           </span>
         ),
         mapping: mapping ? (
@@ -144,6 +144,29 @@ export function countsText(run: TaskRun, heroKey?: string): string {
   return parts.join(" · ");
 }
 
+/** "2nd", "3rd", "11th": a place in line. */
+export function ordinal(n: number): string {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th");
+  return `${n}${suffix}`;
+}
+
+/** The counts line of a queued run: what it waits for, linked, and its place in line when others wait too. */
+export function WaitingLine({ run }: { run: TaskRun }) {
+  const blocker = run.waiting_for;
+  const place = run.queue_position != null && run.queue_position > 1 ? ` · ${ordinal(run.queue_position)} in line` : "";
+  if (!blocker) return <span data-testid="run-waiting">Waiting to start{place}</span>;
+  return (
+    <span data-testid="run-waiting">
+      Waiting for{" "}
+      <Link to={`/tasks/runs/${encodeURIComponent(blocker.id)}`} title={blocker.title} className="text-text underline-offset-2 hover:underline">
+        {typeLabel(blocker.type).title} #{blocker.number}
+      </Link>{" "}
+      to finish{place}
+    </span>
+  );
+}
+
 /** The hero count over the segmented bar, the counts in one muted line under it, then the run's Inputs collapsed. */
 export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<string, unknown> }) {
   const hero = heroStat(run);
@@ -168,7 +191,7 @@ export function RunSummary({ run, schema }: { run: TaskRun; schema?: Record<stri
             <div aria-hidden="true" className={cx(OVERVIEW_BAR, "rounded-full bg-line-1")} />
           )
         }
-        counts={line ? <span className={FADE_IN}>{line}</span> : null}
+        counts={run.status === "queued" ? <WaitingLine run={run} /> : line ? <span className={FADE_IN}>{line}</span> : null}
       />
       <InputsDisclosure>
         {rows.length ? (

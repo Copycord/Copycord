@@ -15,6 +15,8 @@ export interface TaskType {
   dev?: boolean;
   /** Queued plus running runs of this type. */
   active: number;
+  /** Of those, the runs still queued. */
+  queued?: number;
   total: number;
 }
 
@@ -69,6 +71,10 @@ export interface TaskRun {
   report?: unknown;
   /** Monotonic per run; a frame with a lower seq than the one held is stale. */
   seq: number;
+  /** Queued behind a concurrency slot: the run of the type holding it. Null when not waiting. */
+  waiting_for?: { id: string; number: number; type: string; title: string } | null;
+  /** This run's place in line when more than one run of its type waits. */
+  queue_position?: number | null;
 }
 
 export interface TaskTypesResponse {
