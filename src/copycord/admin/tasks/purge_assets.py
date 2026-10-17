@@ -39,6 +39,8 @@ KIND_ONE = {"emojis": "emoji", "stickers": "sticker", "roles": "role"}
 SCOPE_WORDS = {"cloned": "cloned", "unmapped": "uncloned", "all": "all"}
 LIST_TIMEOUT = 20.0
 DELETE_TIMEOUT = 30.0
+# After a cancel, how long a server reply already due still counts.
+REPLY_GRACE = 0.5
 # Pause between deletes so a long purge stays under Discord's per-route limits.
 DELETE_GAP = 0.3
 RATE_RETRIES = 3
@@ -218,12 +220,34 @@ async def _pause(ctx: Any, seconds: float) -> bool:
     return ctx.cancelled.is_set()
 
 
+async def _send_or_cancel(ctx: Any, frame: dict, timeout: float) -> Optional[dict]:
+    """_send, but a cancel stops the wait: a reply that still comes within REPLY_GRACE s of
+    the cancel counts (the delete was already on its way), else None."""
+    if ctx.cancelled.is_set():
+        return None
+    send = asyncio.ensure_future(_send(frame, timeout))
+    cancel = asyncio.ensure_future(ctx.cancelled.wait())
+    try:
+        await asyncio.wait({send, cancel}, return_when=asyncio.FIRST_COMPLETED)
+        if not send.done():
+            await asyncio.wait({send}, timeout=REPLY_GRACE)
+        return send.result() if send.done() else None
+    finally:
+        for fut in (send, cancel):
+            if not fut.done():
+                fut.cancel()
+        await asyncio.gather(send, cancel, return_exceptions=True)
+
+
 async def _delete_one(ctx: Any, step: Any, gid: Any, kind: str, scope: str, item: dict) -> tuple[str, Optional[str]]:
-    """(outcome, error): deleted, skipped, failed, or cancelled while waiting out a rate limit."""
+    """(outcome, error): deleted, skipped, failed, or cancelled before the delete went out,
+    while its reply was due, or while waiting out a rate limit."""
     frame = {"type": "purge_assets_delete",
              "data": {"guild_id": str(gid), "kind": kind, "scope": scope, "id": str(item["id"])}}
     for attempt in range(RATE_RETRIES + 1):
-        res = await _send(frame, DELETE_TIMEOUT)
+        res = await _send_or_cancel(ctx, frame, DELETE_TIMEOUT)
+        if res is None:
+            return "cancelled", None
         outcome = res.get("outcome")
         if outcome == "rate_limited":
             if attempt == RATE_RETRIES:
@@ -269,8 +293,11 @@ async def run(ctx: Any, inputs: PurgeAssetsInputs) -> None:
     await ctx.log(f"{'Counting' if inputs.dry_run else 'Purging'} {SCOPE_WORDS[scope]} {_words(kinds)} "
                   f"in {_name(mapping)}{' (dry run, nothing is deleted)' if inputs.dry_run else ''}")
 
-    listing = await _send({"type": "purge_assets_list", "data": {"guild_id": str(gid), "kinds": kinds}},
-                          LIST_TIMEOUT)
+    listing = await _send_or_cancel(
+        ctx, {"type": "purge_assets_list", "data": {"guild_id": str(gid), "kinds": kinds}}, LIST_TIMEOUT)
+    if listing is None:
+        # Cancelled while the server listed: every step below ends cancelled.
+        listing = {"ok": True, "kinds": {}}
     if not listing.get("ok"):
         raise RuntimeError(listing.get("error") or "The server bot did not answer")
 
