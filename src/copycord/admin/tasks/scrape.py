@@ -14,8 +14,9 @@ tokens and talks to Discord itself, so the server and client bots are not needed
 Steps: Check tokens (the saved scraper tokens that can see the server; there is no
 token validation, a token that fails or is not in the server is skipped), Scrape
 members (members found of the server's approximate count, as the scraper reports
-them), Save file. One run at a time, as the old queue ran them; later runs wait
-in the framework.
+them), Fetch bios (with Bios on: bios fetched of bios queued, after the members are
+in; no time cap, a profile that keeps failing is skipped), Save file. One run at a
+time, as the old queue ran them; later runs wait in the framework.
 
 A cancel stops the scraper and cancels its asyncio task at once; the run waits at
 most CANCEL_WAIT for it to unwind and nothing the scraper reports after the cancel
@@ -286,6 +287,11 @@ class _Job:
     found: int = 0
     hint: Optional[int] = None
     progressed: bool = False
+    # Bios fetched or skipped of bios queued; the scraper reports them once the members are in.
+    bios_done: int = 0
+    bios_total: int = 0
+    bios_progressed: bool = False
+    bios_started: bool = False
     closed: bool = False
     lines: list = field(default_factory=list)
     changed: asyncio.Event = field(default_factory=asyncio.Event)
@@ -300,6 +306,14 @@ class _Job:
         self.progressed = True
         self.changed.set()
 
+    def on_bios(self, done: Any, total: Any, message: Any = "") -> None:
+        if self.closed:
+            return
+        self.bios_done = _int(done) or 0
+        self.bios_total = _int(total) or 0
+        self.bios_progressed = True
+        self.changed.set()
+
     def on_log(self, message: Any, level: Any = "info") -> None:
         if self.closed:
             return
@@ -311,10 +325,14 @@ class _Job:
         self.changed.set()
 
 
-async def _flush(ctx: Any, step: Any, job: _Job) -> None:
+def _bios(n: int) -> str:
+    return f"{_fmt(n)} bio{'s' if n != 1 else ''}"
+
+
+async def _flush(ctx: Any, step: Any, job: _Job, bios_step: Any = None) -> None:
     lines, job.lines = job.lines, []
     for text, level in lines:
-        await ctx.log(text, level=level, step="scrape")
+        await ctx.log(text, level=level, step="bios" if job.bios_started else "scrape")
     if job.progressed:
         job.progressed = False
         if job.hint:
@@ -323,6 +341,16 @@ async def _flush(ctx: Any, step: Any, job: _Job) -> None:
                                 label=f"{_fmt(job.found)} of about {_fmt(job.hint)} members found")
         else:
             await step.progress(job.found, label=f"{_members(job.found)} found")
+    if job.bios_progressed and bios_step is not None:
+        job.bios_progressed = False
+        if not job.bios_started:
+            # The scraper reports bios once the members are in: Scrape members is done.
+            job.bios_started = True
+            await step.progress(job.found, max(job.found, job.hint or 0) or None)
+            await step.finish("success", f"{_members(job.found)} found")
+            await bios_step.start()
+        await bios_step.progress(job.bios_done, job.bios_total,
+                                 label=f"{_fmt(job.bios_done)} of {_bios(job.bios_total)}")
 
 
 def _reap(task: asyncio.Future) -> None:
@@ -345,7 +373,8 @@ async def _race(ctx: Any, coro: Awaitable) -> tuple[bool, Any]:
     return True, None
 
 
-async def _scrape(ctx: Any, step: Any, job: _Job, scraper: Any) -> tuple[Any, Optional[str], bool]:
+async def _scrape(ctx: Any, step: Any, job: _Job, scraper: Any,
+                  bios_step: Any = None) -> tuple[Any, Optional[str], bool]:
     """Run the scraper: (result or None, error, cancelled)."""
     task = asyncio.ensure_future(scraper.scrape())
     cancel_wait = asyncio.ensure_future(ctx.cancelled.wait())
@@ -359,7 +388,7 @@ async def _scrape(ctx: Any, step: Any, job: _Job, scraper: Any) -> tuple[Any, Op
             if ctx.cancelled.is_set():
                 break
             job.changed.clear()
-            await _flush(ctx, step, job)
+            await _flush(ctx, step, job, bios_step)
             if task.done():
                 job.closed = True
                 try:
@@ -408,7 +437,15 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
     name = _guild_name(inputs)
     tokens_step = ctx.step("tokens", "Check tokens")
     scrape_step = ctx.step("scrape", "Scrape members")
+    bios_step = ctx.step("bios", "Fetch bios") if inputs.include_bio else None
     save_step = ctx.step("save", "Save file")
+
+    async def not_reached() -> None:
+        await scrape_step.finish("skipped", "Not reached")
+        if bios_step is not None:
+            await bios_step.finish("skipped", "Not reached")
+        await save_step.finish("skipped", "Not reached")
+
     proxies = saved_proxies() if inputs.use_proxies else []
     counts = {"members": 0, "tokens": 0, "tokens_skipped": 0}
     report: dict = {
@@ -431,8 +468,7 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
     if not tokens:
         note = "No scraper tokens saved"
         await tokens_step.finish("failed", note)
-        await scrape_step.finish("skipped", "Not reached")
-        await save_step.finish("skipped", "Not reached")
+        await not_reached()
         await end(note)
         ctx.fail(note)
         return
@@ -449,8 +485,7 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
         note = (f"None of the {len(tokens)} scraper tokens work in this server" if len(tokens) != 1
                 else "The scraper token does not work in this server")
         await tokens_step.finish("failed", note)
-        await scrape_step.finish("skipped", "Not reached")
-        await save_step.finish("skipped", "Not reached")
+        await not_reached()
         await ctx.log(note, level="error", step="tokens")
         await end(note)
         ctx.fail(note)
@@ -476,6 +511,7 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
         include_roles=inputs.include_roles,
         progress_callback=job.on_progress,
         log_callback=job.on_log,
+        bio_progress_callback=job.on_bios,
     )
     if ctx.cancelled.is_set():
         await end()
@@ -484,7 +520,7 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
     await scrape_step.state("Starting")
     log.info("scrape_members run %s: guild=%s tokens=%d proxies=%d", ctx.run.id, gid, len(usable), len(proxies))
     scraper = _wiring.make_scraper(config)
-    result, error, cancelled = await _scrape(ctx, scrape_step, job, scraper)
+    result, error, cancelled = await _scrape(ctx, scrape_step, job, scraper, bios_step)
 
     members = list(getattr(result, "members", None) or [])
     if cancelled and not members:
@@ -502,17 +538,44 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
         "member_count_hint": metadata.get("member_count_hint") or job.hint,
         "cancelled": cancelled,
     }
+    if job.bios_started:
+        # The scraper's own counts; a cancel that left no result has only the last report.
+        bios = dict(metadata.get("bios") or {"queued": job.bios_total, "fetched": job.bios_done})
+        b = {k: _int(bios.get(k)) or 0 for k in ("queued", "fetched", "skipped")}
+        report["result"]["bios"] = b
 
-    if cancelled:
+    if job.bios_started:
+        # Scrape members finished when the bios began; the outcome is the bio phase's.
+        if cancelled:
+            await bios_step.finish("cancelled", f"Cancelled after {_fmt(job.bios_done)} of "
+                                   f"{_bios(job.bios_total)}")
+        elif error:
+            await bios_step.finish("failed", error)
+            await ctx.log(f"Scrape failed: {error}", level="error", step="bios")
+        elif not b["queued"]:
+            await bios_step.finish("skipped", "No bios to fetch")
+        else:
+            await bios_step.progress(b["fetched"] + b["skipped"], b["queued"])
+            note = f"{_bios(b['fetched'])} fetched"
+            if b["skipped"]:
+                note += f", {b['skipped']:,} skipped"
+            await bios_step.finish("success", note)
+    elif cancelled:
         await scrape_step.progress(len(members))
         await scrape_step.finish("cancelled", f"Cancelled after {_members(len(members))} found"
                                  if members else "Cancelled")
+        if bios_step is not None:
+            await bios_step.finish("cancelled", "Not reached")
     elif error:
         await scrape_step.finish("failed", error)
         await ctx.log(f"Scrape failed: {error}", level="error", step="scrape")
+        if bios_step is not None:
+            await bios_step.finish("skipped", "Not reached")
     else:
         await scrape_step.progress(len(members), max(len(members), job.hint or 0) or None)
         await scrape_step.finish("success", f"{_members(len(members))} found")
+        if bios_step is not None:
+            await bios_step.finish("skipped", "No bios to fetch")
 
     # Save file
     if error and not members:

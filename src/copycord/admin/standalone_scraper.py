@@ -1670,7 +1670,10 @@ class StandaloneScraper:
                 members=list(self._members.values()),
                 total_count=len(self._members),
                 elapsed_seconds=elapsed,
-                metadata={"guild_name": guild_name or ""},
+                metadata={
+                    "guild_name": guild_name or "",
+                    **({"bios": dict(self._bios)} if self.config.include_bio else {}),
+                },
             )
         except Exception as e:
             elapsed = time.perf_counter() - t0
