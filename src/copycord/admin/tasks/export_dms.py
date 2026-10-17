@@ -159,11 +159,11 @@ def _messages(n: int) -> str:
 
 
 def _failed(job: _Job) -> int:
-    """Messages read that missed a chosen destination."""
+    """Messages read that a failed step kept from a chosen destination (not the ones still to go)."""
     missed = 0
-    if job.forward is not None:
+    if job.forward is not None and job.forward.data["state"] == "failed":
         missed = max(0, job.read_count - job.sent)
-    if job.json_step is not None and job.json_error:
+    if job.json_step is not None and job.json_step.data["state"] == "failed":
         missed = job.read_count
     return missed
 
