@@ -132,6 +132,10 @@ def _assets(n: int, kind: str) -> str:
     return f"{_fmt(n)} {KIND_ONE[kind] if n == 1 else kind}"
 
 
+def _above_bot(n: int, kind: str) -> str:
+    return f"{_assets(n, kind)} at or above the bot's role {'is' if n == 1 else 'are'} left alone"
+
+
 def describe(inputs: PurgeAssetsInputs, lookups: Any = None) -> tuple[str, dict]:
     db = _db(lookups)
     mapping = None
@@ -195,8 +199,7 @@ async def options(params: dict) -> dict:
                 continue
             out["counts"][kind] = sum(1 for i in info.get("items") or [] if _in_scope(i, scope))
             if info.get("above_bot"):
-                out["notes"][kind] = (f"{_assets(info['above_bot'], kind)} at or above the bot's "
-                                      f"role are left alone")
+                out["notes"][kind] = _above_bot(info["above_bot"], kind)
         return out
     out["error"] = "The server bot did not answer, so these counts come from Copycord's records"
     if scope == "cloned":
@@ -297,8 +300,8 @@ async def run(ctx: Any, inputs: PurgeAssetsInputs) -> None:
                       f"{'count' if inputs.dry_run else 'delete'}"
                       + (f", {_fmt(r['kept'])} left alone" if r["kept"] else ""), step=kind)
         if info.get("above_bot"):
-            await ctx.log(f"{KIND_TITLES[kind]}: {_assets(info['above_bot'], kind)} at or above the bot's "
-                          f"role are left alone", level="warning", step=kind)
+            await ctx.log(f"{KIND_TITLES[kind]}: {_above_bot(info['above_bot'], kind)}",
+                          level="warning", step=kind)
         await live_summary()
 
         if inputs.dry_run:
