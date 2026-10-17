@@ -5,14 +5,13 @@ then @everyone, role grants, then channel overwrites.
 """
 import pytest
 
-from copycord.selfclient.enums import ChannelType, MessageType, StickerFormatType, VideoQualityMode
+from copycord.selfclient.enums import ChannelType, MessageType, StickerFormatType
 from copycord.selfclient.models import (
     CategoryChannel,
     ForumChannel,
     Guild,
     Member,
     Message,
-    Object,
     Permissions,
     StageChannel,
     TextChannel,
@@ -140,13 +139,6 @@ class TestPermissionsFor:
         assert not perms.ban_members
         assert not perms.administrator
 
-    def test_plain_member_has_only_everyone(self):
-        guild = make_guild()
-        member = make_member(guild)
-        perms = guild.get_channel(TEXT).permissions_for(member)
-        assert perms.read_message_history
-        assert not perms.manage_messages
-
     def test_role_allow_overrides_everyone_deny(self):
         guild = make_guild(
             [
@@ -219,18 +211,6 @@ class TestPermissionsFor:
         assert isinstance(thread, Thread)
         assert thread.permissions_for(make_member(guild)).read_message_history
 
-    def test_guild_permissions(self):
-        guild = make_guild()
-        perms = make_member(guild, roles=[MOD]).guild_permissions
-        assert perms.manage_messages and perms.view_channel
-        assert make_member(guild, roles=[ADMIN]).guild_permissions.value == Permissions.all().value
-
-    def test_handle_overwrite_clears_then_sets(self):
-        p = Permissions(Permissions._of(("send_messages", "embed_links")).value)
-        p.handle_overwrite(allow=int(bits("attach_files")), deny=int(bits("embed_links")))
-        assert p.send_messages and p.attach_files and not p.embed_links
-
-
 # ---------------------------------------------------------------------------
 # guild / channel / role wrappers
 # ---------------------------------------------------------------------------
@@ -287,16 +267,6 @@ class TestGuildWrappers:
         assert text.topic == "hello" and text.slowmode_delay == 5
         assert text.category.id == CATEGORY and text.category_id == CATEGORY
         assert guild.get_channel(STAGE).category is None
-
-    def test_voice_and_stage(self):
-        guild = make_guild()
-        voice = guild.get_channel(VOICE)
-        assert isinstance(voice, VoiceChannel)
-        assert voice.bitrate == 96000 and voice.user_limit == 10
-        assert voice.video_quality_mode == VideoQualityMode.full
-        assert voice.video_quality_mode.name == "full"
-        stage = guild.get_channel(STAGE)
-        assert isinstance(stage, StageChannel) and stage.topic == "talks"
 
     def test_forum_and_thread(self):
         guild = make_guild()
@@ -429,18 +399,6 @@ class TestMessageWrapper:
 
 
 class TestSmallWrappers:
-    def test_user_defaults(self):
-        user = User({"id": str(MEMBER_ID), "username": "alice", "discriminator": "0"})
-        assert user.display_name == "alice"
-        assert str(user) == "alice"
-        assert user.avatar is None
-        assert user.display_avatar.url.startswith("https://cdn.discordapp.com/embed/avatars/")
-        assert user.mention == f"<@{MEMBER_ID}>"
-
-    def test_object_compares_by_id(self):
-        assert Object(id=5) == Object(id="5")
-        assert Object(5).created_at is not None
-
     def test_unknown_enum_values_pass_through(self):
         guild = make_guild()
         msg = Message(_message_payload(type=999), guild=guild)

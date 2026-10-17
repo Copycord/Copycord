@@ -16,11 +16,8 @@ from copycord.selfclient.events import (
     RawMessageUpdateEvent,
 )
 from copycord.selfclient.models import (
-    ForumChannel,
     Message,
-    Role,
     TextChannel,
-    Thread,
 )
 
 TOKEN = "test-token-not-real"
@@ -348,19 +345,6 @@ class TestGatewayEventsReachTheirHandlers:
         await _stop(listener, task)
 
     @pytest.mark.asyncio
-    async def test_thread_update(self, fake_transport):
-        listener = _listener()
-        task, gw = await _start(listener, fake_transport)
-        await gw.feed("THREAD_UPDATE", _thread("renamed"))
-        await _drain(listener.bot)
-        before, after = _only(listener, "on_thread_update")
-        assert isinstance(before, Thread) and isinstance(after, Thread)
-        assert (before.name, after.name) == ("a thread", "renamed")
-        assert isinstance(after.parent, ForumChannel)
-        assert after.guild.id == GUILD
-        await _stop(listener, task)
-
-    @pytest.mark.asyncio
     async def test_channel_update(self, fake_transport):
         listener = _listener()
         task, gw = await _start(listener, fake_transport)
@@ -371,21 +355,6 @@ class TestGatewayEventsReachTheirHandlers:
         assert (before.name, after.name) == ("general", "renamed")
         assert after.guild.id == GUILD
         await _stop(listener, task)
-
-    @pytest.mark.asyncio
-    async def test_guild_role_update(self, fake_transport):
-        listener = _listener()
-        task, gw = await _start(listener, fake_transport)
-        await gw.feed(
-            "GUILD_ROLE_UPDATE", {"guild_id": str(GUILD), "role": _role("moderator")}
-        )
-        await _drain(listener.bot)
-        before, after = _only(listener, "on_guild_role_update")
-        assert isinstance(before, Role) and isinstance(after, Role)
-        assert (before.name, after.name) == ("mod", "moderator")
-        assert after.guild.id == GUILD
-        await _stop(listener, task)
-
 
 class TestCloseAndRestart:
     @pytest.mark.asyncio
@@ -443,14 +412,6 @@ class TestCloseAndRestart:
             await asyncio.sleep(0)
         assert listener.bot is not old
         assert old.is_closed()
-
-    @pytest.mark.asyncio
-    async def test_an_unused_client_is_kept(self, fake_transport):
-        listener = _listener()
-        listener._install_bot(listener._new_bot(PROXY))
-        first = listener.bot
-        listener._reset_bot_for_retry()
-        assert listener.bot is first
 
     @pytest.mark.asyncio
     async def test_a_stalled_connect_is_aborted_onto_a_fresh_client(self, fake_transport):

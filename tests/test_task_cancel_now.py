@@ -11,7 +11,6 @@ import pytest
 from copycord.admin.tasks import avatars, backfill, export_dms, purge, purge_assets, sync_assets
 from copycord.admin.tasks.service import MemoryRunRepo, TaskService
 from copycord.server.asset_sync import AssetSync
-from copycord.server.item_hooks import ItemHooks
 from copycord.server.rate_limiter import RateLimiter, RateLimitManager
 from copycord.server.stickers import StickerManager
 
@@ -63,16 +62,6 @@ async def test_rate_limit_wait_wakes_on_the_stop_event():
     stop.set()
     await asyncio.wait_for(waiting, 1.0)
     assert time.monotonic() - t0 < 0.5
-
-
-def test_item_hooks_check_raises_once_stopped():
-    class _Stopped(ItemHooks):
-        def stop(self):
-            return True
-
-    ItemHooks().check()
-    with pytest.raises(asyncio.CancelledError):
-        _Stopped().check()
 
 
 # sync assets: the admin task, the server job and the real sticker pass

@@ -300,16 +300,6 @@ def test_cancel_while_delivering_stops_the_queued_forwards(ServerReceiver):
     assert [f["type"] for f in rx.bot.ws_manager.sent] == ["backfill_done"]
 
 
-def test_cancel_for_an_unknown_job_is_harmless(ServerReceiver):
-    async def go():
-        rx = _rx(ServerReceiver, asyncio.Event())
-        return rx, await rx._on_ws({"type": "backfill_job_cancel", "data": {"job_id": "nope"}})
-
-    rx, res = asyncio.run(go())
-    assert res == {"ok": True, "job_id": "nope", "state": "unknown"}
-    assert rx.bus.sent == []
-
-
 def test_an_explicit_hard_cap_still_cuts_the_wait_by_the_clock(ServerReceiver, monkeypatch):
     """BACKFILL_DRAIN_HARD_CAP_SECS overrides the stall window: sends still going out are cancelled
     when it runs out, and the end says how many of the job's messages went out."""

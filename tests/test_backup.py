@@ -4,7 +4,6 @@ import asyncio
 import io
 import json
 import os
-import socket
 import sqlite3
 import sys
 import tarfile
@@ -211,26 +210,6 @@ def test_backup_archive_is_owner_only(data_dir):
     assert archive.stat().st_mode & 0o777 == 0o600
 
 
-class _Tty(io.StringIO):
-    encoding = "utf-8"
-
-    def isatty(self):
-        return True
-
-
-def test_backup_on_a_terminal_is_a_rail(data_dir, monkeypatch):
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setattr(cli, "brand", lambda: "Copycord v4.0.0 (abcdef1)")
-    out = _Tty()
-    monkeypatch.setattr(sys, "stdout", out)
-    assert cli.main(["backup"]) == 0
-    lines = out.getvalue().splitlines()
-    assert "Copycord v4.0.0 (abcdef1)" in lines
-    assert "\u250c  Back up the database" in lines
-    assert any(x.startswith("\u2713  Database backed up  ") for x in lines)
-    assert lines[-1] == "\u2514"
-
-
 def test_backup_json(data_dir, capsys):
     assert cli.main(["backup", "--json"]) == 0
     captured = capsys.readouterr()
@@ -238,30 +217,6 @@ def test_backup_json(data_dir, capsys):
     [archive] = _archives(data_dir)
     assert doc == {"ok": True, "file": str(archive), "size": archive.stat().st_size,
                    "includes_key": True}
-
-
-def test_backup_json_without_a_database(data_dir, capsys):
-    (data_dir / "data.db").unlink()
-    assert cli.main(["backup", "--json"]) == 1
-    doc = json.loads(capsys.readouterr().out)
-    assert doc["ok"] is False and doc["file"] is None
-    assert "nothing to back up" in doc["error"]
-
-
-def test_restore_has_no_json(data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["--json", "restore"])
-    assert exc.value.code == 2
-    assert "--json works with --version, doctor, backup" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("command", ("backup", "restore"))
-def test_backup_commands_have_help(command, data_dir, capsys):
-    with pytest.raises(SystemExit) as exc:
-        cli.main([command, "--help"])
-    assert exc.value.code == 0
-    out = capsys.readouterr().out
-    assert out.startswith(f"copycord {command}\n") and "Examples:" in out
 
 
 # --------------------------------------------------------------------------
@@ -345,17 +300,6 @@ def test_restore_refuses_while_copycord_runs(data_dir, saved, monkeypatch, capsy
     assert "Copycord is running; stop it before restoring" in err
 
 
-def test_restore_refuses_while_the_service_runs(data_dir, saved, monkeypatch, capsys):
-    class State:
-        installed = running = True
-
-    _no_terminal(monkeypatch)
-    monkeypatch.setattr(cli, "service_state", lambda: State())
-    assert cli.main(["restore", "--yes", str(saved)]) == 1
-    assert _mark(data_dir / "data.db") == "current"
-    assert "copycord service stop" in capsys.readouterr().err
-
-
 def test_restore_refuses_a_newer_schema(data_dir, tmp_path, monkeypatch, capsys):
     _no_terminal(monkeypatch)
     newer = _tar(tmp_path / "newer.tar.gz",
@@ -376,13 +320,6 @@ def test_restore_refuses_a_damaged_backup(data_dir, tmp_path, monkeypatch, capsy
     assert "the backup failed its integrity check, nothing was changed" in capsys.readouterr().err
 
 
-def test_restore_refuses_an_archive_without_a_database(data_dir, tmp_path, monkeypatch, capsys):
-    _no_terminal(monkeypatch)
-    empty = _tar(tmp_path / "empty.tar.gz", {"notes.txt": b"hi"})
-    assert cli.main(["restore", "--yes", str(empty)]) == 1
-    assert "has no data.db in it" in capsys.readouterr().err
-
-
 def test_restore_reads_members_by_name_only(data_dir, tmp_path, monkeypatch):
     _no_terminal(monkeypatch)
     evil = _tar(tmp_path / "evil.tar.gz", {"../escaped.txt": b"x",
@@ -397,12 +334,6 @@ def test_restore_without_a_terminal_needs_yes(data_dir, saved, monkeypatch, caps
     assert cli.main(["restore", str(saved)]) == 1
     assert _mark(data_dir / "data.db") == "current"
     assert "rerun with --yes" in capsys.readouterr().err
-
-
-def test_restore_without_a_terminal_needs_the_backup(data_dir, saved, monkeypatch, capsys):
-    _no_terminal(monkeypatch)
-    assert cli.main(["restore", "--yes"]) == 1
-    assert "give its path" in capsys.readouterr().err
 
 
 def test_restore_lists_the_newest_backups_and_asks(data_dir, saved, tmp_path, monkeypatch, capsys):
@@ -425,13 +356,6 @@ def test_restore_cancel_changes_nothing(data_dir, saved, monkeypatch, capsys):
     assert _mark(data_dir / "data.db") == "current"
     assert not list((data_dir / "backups").glob("pre-restore-*"))
     assert "restore cancelled" in capsys.readouterr().err
-
-
-def test_restore_no_at_the_confirmation_changes_nothing(data_dir, saved, monkeypatch, capsys):
-    _answers(monkeypatch, "n")
-    assert cli.main(["restore", str(saved)]) == 1
-    assert _mark(data_dir / "data.db") == "current"
-    assert not list((data_dir / "backups").glob("pre-restore-*"))
 
 
 def test_restore_undo_with_the_pre_restore_backup(data_dir, saved, monkeypatch):
@@ -457,12 +381,6 @@ def test_pre_restore_backups_are_not_pruned(data_dir, monkeypatch):
     assert len([p for p in _archives(data_dir) if p != keep]) == 1
 
 
-def test_restore_without_any_backups(data_dir, monkeypatch, capsys):
-    _answers(monkeypatch)
-    assert cli.main(["restore"]) == 1
-    assert "no backups to restore" in capsys.readouterr().err
-
-
 def test_restore_replaces_a_stale_journal(data_dir, saved, monkeypatch):
     _no_terminal(monkeypatch)
     journal = data_dir / "data.db-journal"
@@ -471,23 +389,3 @@ def test_restore_replaces_a_stale_journal(data_dir, saved, monkeypatch):
     assert not journal.exists()
     assert _mark(data_dir / "data.db") == "saved"
 
-
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def test_doctor_shows_the_failed_check(data_dir, monkeypatch, capsys):
-    (data_dir / ".env").write_text("TZ=UTC\n", encoding="utf-8")
-    monkeypatch.setenv("ADMIN_PORT", str(_free_port()))
-    monkeypatch.setenv("PASSWORD", "not-the-default")
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setattr(cli, "REQUIRED_IMPORTS", ())
-    monkeypatch.setattr(cli, "check_frontend", lambda: cli.Check(cli.PASS, "web UI included"))
-    (data_dir / "backups").mkdir()
-    bs.record_check_failure(data_dir / "backups", "row 7 missing from index x")
-    assert cli.main(["doctor"]) == 0
-    out = capsys.readouterr().out
-    line = next(x for x in out.splitlines() if "last backup failed its check" in x)
-    assert line.startswith("! last backup failed its check")

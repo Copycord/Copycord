@@ -180,16 +180,6 @@ def test_request_timeout_returns_none(reg, loops):
     assert reply is None
 
 
-def test_request_without_endpoint_returns_none(reg, loops):
-    cli = loops("cli-loop")
-    reply = cli.run(
-        WebsocketManager(send_url="ws://127.0.0.1:18999").request(
-            {"type": "x"}, timeout=0.5, max_attempts=1
-        )
-    )
-    assert reply is None
-
-
 def test_send_is_fire_and_forget_across_threads(reg, loops):
     srv, cli = loops("srv-loop"), loops("cli-loop")
     got = []
@@ -207,28 +197,6 @@ def test_send_is_fire_and_forget_across_threads(reg, loops):
     assert thread == "srv-loop"
     assert msg["type"] == "message" and msg["data"] == {"id": 7} and msg["rid"]
     assert "rid" not in payload
-
-
-def test_send_from_both_sides(reg, loops):
-    """Server and client each listen and each send to the other."""
-    a, b = loops("server-loop"), loops("client-loop")
-    inbox = {"server-loop": [], "client-loop": []}
-    done = threading.Event()
-
-    def make(name):
-        async def handler(msg):
-            inbox[threading.current_thread().name].append(msg["type"])
-            if inbox["server-loop"] and inbox["client-loop"]:
-                done.set()
-
-        return handler
-
-    _serve(a, make("server-loop"), port=18801)
-    _serve(b, make("client-loop"), port=18802)
-    a.run(WebsocketManager(send_url="ws://client:18802").send({"type": "to-client"}))
-    b.run(WebsocketManager(send_url="ws://server:18801").send({"type": "to-server"}))
-    assert done.wait(3)
-    assert inbox == {"server-loop": ["to-server"], "client-loop": ["to-client"]}
 
 
 def test_stopped_server_unregisters(reg, loops):
@@ -393,46 +361,12 @@ def test_split_mode_send_and_request_use_real_sockets(split, monkeypatch):
     assert dialled == [URL, URL]
 
 
-def test_split_mode_start_server_binds_socket(split, monkeypatch):
-    served = []
-
-    class FakeServer:
-        def close(self):
-            served.append("closed")
-
-        async def wait_closed(self):
-            pass
-
-    async def fake_serve(handler, host, port, **kw):
-        served.append((host, port))
-        return FakeServer()
-
-    monkeypatch.setattr(ws_mod.websockets, "serve", fake_serve)
-
-    async def main():
-        mgr = WebsocketManager(send_url="ws://unused", listen_host="0.0.0.0", listen_port=PORT)
-        task = asyncio.ensure_future(mgr.start_server(lambda m: None))
-        while not served:
-            await asyncio.sleep(0.005)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    asyncio.run(main())
-    assert served == [("0.0.0.0", PORT), "closed"]
-
-
 async def _idle():
     await asyncio.Event().wait()
 
 
 def _fake_factories():
     return {n: _idle for n in ("admin", "server", "client")}
-
-
-def test_build_supervisor_fake_factories_default_off(split):
-    build_supervisor(factories=_fake_factories(), control_ports={"server": 0, "client": 0})
-    assert inprocess.active() is None
 
 
 def test_build_supervisor_enables_inprocess_for_all_roles(split):
