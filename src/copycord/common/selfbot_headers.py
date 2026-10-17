@@ -195,7 +195,7 @@ def make_fingerprint(token: str) -> dict:
         "client_launch_id": launch_id,
         "launch_signature": launch_signature,
         "client_app_state": "focused",
-        "client_heartbeat_session_id": "",
+        "client_heartbeat_session_id": str(uuid.uuid4()),
     }
 
     gateway_props = {

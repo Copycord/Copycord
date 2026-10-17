@@ -37,6 +37,7 @@ from copycord.common.selfbot_headers import (
     TLS_IMPERSONATE,
     _mask_proxy_for_log,
     build_headers,
+    set_heartbeat_session_id,
 )
 from copycord.selfclient.gateway import (
     GatewayClient,
@@ -1253,6 +1254,7 @@ class StandaloneScraper:
 
                             if op == 0 and t == "READY":
                                 ready = True
+                                set_heartbeat_session_id(token, identity.heartbeat_session_id)
                                 self._sessions_ready += 1
                                 self._log(
                                     f"🟢 Session {session_index + 1} connected",
