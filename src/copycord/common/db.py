@@ -5745,6 +5745,15 @@ class DBManager:
 
     # event_logs CRUD
 
+    # Text columns, the ids, and the values (not the keys) of extra_json, e.g. a sync task id.
+    _EVENT_LOG_SEARCH = (
+        "(details LIKE ? OR channel_name LIKE ? OR category_name LIKE ? OR guild_name LIKE ?"
+        " OR log_id LIKE ? OR CAST(guild_id AS TEXT) LIKE ? OR CAST(channel_id AS TEXT) LIKE ?"
+        " OR CASE WHEN json_valid(extra_json) THEN EXISTS("
+        "SELECT 1 FROM json_tree(extra_json) WHERE type NOT IN ('object', 'array')"
+        " AND CAST(value AS TEXT) LIKE ?) ELSE 0 END)"
+    )
+
     @_in_tx
     def add_event_log(
         self,
@@ -5803,11 +5812,8 @@ class DBManager:
             clauses.append("guild_id = ?")
             params.append(guild_id)
         if search:
-            clauses.append(
-                "(details LIKE ? OR channel_name LIKE ? OR category_name LIKE ? OR guild_name LIKE ?)"
-            )
-            pat = f"%{search}%"
-            params.extend([pat, pat, pat, pat])
+            clauses.append(self._EVENT_LOG_SEARCH)
+            params.extend([f"%{search}%"] * 8)
 
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         sql = f"SELECT * FROM event_logs{where} ORDER BY created_at DESC, log_id DESC LIMIT ? OFFSET ?"
@@ -5834,11 +5840,8 @@ class DBManager:
             clauses.append("guild_id = ?")
             params.append(guild_id)
         if search:
-            clauses.append(
-                "(details LIKE ? OR channel_name LIKE ? OR category_name LIKE ? OR guild_name LIKE ?)"
-            )
-            pat = f"%{search}%"
-            params.extend([pat, pat, pat, pat])
+            clauses.append(self._EVENT_LOG_SEARCH)
+            params.extend([f"%{search}%"] * 8)
 
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         sql = f"SELECT COUNT(*) FROM event_logs{where}"

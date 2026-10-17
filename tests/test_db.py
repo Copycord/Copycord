@@ -331,6 +331,18 @@ class TestEventLogs:
         logs = db.get_event_logs(search="announcements")
         assert len(logs) == 1
 
+    def test_search_matches_metadata_values_and_ids(self, db):
+        db.add_event_log(event_type="guild_metadata", details="Updated guild metadata: icon",
+                         guild_id=1442034337590677500,
+                         extra={"sync_task": "yi8h5", "changed_fields": ["icon"]})
+        db.add_event_log(event_type="x", details="other", extra={"note": "nothing"})
+        db.conn.execute("UPDATE event_logs SET extra_json = 'not json' WHERE details = 'other'")
+        assert [r["details"] for r in db.get_event_logs(search="yi8h5")] == ["Updated guild metadata: icon"]
+        assert db.count_event_logs(search="yi8h5") == 1
+        assert len(db.get_event_logs(search="1442034337590677500")) == 1
+        # Keys are not searched: "sync_task" is only a key.
+        assert db.get_event_logs(search="sync_task") == []
+
     def test_delete_single(self, db):
         log_id = db.add_event_log(event_type="x", details="a")
         assert db.delete_event_log(log_id) is True
