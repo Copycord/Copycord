@@ -315,11 +315,14 @@ export const DISCLOSURE_SUMMARY =
 /** What an opened disclosure shows, under a hairline. */
 export const DISCLOSURE_BODY = "border-t border-border px-4 py-3";
 
-/** A disclosure's summary line: the chevron, turned while open, and the title in the card head's type. */
-export function DisclosureTitle({ title }: { title: string }) {
+/**
+ * A disclosure's summary line: the chevron, turned while open, and the title in the card head's type.
+ * `open` turns it from a button toggle's own state (a details element turns it by itself).
+ */
+export function DisclosureTitle({ title, open }: { title: string; open?: boolean }) {
   return (
     <>
-      <span aria-hidden="true" className="inline-block w-2 text-muted transition-transform group-open:rotate-90">
+      <span aria-hidden="true" className={cx("inline-block w-2 text-muted transition-transform group-open:rotate-90", open && "rotate-90")}>
         ›
       </span>
       <span className={CARD_TITLE}>{title}</span>

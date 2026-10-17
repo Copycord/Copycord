@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
@@ -7,7 +7,7 @@ import { typeLabel } from "../../typeLabels";
 import { describeRunInputs, entryFor, heroStat } from "..";
 import { GONE, ScrapeDownloadCard, includeWords, scrapeFileUrl, scrapePathOf } from "./entry";
 import { SCRAPE_EXPLAINER, ScrapeMembersForm, guildIdError, guildOptionLabel, tokenTotal } from "./ScrapeMembersForm";
-import { ScraperSettingsCard, TOKENS_URL, textLines } from "./ScraperSettingsCard";
+import { AUTOSAVE_MS, ScraperSettingsCard, TOKENS_URL, openScraperSettings, textLines } from "./ScraperSettingsCard";
 
 const TYPE: TaskType = { key: "scrape_members", title: "Scrape members", description: "", inputs_schema: {}, active: 0, total: 0 };
 const GUILDS = [
@@ -231,6 +231,21 @@ function renderSettings() {
   );
 }
 
+const cardToggle = () => screen.getByRole("button", { name: /Scraper tokens and proxies/ });
+const expand = () => fireEvent.click(cardToggle());
+const puts = (calls: Call[]) => calls.filter((c) => c.method === "PUT");
+
+/** Edits a list on fake timers and runs `step` (advance the debounce, blur), back on real timers after. */
+function editWith(input: HTMLElement, value: string, step: () => void) {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    fireEvent.change(input, { target: { value } });
+    step();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 describe("ScraperSettingsCard", () => {
   function serveSettings(tokens: unknown = ["MTAxMjM0.tok.one", "OTg3NjU0.tok.two"], proxies = ["1.2.3.4:80"], status = 200) {
     return serve({
@@ -241,9 +256,47 @@ describe("ScraperSettingsCard", () => {
     });
   }
 
-  it("shows the saved tokens one per line in a plain textbox, with no list, add, rename or delete", async () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("is collapsed by default with the saved counts in its head, and expands and collapses on click", async () => {
+    serveSettings();
+    renderSettings();
+    const toggle = cardToggle();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const panel = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    expect(panel).not.toBeNull();
+    expect(panel).not.toBeVisible();
+    expect(await screen.findByText("2 tokens, 1 proxy")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Tokens" })).not.toBeInTheDocument();
+    expand();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(panel).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Tokens" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Proxies" })).toBeVisible();
+    expect(screen.queryByText("2 tokens, 1 proxy")).not.toBeInTheDocument();
+    expand();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("textbox", { name: "Tokens" })).not.toBeInTheDocument();
+  });
+
+  it("opens when the start form's link asks for it", async () => {
+    serveSettings();
+    const before = Element.prototype.scrollIntoView;
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    renderSettings();
+    await screen.findByText("2 tokens, 1 proxy");
+    act(() => openScraperSettings());
+    expect(cardToggle()).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("textbox", { name: "Tokens" })).toBeVisible();
+    expect(scroll).toHaveBeenCalled();
+    Element.prototype.scrollIntoView = before;
+  });
+
+  it("shows the saved tokens one per line in a plain textbox, with no Save buttons, list, add, rename or delete", async () => {
     const calls = serveSettings();
     renderSettings();
+    expand();
     expect(await screen.findByText("2 tokens saved")).toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "Tokens" });
     expect(input.tagName).toBe("TEXTAREA");
@@ -251,58 +304,142 @@ describe("ScraperSettingsCard", () => {
     expect(input).toHaveAttribute("spellcheck", "false");
     expect(input).toHaveValue("MTAxMjM0.tok.one\nOTg3NjU0.tok.two");
     expect(screen.queryByText(/not validated/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save tokens" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add token|edit|delete|validate/i })).not.toBeInTheDocument();
     expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });
 
-  it("saves the tokens as the deduped list of trimmed lines", async () => {
+  it("saves the tokens by itself after the last edit, once, as the deduped list, and keeps the text as typed", async () => {
     const calls = serveSettings();
     renderSettings();
+    expand();
     await screen.findByText("2 tokens saved");
     const input = screen.getByRole("textbox", { name: "Tokens" });
-    const save = screen.getByRole("button", { name: "Save tokens" });
-    fireEvent.change(input, { target: { value: "MTAxMjM0.tok.one\n\n  OTg3NjU0.tok.two  \nMTAxMjM0.tok.one\nnew.tok.three\n" } });
-    await waitFor(() => expect(save).toBeEnabled());
-    fireEvent.click(save);
-    await waitFor(() =>
-      expect(calls.find((c) => c.method === "PUT")).toEqual({
-        method: "PUT",
-        url: "/api/scraper/tokens",
-        body: { tokens: ["MTAxMjM0.tok.one", "OTg3NjU0.tok.two", "new.tok.three"] },
-      }),
-    );
-    expect(await screen.findByText("Tokens saved")).toBeInTheDocument();
-    expect(screen.getByText("3 tokens saved")).toBeInTheDocument();
-    expect(input).toHaveValue("MTAxMjM0.tok.one\nOTg3NjU0.tok.two\nnew.tok.three");
-    expect(save).toBeDisabled();
+    const typed = "MTAxMjM0.tok.one\n\n  OTg3NjU0.tok.two  \nMTAxMjM0.tok.one\nnew.tok.three\n";
+    editWith(input, typed, () => {
+      act(() => vi.advanceTimersByTime(AUTOSAVE_MS - 1));
+      expect(puts(calls)).toEqual([]);
+      act(() => vi.advanceTimersByTime(1));
+    });
+    expect(puts(calls)).toEqual([
+      { method: "PUT", url: "/api/scraper/tokens", body: { tokens: ["MTAxMjM0.tok.one", "OTg3NjU0.tok.two", "new.tok.three"] } },
+    ]);
+    expect(await screen.findByText("3 tokens saved")).toBeInTheDocument();
+    expect(input).toHaveValue(typed);
+    expect(screen.queryByText("Tokens saved")).not.toBeInTheDocument();
+    fireEvent.blur(input);
+    expect(puts(calls)).toHaveLength(1);
     expect(textLines(" a \r\nb\n\na\n")).toEqual(["a", "b"]);
+  });
+
+  it("saves at once on blur and on unmount", async () => {
+    const calls = serveSettings();
+    const { unmount } = renderSettings();
+    expand();
+    expect(await screen.findByText("1 proxy saved")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "Proxies" });
+    expect(input).toHaveValue("1.2.3.4:80");
+    editWith(input, "1.2.3.4:80\n\n  5.6.7.8:3128  \n", () => fireEvent.blur(input));
+    expect(puts(calls).map((c) => c.body)).toEqual([{ proxies: ["1.2.3.4:80", "5.6.7.8:3128"] }]);
+    expect(await screen.findByText("2 proxies saved")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "9.9.9.9:1" } });
+    unmount();
+    expect(puts(calls).map((c) => c.body)).toEqual([{ proxies: ["1.2.3.4:80", "5.6.7.8:3128"] }, { proxies: ["9.9.9.9:1"] }]);
+  });
+
+  it("does not save when the lines did not change", async () => {
+    const calls = serveSettings();
+    renderSettings();
+    expand();
+    await screen.findByText("2 tokens saved");
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    editWith(input, "MTAxMjM0.tok.one  \n\nOTg3NjU0.tok.two\nMTAxMjM0.tok.one\n", () => {
+      act(() => vi.advanceTimersByTime(AUTOSAVE_MS * 2));
+      fireEvent.blur(input);
+    });
+    expect(puts(calls)).toEqual([]);
   });
 
   it("shows an empty textbox with its hint when no tokens are saved", async () => {
     serveSettings([]);
     renderSettings();
-    expect(await screen.findByText("0 tokens saved")).toBeInTheDocument();
+    expect(await screen.findByText("0 tokens, 1 proxy")).toBeInTheDocument();
+    expand();
+    expect(screen.getByText("0 tokens saved")).toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "Tokens" });
     expect(input).toHaveValue("");
     expect(input).toHaveAttribute("placeholder", "One Discord token per line");
-    expect(screen.getByRole("button", { name: "Save tokens" })).toBeDisabled();
   });
 
-  it("says so when the tokens cannot be loaded and keeps the save off", async () => {
+  it("says so when the tokens cannot be loaded and never saves over the file", async () => {
     const calls = serveSettings(undefined, ["1.2.3.4:80"], 500);
     renderSettings();
+    expand();
     expect(await screen.findByText("Could not read the token file")).toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "Tokens" });
     expect(input).toHaveAttribute("readonly");
-    fireEvent.change(input, { target: { value: "typed.anyway" } });
-    expect(screen.getByRole("button", { name: "Save tokens" })).toBeDisabled();
+    editWith(input, "typed.anyway", () => {
+      act(() => vi.advanceTimersByTime(AUTOSAVE_MS * 2));
+      fireEvent.blur(input);
+    });
     expect(await screen.findByText("1 proxy saved")).toBeInTheDocument();
-    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    expand();
+    expect(screen.queryByText(/tokens?, /)).not.toBeInTheDocument();
+    expect(puts(calls)).toEqual([]);
   });
 
-  it("shimmers only the count and the lines while loading, in the textbox's own box", async () => {
+  it("keeps the text and the saved count on a failed save, with one error, and tries again on the next edit", async () => {
+    const calls = serve({
+      "GET /api/scraper/tokens": () => ({ body: { ok: true, tokens: ["a.b.c"] } }),
+      "PUT /api/scraper/tokens": () => ({ status: 500, body: { ok: false, error: "Could not write the token file" } }),
+      "GET /api/scraper/proxies": () => ({ body: { ok: true, proxies: [] } }),
+    });
+    renderSettings();
+    expand();
+    await screen.findByText("1 token saved");
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    editWith(input, "a.b.c\nd.e.f", () => fireEvent.blur(input));
+    expect(await screen.findByText("Could not write the token file")).toBeInTheDocument();
+    expect(screen.getAllByText("Could not write the token file")).toHaveLength(1);
+    expect(input).toHaveValue("a.b.c\nd.e.f");
+    expect(screen.getByText("1 token saved")).toBeInTheDocument();
+    editWith(input, "a.b.c\nd.e.f\n", () => act(() => vi.advanceTimersByTime(AUTOSAVE_MS)));
+    expect(puts(calls)).toHaveLength(2);
+  });
+
+  it("ignores an older save's late reply", async () => {
+    const replies: ((r: Response) => void)[] = [];
+    const calls: Call[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        calls.push({ method, url, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined });
+        if (method === "PUT") return new Promise<Response>((r) => replies.push(r));
+        return Promise.resolve(Response.json(url === TOKENS_URL ? { ok: true, tokens: ["a"] } : { ok: true, proxies: [] }));
+      }),
+    );
+    renderSettings();
+    expand();
+    await screen.findByText("1 token saved");
+    const input = screen.getByRole("textbox", { name: "Tokens" });
+    editWith(input, "a\nb", () => fireEvent.blur(input));
+    editWith(input, "a\nb\nc", () => fireEvent.blur(input));
+    expect(puts(calls).map((c) => c.body)).toEqual([{ tokens: ["a", "b"] }, { tokens: ["a", "b", "c"] }]);
+    // "Saving" takes the count's place in the same cell while a save is out.
+    expect(screen.getByText("Saving")).not.toHaveClass("invisible");
+    expect(screen.getByText("1 token saved")).toHaveClass("invisible");
+    await act(async () => replies[1]?.(Response.json({ ok: true, tokens: ["a", "b", "c"] })));
+    expect(await screen.findByText("3 tokens saved")).not.toHaveClass("invisible");
+    expect(screen.getByText("Saving")).toHaveClass("invisible");
+    await act(async () => replies[0]?.(Response.json({ ok: true, tokens: ["a", "b"] })));
+    expect(screen.getByText("3 tokens saved")).toBeInTheDocument();
+    expect(screen.queryByText("2 tokens saved")).not.toBeInTheDocument();
+    expect(input).toHaveValue("a\nb\nc");
+  });
+
+  it("shimmers only the counts and the lines while loading, in the textbox's own box", async () => {
     let answer: (r: Response) => void = () => {};
     vi.stubGlobal(
       "fetch",
@@ -311,13 +448,15 @@ describe("ScraperSettingsCard", () => {
       ),
     );
     const { container } = renderSettings();
+    await screen.findByText("0 proxies saved");
+    // Collapsed: the head's counts and the hidden token count and lines.
+    expect(container.querySelectorAll("[data-skeleton]").length).toBe(5);
+    expand();
     const input = screen.getByRole("textbox", { name: "Tokens" });
     expect(input).toHaveAttribute("readonly");
     expect(input).not.toHaveAttribute("placeholder");
     expect(input.parentElement).toHaveAttribute("aria-busy", "true");
     expect(screen.getByText("Tokens")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save tokens" })).toBeDisabled();
-    await screen.findByText("0 proxies saved");
     expect(container.querySelectorAll("[data-skeleton]").length).toBe(4);
     answer(Response.json({ ok: true, tokens: ["a.b.c"] }));
     expect(await screen.findByText("1 token saved")).toBeInTheDocument();
@@ -325,23 +464,5 @@ describe("ScraperSettingsCard", () => {
     expect(input).toHaveValue("a.b.c");
     expect(input).not.toHaveAttribute("readonly");
     expect(container.querySelectorAll("[data-skeleton]").length).toBe(0);
-  });
-
-  it("saves the proxy list", async () => {
-    const calls = serveSettings();
-    renderSettings();
-    expect(await screen.findByText("1 proxy saved")).toBeInTheDocument();
-    const save = screen.getByRole("button", { name: "Save proxies" });
-    expect(save).toBeDisabled();
-    const input = screen.getByRole("textbox", { name: "Proxies" });
-    // A plain textbox: one proxy per line, the saved list shown as its lines, blank lines dropped.
-    expect(input.tagName).toBe("TEXTAREA");
-    expect(input).toHaveValue("1.2.3.4:80");
-    fireEvent.change(input, { target: { value: "1.2.3.4:80\n\n  5.6.7.8:3128  \n" } });
-    await waitFor(() => expect(save).toBeEnabled());
-    fireEvent.click(save);
-    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ proxies: ["1.2.3.4:80", "5.6.7.8:3128"] }));
-    expect(await screen.findByText("2 proxies saved")).toBeInTheDocument();
-    expect(await screen.findByText("Proxies saved")).toBeInTheDocument();
   });
 });

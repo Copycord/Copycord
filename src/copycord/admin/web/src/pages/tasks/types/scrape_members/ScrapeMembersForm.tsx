@@ -14,7 +14,7 @@ import { useApi } from "../../../../hooks/useApi";
 import { formatCount } from "../../StepList";
 import { FILTER_FROM, filterGuilds } from "../download_avatars/AvatarsForm";
 import { useStartRun, type TaskFormProps } from "../start";
-import { SETTINGS_ID } from "./ScraperSettingsCard";
+import { openScraperSettings } from "./ScraperSettingsCard";
 
 export const SCRAPE_EXPLAINER =
   "Lists the members of a server with the saved scraper tokens and saves them to a JSON file. " +
@@ -108,7 +108,7 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
 
   const toSettings = () => {
     onClose();
-    document.getElementById(SETTINGS_ID)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    openScraperSettings();
   };
 
   const footer = noTokens ? (
