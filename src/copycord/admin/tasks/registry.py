@@ -70,5 +70,5 @@ def get(key: str) -> Optional[TaskType]:
     return _TYPES.get(key)
 
 
-def all() -> list[TaskType]:  # noqa: A001 - registry API name from the plan
+def all() -> list[TaskType]:  # noqa: A001 - registry API name
     return list(_TYPES.values())

@@ -403,7 +403,7 @@ async def event_logs_redirect(request: Request):
 @app.get("/app", include_in_schema=False)
 @app.get("/app/{path:path}", include_in_schema=False)
 async def app_redirect(request: Request, path: str = ""):
-    """The SPA used to live under /app; old links land on the same page at the root."""
+    """Redirect /app/<path> links to the same page at the root."""
     return _root_redirect(request, path)
 
 
@@ -2284,10 +2284,7 @@ async def _close_http_session():
 
 @app.get("/api/validate-tokens", response_class=JSONResponse)
 async def api_validate_tokens():
-    """
-    Check whether the saved CLIENT_TOKEN and SERVER_TOKEN are currently valid.
-
-    """
+    """Check whether the saved CLIENT_TOKEN and SERVER_TOKEN are valid."""
     env = _read_env()
     raw_client = (env.get("CLIENT_TOKEN") or "").strip()
     raw_server = (env.get("SERVER_TOKEN") or "").strip()
@@ -2452,9 +2449,7 @@ async def backup_download(name: str):
 
 @app.post("/api/backup/delete")
 async def backup_delete(name: str = Form(...)):
-    """
-    Permanently delete a backup archive from BACKUP_DIR.
-    """
+    """Permanently delete a backup archive from BACKUP_DIR."""
     p = safe_child(BACKUP_DIR, name)
     if p is None:
         return PlainTextResponse("invalid name", status_code=400)
@@ -2473,12 +2468,7 @@ async def backup_restore(
     file: UploadFile | None = File(None),
     name: str | None = Form(None),
 ):
-    """
-    Restore from an uploaded .tar.gz or from an existing archive in BACKUP_DIR.
-    Safeguards:
-      - Stops agents
-      - Atomic replace of live DB
-    """
+    """Stop the agents and restore the DB from an uploaded .tar.gz or an archive in BACKUP_DIR."""
     if source not in ("upload", "existing"):
         return PlainTextResponse("bad source", status_code=400)
 
@@ -2541,7 +2531,7 @@ async def backup_restore(
 
 @app.get("/api/event-log-types")
 async def api_get_event_log_types():
-    """Lightweight endpoint that returns only the distinct event types."""
+    """Return the distinct event log types."""
     types = db.get_event_log_types()
     return JSONResponse(
         content={"ok": True, "types": types},
@@ -2667,7 +2657,7 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
         HEARTBEAT_EVERY = 15.0
         # Sent once, after the backlog (or straight away when there is no log
         # file yet), so the log modal knows the tail is complete even when it is
-        # empty. Older pages read it as an empty batch.
+        # empty. A client that ignores "ready" sees an empty batch.
         READY = f"data: {json.dumps({'lines': [], 'ready': True})}\n\n"
         sent_ready = False
 
@@ -2995,9 +2985,7 @@ async def api_save_filters(mapping_id: str, request: Request):
 
 @app.post("/api/guild-mappings/{mapping_id}/toggle-status", response_class=JSONResponse)
 async def api_toggle_mapping_status(mapping_id: str):
-    """
-    Toggle a mapping between 'active' and 'paused'.
-    """
+    """Toggle a mapping between 'active' and 'paused'."""
     row = db.get_mapping_by_id(mapping_id)
     if not row:
         raise HTTPException(status_code=404, detail="mapping-not-found")
@@ -3022,10 +3010,7 @@ async def api_toggle_mapping_status(mapping_id: str):
 
 @app.get("/api/mappings/{mapping_id}/channels", response_class=JSONResponse)
 async def api_mapping_channels(mapping_id: str):
-    """
-    Fetch categories + channels for the ORIGINAL guild for this mapping
-    using the Discord HTTP API and the CLIENT_TOKEN from config.
-    """
+    """Fetch the categories and channels of the mapping's original guild with CLIENT_TOKEN."""
     mapping = db.get_mapping_by_id(mapping_id)
     if not mapping:
         raise HTTPException(status_code=404, detail="mapping-not-found")
@@ -3549,11 +3534,7 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
 
 @app.get("/api/guilds", response_class=JSONResponse)
 async def guilds_api():
-    """
-    Return list of guilds for the UI.
-    Shape:
-      { items: [ { id, name, icon_url, member_count }, ... ] }
-    """
+    """Return the known guilds as {items: [{id, name, icon_url, member_count}]}."""
     rows = db.get_all_guilds()
     items = []
     for r in rows:
@@ -3857,7 +3838,7 @@ _proxy_test_task: Optional[asyncio.Task] = None
 
 @app.post("/api/server/proxies/test", response_class=JSONResponse)
 async def api_server_proxies_test(request: Request):
-    """Start a background proxy test task. Results streamed via hub broadcast."""
+    """Start a background proxy test whose results stream over the hub broadcast."""
     global _proxy_test_task
     import re as _re
 
@@ -4183,10 +4164,7 @@ async def api_notifications_test():
 
 @app.get("/api/scraper/scrapes", response_class=JSONResponse)
 async def api_scraper_scrapes_list():
-    """List all saved scrape files with metadata (without the full members array).
-
-    Walks data/scrapes/{guild_id}/ subdirectories.
-    """
+    """List the scrape files under data/scrapes/<guild_id>/ with their metadata, without the members."""
     scrapes_dir = DATA_DIR / "scrapes"
     if not scrapes_dir.is_dir():
         return JSONResponse({"ok": True, "scrapes": []})
@@ -4300,11 +4278,7 @@ async def api_scraper_scrape_delete(filepath: str):
 
 @app.get("/api/guilds/{guild_id}", response_class=JSONResponse)
 async def guild_details(guild_id: str):
-    """
-    Return details for a single guild.
-    Shape:
-      { id, name, icon_url, member_count, ... }
-    """
+    """Return one guild's details: {id, name, icon_url, member_count, ...}."""
     try:
         rows = db.get_all_guilds()
         row = next((r for r in rows if str(r.get("guild_id")) == str(guild_id)), None)
@@ -4358,9 +4332,7 @@ def _discordify(s: str | None) -> str | None:
 
 @app.post("/api/channels/customize", response_class=JSONResponse)
 async def api_channels_customize(payload: dict = Body(...)):
-    """
-    Set or clear a channel's custom clone name, scoped to (original_channel_id, cloned_guild_id).
-    """
+    """Set or clear a channel's custom clone name, scoped to (original_channel_id, cloned_guild_id)."""
     try:
         ocid = int(payload.get("original_channel_id"))
         cgid = int(payload.get("cloned_guild_id"))
@@ -4425,9 +4397,7 @@ async def api_channels_customize(payload: dict = Body(...)):
 
 @app.post("/api/categories/customize", response_class=JSONResponse)
 async def api_categories_customize(payload: dict = Body(...)):
-    """
-    Set or clear a category's custom display name, scoped to (original_category_id, cloned_guild_id).
-    """
+    """Set or clear a category's custom display name, scoped to (original_category_id, cloned_guild_id)."""
 
     def _norm_display(s):
         if s is None:
@@ -4980,9 +4950,7 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
     response_class=JSONResponse,
 )
 async def api_verify_mapping_tokens(mapping_id: str):
-    """Re-check every attached token: is it still valid AND a member of the
-    clone guild? Returns per-token results (with ids) so the UI can offer to
-    prune the non-working ones."""
+    """Check each attached token is valid and in the clone guild, returning per-token results with ids."""
     m = db.get_mapping_by_id(mapping_id)
     if not m:
         return JSONResponse(
@@ -5032,8 +5000,7 @@ async def api_verify_mapping_tokens(mapping_id: str):
     response_class=JSONResponse,
 )
 async def api_bulk_delete_mapping_tokens(mapping_id: str, payload: dict = Body(...)):
-    """Bulk-remove tokens. Pass ``{"scope": "all"}`` to remove every token, or
-    ``{"ids": [...]}`` to remove a specific set (e.g. non-working ones)."""
+    """Remove every attached token with {"scope": "all"}, or the ones listed in {"ids": [...]}."""
     m = db.get_mapping_by_id(mapping_id)
     if not m:
         return JSONResponse(
@@ -5094,10 +5061,7 @@ async def api_delete_mapping_token(mapping_id: str, token_id: str):
 
 @app.get("/api/client-guilds", response_class=JSONResponse)
 async def api_client_guilds():
-    """
-    Return list of guilds for the CLIENT (selfbot) account, using CLIENT_TOKEN.
-
-    """
+    """Return the guilds of the client (selfbot) account behind CLIENT_TOKEN."""
 
     cfg = db.get_all_config()
     client_token = (cfg.get("CLIENT_TOKEN") or "").strip()
@@ -5351,9 +5315,7 @@ async def api_validate_forwarding(payload: dict = Body(...)):
 
 @app.get("/api/forwarding", response_class=JSONResponse)
 async def api_list_forwarding(guild_id: str | None = Query(default=None)):
-    """
-    List message forwarding rules, optionally filtered by guild_id.
-    """
+    """List message forwarding rules, optionally filtered by guild_id."""
     rows = db.list_message_forwarding_rules(guild_id=guild_id) or []
 
     for row in rows:
@@ -5442,9 +5404,7 @@ async def api_save_forwarding(payload: dict = Body(...)):
 
 @app.delete("/api/forwarding/{rule_id}", response_class=JSONResponse)
 async def api_delete_forwarding(rule_id: str):
-    """
-    Delete a message forwarding rule.
-    """
+    """Delete a message forwarding rule."""
     existing = db.get_message_forwarding_rule(rule_id)
     if not existing:
         raise HTTPException(status_code=404, detail="fwd-not-found")
@@ -5455,10 +5415,7 @@ async def api_delete_forwarding(rule_id: str):
 
 @app.get("/api/forwarding/count", response_class=JSONResponse)
 async def api_forwarding_count():
-    """
-    Returns the total number of forwarded messages recorded so far,
-    plus counts grouped by provider.
-    """
+    """Return the number of forwarded messages recorded, in total and per provider."""
     try:
         total = db.count_forwarded_messages()
         by_provider = db.count_forwarded_by_provider()
@@ -5470,12 +5427,7 @@ async def api_forwarding_count():
 
 @app.get("/api/forwarding/count/by-rule", response_class=JSONResponse)
 async def api_forwarding_count_by_rule(include_null: bool = False):
-    """
-    Returns counts of forwarded messages grouped by rule_id.
-
-    Query params:
-    - include_null (bool): include a bucket for missing/empty rule_id under key "".
-    """
+    """Return forwarded message counts per rule_id; include_null adds a "" bucket for rows without one."""
     try:
         by_rule = db.count_forwarded_by_rule(include_null=include_null)
         return JSONResponse({"ok": True, "by_rule": by_rule})

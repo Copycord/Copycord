@@ -16,13 +16,13 @@ token validation, a token that fails or is not in the server is skipped), Scrape
 members (members found of the server's approximate count, as the scraper reports
 them), Fetch bios (with Bios on: bios fetched of bios queued, after the members are
 in; no time cap, a profile that keeps failing is skipped), Save file. One run at a
-time, as the old queue ran them; later runs wait in the framework.
+time; later runs wait in the framework.
 
 A cancel stops the scraper and cancels its asyncio task at once; the run waits at
 most CANCEL_WAIT for it to unwind and nothing the scraper reports after the cancel
-reaches the run. Members found before the cancel are still saved, as the old page did.
+reaches the run. Members found before the cancel are still saved.
 
-The result is the same file the old page wrote and lists under past scrapes:
+The result is the file the Scraper page lists under past scrapes:
 <data dir>/scrapes/<guild id>/scrape_<guild id>_<stamp>.json (save_scrape_file).
 GET /api/tasks/scrape-members/<run id> tells the run page whether it is still there,
 and .../file serves it. With Debug report on (dev mode only, COPYCORD_ENV=dev) the run

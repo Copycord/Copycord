@@ -7,7 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""Backfill channels: the first task type.
+"""Backfill channels: clone the message history of the chosen channels.
 
 One step per channel. Every channel becomes a client job keyed by
 job_id = "<run_id>:<channel_id>"; the admin bus watcher hands the job frames
@@ -92,7 +92,7 @@ class Range(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> "Range":
-        # v3 rules: since needs a start date, between needs both, last_n a positive number.
+        # since needs a start date, between needs both, last_n a positive number.
         if self.mode in ("since", "between"):
             if not self.since:
                 raise ValueError("Pick a start date")

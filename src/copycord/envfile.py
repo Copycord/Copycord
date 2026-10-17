@@ -80,7 +80,7 @@ def is_env_key(key: str) -> bool:
 
 
 def env_path() -> Path:
-    """<home>/.env; a .env left in a custom data dir is still read for now."""
+    """<home>/.env, or the data dir's .env when only that one exists."""
     from copycord.common.paths import data_dir, home_dir
 
     path = home_dir() / FILENAME

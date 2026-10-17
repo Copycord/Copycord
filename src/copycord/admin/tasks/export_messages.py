@@ -8,8 +8,7 @@
 # =============================================================================
 
 """Export messages: a guild's messages, filtered as the Guilds page export dialog
-does, to a JSON file and, optionally, a webhook. Replaces the dialog's old
-direct POST /api/export/messages, which is gone.
+does, to a JSON file and, optionally, a webhook.
 
 The run sends export_messages with job_id = run id to the client, whose
 ExportMessagesRunner scans the guild and sends export_messages_progress frames

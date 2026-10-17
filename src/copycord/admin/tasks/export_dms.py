@@ -8,7 +8,7 @@
 # =============================================================================
 
 """Export DMs: a user's DM history from the client account to a JSON file
-and, optionally, a webhook. Replaces the /export_dms slash command.
+and, optionally, a webhook.
 
 The run sends export_dm_history with job_id = run id to the client, whose
 DmHistoryExporter reads the DM and sends export_dm_progress frames
