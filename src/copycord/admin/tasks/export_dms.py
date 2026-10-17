@@ -19,19 +19,28 @@ Steps: Read DM history, then Save JSON file and Forward to webhook when chosen.
 A cancel sends export_dm_cancel; the client stops the exporter, which still
 sends its export_dm_done (error "cancelled") with what it got through.
 
-configure(send=...) wires the client command sender; tests hand in fakes."""
+The Save JSON file step says how many messages it saved; the file's path is in the
+run report only. GET /api/tasks/export-dms/<run id> tells the run page whether the
+file is still there (name, size), and .../file serves it while it exists.
+
+configure(send=..., data_dir=...) wires the client command sender and the data
+directory the client writes exports/dm/ under; tests hand in fakes."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .context import STEP_FINAL
 from .registry import TaskType, register
+from .routes import _run_id, get_service, router
 
 log = logging.getLogger("copycord.tasks.export_dms")
 
@@ -50,14 +59,17 @@ ERRORS = {
 @dataclass
 class _Wiring:
     send: Optional[Callable[[dict], Awaitable[Any]]] = None
+    data_dir: Optional[Path] = None
 
 
 _wiring = _Wiring()
 
 
-def configure(send: Optional[Callable[[dict], Awaitable[Any]]] = None) -> None:
+def configure(send: Optional[Callable[[dict], Awaitable[Any]]] = None, data_dir: Any = None) -> None:
     if send is not None:
         _wiring.send = send
+    if data_dir is not None:
+        _wiring.data_dir = Path(data_dir)
 
 
 async def _send(frame: dict) -> dict:
@@ -228,8 +240,8 @@ async def _progress(job: _Job, data: dict) -> None:
             await _ensure_running(job.json_step)
             if data.get("json_path"):
                 job.json_path = str(data["json_path"])
-                await job.json_step.finish("success", job.json_path)
-                await ctx.log(f"Saved {_messages(job.read_count)} to {job.json_path}", step="json")
+                await job.json_step.finish("success", f"{_messages(job.read_count)} saved")
+                await ctx.log(f"Saved {_messages(job.read_count)} to a JSON file", step="json")
             else:
                 job.json_error = str(data.get("json_error") or "JSON file not written")
                 await job.json_step.finish("failed", job.json_error)
@@ -260,7 +272,7 @@ async def _end(job: _Job, data: dict) -> None:
             await job.read.finish("success", f"{_messages(job.read_count)} read")
         if job.json_step is not None and job.json_step.data["state"] not in STEP_FINAL:
             if job.json_path:
-                await job.json_step.finish("success", job.json_path)
+                await job.json_step.finish("success", f"{_messages(job.read_count)} saved")
             else:
                 job.json_error = job.json_error or "JSON file not written"
                 await job.json_step.finish("failed", job.json_error)
@@ -345,7 +357,8 @@ async def run(ctx: Any, inputs: ExportDmsInputs) -> None:
     elif ctx.cancelled.is_set():
         await ctx.log("Run cancelled", level="warning")
     else:
-        where = job.json_path or "the webhook"
+        where = " and ".join(w for w in ("a JSON file" if job.json_path else "",
+                                         "the webhook" if job.forward is not None else "") if w)
         await ctx.log(f"Done: {_messages(job.read_count)} exported to {where}")
 
 
@@ -370,6 +383,60 @@ async def _wait(ctx: Any, job: _Job) -> None:
         if not done.done():
             done.cancel()
         await asyncio.gather(done, cancel_wait, return_exceptions=True)
+
+
+# the export file (behind the /api session guard like every /api path)
+
+_STAMP_RE = re.compile(r"\d{8}-\d{6}")
+NO_FILE = "No export file"
+GONE = "File no longer on disk"
+
+
+def _export_file(run_id: str) -> tuple[Optional[Path], Optional[dict], Optional[JSONResponse]]:
+    """The run's saved JSON file and what the run page shows about it, or the 404 to answer.
+    Only a file under <data dir>/exports/dm/ is served, whatever the report says."""
+    svc = get_service()
+    rid = _run_id(run_id)
+    run = svc.get(rid) if svc is not None and rid is not None else None
+    if run is None or run.type != TYPE_KEY:
+        return None, None, JSONResponse({"detail": "Unknown run"}, status_code=404)
+    report = run.report or {}
+    raw = (report.get("output") or {}).get("json_path")
+    if not raw or _wiring.data_dir is None:
+        return None, None, JSONResponse({"detail": NO_FILE}, status_code=404)
+    root = (_wiring.data_dir / "exports" / "dm").resolve()
+    try:
+        path = Path(str(raw)).resolve()
+    except (OSError, ValueError):
+        return None, None, JSONResponse({"detail": NO_FILE}, status_code=404)
+    if not path.is_relative_to(root) or path == root:
+        return None, None, JSONResponse({"detail": NO_FILE}, status_code=404)
+    if not path.is_file():
+        return None, None, JSONResponse({"detail": GONE}, status_code=404)
+    user_id = str((report.get("user") or {}).get("id") or (run.context or {}).get("user_id") or "user")
+    if not user_id.isdigit():
+        user_id = "user"
+    stamp = path.parent.name if _STAMP_RE.fullmatch(path.parent.name) else str(run.number)
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = None
+    messages = _int((report.get("summary") or {}).get("exported"))
+    return path, {"filename": f"dms-{user_id}-{stamp}.json", "size": size, "messages": messages}, None
+
+
+@router.get("/export-dms/{run_id}")
+async def export_dms_file_info(run_id: str):
+    _path, info, error = _export_file(run_id)
+    return error if error is not None else {"file": info}
+
+
+@router.get("/export-dms/{run_id}/file")
+async def export_dms_file(run_id: str):
+    path, info, error = _export_file(run_id)
+    if error is not None:
+        return error
+    return FileResponse(path, media_type="application/json", filename=info["filename"])
 
 
 EXPORT_DMS = register(TaskType(

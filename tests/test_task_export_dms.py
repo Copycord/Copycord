@@ -3,9 +3,14 @@ frames handed straight to the dispatcher, as the admin bus watcher does."""
 import asyncio
 
 import pytest
+from starlette.testclient import TestClient
 
+from copycord.admin import app as app_module
+from copycord.admin import auth
+from copycord.admin.security import CSRF_HEADER
 from copycord.admin.tasks import export_dms
-from copycord.admin.tasks.service import MemoryRunRepo, TaskService
+from copycord.admin.tasks import routes as task_routes
+from copycord.admin.tasks.service import MemoryRunRepo, TaskRun, TaskService
 
 UID = "123456789012345678"
 HOOK = "https://discord.com/api/webhooks/111/secret-token"
@@ -88,7 +93,7 @@ async def test_progress_per_batch_then_done(svc, sent):
     steps = _steps(svc, run.id)
     assert steps["read"]["state"] == "success" and steps["read"]["note"] == "300 messages read"
     assert steps["json"]["state"] == "success"
-    assert steps["json"]["note"] == "/data/exports/dm/1/x/messages.json"
+    assert steps["json"]["note"] == "300 messages saved"
 
     await _frame("export_dm_progress", run.id, phase="forward", done=0, total=300)
     await _frame("export_dm_progress", run.id, phase="forward", done=10, total=300)
@@ -119,7 +124,9 @@ async def test_json_only_has_no_forward_step(svc, sent):
     assert done.status == "success"
     assert done.summary == {"exported": 3, "failed": 0}
     assert _steps(svc, run.id)["read"]["note"] == "3 messages read"
-    assert _steps(svc, run.id)["json"]["note"] == "/tmp/m.json"
+    assert _steps(svc, run.id)["json"]["note"] == "3 messages saved"
+    assert done.report["output"]["json_path"] == "/tmp/m.json"
+    assert all("/tmp/m.json" not in str(s) for s in svc.get(run.id).steps)
 
 
 @pytest.mark.asyncio
@@ -214,3 +221,96 @@ def test_mask_webhook():
     assert export_dms.mask_webhook(HOOK) == "https://discord.com/api/webhooks/111/..."
     assert export_dms.mask_webhook(None) is None
     assert export_dms.mask_webhook("https://x.io/a") == "https://x.io/a"
+
+
+# the export file route
+
+STAMP = "20261017-022246"
+
+
+@pytest.fixture()
+def http(tmp_path, monkeypatch):
+    repo = MemoryRunRepo()
+    service = TaskService(repo)
+    monkeypatch.setattr(export_dms, "_wiring", export_dms._Wiring(data_dir=tmp_path))
+    monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
+    monkeypatch.setattr(app_module, "_startup_hooks", [])
+    monkeypatch.setattr(app_module, "_shutdown_hooks", [])
+    task_routes.set_service(service)
+    try:
+        with TestClient(app_module.app) as tc:
+            tc.headers.update({"origin": "http://testserver", CSRF_HEADER: "1",
+                               "cookie": f"{auth.ADMIN_COOKIE_NAME}={auth.make_session_token()}"})
+            yield tc, repo, tmp_path
+    finally:
+        task_routes.set_service(None)
+
+
+def _finished_run(repo, json_path, type_key="export_dms"):
+    run = TaskRun(type=type_key, number=4, status="success", title=f"Export DMs with {UID}", trigger="manual",
+                  actor="admin", inputs={"user_id": UID}, context={"label": UID, "user_id": UID},
+                  summary={"exported": 62, "failed": 0},
+                  report={"user": {"id": UID, "name": "alice"}, "output": {"json_path": json_path, "webhook": None},
+                          "summary": {"exported": 62, "failed": 0}})
+    return repo.insert_run(run)
+
+
+def _saved(tmp_path, body=b'[{"id": "1"}]'):
+    path = tmp_path / "exports" / "dm" / UID / STAMP / "messages.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(body)
+    return path
+
+
+def test_route_serves_the_export_file(http):
+    tc, repo, tmp_path = http
+    rid = _finished_run(repo, str(_saved(tmp_path)))
+    info = tc.get(f"/api/tasks/export-dms/{rid}")
+    assert info.status_code == 200
+    assert info.json() == {"file": {"filename": f"dms-{UID}-{STAMP}.json", "size": 13, "messages": 62}}
+    resp = tc.get(f"/api/tasks/export-dms/{rid}/file")
+    assert resp.status_code == 200 and resp.content == b'[{"id": "1"}]'
+    assert resp.headers["content-type"].startswith("application/json")
+    assert f'filename="dms-{UID}-{STAMP}.json"' in resp.headers["content-disposition"]
+
+
+def test_route_unknown_run_is_404(http):
+    tc, repo, tmp_path = http
+    other = _finished_run(repo, str(_saved(tmp_path)), type_key="backfill")
+    for rid in ("0" * 32, "nope", other):
+        for suffix in ("", "/file"):
+            resp = tc.get(f"/api/tasks/export-dms/{rid}{suffix}")
+            assert resp.status_code == 404 and resp.json() == {"detail": "Unknown run"}
+
+
+def test_route_missing_file_is_404(http):
+    tc, repo, tmp_path = http
+    path = _saved(tmp_path)
+    rid = _finished_run(repo, str(path))
+    path.unlink()
+    for suffix in ("", "/file"):
+        resp = tc.get(f"/api/tasks/export-dms/{rid}{suffix}")
+        assert resp.status_code == 404 and resp.json() == {"detail": "File no longer on disk"}
+    no_json = _finished_run(repo, None)
+    resp = tc.get(f"/api/tasks/export-dms/{no_json}/file")
+    assert resp.status_code == 404 and resp.json() == {"detail": "No export file"}
+
+
+def test_route_never_serves_outside_the_exports_dir(http):
+    tc, repo, tmp_path = http
+    _saved(tmp_path)
+    secret = tmp_path / "secret.json"
+    secret.write_text("{}")
+    for bad in (str(secret), str(tmp_path / "exports" / "dm" / ".." / ".." / "secret.json"),
+                f"{tmp_path}/exports/dm/{UID}/{STAMP}/../../../../secret.json", "/etc/passwd",
+                str(tmp_path / "exports" / "dm")):
+        rid = _finished_run(repo, bad)
+        resp = tc.get(f"/api/tasks/export-dms/{rid}/file")
+        assert resp.status_code == 404 and resp.json() == {"detail": "No export file"}, bad
+
+
+def test_route_needs_a_session(http):
+    tc, repo, tmp_path = http
+    rid = _finished_run(repo, str(_saved(tmp_path)))
+    tc.headers.pop("cookie")
+    assert tc.get(f"/api/tasks/export-dms/{rid}/file", follow_redirects=False).status_code == 401

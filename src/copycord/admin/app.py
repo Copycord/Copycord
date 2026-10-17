@@ -2081,7 +2081,7 @@ async def _startup_tasks():
     service = TaskService(SqliteTaskRepo(db), publish=_publish_task_event)
     task_routes.set_service(service)
     task_backfill.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame))
-    task_export_dms.configure(send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=5.0))
+    task_export_dms.configure(send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=5.0), data_dir=DATA_DIR)
     task_sync_assets.configure(db=db, send=lambda frame: _ws_cmd(SERVER_AGENT_URL, frame, timeout=5.0))
     task_purge.configure(db=db)
     task_purge_assets.configure(db=db, send=lambda frame, timeout: _ws_cmd(SERVER_AGENT_URL, frame, timeout=timeout))
