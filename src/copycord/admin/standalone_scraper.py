@@ -713,7 +713,7 @@ class StandaloneScraper:
             except Exception:
                 pass
 
-    def _debug(self, message: str, level: str = "info"):
+    def _debug(self, message: str, level: str = "debug"):
         """Diagnostic log to the Python logger only, not the UI."""
         message = self._redact(message)
         getattr(logger, level if level != "warn" else "warning", logger.info)(message)
@@ -1576,28 +1576,31 @@ class StandaloneScraper:
 
             async def progress_reporter():
                 spinner = itertools.cycle("|/-\\")
+                _log_tick = 0
                 while not progress_stop.is_set() and not self._stop_event.is_set():
                     total = len(self._members)
                     snap = await planner.snapshot_metrics()
                     pq = snap["pq_len"]
                     visited = snap["visited"]
                     sat = snap["saturated"]
-                    if member_count and member_count > 0:
-                        pct = (
-                            min(total / member_count * 100, 99.9)
-                            if total < member_count
-                            else 100.0
-                        )
-                        self._log(
-                            f"⛏️ Scraping — {pct:5.1f}% ({total:,}/{member_count:,})",
-                            "info",
-                        )
-                    else:
-                        sp = next(spinner)
-                        self._log(
-                            f"⛏️ Scraping {sp} — found {total:,} members so far",
-                            "info",
-                        )
+                    _log_tick += 1
+                    if _log_tick % 5 == 1:
+                        if member_count and member_count > 0:
+                            pct = (
+                                min(total / member_count * 100, 99.9)
+                                if total < member_count
+                                else 100.0
+                            )
+                            self._log(
+                                f"⛏️ Scraping — {pct:5.1f}% ({total:,}/{member_count:,})",
+                                "info",
+                            )
+                        else:
+                            sp = next(spinner)
+                            self._log(
+                                f"⛏️ Scraping {sp} — found {total:,} members so far",
+                                "info",
+                            )
 
                     self._debug(
                         f"[progress] pq={pq} visited={visited} sat={sat} total={total}"

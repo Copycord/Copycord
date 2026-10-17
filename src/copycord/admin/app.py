@@ -1354,7 +1354,7 @@ async def bus_stream(request: Request):
     route_var.set("/bus/stream")
     client_var.set(client_addr)
 
-    local_log.info("Client connected")
+    local_log.debug("Client connected")
 
     async def gen():
         q = hub.subscribe()
@@ -1480,7 +1480,7 @@ async def ws_out(websocket: WebSocket):
     route_var.set("/ws/out")
     client_var.set("-")
 
-    local_log.info("Client connected", extra={"events_sent": 0})
+    local_log.debug("Client connected", extra={"events_sent": 0})
     local_log.debug("WebSocket attached to hub")
 
     try:
