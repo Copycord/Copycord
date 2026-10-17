@@ -40,7 +40,7 @@ from typing import Any, Awaitable, Callable, Optional
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from .context import iso
+from .context import TaskCancelled, iso
 from .registry import TaskType, register
 from .routes import router
 
@@ -479,11 +479,26 @@ async def _sleep(ctx: Any, seconds: float) -> None:
 
 
 async def _download(ctx: Any, url: str) -> bytes:
+    """The avatar's bytes; TaskCancelled when the run is cancelled while the request is in
+    flight (it is dropped) or before a retry."""
     fetch = _wiring.fetch or _http_get
     error = "Failed"
     for attempt in range(RETRIES + 1):
+        ctx.check_cancelled()
+        get = asyncio.ensure_future(fetch(url))
+        cancel = asyncio.ensure_future(ctx.cancelled.wait())
         try:
-            status, body, headers = await fetch(url)
+            await asyncio.wait({get, cancel}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for fut in (get, cancel):
+                if not fut.done():
+                    fut.cancel()
+            await asyncio.gather(get, cancel, return_exceptions=True)
+        # A file that came in before the cancel still counts.
+        if get.cancelled():
+            raise TaskCancelled()
+        try:
+            status, body, headers = get.result()
         except Exception as exc:
             status, body, headers = 0, b"", {}
             error = str(exc) or type(exc).__name__
@@ -503,6 +518,7 @@ async def _download(ctx: Any, url: str) -> bytes:
                 error = f"HTTP {status}"
         if attempt < RETRIES and not ctx.cancelled.is_set():
             await _sleep(ctx, min(wait, RETRY_WAIT_MAX))
+        ctx.check_cancelled()
     raise RuntimeError(error)
 
 
@@ -621,6 +637,11 @@ async def _download_all(ctx: Any, inputs: AvatarInputs, name: str, members: list
                     counts["downloaded"] += 1
                     writer.writerow([uid, username, m.get("global_name") or "", fname,
                                      "default avatar" if "/embed/avatars/" in url else "downloaded"])
+                except TaskCancelled:
+                    # Cancelled mid-download: this member and the rest are skipped, not failed.
+                    counts["skipped"] += 1
+                    writer.writerow([uid, username, m.get("global_name") or "", "", "skipped"])
+                    continue
                 except Exception as exc:
                     error = str(exc) or type(exc).__name__
                     counts["failed"] += 1

@@ -9205,6 +9205,9 @@ class ServerReceiver:
                     return
 
                 await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key)
+                # A backfill cancelled during the rate limit wait posts nothing more.
+                if is_backfill and self._bf_skip_cancelled(source_id):
+                    return
                 released = False
                 try:
                     if override_identity is not None:

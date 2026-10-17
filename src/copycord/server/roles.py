@@ -575,6 +575,7 @@ class RoleManager:
                     continue
 
                 try:
+                    hooks.check()
                     await cloned_role.delete()
                     await asyncio.sleep(self._ROLE_OP_DELAY)
                     deleted += 1
@@ -642,6 +643,7 @@ class RoleManager:
                     and cloned_role.position < bot_top
                 ):
                     try:
+                        hooks.check()
                         await cloned_role.delete(
                             reason="Blocked by Copycord role blocklist"
                         )
@@ -674,6 +676,7 @@ class RoleManager:
             want_colors = info.get("colors") if clone_role_styles else None
 
             if mapping and not cloned_role:
+                hooks.check()
                 cloned_role, add, can_create, create_suppressed_logged = (
                     await self._recreate_missing_role(
                         guild=guild,
@@ -739,6 +742,7 @@ class RoleManager:
                             kwargs.pop("colour", None)
                             kwargs["colours"] = colours_obj
 
+                    hooks.check()
                     new_role = await guild.create_role(**kwargs)
                     await asyncio.sleep(self._ROLE_OP_DELAY)
                     created += 1
@@ -775,6 +779,7 @@ class RoleManager:
                         kwargs.pop("icon", None)
                         kwargs.pop("unicode_emoji", None)
                         try:
+                            hooks.check()
                             new_role = await guild.create_role(**kwargs)
                             await asyncio.sleep(self._ROLE_OP_DELAY)
                             created += 1
@@ -944,6 +949,7 @@ class RoleManager:
                                 kwargs.pop("colour", None)
                                 kwargs["colours"] = colours_obj
 
+                        hooks.check()
                         await cloned_role.edit(**kwargs)
                         await asyncio.sleep(self._ROLE_OP_DELAY)
                         updated += 1
@@ -976,6 +982,7 @@ class RoleManager:
                             kwargs.pop("icon", None)
                             kwargs.pop("unicode_emoji", None)
                             try:
+                                hooks.check()
                                 await cloned_role.edit(**kwargs)
                                 await asyncio.sleep(self._ROLE_OP_DELAY)
                                 updated += 1

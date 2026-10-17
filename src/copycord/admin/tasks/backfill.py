@@ -41,7 +41,9 @@ from .registry import TaskType, register
 log = logging.getLogger("copycord.tasks.backfill")
 
 TYPE_KEY = "backfill_channels"
-CANCEL_WAIT = 20.0
+# How long a cancel waits for each job's backfill_job_end before the step ends cancelled; the
+# late end still brings the delivered count (_late), so the run does not sit in the wait.
+CANCEL_WAIT = 1.0
 # How long a job marked cancelled after CANCEL_WAIT still takes its late backfill_job_end.
 LATE_END_WAIT = 600.0
 JOB_FRAMES = ("backfill_job", "backfill_job_progress", "backfill_job_delivered",
@@ -603,8 +605,13 @@ async def _wait_jobs(ctx: Any, jobs: list[_Job]) -> None:
             await ctx.log(f"Cancelling {len(live)} job{'s' if len(live) != 1 else ''}", level="warning")
             # The client stops pulling (or drops a queued job) and tells the server, which stops
             # forwarding; each job then ends with backfill_job_end and what it delivered.
-            for job in live:
-                await _send({"type": "backfill_cancel", "data": {"job_id": job.job_id}})
+            # Sent together and bounded: a slow client link never holds the cancel up.
+            try:
+                await asyncio.wait_for(asyncio.gather(*(
+                    _send({"type": "backfill_cancel", "data": {"job_id": job.job_id}}) for job in live
+                )), timeout=CANCEL_WAIT)
+            except asyncio.TimeoutError:
+                pass
             try:
                 await asyncio.wait_for(asyncio.shield(all_done), timeout=CANCEL_WAIT)
             except asyncio.TimeoutError:
@@ -615,7 +622,7 @@ async def _wait_jobs(ctx: Any, jobs: list[_Job]) -> None:
                 await job.step.finish("cancelled", _cancelled_note(job.delivered))
                 job.result["finished_at"] = job.step.data["finished_at"]
                 await ctx.log(f"Cancelled #{job.name} after {_fmt(job.delivered)} messages "
-                              f"(no end from the client)", level="warning", step=job.step.key)
+                              f"(the client is still stopping)", level="warning", step=job.step.key)
                 _late[job.job_id] = job
                 asyncio.get_running_loop().call_later(LATE_END_WAIT, _forget_late, job.job_id, job)
     finally:

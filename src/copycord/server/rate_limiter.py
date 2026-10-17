@@ -35,12 +35,29 @@ class RateLimiter:
         self._lock = asyncio.Lock()
         self._cooldown_until = 0.0
 
-    async def acquire(self):
+    @staticmethod
+    async def _wait(seconds: float, stop: Optional[asyncio.Event]) -> bool:
+        """Sleep, waking at once when stop is set; True when it was."""
+        if stop is None:
+            await asyncio.sleep(seconds)
+            return False
+        if stop.is_set():
+            return True
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            return False
+        return True
+
+    async def acquire(self, stop: Optional[asyncio.Event] = None):
+        """Wait for a slot. With stop, the wait ends as soon as it is set and the slot is not
+        taken; the caller checks its stop before acting."""
         async with self._lock:
             now = time.monotonic()
 
             if now < self._cooldown_until:
-                await asyncio.sleep(self._cooldown_until - now)
+                if await self._wait(self._cooldown_until - now, stop):
+                    return
                 now = time.monotonic()
 
             elapsed = now - self._last_check
@@ -53,8 +70,8 @@ class RateLimiter:
 
             if self._allowance < 1.0:
                 wait = (1.0 - self._allowance) * (self._time_window / self._max_rate)
-                if wait > 0:
-                    await asyncio.sleep(wait)
+                if wait > 0 and await self._wait(wait, stop):
+                    return
                 self._last_check = time.monotonic()
                 self._allowance = 0.0
             else:
@@ -148,17 +165,19 @@ class RateLimitManager:
     def proxy_bypass(self) -> bool:
         return self._proxy_bypass
 
-    async def acquire(self, action: ActionType, key: str | None = None):
+    async def acquire(self, action: ActionType, key: str | None = None,
+                      stop: Optional[asyncio.Event] = None):
         if self._proxy_bypass:
             return
         lim = self._get(action, key)
         if lim:
-            await lim.acquire()
+            await lim.acquire(stop)
 
-    async def acquire_for_guild(self, action: ActionType, clone_guild_id: int):
+    async def acquire_for_guild(self, action: ActionType, clone_guild_id: int,
+                                stop: Optional[asyncio.Event] = None):
         if self._proxy_bypass:
             return
-        await self.acquire(action, key=str(int(clone_guild_id)))
+        await self.acquire(action, key=str(int(clone_guild_id)), stop=stop)
 
     def penalize(self, action: ActionType, seconds: float, key: str | None = None):
         lim = self._get(action, key)

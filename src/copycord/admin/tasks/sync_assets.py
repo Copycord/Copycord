@@ -14,8 +14,8 @@ step that puts the cloned roles in the host's order. The server bot does the wor
 (server/asset_sync.py): the run sends it sync_assets with job_id = "<run_id>:assets", and
 the admin bus watcher hands the job's frames (sync_assets_step, sync_assets_progress,
 sync_assets_log, sync_assets_end) to dispatch(), which routes them by job_id to the run.
-Each asset moves its step's bar with the asset's name as the label; a cancel asks the
-server to stop before its next asset.
+Each asset moves its step's bar with the asset's name as the label; a cancel stops the
+server's job at once, the asset in flight included.
 
 configure(db=..., send=...) wires the DB and the server command sender (an async callable
 taking {type, data} and returning a dict); app.py does it at startup and tests hand in fakes."""
@@ -40,8 +40,9 @@ ROLE_ORDER = "role_order"
 TITLES = {"roles": "Roles", ROLE_ORDER: "Role order", "emojis": "Emojis", "stickers": "Stickers"}
 FRAMES = ("sync_assets_step", "sync_assets_progress", "sync_assets_log", "sync_assets_end")
 SUMMARY_KEYS = ("created", "updated", "deleted", "reordered", "skipped", "failed")
-# How long a cancelled job may take to stop at its next asset and send its end.
-CANCEL_WAIT = 30.0
+# How long a cancelled job may take to send its end. The server cancels the job's task, so
+# the end comes at once; this only bounds a server that went quiet.
+CANCEL_WAIT = 1.0
 
 
 # wiring
@@ -226,8 +227,13 @@ async def _wait(ctx: Any, job: _Job) -> None:
             return
         # Bots stopped (ctx.cancel_note): no server is left to tell or to send an end.
         if ctx.cancel_note is None:
-            await ctx.log("Cancelling: the server stops before its next asset", level="warning")
-            await _send({"type": "sync_assets_cancel", "data": {"job_id": job.job_id}})
+            await ctx.log("Cancelling: the server stops now", level="warning")
+            try:
+                # A slow server link never holds the cancel up.
+                await asyncio.wait_for(
+                    _send({"type": "sync_assets_cancel", "data": {"job_id": job.job_id}}), CANCEL_WAIT)
+            except asyncio.TimeoutError:
+                pass
             try:
                 await asyncio.wait_for(asyncio.shield(end_wait), timeout=CANCEL_WAIT)
             except asyncio.TimeoutError:

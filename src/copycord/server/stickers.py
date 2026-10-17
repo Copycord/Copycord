@@ -328,8 +328,9 @@ class StickerManager:
             else:
                 try:
                     await self.ratelimit.acquire_for_guild(
-                        ActionType.STICKER_CREATE, guild.id
+                        ActionType.STICKER_CREATE, guild.id, stop=hooks.stop_event
                     )
+                    hooks.check()
                     await cloned.delete()
                     deleted += 1
                     await hooks.item(row["cloned_sticker_name"], "deleted")
@@ -390,8 +391,9 @@ class StickerManager:
             if mapping and cloned and mapping["original_sticker_name"] != name:
                 try:
                     await self.ratelimit.acquire_for_guild(
-                        ActionType.STICKER_CREATE, guild.id
+                        ActionType.STICKER_CREATE, guild.id, stop=hooks.stop_event
                     )
+                    hooks.check()
                     await cloned.edit(name=name)
                     renamed += 1
                     outcome, why = "updated", None
@@ -462,6 +464,7 @@ class StickerManager:
                 )
                 await hooks.item(name, "failed", f"Could not download it: {e}")
                 continue
+            hooks.check()
 
             if raw and len(raw) > 512 * 1024:
                 self._log(
@@ -484,8 +487,9 @@ class StickerManager:
 
             try:
                 await self.ratelimit.acquire_for_guild(
-                    ActionType.STICKER_CREATE, guild.id
+                    ActionType.STICKER_CREATE, guild.id, stop=hooks.stop_event
                 )
+                hooks.check()
                 created_stk = await guild.create_sticker(
                     name=name,
                     description=desc,
