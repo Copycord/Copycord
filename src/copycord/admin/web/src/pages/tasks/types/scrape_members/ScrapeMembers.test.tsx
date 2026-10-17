@@ -6,8 +6,8 @@ import { ToastProvider } from "../../../../components/Toast";
 import type { TaskRun, TaskType } from "../../../../types/tasks";
 import { typeLabel } from "../../typeLabels";
 import { describeRunInputs, entryFor, heroStat } from "..";
-import { GONE, ScrapeDownloadCard, includeWords, scrapeFileUrl, scrapePathOf } from "./entry";
-import { SCRAPE_EXPLAINER, ScrapeMembersForm, guildIdError, guildOptionLabel, tokenTotal } from "./ScrapeMembersForm";
+import { GONE, ScrapeDownloadCard, debugReportOf, includeWords, scrapeDebugUrl, scrapeFileUrl, scrapePathOf } from "./entry";
+import { DEBUG_REPORT_HELP, SCRAPE_EXPLAINER, ScrapeMembersForm, guildIdError, guildOptionLabel, tokenTotal } from "./ScrapeMembersForm";
 import { AUTOSAVE_MS, ScraperSettingsCard, TOKENS_URL, openScraperSettings, textLines } from "./ScraperSettingsCard";
 
 const TYPE: TaskType = { key: "scrape_members", title: "Scrape members", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -48,12 +48,12 @@ function RunPage() {
   return <p>Run page {id}</p>;
 }
 
-function renderForm(onClose = () => {}) {
+function renderForm(onClose = () => {}, type: TaskType = TYPE) {
   render(
     <ToastProvider>
       <MemoryRouter initialEntries={["/tasks"]}>
         <Routes>
-          <Route path="/tasks" element={<ScrapeMembersForm type={TYPE} open onClose={onClose} />} />
+          <Route path="/tasks" element={<ScrapeMembersForm type={type} open onClose={onClose} />} />
           <Route path="/tasks/runs/:id" element={<RunPage />} />
         </Routes>
       </MemoryRouter>
@@ -171,6 +171,58 @@ describe("ScrapeMembersForm", () => {
     expect(posts(calls)).toEqual([]);
   });
 
+  it("has no Debug report toggle outside dev mode and posts no debug_report", async () => {
+    const calls = serveForm();
+    renderForm(() => {}, { ...TYPE, dev: false });
+    await screen.findByText("4 saved proxies.");
+    expect(screen.queryByRole("switch", { name: "Debug report" })).not.toBeInTheDocument();
+    expect(screen.queryByText(DEBUG_REPORT_HELP)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Or a server ID" }), { target: { value: "999" } });
+    submit();
+    expect(await screen.findByText("Run page r9")).toBeInTheDocument();
+    expect(posts(calls)[0] as { inputs: Record<string, unknown> }).toHaveProperty("inputs");
+    expect("debug_report" in (posts(calls)[0] as { inputs: Record<string, unknown> }).inputs).toBe(false);
+  });
+
+  it("shows the Debug report toggle in dev mode from first paint, off, and posts it", async () => {
+    const calls = serveForm();
+    renderForm(() => {}, { ...TYPE, dev: true });
+    // Known from the type listing, before the options answer.
+    const toggle = screen.getByRole("switch", { name: "Debug report" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(DEBUG_REPORT_HELP)).toBeInTheDocument();
+    await screen.findByText("4 saved proxies.");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.change(screen.getByRole("textbox", { name: "Or a server ID" }), { target: { value: "999" } });
+    submit();
+    expect(await screen.findByText("Run page r9")).toBeInTheDocument();
+    expect((posts(calls)[0] as { inputs: { debug_report: boolean } }).inputs.debug_report).toBe(true);
+  });
+
+  it("posts debug_report false in dev mode when the toggle is left off", async () => {
+    const calls = serveForm();
+    renderForm(() => {}, { ...TYPE, dev: true });
+    await screen.findByText("4 saved proxies.");
+    fireEvent.change(screen.getByRole("textbox", { name: "Or a server ID" }), { target: { value: "999" } });
+    submit();
+    expect(await screen.findByText("Run page r9")).toBeInTheDocument();
+    expect((posts(calls)[0] as { inputs: { debug_report: boolean } }).inputs.debug_report).toBe(false);
+  });
+
+  it("shows the server's refusal under the Debug report toggle", async () => {
+    serve({
+      "GET /api/tasks/types/scrape_members/options": () => ({ body: { guilds: GUILDS, tokens: { total: 1 }, proxies: 0 } }),
+      "POST /api/tasks/runs": () => ({ status: 422, body: { errors: { debug_report: "Value error, The debug report is only available when COPYCORD_ENV is dev" } } }),
+    });
+    renderForm(() => {}, { ...TYPE, dev: true });
+    await screen.findByText("No proxies saved, so none are used.");
+    fireEvent.click(screen.getByRole("switch", { name: "Debug report" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Or a server ID" }), { target: { value: "5" } });
+    submit();
+    expect(await screen.findByText("The debug report is only available when COPYCORD_ENV is dev")).toBeInTheDocument();
+  });
+
   it("helpers", () => {
     expect(guildIdError("")).toBeUndefined();
     expect(guildIdError("123")).toBeUndefined();
@@ -245,6 +297,39 @@ describe("Scrape members run page", () => {
     const second = render(<ScrapeDownloadCard run={runWith("111/x.json")} />);
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(second.container).toBeEmptyDOMElement();
+  });
+
+  it("adds a Download debug report link when the run wrote one, the same way as the JSON file", async () => {
+    serve({
+      "GET /api/tasks/scrape-members/r9": () => ({ body: { file: { filename: "scrape_111_20261016_101500.json", size: 2048, members: 1204 } } }),
+    });
+    const run = runWith("111/scrape_111_20261016_101500.json");
+    (run.report as Record<string, unknown>).debug_report = { path: "111/debug_111_20261016_101500.json", size: 3072 };
+    expect(debugReportOf(run)).toEqual({ filename: "debug_111_20261016_101500.json", size: 3072 });
+    render(<ScrapeDownloadCard run={run} />);
+    await screen.findByRole("button", { name: "Download JSON" });
+    expect(screen.getByText("debug_111_20261016_101500.json")).toBeInTheDocument();
+    expect(screen.getByText("Debug report, 3.0 KB")).toBeInTheDocument();
+    const clicked: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(`${this.getAttribute("href")} ${this.download}`);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Download debug report" }));
+    expect(clicked).toEqual([`${scrapeDebugUrl("r9")} debug_111_20261016_101500.json`]);
+    expect(scrapeDebugUrl("r9")).toBe("/api/tasks/scrape-members/r9/debug-report");
+    click.mockRestore();
+  });
+
+  it("shows the debug report alone for a run that saved no members file", () => {
+    const calls = serve({});
+    const run = runWith(null);
+    (run.report as Record<string, unknown>).debug_report = { path: "111/debug_111_20261016_101500.json", size: null };
+    render(<ScrapeDownloadCard run={run} />);
+    expect(screen.getByRole("button", { name: "Download debug report" })).toBeInTheDocument();
+    expect(screen.getByText("Debug report")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download JSON" })).not.toBeInTheDocument();
+    expect(calls).toEqual([]);
+    expect(debugReportOf(runWith(null))).toBeNull();
   });
 });
 

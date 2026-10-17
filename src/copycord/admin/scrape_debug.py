@@ -46,7 +46,9 @@ def mask_token(token: Optional[str]) -> str:
 
 def masked_proxy(proxy: Optional[str]) -> Optional[str]:
     """scheme://***@host:port for a proxy with credentials, None for no proxy."""
-    return mask_proxy(proxy) if proxy else None
+    if not proxy:
+        return None
+    return mask_proxy(proxy if "://" in proxy else f"http://{proxy}")
 
 
 def decode_super_properties(value: Any) -> Any:

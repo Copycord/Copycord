@@ -1,6 +1,7 @@
 """Scrape members task type: a fake scraper in place of StandaloneScraper, a fake
 token store and per token membership check, files under tmp_path."""
 import asyncio
+import base64
 import json
 
 import pytest
@@ -9,8 +10,10 @@ from starlette.testclient import TestClient
 
 from copycord.admin import app as app_module
 from copycord.admin import auth
+from copycord.admin.scrape_debug import DebugRecorder
 from copycord.admin.security import CSRF_HEADER
 from copycord.admin.standalone_scraper import ScraperResult
+from copycord.common.selfbot_headers import build_headers
 from copycord.admin.tasks import registry, scrape
 from copycord.admin.tasks import routes as task_routes
 from copycord.admin.tasks.service import MemoryRunRepo, TaskRun, TaskService
@@ -45,6 +48,11 @@ class FakeScraper:
         self.cancelled = False
         self.ticks = 0
         self.ended = False
+        # With Debug report on, records one token check per token, as the real one does.
+        self.recorder = DebugRecorder(config.tokens, config.proxies) if config.debug_report else None
+
+    def debug_report(self, **kwargs):
+        return None if self.recorder is None else self.recorder.snapshot(**kwargs)
 
     def _find(self):
         self.ticks += 1
@@ -56,6 +64,10 @@ class FakeScraper:
     async def scrape(self):
         self.config.log_callback(f"\U0001f680 Starting scraper for guild {self.config.guild_id}", "info")
         self.config.log_callback(f"Token 2 is invalid {DASH} skipping", "warn")
+        if self.recorder is not None:
+            for token in self.config.tokens:
+                self.recorder.rest(token, "token_check", "GET", "https://discord.com/api/v9/users/@me",
+                                   build_headers(token), proxy=(self.config.proxies or [None])[0])
         try:
             while self.endless or len(self._members) < self.count:
                 await asyncio.sleep(0.01)
@@ -182,7 +194,9 @@ def test_registered_one_at_a_time_without_bots():
     assert t.options is scrape.options
     assert set(t.inputs_schema()["properties"]) == {
         "guild_id", "include_username", "include_avatar_url", "include_bio", "include_roles", "use_proxies",
-        "sessions_per_token"}
+        "sessions_per_token", "debug_report"}
+    assert t.inputs_schema()["properties"]["debug_report"]["title"] == "Debug report"
+    assert scrape.ScrapeInputs(guild_id=GID).debug_report is False
 
 
 @pytest.mark.asyncio
@@ -714,3 +728,140 @@ def test_scraper_opens_one_gateway_session_per_token():
     from copycord.admin.standalone_scraper import ScraperConfig
 
     assert ScraperConfig(guild_id=1, tokens=["a", "b"]).sessions_per_token == 1
+
+
+# the debug report (dev mode only)
+
+LONG = "scraperfaketoken-" + "x" * 24 + "-wxyz"
+LONG_MASKED = "scrape...wxyz"
+SECRET = "s3cretpw"
+
+
+@pytest.fixture()
+def dev(monkeypatch):
+    monkeypatch.setenv("COPYCORD_ENV", "dev")
+
+
+@pytest.mark.asyncio
+async def test_debug_report_is_refused_outside_dev_as_a_field_error(svc, env, monkeypatch):
+    for value in (None, "prod", "1"):
+        if value is None:
+            monkeypatch.delenv("COPYCORD_ENV", raising=False)
+        else:
+            monkeypatch.setenv("COPYCORD_ENV", value)
+        with pytest.raises(ValueError) as err:
+            await svc.start("scrape_members", {"guild_id": GID, "debug_report": True})
+        errors = err.value.args[0]
+        assert set(errors) == {"debug_report"} and scrape.DEBUG_REFUSED in errors["debug_report"]
+    # Off is always fine, and nothing was started by the refusals.
+    assert env["built"] == []
+    run = await svc.start("scrape_members", {"guild_id": GID, "debug_report": False})
+    done = await _settled(svc, run.id)
+    assert done.status == "success" and "debug_report" not in done.report
+    assert env["built"][0].config.debug_report is False
+    assert not list((env["dir"] / "scrapes").rglob("debug_*.json"))
+
+
+@pytest.mark.asyncio
+async def test_debug_report_is_written_beside_the_members_file(svc, env, dev):
+    _save_tokens(env["dir"], [LONG])
+    env["access"]["with"] = {LONG}
+    (env["dir"] / "proxies.txt").write_text(f"user:{SECRET}@5.6.7.8:3128\n")
+    run = await svc.start("scrape_members", {"guild_id": GID, "debug_report": True})
+    done = await _settled(svc, run.id)
+    assert done.status == "success"
+    assert env["built"][0].config.debug_report is True
+    debug = done.report["debug_report"]
+    assert debug["path"].startswith(f"{GID}/debug_{GID}_") and debug["path"].endswith(".json")
+    path = env["dir"] / "scrapes" / debug["path"]
+    assert path.parent == (env["dir"] / "scrapes" / done.report["output"]["path"]).parent
+    assert debug["size"] == path.stat().st_size
+    text = path.read_text()
+    assert LONG not in text and SECRET not in text
+    data = json.loads(text)
+    assert data["status"] == "success" and data["run_id"] == str(run.id)
+    (tok,) = data["tokens"]
+    assert tok["token"] == LONG_MASKED
+    (check,) = tok["rest"]
+    assert check["kind"] == "token_check" and check["headers"]["Authorization"] == LONG_MASKED
+    assert check["proxy"] == "http://***@5.6.7.8:3128"
+    assert tok["super_properties"] == json.loads(
+        base64.b64decode(build_headers(LONG)["X-Super-Properties"]))
+    assert f"Saved the debug report to {debug['path']}" in _msgs(done)
+    # Past scrapes still list only the members file.
+    assert [p.name for p in path.parent.glob("scrape_*.json")] == [done.report["output"]["path"].split("/")[1]]
+
+
+@pytest.mark.asyncio
+async def test_debug_report_is_written_on_failure_with_what_was_captured(svc, env, dev):
+    env["opts"].update(count=2, raise_exc=RuntimeError("gateway exploded"))
+    run = await svc.start("scrape_members", {"guild_id": GID, "debug_report": True})
+    done = await _settled(svc, run.id)
+    assert done.status == "failed"
+    data = json.loads((env["dir"] / "scrapes" / done.report["debug_report"]["path"]).read_text())
+    assert data["status"] == "failed" and data["error"] == "gateway exploded"
+    assert [r["kind"] for r in data["tokens"][0]["rest"]] == ["token_check"]
+
+
+@pytest.mark.asyncio
+async def test_debug_report_is_written_on_failure_with_no_members(svc, env, dev):
+    env["opts"].update(count=0, result=ScraperResult(success=False, error="No valid tokens with guild access"))
+    run = await svc.start("scrape_members", {"guild_id": GID, "debug_report": True})
+    done = await _settled(svc, run.id)
+    assert done.status == "failed" and done.report["output"]["path"] is None
+    data = json.loads((env["dir"] / "scrapes" / done.report["debug_report"]["path"]).read_text())
+    assert data["status"] == "failed" and data["error"] == "No valid tokens with guild access"
+
+
+@pytest.mark.asyncio
+async def test_debug_report_is_written_on_cancel(svc, env, dev):
+    env["opts"].update(endless=True, hint=None)
+    run = await svc.start("scrape_members", {"guild_id": GID, "debug_report": True})
+    await _until(lambda: _found(svc, run.id) >= 2)
+    await svc.cancel(run.id)
+    done = await _settled(svc, run.id)
+    assert done.status == "cancelled"
+    data = json.loads((env["dir"] / "scrapes" / done.report["debug_report"]["path"]).read_text())
+    assert data["status"] == "cancelled" and data["tokens"][0]["rest"]
+
+
+def test_types_listing_carries_the_dev_flag(http, monkeypatch):
+    tc, _repo, _tmp = http
+    monkeypatch.delenv("COPYCORD_ENV", raising=False)
+    types = {t["key"]: t for t in tc.get("/api/tasks/types").json()["types"]}
+    assert types["scrape_members"]["dev"] is False
+    monkeypatch.setenv("COPYCORD_ENV", "DEV")
+    types = {t["key"]: t for t in tc.get("/api/tasks/types").json()["types"]}
+    assert types["scrape_members"]["dev"] is True
+
+
+def test_route_serves_the_debug_report(http):
+    tc, repo, tmp_path = http
+    rel, _path = _saved(tmp_path)
+    debug = tmp_path / "scrapes" / GID / f"debug_{GID}_20261016_101010.json"
+    debug.write_text('{"kind": "copycord-scrape-debug-report"}')
+    run = TaskRun(type="scrape_members", number=3, status="failed", title="Scrape members of Zeta",
+                  trigger="manual", actor="admin", inputs={"guild_id": GID, "debug_report": True},
+                  context={"label": "Zeta", "guild_id": GID},
+                  report={"output": {"path": None, "size": None},
+                          "debug_report": {"path": f"{GID}/{debug.name}", "size": 40}})
+    rid = repo.insert_run(run)
+    resp = tc.get(f"/api/tasks/scrape-members/{rid}/debug-report")
+    assert resp.status_code == 200 and resp.json() == {"kind": "copycord-scrape-debug-report"}
+    assert resp.headers["content-type"].startswith("application/json")
+    assert f'filename="{debug.name}"' in resp.headers["content-disposition"]
+    # A run without one, a deleted one, a path outside scrapes/ and no session.
+    plain = _finished_run(repo, rel)
+    resp = tc.get(f"/api/tasks/scrape-members/{plain}/debug-report")
+    assert resp.status_code == 404 and resp.json() == {"detail": scrape.NO_DEBUG}
+    for bad in ("../secret.json", "/etc/passwd"):
+        run.report = {"debug_report": {"path": bad}}
+        run.id = None
+        bad_id = repo.insert_run(run)
+        resp = tc.get(f"/api/tasks/scrape-members/{bad_id}/debug-report")
+        assert resp.status_code == 404 and resp.json() == {"detail": scrape.NO_DEBUG}
+    debug.unlink()
+    resp = tc.get(f"/api/tasks/scrape-members/{rid}/debug-report")
+    assert resp.status_code == 404 and resp.json() == {"detail": scrape.GONE}
+    tc.headers.pop("cookie")
+    assert tc.get(f"/api/tasks/scrape-members/{rid}/debug-report", follow_redirects=False).status_code == 401

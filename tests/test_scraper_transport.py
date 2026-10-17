@@ -280,3 +280,127 @@ async def test_no_members_fails_the_scrape_without_a_rest_fallback(fakes, ready,
     urls = [url for sess in sessions for url, _ in sess.calls]
     assert not [u for u in urls if u.endswith("/members") or "/members?" in u]
     assert all(sess.closed for sess in sessions)
+
+
+# the debug report: what each token sent, masked, captured where the scraper builds it
+
+LONG_TOKENS = ["tokAAA" + "a" * 30 + "end1", "tokBBB" + "b" * 30 + "end2"]
+
+
+def _debug_scraper(**kwargs):
+    config = ScraperConfig(guild_id=1, tokens=list(LONG_TOKENS), proxies=list(PROXIES[:2]),
+                           debug_report=True, **kwargs)
+    s = StandaloneScraper(config)
+
+    async def pause(seconds):
+        await asyncio.sleep(0)
+        return s._stop_event.is_set()
+
+    s._pause = pause
+    return s
+
+
+def _decoded(headers):
+    return json.loads(base64.b64decode(headers["X-Super-Properties"]))
+
+
+@pytest.mark.asyncio
+async def test_debug_report_records_each_tokens_headers_identify_and_proxy_masked(fakes):
+    _sessions, sockets, _ = fakes
+    s = _debug_scraper(include_bio=True)
+    result = await asyncio.wait_for(s.scrape(), timeout=30)
+    assert result.success, result.error
+    report = s.debug_report(status="success")
+
+    text = json.dumps(report)
+    assert not [t for t in LONG_TOKENS if t in text]
+    assert PASSWORD not in text and "user0:" not in text
+    assert report["kind"] == "copycord-scrape-debug-report" and report["status"] == "success"
+    assert report["guild_id"] == "1" and report["impersonate"] == TLS_IMPERSONATE
+
+    for i, (token, entry) in enumerate(zip(LONG_TOKENS, report["tokens"])):
+        masked = token[:6] + "..." + token[-4:]
+        expected = build_headers(token)
+        assert entry["index"] == i + 1 and entry["token"] == masked and entry["valid"] is True
+        assert entry["user_agent"] == expected["User-Agent"]
+        assert entry["super_properties"] == _decoded(expected)
+        assert entry["super_properties"]["browser"] == "Chrome"
+
+        # REST: every kind sent, with the exact headers, the session slot, TLS target and proxy.
+        kinds = [r["kind"] for r in entry["rest"]]
+        assert "token_check" in kinds and "bio" in kinds
+        assert ("guild_info" in kinds) == (i == 0)
+        for r in entry["rest"]:
+            assert r["method"] == "GET" and r["requests"] >= 1
+            assert r["headers"] == {**expected, "Authorization": masked}
+            assert r["super_properties"] == _decoded(expected)
+            assert r["impersonate"] == TLS_IMPERSONATE and r["session_slot"] == 0
+            assert r["proxy"] == f"http://***@host{i}.example:800{i}"
+            assert r["user_agent"] == expected["User-Agent"]
+
+        # Gateway: the socket's upgrade headers and the IDENTIFY as sent, without its token.
+        (gw,) = entry["gateway"]
+        sock = next(sock for sock in sockets if sock.identify()["d"]["token"] == token)
+        assert gw["session_index"] == i and gw["session_slot"] == 0 and gw["connects"] == 1
+        assert gw["url"] == sock.url == gateway_url(zlib_stream=True)
+        assert gw["headers"] == sock.headers == GatewayClient(token)._ws_headers()
+        assert gw["proxy"] == f"http://***@host{i}.example:800{i}"
+        sent = sock.identify()
+        assert "token" not in gw["identify"]["d"]
+        assert gw["identify"] == {**sent, "d": {k: v for k, v in sent["d"].items() if k != "token"}}
+        assert gw["identify"]["d"]["properties"] == gateway_properties(token)
+
+
+@pytest.mark.asyncio
+async def test_debug_report_keeps_what_was_captured_when_the_scrape_fails(fakes):
+    s = _debug_scraper()
+
+    async def gateway(**kwargs):
+        return None
+
+    s._run_gateway_session = gateway
+    result = await asyncio.wait_for(s.scrape(), timeout=10)
+    assert not result.success
+    report = s.debug_report(status="failed", error=result.error)
+    assert report["status"] == "failed" and report["error"] == result.error
+    assert [r["kind"] for r in report["tokens"][0]["rest"]] == ["token_check", "guild_info"]
+    assert report["tokens"][0]["gateway"] == []
+
+
+@pytest.mark.asyncio
+async def test_no_debug_report_unless_asked(fakes):
+    _sessions, sockets, _ = fakes
+    s = _scraper([])
+    assert s.debug_report() is None
+    result = await asyncio.wait_for(s.scrape(), timeout=30)
+    assert result.success and s.debug_report() is None
+    assert all(isinstance(sock, FakeSocket) for sock in sockets)
+
+
+def test_debug_recorder_masks_and_folds_reconnects():
+    from copycord.admin import scrape_debug as sd
+
+    token = LONG_TOKENS[0]
+    assert sd.mask_token(token) == token[:6] + "..." + token[-4:]
+    assert sd.mask_token("short") == "***" and sd.mask_token(None) == "***"
+    assert sd.masked_proxy(None) is None
+    assert sd.masked_proxy(f"user:{PASSWORD}@1.2.3.4:80") == "http://***@1.2.3.4:80"
+    assert sd.decode_super_properties("not base64 json") is None
+
+    rec = sd.DebugRecorder([token], [PROXY_URLS[0]])
+    headers = {"User-Agent": "UA", "Origin": "https://discord.com"}
+    identify = json.dumps({"op": 2, "d": {"token": token, "properties": {"os": "Windows"}}})
+    for _ in range(3):
+        rec.gateway_connect(token, 0, "wss://gw", headers, proxy=PROXY_URLS[0])
+        rec.gateway_sent(token, 0, json.dumps({"op": 1, "d": None}))
+        rec.gateway_sent(token, 0, identify)
+    rec.gateway_connect(token, 0, "wss://gw", headers, proxy=PROXY_URLS[0])  # never identified
+    # A URL or error that quotes a secret is scrubbed too.
+    rec.rest(token, "other", "GET", f"https://x/?t={token}", {"Authorization": token}, proxy=PROXY_URLS[0])
+    report = rec.snapshot(error=f"proxy {PROXY_URLS[0]} failed")
+    text = json.dumps(report)
+    assert token not in text and PASSWORD not in text
+    gw = report["tokens"][0]["gateway"]
+    assert [g["connects"] for g in gw] == [3, 1]
+    assert gw[0]["identify"] == {"op": 2, "d": {"properties": {"os": "Windows"}}}
+    assert gw[1]["identify"] is None
