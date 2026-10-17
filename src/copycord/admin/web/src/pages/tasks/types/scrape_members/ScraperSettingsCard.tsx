@@ -233,9 +233,9 @@ function CountsSummary({ counts }: { counts: Counts }) {
   const settled = tokens !== undefined && proxies !== undefined;
   const reveal = useReveal(settled);
   const words = (t: number, p: number) => `${plural(t, "token", "tokens")}, ${plural(p, "proxy", "proxies")}`;
-  if (!settled) return <Skeleton.Text className="ml-auto text-xs">{words(2, 1)}</Skeleton.Text>;
+  if (!settled) return <Skeleton.Text className="text-xs">{words(2, 1)}</Skeleton.Text>;
   if (tokens === null || proxies === null) return null;
-  return <span className={cx("ml-auto text-xs font-normal text-muted", reveal)}>{words(tokens, proxies)}</span>;
+  return <span className={cx("text-xs font-normal text-muted", reveal)}>{words(tokens, proxies)}</span>;
 }
 
 export function ScraperSettingsCard() {
@@ -268,7 +268,12 @@ export function ScraperSettingsCard() {
           )}
         >
           <DisclosureTitle title="Scraper tokens and proxies" open={open} />
-          {open ? null : <CountsSummary counts={counts} />}
+          <span className="ml-auto flex items-center gap-3">
+            {open ? null : <CountsSummary counts={counts} />}
+            <span aria-hidden="true" className="text-xs font-medium text-accent">
+              {open ? "Hide" : "Edit"}
+            </span>
+          </span>
         </button>
       </h2>
       {/* Kept mounted while collapsed: the lists load once and an edit in flight still saves. */}
