@@ -523,6 +523,7 @@ class ClientListener:
                             str(data_dir()), "exports"
                         ),
                         save_json=save_json,
+                        job_id=(str(data.get("job_id") or "") or None),
                     )
                     await exporter.run(user_id=uid, webhook_url=webhook_url)
                 finally:
@@ -532,6 +533,13 @@ class ClientListener:
             await DmHistoryExporter.register_task(uid, task)
 
             return {"ok": True, "user_id": uid}
+
+        elif typ == "export_dm_cancel":
+            try:
+                uid = int(data["user_id"])
+            except (KeyError, TypeError, ValueError):
+                return {"ok": False, "error": "user_id required"}
+            return {"ok": await DmHistoryExporter.cancel(uid), "user_id": uid}
 
         elif typ == "export_messages":
             d = data or {}

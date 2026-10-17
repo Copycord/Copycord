@@ -5,29 +5,25 @@ title: Exports
 
 # Export Commands
 
-Export DM histories and debug information.
+Debug information. DM exports are no longer a slash command: run **Export DMs** from the dashboard's
+Tasks page.
 
-## `/export_dms`
+## Export DMs (Tasks page)
 
-Export a user's DM (direct message) history to a JSON file, with optional real-time webhook forwarding.
+Exports a user's DM (direct message) history from the client account to a JSON file, a webhook, or both.
 
-**Parameters:**
+| Input | Required | Description |
+|-------|----------|-------------|
+| User ID | Yes | The Discord user ID to export DMs from |
+| Save a JSON file | No | Writes `exports/dm/<user_id>/<time>/messages.json` in the data folder (default: on) |
+| Webhook URL | No | Forwards every message to this webhook, oldest first |
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `user_id` | Yes | The Discord user ID to export DMs from |
-| `webhook_url` | No | Webhook URL to forward messages to in real time |
-| `json_file` | No | Save a JSON snapshot (default: `true`) |
-
-**Usage:**
-```
-/export_dms 123456789012345678
-/export_dms 123456789012345678 https://discord.com/api/webhooks/123/abc true
-```
+The run page shows the messages read, the JSON file's path and the messages forwarded as they go, and
+Cancel stops the export.
 
 :::note
 - Only one DM export per user can run at a time
-- The user token (client) must have DM history with the target user
+- The user token (client) must have an open DM with the target user
 - Messages are exported chronologically
 :::
 

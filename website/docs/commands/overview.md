@@ -25,7 +25,7 @@ Copycord provides a comprehensive set of slash commands for managing your clone 
 | [Roles](/docs/commands/roles) | `onjoin_role`, `onjoin_dm`, `role_block`, `role_mention`, etc. | Role management and auto-assignment |
 | [Assets](/docs/commands/assets) | `purge_assets`, `pull_assets` | Manage emojis, stickers, and roles |
 | [Webhooks](/docs/commands/webhooks) | `channel_webhook set/view/clear/list` | Custom webhook identities per channel |
-| [Exports](/docs/commands/exports) | `export_dms`, `mapping_debug` | Export DM history and debug info |
+| [Exports](/docs/commands/exports) | `mapping_debug` | Debug info (DM exports run from the Tasks page) |
 | [Rewrites](/docs/commands/rewrites) | `rewrite add/list/remove` | Find-and-replace rules for messages |
 
 ## Quick reference
@@ -54,7 +54,6 @@ All commands at a glance:
 /role_mention add|list|delete             — Auto-mention roles on messages
 /channel_webhook set|view|clear|list      — Custom webhook identity
 /channel_webhook set_all|clear_all        — Bulk webhook identity
-/export_dms <user_id>                     — Export DM history
 /mapping_debug                            — Debug guild mapping
 /rewrite add|list|remove                  — Word/phrase rewrites
 ```

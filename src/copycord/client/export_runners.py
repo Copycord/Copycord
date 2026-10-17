@@ -1099,7 +1099,13 @@ class ExportMessagesRunner:
 
 
 class DmHistoryExporter:
-    """Export a user's DM history; one export per user_id at a time."""
+    """Export a user's DM history; one export per user_id at a time.
+
+    Started by the Export DMs task with a job_id: the exporter then sends
+    export_dm_progress frames (phase count, read, forward) and puts the job_id
+    and its counts on export_dm_done, a cancelled export included."""
+
+    PROGRESS_EVERY = 100
 
     _lock: asyncio.Lock = asyncio.Lock()
     _active_users: set[int] = set()
@@ -1148,6 +1154,7 @@ class DmHistoryExporter:
         do_precache_count: bool = True,
         out_root: str = os.path.join(str(data_dir()), "exports"),
         save_json: bool = True,
+        job_id: Optional[str] = None,
     ) -> None:
         self.bot = bot
         self.ws = ws
@@ -1157,10 +1164,42 @@ class DmHistoryExporter:
         self.do_precache_count = bool(do_precache_count)
         self.out_root = out_root
         self.save_json = bool(save_json)
+        self.job_id = job_id
+
+    def _job_fields(self, buffered: List[DictLike], sent: int) -> DictLike:
+        if not self.job_id:
+            return {}
+        return {"job_id": self.job_id, "count": len(buffered), "sent": sent}
+
+    async def _progress(
+        self, user_id: int, username: Optional[str], phase: str, done: int,
+        total: Optional[int] = None, **extra: Any,
+    ) -> None:
+        if not self.job_id:
+            return
+        try:
+            await self._ws_send(
+                {
+                    "type": "export_dm_progress",
+                    "data": {
+                        "job_id": self.job_id,
+                        "user_id": user_id,
+                        "username": username,
+                        "phase": phase,
+                        "done": done,
+                        "total": total,
+                        **extra,
+                    },
+                }
+            )
+        except Exception as e:
+            self.log.debug(f"[📥] DM export progress send failed: {e}")
 
     async def run(self, user_id: int, webhook_url: Optional[str]) -> None:
         json_path: Optional[str] = None
         buffered: List[DictLike] = []
+        sent = 0
+        uname: Optional[str] = None
         try:
             dm, user = await self._find_dm_channel(user_id)
             if dm is None or user is None:
@@ -1175,6 +1214,7 @@ class DmHistoryExporter:
                             "username": None,
                             "webhook_url": webhook_url,
                             "error": "dm-not-in-cache",
+                            **self._job_fields(buffered, sent),
                         },
                     }
                 )
@@ -1186,21 +1226,29 @@ class DmHistoryExporter:
                 or user.name
             )
 
+            found: Optional[int] = None
             if self.do_precache_count:
                 found = 0
+                await self._progress(user_id, uname, "count", 0)
                 async for _ in self.bot.history(
                     dm, limit=None, oldest_first=True, raise_on_error=True
                 ):
                     found += 1
+                    if found % self.PROGRESS_EVERY == 0:
+                        await self._progress(user_id, uname, "count", found)
                 self.log.info(
                     f"[📥] Starting DM export for {uname} ({user_id}) — messages found: {found}"
                 )
 
+            await self._progress(user_id, uname, "read", 0, found)
             async for msg in self.bot.history(
                 dm, limit=None, oldest_first=True, raise_on_error=True
             ):
                 serialized = self.serialize(msg)
                 buffered.append(serialized)
+                if len(buffered) % self.PROGRESS_EVERY == 0:
+                    await self._progress(user_id, uname, "read", len(buffered), found)
+            await self._progress(user_id, uname, "read", len(buffered), len(buffered))
 
             if self.save_json:
                 try:
@@ -1222,12 +1270,20 @@ class DmHistoryExporter:
                             indent=2,
                         )
                     self.log.info(f"[📥] DM JSON saved: {json_path}")
+                    await self._progress(
+                        user_id, uname, "json", len(buffered), len(buffered),
+                        json_path=json_path,
+                    )
                 except Exception as e:
                     self.log.warning(f"[📥] Failed to write DM JSON: {e}")
                     json_path = None
+                    await self._progress(
+                        user_id, uname, "json", 0, len(buffered), json_error=str(e)
+                    )
 
             sent = 0
             if webhook_url:
+                await self._progress(user_id, uname, "forward", 0, len(buffered))
                 for serialized in buffered:
                     payload: DictLike = {
                         "type": "export_dm_message",
@@ -1241,6 +1297,9 @@ class DmHistoryExporter:
                     try:
                         await self._ws_send(payload)
                         sent += 1
+                        await self._progress(
+                            user_id, uname, "forward", sent, len(buffered)
+                        )
                     except Exception as send_err:
                         self.log.warning(
                             f"[📥] DM Export: websocket send failed (likely closed) after {sent} messages: {send_err}"
@@ -1268,9 +1327,28 @@ class DmHistoryExporter:
                         "username": uname,
                         "webhook_url": webhook_url,
                         **({"json_path": json_path} if json_path else {}),
+                        **self._job_fields(buffered, sent),
                     },
                 }
             )
+
+        except asyncio.CancelledError:
+            self.log.info(f"[📥] DM export cancelled for user_id={user_id}")
+            with contextlib.suppress(Exception):
+                await self._ws_send(
+                    {
+                        "type": "export_dm_done",
+                        "data": {
+                            "user_id": user_id,
+                            "username": uname,
+                            "webhook_url": webhook_url,
+                            "error": "cancelled",
+                            **({"json_path": json_path} if json_path else {}),
+                            **self._job_fields(buffered, sent),
+                        },
+                    }
+                )
+            raise
 
         except Exception as e:
             self.log.exception(f"[📥] DM export error for user_id={user_id}: {e}")
@@ -1283,6 +1361,7 @@ class DmHistoryExporter:
                         "webhook_url": webhook_url,
                         "error": str(e),
                         **({"json_path": json_path} if json_path else {}),
+                        **self._job_fields(buffered, sent),
                     },
                 }
             )

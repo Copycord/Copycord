@@ -36,7 +36,7 @@ Source Server ──► Client (self-bot) ──► Server (bot) ──► Clone
 - **Advanced filtering**: Whitelist/exclude channels, block keywords, rewrite text
 - **Custom branding**: Rename channels, customize webhook names and avatars
 - **Member scraper**: Export user IDs, usernames, avatars, and bios
-- **DM export**: Export direct message history to JSON
+- **DM export**: Export direct message history to JSON or a webhook from the Tasks page
 - **Announcement system**: Keyword-triggered notifications with user subscriptions
 - **Database backups**: Automatic daily backups with restore capability
 - **Web dashboard**: Modern UI to manage everything from your browser

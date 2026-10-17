@@ -1780,8 +1780,14 @@ class ServerReceiver:
                     return
                 await self.webhook_exporter.handle_ws_export_dm_message(data)
 
+            elif typ == "export_dm_progress":
+                # Export DMs task frames go to the admin bus, keyed by job_id.
+                await self.bus.publish("client", msg)
+
             elif typ == "export_dm_done":
                 await self.webhook_exporter.handle_ws_export_dm_done(data)
+                if (data or {}).get("job_id"):
+                    await self.bus.publish("client", msg)
 
             elif typ == "export_message":
                 if (

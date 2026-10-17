@@ -22,6 +22,7 @@ from .service import (
 )
 from . import backfill  # noqa: F401,E402  registers backfill_channels
 from . import purge  # noqa: F401,E402  registers purge_messages
+from . import export_dms  # noqa: F401,E402  registers export_dms
 
 __all__ = (
     "MemoryRunRepo", "RunContext", "RunFinished", "RunRepo",
