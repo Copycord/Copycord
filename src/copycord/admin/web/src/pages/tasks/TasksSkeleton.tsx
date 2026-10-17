@@ -495,10 +495,16 @@ export const RAIL_RUNNING_DOT = "size-1.5 rounded-full bg-accent animate-pulse";
 export const RAIL_QUEUED = "inline-flex items-center gap-1 text-xs font-medium text-info tabular-nums";
 export const RAIL_QUEUED_DOT = "size-1.5 rounded-full bg-info";
 
-/** "1 running", "1 queued", "1 running · 1 queued": the rail badge's words. */
+/** "1 running, 2 queued": the active runs in words, for the rail entry's title. */
 export function activeText(active: number, queued = 0): string {
   const running = Math.max(0, active - queued);
-  return [running > 0 ? `${running} running` : "", queued > 0 ? `${queued} queued` : ""].filter(Boolean).join(" · ");
+  return [running > 0 ? `${running} running` : "", queued > 0 ? `${queued} queued` : ""].filter(Boolean).join(", ");
+}
+
+/** The rail badge, kept short: the running runs only ("1 running"), or "2 queued" when none runs yet. */
+export function badgeText(active: number, queued = 0): string {
+  const running = Math.max(0, active - queued);
+  return running > 0 ? `${running} running` : `${queued} queued`;
 }
 // The active count says "running" in words too (rule a): the pulsing accent dot alone was a colour-only signal.
 
@@ -510,7 +516,7 @@ export function RailCounts({ total, active = 0, queued = 0 }: { total: number | 
       {active > 0 ? (
         <span className={onlyQueued ? RAIL_QUEUED : RAIL_RUNNING}>
           <span aria-hidden="true" className={onlyQueued ? RAIL_QUEUED_DOT : RAIL_RUNNING_DOT} />
-          {activeText(active, queued)}
+          {badgeText(active, queued)}
         </span>
       ) : null}
       {total == null ? (

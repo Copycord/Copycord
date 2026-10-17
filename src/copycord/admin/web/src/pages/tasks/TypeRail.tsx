@@ -20,7 +20,7 @@ const item = (active: boolean) => cx(RAIL_ITEM, active ? RAIL_ACTIVE : "hover:bg
 /** "2 runs, 1 running": the counts in words, for the entry's title; queued runs are named as queued. */
 export function railTitle(total: number, active: number, queued = 0): string {
   const runs = `${total} ${total === 1 ? "run" : "runs"}`;
-  return active > 0 ? `${runs}, ${activeText(active, queued).replace(" · ", ", ")}` : runs;
+  return active > 0 ? `${runs}, ${activeText(active, queued)}` : runs;
 }
 
 export function TypeRail({ types, selected, loading = false }: TypeRailProps) {
