@@ -1,11 +1,11 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
 import type { TaskRun, TaskType } from "../../../../types/tasks";
 import { typeLabel } from "../../typeLabels";
 import { describeRunInputs, entryFor, heroStat } from "..";
-import { AVATARS_EXPLAINER, AvatarsForm, filterGuilds, hoursError } from "./AvatarsForm";
+import { AVATARS_EXPLAINER, AvatarsForm, hoursError } from "./AvatarsForm";
 import { AvatarsDownloadCard, downloadOf, sizeWords } from "./entry";
 
 const TYPE: TaskType = { key: "download_avatars", title: "Download avatars", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -86,15 +86,18 @@ describe("AvatarsForm", () => {
     expect(posts).toEqual([]);
   });
 
-  it("shows a filter box once the list is long", async () => {
+  it("filters the servers in the server box itself", async () => {
     serve(Array.from({ length: 12 }, (_, i) => ({ id: String(100 + i), name: `Server ${i}` })));
     renderForm();
-    expect(await screen.findByRole("searchbox", { name: "Find a server" })).toBeInTheDocument();
+    expect(screen.queryByRole("searchbox", { name: "Find a server" })).toBeNull();
+    const box = await screen.findByRole("combobox", { name: "Server" });
+    await waitFor(() => expect(box.tagName).toBe("INPUT"));
+    fireEvent.focus(box);
+    fireEvent.change(box, { target: { value: "111" } });
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Server 11"]);
   });
 
-  it("filters and validates in words", () => {
-    expect(filterGuilds(GUILDS, "be")).toEqual([GUILDS[1]]);
-    expect(filterGuilds(GUILDS, " ")).toEqual(GUILDS);
+  it("validates in words", () => {
     expect(hoursError("1")).toBeUndefined();
     expect(hoursError("168")).toBeUndefined();
     for (const bad of ["0", "169", "1.5", ""]) expect(hoursError(bad)).toBeDefined();

@@ -8,6 +8,9 @@
 // under the toggle (or above it when there is no room below), so a Modal body never grows a
 // scrollbar or clips it; a page scroll closes it. A disabled option with an empty value is the
 // placeholder: the toggle shows it muted and the list leaves it out.
+// A searchable field draws the toggle as a text input with the same look: closed it shows the
+// chosen label, focused it empties and opens the list, and typing keeps the options whose label or
+// value holds the text. Escape closes and keeps the old value, Tab and a click outside close.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
@@ -43,6 +46,8 @@ export interface ToolbarSelectProps {
   className?: string;
   /** Replaces the toolbar look of the toggle (the field variant passes the Field control look). */
   toggleClassName?: string;
+  /** Field variant only: the toggle is a text input that filters the options by label or value. */
+  searchable?: boolean;
   "aria-describedby"?: string;
   "aria-invalid"?: boolean;
 }
@@ -92,14 +97,17 @@ export function ToolbarSelect({
   variant = "toolbar",
   className,
   toggleClassName,
+  searchable,
   ...aria
 }: ToolbarSelectProps) {
   const field = variant === "field";
+  const search = field && Boolean(searchable) && !pending;
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [focus, setFocus] = useState(0);
   const [place, setPlace] = useState<CSSProperties | null>(null);
   const wrap = useRef<HTMLSpanElement>(null);
-  const toggle = useRef<HTMLButtonElement>(null);
+  const toggle = useRef<HTMLButtonElement & HTMLInputElement>(null);
   const list = useRef<HTMLSpanElement>(null);
   const listId = `${id}-listbox`;
   const selected = Math.max(
@@ -107,7 +115,9 @@ export function ToolbarSelect({
     options.findIndex((o) => o.value === value),
   );
   // Indexes into options of the rows the list shows, and of the ones the keys and clicks can pick.
-  const shown = options.flatMap((o, i) => (field && isPlaceholder(o) ? [] : [i]));
+  const q = search && open ? query.trim().toLocaleLowerCase() : "";
+  const matches = (o: ToolbarOption) => !q || o.label.toLocaleLowerCase().includes(q) || o.value.toLocaleLowerCase().includes(q);
+  const shown = options.flatMap((o, i) => ((field && isPlaceholder(o)) || !matches(o) ? [] : [i]));
   const pickable = shown.filter((i) => !options[i]!.disabled);
   const current = options[selected];
   const placeholderShown = field && current !== undefined && isPlaceholder(current);
@@ -147,6 +157,10 @@ export function ToolbarSelect({
     if (open) list.current?.querySelector(`[data-idx="${focus}"]`)?.scrollIntoView?.({ block: "nearest" });
   }, [open, focus, place]);
 
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
   const show = () => {
     if (disabled) return;
     setFocus(pickable.includes(selected) ? selected : (pickable[0] ?? -1));
@@ -156,6 +170,7 @@ export function ToolbarSelect({
     const o = options[i];
     if (!o || o.disabled) return;
     setOpen(false);
+    setQuery("");
     // Like the old dropdown, picking the current option fires change again (Name twice flips the direction);
     // the field variant acts like a native select and stays quiet.
     if (!field || o.value !== value) onChange(o.value);
@@ -168,7 +183,18 @@ export function ToolbarSelect({
     setFocus(pickable[next]!);
   };
 
-  const onKey = (e: KeyboardEvent<HTMLButtonElement>) => {
+  /** Typing filters the list and moves the highlight to the first row that is left. */
+  const onType = (text: string) => {
+    setQuery(text);
+    if (!open) setOpen(true);
+    const t = text.trim().toLocaleLowerCase();
+    const first = options.findIndex(
+      (o) => !o.disabled && (!t || o.label.toLocaleLowerCase().includes(t) || o.value.toLocaleLowerCase().includes(t)),
+    );
+    setFocus(first);
+  };
+
+  const onKey = (e: KeyboardEvent<HTMLElement>) => {
     if (disabled) return;
     switch (e.key) {
       case "ArrowDown":
@@ -183,8 +209,13 @@ export function ToolbarSelect({
         if (!open) show();
         if (pickable.length) setFocus(pickable[e.key === "Home" ? 0 : pickable.length - 1]!);
         break;
+      case "Tab":
+        if (open) setOpen(false);
+        break;
       case "Enter":
       case " ":
+        // A space is text in the search box.
+        if (search && e.key === " ") break;
         e.preventDefault();
         if (!open) show();
         else choose(focus);
@@ -217,7 +248,7 @@ export function ToolbarSelect({
     >
       {shown.length === 0 ? (
         <span className="block px-2.5 py-2 text-[13px] leading-[1.3] text-muted">
-          {options.find(isPlaceholder)?.label || "Nothing to pick"}
+          {q ? "No matches" : options.find(isPlaceholder)?.label || "Nothing to pick"}
         </span>
       ) : null}
       {shown.map((i) => {
@@ -273,43 +304,76 @@ export function ToolbarSelect({
           ))}
         </select>
       )}
-      <button
-        ref={toggle}
-        type="button"
-        id={field ? id : undefined}
-        role={field ? "combobox" : undefined}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listId}
-        aria-activedescendant={field && open && focus >= 0 ? `${listId}-${focus}` : undefined}
-        {...aria}
-        disabled={disabled}
-        onClick={() => (open ? setOpen(false) : show())}
-        onKeyDown={onKey}
-        className={cx(
-          "relative w-full cursor-pointer text-left",
-          toggleClassName ?? TOOLBAR_TOGGLE,
-          field && "block pr-[42px]",
-        )}
-      >
-        {pending ? (
-          <Skeleton.Text className="align-middle">{pendingLabel}</Skeleton.Text>
-        ) : (
-          <span className={cx(field && "block truncate", placeholderShown && "text-muted")}>
-            {prefix && options[selected] ? `${prefix}: ${options[selected].label}` : options[selected]?.label || (field ? "\u00a0" : "")}
+      {search ? (
+        <>
+          <input
+            ref={toggle}
+            type="text"
+            id={id}
+            role="combobox"
+            autoComplete="off"
+            spellCheck={false}
+            aria-autocomplete="list"
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            aria-controls={listId}
+            aria-activedescendant={open && focus >= 0 && shown.includes(focus) ? `${listId}-${focus}` : undefined}
+            {...aria}
+            disabled={disabled}
+            value={open ? query : placeholderShown ? "" : (current?.label ?? "")}
+            placeholder={open ? (placeholderShown ? "Type to search" : current?.label) : current?.label}
+            onFocus={() => !open && show()}
+            onClick={() => !open && show()}
+            onChange={(e) => onType(e.target.value)}
+            onKeyDown={onKey}
+            className={cx("relative block w-full truncate text-left", toggleClassName ?? TOOLBAR_TOGGLE, "pr-[42px]")}
+          />
+          <span
+            aria-hidden
+            className={cx("pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-sm leading-none text-accent", open && "rotate-180")}
+          >
+            ▾
           </span>
-        )}
-        <span
-          aria-hidden
+        </>
+      ) : (
+        <button
+          ref={toggle}
+          type="button"
+          id={field ? id : undefined}
+          role={field ? "combobox" : undefined}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-activedescendant={field && open && focus >= 0 ? `${listId}-${focus}` : undefined}
+          {...aria}
+          disabled={disabled}
+          onClick={() => (open ? setOpen(false) : show())}
+          onKeyDown={onKey}
           className={cx(
-            "absolute top-1/2 -translate-y-1/2 text-sm leading-none text-accent",
-            field ? "right-3.5" : "right-2.5",
-            open && "rotate-180",
+            "relative w-full cursor-pointer text-left",
+            toggleClassName ?? TOOLBAR_TOGGLE,
+            field && "block pr-[42px]",
           )}
         >
-          ▾
-        </span>
-      </button>
+          {pending ? (
+            <Skeleton.Text className="align-middle">{pendingLabel}</Skeleton.Text>
+          ) : (
+            <span className={cx(field && "block truncate", placeholderShown && "text-muted")}>
+              {prefix && options[selected] ? `${prefix}: ${options[selected].label}` : options[selected]?.label || (field ? "\u00a0" : "")}
+            </span>
+          )}
+          <span
+            aria-hidden
+            className={cx(
+              "absolute top-1/2 -translate-y-1/2 text-sm leading-none text-accent",
+              field ? "right-3.5" : "right-2.5",
+              open && "rotate-180",
+            )}
+          >
+            ▾
+          </span>
+        </button>
+      )}
       {open && !field ? listbox : null}
       {open && field && place ? createPortal(listbox, document.body) : null}
     </span>

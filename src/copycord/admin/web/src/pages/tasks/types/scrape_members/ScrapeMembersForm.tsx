@@ -1,5 +1,5 @@
 // Start form of Scrape members: one of the servers the scraper tokens are in (from the type's options,
-// with a filter box once the list is long) or a server ID typed in, what to include for each member,
+// typed into the server box to filter by name or ID) or a server ID typed in, what to include for each member,
 // and whether to use the saved proxies. Tokens are not checked here: one that fails or is not in the
 // server is skipped when the run starts. With no tokens saved the form points at the settings card,
 // decided from the card's saved count when it has one so the modal opens at its final layout, and from
@@ -15,7 +15,6 @@ import { Field, FieldSelect, Input } from "../../../../components/ui/Field";
 import { Toggle } from "../../../../components/ui/Toggle";
 import { useApi } from "../../../../hooks/useApi";
 import { formatCount } from "../../StepList";
-import { FILTER_FROM, filterGuilds } from "../download_avatars/AvatarsForm";
 import { useStartRun, type TaskFormProps } from "../start";
 import { openScraperSettings, useSavedTokenCount } from "./ScraperSettingsCard";
 
@@ -81,7 +80,6 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
   const loadError = opts.data?.error || (opts.error ? "Could not load the servers" : undefined);
   const [guildId, setGuildId] = useState("");
   const [typedId, setTypedId] = useState("");
-  const [filter, setFilter] = useState("");
   const [include, setInclude] = useState<Record<IncludeKey, boolean>>(
     () => Object.fromEntries(INCLUDE_FIELDS.map((f) => [f.key, f.initial])) as Record<IncludeKey, boolean>,
   );
@@ -95,10 +93,6 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
     fn();
     setErrors({});
   };
-
-  const shown = filterGuilds(guilds, filter);
-  const chosen = guilds.find((g) => g.id === guildId);
-  const listed = chosen && !shown.includes(chosen) ? [chosen, ...shown] : shown;
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -156,14 +150,9 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
         <form id="scrape-form" noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
           <p className="m-0 text-sm text-muted">{SCRAPE_EXPLAINER}</p>
 
-          {guilds.length > FILTER_FROM ? (
-            <Field label="Find a server">
-              <Input type="search" autoComplete="off" placeholder="Server name or ID" value={filter} onChange={(e) => setFilter(e.target.value)} />
-            </Field>
-          ) : null}
-
           <Field label="Server" help={loadError ? undefined : "Servers the scraper tokens are in."} error={typedId.trim() ? undefined : errors.guild_id || loadError}>
             <FieldSelect
+              searchable
               value={guildId}
               onChange={(v) =>
                 changed(() => {
@@ -174,8 +163,8 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
               pending={pending}
               pendingLabel="Pick a server"
               options={[
-                { value: "", label: listed.length || !filter ? "Pick a server" : "No server matches", disabled: true },
-                ...listed.map((g) => ({ value: g.id, label: guildOptionLabel(g) })),
+                { value: "", label: "Pick a server", disabled: true },
+                ...guilds.map((g) => ({ value: g.id, label: guildOptionLabel(g) })),
               ]}
             />
           </Field>

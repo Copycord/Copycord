@@ -133,6 +133,8 @@ export interface FieldSelectProps {
   "aria-invalid"?: boolean;
   /** Replaces the Input look of the toggle, e.g. the 34px toolbar dropdown look; the caret room stays. */
   toggleClassName?: string;
+  /** Type in the closed box to filter the options by label or value; for lists that can run long. */
+  searchable?: boolean;
 }
 
 /** The app's dropdown (ToolbarSelect) as a form control: full width, the Input look, its own listbox. */
@@ -144,6 +146,7 @@ export function FieldSelect({
   pending,
   pendingLabel,
   toggleClassName = CONTROL_CLASS,
+  searchable,
   ...rest
 }: FieldSelectProps) {
   const auto = useId();
@@ -159,6 +162,7 @@ export function FieldSelect({
       pending={pending}
       pendingLabel={pendingLabel}
       toggleClassName={toggleClassName}
+      searchable={searchable}
       {...aria}
     />
   );

@@ -1,5 +1,5 @@
 // Start form of Download avatars: one of the client account's servers (from the type's options,
-// with a filter box once the list is long) and how long the link lives. Nothing is deleted, so the
+// typed into the server box to filter by name or ID) and how long the link lives. Nothing is deleted, so the
 // run starts without a confirm.
 
 import { useState } from "react";
@@ -13,9 +13,6 @@ import { useStartRun, type TaskFormProps } from "../start";
 export const AVATARS_EXPLAINER =
   "Lists the members the client account can see in one of its servers, downloads each profile picture " +
   "and zips them behind a download link that expires.";
-
-/** A filter box shows above the server list once it holds more servers than this. */
-export const FILTER_FROM = 10;
 
 export interface AvatarGuild {
   id: string;
@@ -33,12 +30,6 @@ export function hoursError(text: string): string | undefined {
   return /^\s*\d+\s*$/.test(text) && n >= 1 && n <= 168 ? undefined : "Enter a whole number of hours from 1 to 168.";
 }
 
-/** The servers whose name (or id) holds the filter text, case blind. */
-export function filterGuilds(guilds: AvatarGuild[], text: string): AvatarGuild[] {
-  const q = text.trim().toLocaleLowerCase();
-  return q ? guilds.filter((g) => g.name.toLocaleLowerCase().includes(q) || g.id.includes(q)) : guilds;
-}
-
 /** The server's "Value error, Pick ..." in the form's words. */
 function serverText(msg: string): string {
   return msg.replace(/^Value error, /, "");
@@ -50,7 +41,6 @@ export function AvatarsForm({ type, open, onClose }: TaskFormProps) {
   const pending = open && !opts.data && !opts.error;
   const loadError = opts.data?.error || (opts.error ? "Could not load the servers" : undefined);
   const [guildId, setGuildId] = useState("");
-  const [filter, setFilter] = useState("");
   const [hours, setHours] = useState("24");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const { start, busy } = useStartRun(type);
@@ -60,10 +50,7 @@ export function AvatarsForm({ type, open, onClose }: TaskFormProps) {
     setErrors({});
   };
 
-  const shown = filterGuilds(guilds, filter);
   const chosen = guilds.find((g) => g.id === guildId);
-  // The chosen server stays in the list while a filter hides it, so the box keeps naming it.
-  const listed = chosen && !shown.includes(chosen) ? [chosen, ...shown] : shown;
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -94,21 +81,16 @@ export function AvatarsForm({ type, open, onClose }: TaskFormProps) {
       <form id="avatars-form" noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <p className="m-0 text-sm text-muted">{AVATARS_EXPLAINER}</p>
 
-        {guilds.length > FILTER_FROM ? (
-          <Field label="Find a server">
-            <Input type="search" autoComplete="off" placeholder="Server name" value={filter} onChange={(e) => setFilter(e.target.value)} />
-          </Field>
-        ) : null}
-
         <Field label="Server" help={loadError ? undefined : "Servers the client account is in."} error={errors.guild_id || loadError}>
           <FieldSelect
+            searchable
             value={guildId}
             onChange={(v) => changed(() => setGuildId(v))}
             pending={pending}
             pendingLabel="Pick a server"
             options={[
-              { value: "", label: listed.length || !filter ? "Pick a server" : "No server matches", disabled: true },
-              ...listed.map((g) => ({ value: g.id, label: g.name })),
+              { value: "", label: "Pick a server", disabled: true },
+              ...guilds.map((g) => ({ value: g.id, label: g.name })),
             ]}
           />
         </Field>
