@@ -41,9 +41,12 @@ const LOG_LEVELS = [
 export interface GlobalConfigSectionProps {
   /** Why the Bots card's Start is off (missing or rejected tokens), or null; the old updateStartButtonOnly. */
   onStartBlockedChange?: (reason: string | null) => void;
+  /** The Bots card's live running state. When given, the lock follows it; without it the section reads
+   *  /api/status once when the form first changes. */
+  botsRunning?: boolean;
 }
 
-export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectionProps = {}) {
+export function GlobalConfigSection({ onStartBlockedChange, botsRunning }: GlobalConfigSectionProps = {}) {
   const notify = useNotify();
   const [baseline, setBaseline] = useState<GlobalConfig | null>(null);
   const [values, setValues] = useState<GlobalConfig>(EMPTY_CONFIG);
@@ -98,7 +101,7 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
 
   // Bot state is read when the form first changes, so opening the page costs no extra poll.
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty || botsRunning !== undefined) return;
     let live = true;
     api.get<StatusResponse>(STATUS_URL).then(
       (s) => live && setRunning(anyRunning(statusesFrom(s))),
@@ -107,7 +110,7 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
     return () => {
       live = false;
     };
-  }, [dirty]);
+  }, [dirty, botsRunning]);
 
   const set = <K extends keyof GlobalConfig>(key: K, value: GlobalConfig[K]) => setValues((v) => ({ ...v, [key]: value }));
 
@@ -135,7 +138,7 @@ export function GlobalConfigSection({ onStartBlockedChange }: GlobalConfigSectio
   };
 
   const invite = inviteUrl(clientId);
-  const locked = running;
+  const locked = botsRunning ?? running;
 
 
   const needsTokens = baseline !== null && missingTokens(values).length > 0;
