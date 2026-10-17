@@ -1,5 +1,6 @@
 // Scrape members in the task type registry: its form, inputs rows, summary words, hero count and the
-// run page's download card (the saved JSON file, "File no longer on disk" once it was deleted).
+// run page's download card (the saved JSON file, "File no longer on disk" once it was deleted, and the
+// debug report when the run wrote one).
 
 import { useEffect, useState } from "react";
 import type { InputRow, InputsRun, TaskTypeEntry } from "..";
@@ -34,6 +35,33 @@ export function scrapeFileUrl(runId: string): string {
   return `${scrapeInfoUrl(runId)}/file`;
 }
 
+export function scrapeDebugUrl(runId: string): string {
+  return `${scrapeInfoUrl(runId)}/debug-report`;
+}
+
+export interface DebugReportFile {
+  filename: string;
+  size: number | null;
+}
+
+/** The run's debug report (dev mode, Debug report on) from the run report, or null when it wrote none. */
+export function debugReportOf(run: Pick<TaskRun, "report">): DebugReportFile | null {
+  const report = run.report && typeof run.report === "object" ? (run.report as { debug_report?: unknown }) : null;
+  const debug = report?.debug_report && typeof report.debug_report === "object" ? (report.debug_report as { path?: unknown; size?: unknown }) : null;
+  if (typeof debug?.path !== "string" || !debug.path) return null;
+  return { filename: debug.path.split("/").pop() || debug.path, size: typeof debug.size === "number" ? debug.size : null };
+}
+
+/** Download a run file the way the browser saves any link: an anchor with the download name. */
+function download(href: string, filename: string) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
 /** "1 member", "1,204 members". */
 export function membersWords(n: number): string {
   return `${formatCount(n)} ${n === 1 ? "member" : "members"}`;
@@ -59,38 +87,47 @@ export function ScrapeDownloadCard({ run }: { run: TaskRun }) {
       live = false;
     };
   }, [run.id, path]);
-  if (!path || state.kind === "loading" || state.kind === "none") return null;
-  if (state.kind === "gone") {
-    return (
-      <section aria-label="Download" className={RUN_CARD}>
-        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <span className="text-sm text-text">JSON file</span>
-          <p className="m-0 text-sm text-muted">{GONE}</p>
-        </div>
-      </section>
+  const debug = debugReportOf(run);
+  // The card appears whole, once the members file's state is known.
+  if (path && state.kind === "loading") return null;
+  let fileRow = null;
+  if (path && state.kind === "gone") {
+    fileRow = (
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <span className="text-sm text-text">JSON file</span>
+        <p className="m-0 text-sm text-muted">{GONE}</p>
+      </div>
     );
-  }
-  const { file } = state;
-  const save = () => {
-    const a = document.createElement("a");
-    a.href = scrapeFileUrl(run.id);
-    a.download = file.filename;
-    document.body.append(a);
-    a.click();
-    a.remove();
-  };
-  const facts = [file.members != null ? membersWords(file.members) : null, file.size != null ? sizeWords(file.size) : null].filter(Boolean);
-  return (
-    <section aria-label="Download" className={RUN_CARD}>
+  } else if (path && state.kind === "ok") {
+    const { file } = state;
+    const facts = [file.members != null ? membersWords(file.members) : null, file.size != null ? sizeWords(file.size) : null].filter(Boolean);
+    fileRow = (
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate text-sm text-text">{file.filename}</span>
           {facts.length ? <span className="text-xs text-muted">{facts.join(", ")}</span> : null}
         </div>
-        <Button variant="primary" onClick={save}>
+        <Button variant="primary" onClick={() => download(scrapeFileUrl(run.id), file.filename)}>
           Download JSON
         </Button>
       </div>
+    );
+  }
+  if (!fileRow && !debug) return null;
+  return (
+    <section aria-label="Download" className={RUN_CARD}>
+      {fileRow}
+      {debug ? (
+        <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-3${fileRow ? " border-t border-border" : ""}`}>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="truncate text-sm text-text">{debug.filename}</span>
+            <span className="text-xs text-muted">{debug.size != null ? `Debug report, ${sizeWords(debug.size)}` : "Debug report"}</span>
+          </div>
+          <Button variant="secondary" onClick={() => download(scrapeDebugUrl(run.id), debug.filename)}>
+            Download debug report
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }

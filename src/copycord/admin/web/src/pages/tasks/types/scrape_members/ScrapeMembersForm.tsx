@@ -3,7 +3,8 @@
 // and whether to use the saved proxies. Tokens are not checked here: one that fails or is not in the
 // server is skipped when the run starts. With no tokens saved the form points at the settings card,
 // decided from the card's saved count when it has one so the modal opens at its final layout, and from
-// the options reply otherwise (the reply wins when the two disagree).
+// the options reply otherwise (the reply wins when the two disagree). In dev mode (the type listing's
+// dev flag, so it is known at first paint) a Debug report toggle is added; outside dev it is not rendered.
 
 import { useState } from "react";
 import type { FormEvent } from "react";
@@ -21,6 +22,8 @@ import { openScraperSettings, useSavedTokenCount } from "./ScraperSettingsCard";
 export const SCRAPE_EXPLAINER =
   "Lists the members of a server with the saved scraper tokens and saves them to a JSON file. " +
   "A token that does not work or is not in the server is skipped.";
+
+export const DEBUG_REPORT_HELP = "Saves a JSON file of the headers each token sent, to check the scrape.";
 
 export interface ScrapeGuild {
   id: string;
@@ -87,6 +90,8 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
   );
   const [useProxies, setUseProxies] = useState(true);
   const [sessions, setSessions] = useState("1");
+  const dev = type.dev === true;
+  const [debugReport, setDebugReport] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const { start, busy } = useStartRun(type);
 
@@ -108,7 +113,13 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
     else if (!typed && !guildId) found.guild_id = "Pick a server or enter a server ID.";
     setErrors(found);
     if (Object.keys(found).length) return;
-    const res = await start({ guild_id: typed || guildId, ...include, use_proxies: useProxies, sessions_per_token: Number(sessions) });
+    const res = await start({
+      guild_id: typed || guildId,
+      ...include,
+      use_proxies: useProxies,
+      sessions_per_token: Number(sessions),
+      ...(dev ? { debug_report: debugReport } : {}),
+    });
     if (res && Object.keys(res).length) setErrors(Object.fromEntries(Object.entries(res).map(([k, v]) => [k, serverText(v)])));
     else if (!res) onClose();
   };
@@ -215,6 +226,17 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
               <FieldSelect value={sessions} onChange={(v) => changed(() => setSessions(v))} options={SESSION_CHOICES} />
             </div>
           </Field>
+
+          {dev ? (
+            <div className="flex flex-col gap-1">
+              <Toggle label="Debug report" description={DEBUG_REPORT_HELP} checked={debugReport} onChange={(v) => changed(() => setDebugReport(v))} />
+              {errors.debug_report ? (
+                <p role="alert" className="m-0 text-xs text-danger">
+                  {errors.debug_report}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           {errors.inputs || errors.general ? (
             <p role="alert" className="m-0 text-xs text-danger">

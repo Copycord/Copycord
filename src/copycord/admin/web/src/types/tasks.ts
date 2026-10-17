@@ -11,6 +11,8 @@ export interface TaskType {
   inputs_schema: Record<string, unknown>;
   /** The type runs only while the server and client bots are both running. */
   requires_bots?: boolean;
+  /** Dev mode (COPYCORD_ENV=dev): forms show their developer options. */
+  dev?: boolean;
   /** Queued plus running runs of this type. */
   active: number;
   total: number;
