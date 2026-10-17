@@ -26,13 +26,16 @@ export function savedPathOf(run: Pick<TaskRun, "report">): string | null {
   return typeof output?.json_path === "string" && output.json_path ? output.json_path : null;
 }
 
-export function fileUrl(runId: string): string {
-  return `/api/tasks/export-dms/${encodeURIComponent(runId)}/file`;
+const DMS_BASE = "/api/tasks/export-dms";
+
+export function fileUrl(runId: string, base = DMS_BASE): string {
+  return `${base}/${encodeURIComponent(runId)}/file`;
 }
 
 type FileState = { kind: "loading" } | { kind: "ok"; file: ExportFile } | { kind: "gone" } | { kind: "none" };
 
-export function ExportDmsDownloadCard({ run }: { run: TaskRun }) {
+/** The saved JSON file's card on the run page, read from the type's file route under base. */
+export function ExportFileCard({ run, base }: { run: TaskRun; base: string }) {
   const path = savedPathOf(run);
   const [state, setState] = useState<FileState>({ kind: "loading" });
   useEffect(() => {
@@ -40,7 +43,7 @@ export function ExportDmsDownloadCard({ run }: { run: TaskRun }) {
     let live = true;
     setState({ kind: "loading" });
     api
-      .get<{ file: ExportFile }>(`/api/tasks/export-dms/${encodeURIComponent(run.id)}`)
+      .get<{ file: ExportFile }>(`${base}/${encodeURIComponent(run.id)}`)
       .then((res) => live && setState(res?.file ? { kind: "ok", file: res.file } : { kind: "none" }))
       .catch((e: unknown) => {
         if (!live) return;
@@ -49,7 +52,7 @@ export function ExportDmsDownloadCard({ run }: { run: TaskRun }) {
     return () => {
       live = false;
     };
-  }, [run.id, path]);
+  }, [run.id, path, base]);
   if (!path || state.kind === "loading" || state.kind === "none") return null;
   if (state.kind === "gone") {
     return (
@@ -64,7 +67,7 @@ export function ExportDmsDownloadCard({ run }: { run: TaskRun }) {
   const { file } = state;
   const save = () => {
     const a = document.createElement("a");
-    a.href = fileUrl(run.id);
+    a.href = fileUrl(run.id, base);
     a.download = file.filename;
     document.body.append(a);
     a.click();
@@ -87,6 +90,10 @@ export function ExportDmsDownloadCard({ run }: { run: TaskRun }) {
       </div>
     </section>
   );
+}
+
+export function ExportDmsDownloadCard({ run }: { run: TaskRun }) {
+  return <ExportFileCard run={run} base={DMS_BASE} />;
 }
 
 /** The webhook without its token: "https://discord.com/api/webhooks/123/...". */

@@ -12,6 +12,8 @@ export interface TaskFormProps {
   type: TaskType;
   open: boolean;
   onClose: () => void;
+  /** Values the page URL preselects, like ?guild=<id>; a form reads the keys it knows. */
+  initial?: Record<string, string>;
 }
 
 export function useStartRun(type: TaskType) {
