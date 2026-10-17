@@ -1,4 +1,4 @@
-// The old #notifications-card card: Discord webhook URL, a Test button and one switch per alert.
+// The Notifications card (#notifications-card): Discord webhook URL, a Test button and one switch per alert.
 // Every change is saved 600 ms after the last one.
 
 import { useEffect, useState } from "react";

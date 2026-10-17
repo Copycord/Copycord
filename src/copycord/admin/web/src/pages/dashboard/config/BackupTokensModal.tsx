@@ -17,7 +17,7 @@ export interface BackupTokensModalProps {
 
 const errText = (e: unknown, fallback: string) => errorText(e, fallback.replace(/\.$/, ""));
 
-// The old .field label.has-tip and .field-token .token-input / .field > input, which keep the browser font size.
+// Labels with a tip and the token and text inputs, which keep the browser font size.
 const LABEL = "relative mb-1.5 ml-0.5 inline-flex items-center gap-1.5 text-xs text-muted";
 const INPUT =
   "w-full rounded-control border border-border-input bg-control py-3 pl-3 text-text outline-0 transition-[border-color] focus:border-accent";

@@ -1,7 +1,6 @@
 // The three dialogs of the Proxy card: Proxy Settings, the favorites help and
-// the test results. Same shell as the log modal: old ids, the .show class,
-// close by X, backdrop or Escape. The look is the old .proxy-settings-content
-// (480px) with its groups, rows and the ghost Reset button.
+// the test results. Same shell as the log modal: element ids, the .show class,
+// close by X, backdrop or Escape. 480px wide, with groups, rows and the ghost Reset button.
 
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";

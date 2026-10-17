@@ -1,4 +1,4 @@
-// The card action icons from ICONS in app.js (lucide paths).
+// The card action icons (lucide paths).
 
 import type { ReactNode } from "react";
 

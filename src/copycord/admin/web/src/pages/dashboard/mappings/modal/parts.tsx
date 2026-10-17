@@ -1,4 +1,4 @@
-// Pieces of the old #mapping-modal look shared by the mapping form, the user
+// Pieces of the #mapping-modal look shared by the mapping form, the user
 // tokens section and the message features sub-modal: the uppercase purple
 // section row with its round chevron, the bordered toggle row and the
 // label.toggle switch (a hidden checkbox and a 38x22 track).
@@ -6,7 +6,7 @@
 import type { ReactNode } from "react";
 import { cx } from "../../../../components/ui";
 
-/** details.mapping-section.mapping-settings-section; the last one drops its rule like the old :last-of-type. */
+/** details.mapping-section.mapping-settings-section; the last one drops its rule. */
 export const SECTION =
   "mapping-section mapping-settings-section group/sec border-b border-border pt-3.5 pb-1.5 last-of-type:border-b-0";
 
@@ -41,7 +41,7 @@ export interface SwitchProps {
   className?: string;
 }
 
-/** label.toggle: a visually hidden checkbox and the old track and thumb. */
+/** label.toggle: a visually hidden checkbox with a track and thumb. */
 export function Switch({ id, checked, disabled, onChange, label, labelledBy, className }: SwitchProps) {
   return (
     <label
@@ -72,7 +72,7 @@ export interface ToggleRowProps {
   id: string;
   name: ReactNode;
   desc?: ReactNode;
-  /** The old orange italic note under a setting that cannot be applied. */
+  /** Orange italic note under a setting that cannot be applied. */
   note?: ReactNode;
   checked: boolean;
   disabled?: boolean;

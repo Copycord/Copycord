@@ -1,5 +1,4 @@
-// Defaults, section layout and pure form logic of the mapping modal, ported from
-// openMappingModal, collectMappingForm and validateMappingFields in app.js.
+// Defaults, section layout and pure form logic of the mapping modal.
 
 import { api } from "../../../../lib/api";
 import type {
@@ -203,7 +202,7 @@ export const MSG_FEATURES: readonly MsgFeature[] = [
 
 export type MappingMode = "create" | "edit" | "clone";
 
-/** "true"/"false" strings from older rows count as booleans, like the old normalizer. */
+/** "true"/"false" strings from older rows count as booleans. */
 export function toBool(raw: unknown): boolean {
   if (typeof raw === "boolean") return raw;
   if (typeof raw === "string") {
@@ -214,7 +213,7 @@ export function toBool(raw: unknown): boolean {
   return !!raw;
 }
 
-/** "random" was removed; any legacy or unknown strategy is treated as rotate. */
+/** Any unknown strategy (including the retired "random") is treated as rotate. */
 export function normalizeStrategy(v: unknown): string {
   return v === "sticky_author" ? "sticky_author" : "round_robin";
 }

@@ -1,5 +1,5 @@
 // Calls and pure helpers for the Global Configuration card and the backup
-// tokens modal, ported from app.js and the index.html form.
+// tokens modal.
 
 import { splitChips } from "../../../components/ui";
 import { api } from "../../../lib/api";
@@ -41,7 +41,7 @@ export const FIELD_TIPS = {
     "Maximum size of each log file in megabytes before older entries are pruned. Set to 0 to disable pruning.",
 } as const;
 
-/** The links the old page got from links.json at startup. */
+/** Targets of the promo cards: GitHub, Discord and Ko-fi. */
 export const PROMO_LINKS = {
   github: "https://github.com/Copycord/Copycord",
   discord: "https://discord.gg/ArFdqrJHBj",
@@ -66,7 +66,7 @@ export async function loadConfig(): Promise<GlobalConfig> {
   };
 }
 
-/** The form body the old #cfg-form posted. */
+/** The form body POST /save takes. */
 export function buildSaveForm(c: GlobalConfig): FormData {
   const fd = new FormData();
   fd.append("SERVER_TOKEN", c.SERVER_TOKEN);

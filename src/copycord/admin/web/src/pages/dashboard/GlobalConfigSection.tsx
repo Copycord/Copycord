@@ -1,8 +1,8 @@
-// The old #global-config-card: tokens with show/hide, command users, auto
+// The Global Configuration card (#global-config-card): tokens with show/hide, command users, auto
 // start, log level and size, Save/Cancel, the bot invite link and the backup
 // tokens modal. Save and Cancel show only while the form differs from what
-// was loaded, and stay off while a bot is running. Laid out as the old
-// two-column grid of bordered field boxes (.grid, .field-token, .gc-setting-row).
+// was loaded, and stay off while a bot is running. Laid out as a two-column
+// grid of bordered field boxes.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BUSY_HOST, BusyContent, ChipInput, cx } from "../../components/ui";
@@ -39,7 +39,7 @@ const LOG_LEVELS = [
 ];
 
 export interface GlobalConfigSectionProps {
-  /** Why the Bots card's Start is off (missing or rejected tokens), or null; the old updateStartButtonOnly. */
+  /** Why the Bots card's Start is off (missing or rejected tokens), or null. */
   onStartBlockedChange?: (reason: string | null) => void;
   /** The Bots card's live running state. When given, the lock follows it; without it the section reads
    *  /api/status once when the form first changes. */
@@ -76,7 +76,7 @@ export function GlobalConfigSection({ onStartBlockedChange, botsRunning }: Globa
       if (bad && announce) notify(res.errors?.join(" ") || BAD_TOKENS_MESSAGE, "error");
       setClientId(res.bot_client_id || null);
     } catch {
-      // The old page only logged this.
+      // A failed check keeps the token state as it was, with no toast.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -186,7 +186,7 @@ export function GlobalConfigSection({ onStartBlockedChange, botsRunning }: Globa
               <TokenInput field id="SERVER_TOKEN" value={values.SERVER_TOKEN} onChange={(v) => set("SERVER_TOKEN", v)} invalid={invalid.has("SERVER_TOKEN")} aria-describedby="SERVER_TOKEN-help" />
             </div>
             <div className={FIELD}>
-              {/* The old .gc-label-row: the label and the 28px backup tokens button on one 28px row. */}
+              {/* The label and the 28px backup tokens button on one 28px row. */}
               <label htmlFor="CLIENT_TOKEN" className={cx(LABEL, "mt-1 mb-2.5 w-fit")}>
                 Client Token
               </label>

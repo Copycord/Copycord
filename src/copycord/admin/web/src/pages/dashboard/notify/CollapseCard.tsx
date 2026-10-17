@@ -1,5 +1,5 @@
-// The old collapsible card (details.srv-proxy-card): title, docs link and chevron in the summary,
-// open state remembered in localStorage under the old key.
+// Collapsible card (details.srv-proxy-card): title, docs link and chevron in the summary,
+// open state remembered in localStorage.
 
 import { useState } from "react";
 import type { ReactNode, SyntheticEvent } from "react";

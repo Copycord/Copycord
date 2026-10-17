@@ -10,7 +10,7 @@ import type {
   SyncSettingsReply,
 } from "../../../types/dashboard-notify";
 
-/** Debounce before a change is written, as on the old page. */
+/** Debounce before a change is written. */
 export const SAVE_DELAY_MS = 600;
 
 export const NOTIF_HINT =
@@ -62,7 +62,7 @@ export function notifPayload(webhookUrl: string, events: NotifEvents): NotifSett
   return { webhook_url: webhookUrl.trim(), events };
 }
 
-/** Falsy server values fall back to the defaults, as the old `|| 15` did. */
+/** Falsy server values fall back to the defaults. */
 export function syncFormFrom(reply: SyncSettingsReply["settings"]): SyncForm {
   const s = reply ?? {};
   return {

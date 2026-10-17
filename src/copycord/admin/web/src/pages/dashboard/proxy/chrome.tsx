@@ -9,7 +9,7 @@ import { CHECK, CHECK_LABEL, PROXY_HINT } from "../parts";
 
 /** .srv-proxy-hint.srv-proxy-rotation-hint */
 export const ROTATION_HINT = "m-0 mt-1.5 text-xs leading-normal text-muted";
-/** .input.srv-proxy-interval-input: the full width .input look at 34px, so it shrinks on phones like the old one. */
+/** .input.srv-proxy-interval-input: the full width .input look at 34px, so it shrinks on phones. */
 export const NUM =
   "h-[34px] w-full rounded-control border border-border-input bg-(image:--control-gradient) px-3.5 py-3 text-center text-sm text-text outline-0 transition-[border-color] [appearance:textfield] " +
   "hover:border-accent/30 hover:bg-[linear-gradient(180deg,var(--color-secondary-top)_0%,var(--color-secondary-bottom)_100%)] focus:border-accent focus:bg-[linear-gradient(180deg,var(--color-secondary-top)_0%,var(--color-secondary-bottom)_100%)] disabled:opacity-50 " +
@@ -29,7 +29,7 @@ const UNITS = [
   { value: "3600", label: "hours" },
 ];
 
-/** The .dd dropdown the old page turned select.srv-proxy-interval-select into; `pending` puts a bar on the label. */
+/** The interval dropdown; `pending` puts a bar on the label. */
 export function UnitSelect({
   id,
   value,

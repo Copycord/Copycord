@@ -41,11 +41,11 @@ export interface UserTokensBlockProps {
   mappingId: string | null;
   settings: MappingSettings;
   setSetting: (key: string, value: MappingSettingValue) => void;
-  /** Current #mappingSettingsSearch text. The old page never filtered this section by it. */
+  /** Current #mappingSettingsSearch text. */
   search: string;
 }
 
-// The old .dd toggle the strategy <select> was turned into: 34px, 13px, purple caret; the field dropdown adds the caret room.
+// The strategy dropdown toggle: 34px, 13px, purple caret; the field dropdown adds the caret room.
 const STRATEGY_TOGGLE =
   "user-token-select dd-toggle min-h-[34px] rounded-btn border border-border-input bg-control py-2 pl-2.5 font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus:border-accent";
 const STRATEGIES = [

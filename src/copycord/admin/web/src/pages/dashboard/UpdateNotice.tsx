@@ -1,4 +1,4 @@
-// The "New Update Available" notice from index.html, shown when /version
+// The "New Update Available" notice, shown when /version
 // reports a newer release; clicking opens the release page.
 
 import { useApi } from "../../hooks/useApi";

@@ -1,4 +1,4 @@
-// Calls and pure helpers for the mapping cards, ported from renderGuildMappings in app.js.
+// Calls and pure helpers for the mapping cards.
 
 import { api } from "../../../lib/api";
 import type {
@@ -26,7 +26,7 @@ export function isPaused(m: DashboardMapping): boolean {
   return (m.status || "active").toLowerCase() === "paused";
 }
 
-/** Case insensitive match over the names and IDs, as the old search box did. */
+/** Case insensitive match over the names and IDs. */
 export function filterMappings(mappings: DashboardMapping[], query: string): DashboardMapping[] {
   const q = query.trim().toLowerCase();
   if (!q) return mappings;

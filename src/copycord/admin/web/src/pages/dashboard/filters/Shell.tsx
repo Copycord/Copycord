@@ -1,7 +1,6 @@
-// Dialog shell shared by the Filters modal and its two pickers: old ids, the
+// Dialog shell shared by the Filters modal and its two pickers: element ids, the
 // .show class, close by X or backdrop. Escape is handled by FiltersModal so
-// only the top dialog closes. The look is the old .modal-content with the
-// per dialog width, margin and radius passed in `cardClass`.
+// only the top dialog closes. The per dialog width, margin and radius passed in `cardClass`.
 
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";

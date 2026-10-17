@@ -1,7 +1,7 @@
-// The log modal from index.html: live tail of /logs/stream/{which} over SSE,
+// The log modal: live tail of /logs/stream/{which} over SSE,
 // a search box that filters lines, Clear logs (asks first, then POSTs
 // /logs/clear/{which}) and close by X, backdrop or Escape. Lines render as
-// plain text. Keeps the old ids and the .show class for the e2e specs.
+// plain text. The e2e specs rely on its ids and the .show class.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -53,7 +53,7 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
   onCloseRef.current = onClose;
   const open = which !== null;
 
-  // One stream per open; a dropped stream reconnects after RETRY_MS like the old page.
+  // One stream per open; a dropped stream reconnects after RETRY_MS.
   useEffect(() => {
     if (!which) return;
     follow.current = true;
@@ -92,7 +92,7 @@ export function LogModal({ which, onClose, EventSourceImpl }: LogModalProps) {
       clearTimeout(cap);
       client?.close();
       setSettled(false);
-      // Clear on close, not on open: the next open then never paints the old tail at the top.
+      // Clear on close, not on open: the next open then never paints the previous tail at the top.
       setLines([]);
       setQuery("");
       follow.current = true;

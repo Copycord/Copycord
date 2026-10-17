@@ -1,5 +1,4 @@
-// The /api/status poll from app.js (startStatusPoll and burstStatusPoll):
-// every 4 s, 8 s while a role reports an error, doubling up to 15 s while the
+// The /api/status poll: every 4 s, 8 s while a role reports an error, doubling up to 15 s while the
 // fetch fails, and every 800 ms for 15 s after Start or Stop. It stops while
 // the tab is hidden and polls at once when the tab comes back.
 
@@ -19,7 +18,7 @@ export function nextPollDelay(prev: number, result: PollResult): number {
   return result === "degraded" ? DEGRADED_POLL_MS : POLL_MS;
 }
 
-/** Polls with `poll` on the app.js schedule; returns a function that starts the fast burst. */
+/** Polls with `poll` on the schedule above; returns a function that starts the fast burst. */
 export function useStatusPoll(poll: () => Promise<PollResult>): () => void {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const delay = useRef(POLL_MS);

@@ -1,6 +1,6 @@
 // #mapping-modal / #mapping-form: name, host and clone guild IDs, the per mapping
 // settings with search, the Message Features sub-modal and create, edit or clone save.
-// The look is the old 720px #mapping-modal: labels with "i" tips, a sticky search
+// 720px wide: labels with "i" tips, a sticky search
 // toolbar, uppercase section rows with a round chevron and a sticky footer.
 
 import { useEffect, useMemo, useRef, useState } from "react";

@@ -1,5 +1,5 @@
-// A password input with the old eye button that shows and hides the value.
-// With `field` it takes the old Global Configuration .token-input look.
+// A password input with an eye button that shows and hides the value.
+// With `field` it takes the Global Configuration token input look.
 
 import { useState } from "react";
 import { Input, cx } from "../../../components/ui";
@@ -10,7 +10,7 @@ export interface TokenInputProps {
   onChange: (value: string) => void;
   invalid?: boolean;
   placeholder?: string;
-  /** The old #cfg-form .field-token .token-input and its 16px .reveal-btn. */
+  /** The Global Configuration token input and its 16px reveal button. */
   field?: boolean;
   "aria-describedby"?: string;
 }

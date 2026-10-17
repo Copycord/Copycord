@@ -1,5 +1,4 @@
-// Pieces the old dashboard cards share, with the old main.css values: the
-// ghost button, the collapsible card summary (title, docs link, round
+// Pieces the dashboard cards share: the ghost button, the collapsible card summary (title, docs link, round
 // chevron), the label.toggle switch and the small settings row controls.
 
 import type { ReactNode } from "react";
@@ -11,7 +10,7 @@ import {
   GHOST_TINT_FOCUS,
 } from "../../components/ui/Button";
 
-/** The old .btn.btn-ghost: 42px tall, rgba fills so the values read as the old ones. */
+/** Ghost button: 42px tall with rgba fills. */
 export const GHOST =
   "min-h-[42px] cursor-pointer items-center justify-center rounded-control border border-border bg-wash-4 " +
   "px-4 py-2.5 text-center text-sm leading-none font-semibold text-accent no-underline outline-none select-none " +
@@ -19,7 +18,7 @@ export const GHOST =
   "enabled:hover:-translate-y-0.5 enabled:hover:border-accent-a30 enabled:hover:bg-line-1 " +
   "enabled:hover:[box-shadow:0_4px_12px_var(--color-shadow-20)] enabled:active:translate-y-0 enabled:active:scale-[0.97] " +
   "disabled:cursor-not-allowed";
-/** The old .btn[disabled]; left off where a hidden button must keep opacity 1 like the old one. */
+/** Disabled dimming; left off where a hidden button must keep opacity 1. */
 export const GHOST_DISABLED = "disabled:opacity-60";
 
 /** The Bots table rows, shared with the dashboard skeleton. */
@@ -33,7 +32,7 @@ export const BOTS_CARD = "mt-[18px] rounded-card border border-border bg-(image:
 export const BOTS_TITLE = "my-[0.83em] text-[24px] leading-[normal] font-bold";
 export const BOTS_TABLE = "mt-2 w-full table-fixed border-collapse border-table-rule text-left [&_tr]:border-table-rule";
 
-// The old .runtime-table: fixed layout, four equal columns spread across the card
+// Bots table: fixed layout, four equal columns spread across the card
 // (Component left, State, Uptime and Status centered), muted 0.9rem headers, a rule under every row.
 export const BOTS_COL_COMPONENT = "w-1/4 text-left";
 export const BOTS_COL_STATE = "w-1/4 text-center";
@@ -42,7 +41,7 @@ export const BOTS_COL_STATUS = "w-1/4 text-center";
 export const BOTS_HEAD = "border-b border-b-border px-3 py-2 align-middle text-[0.9rem] font-medium whitespace-nowrap text-muted";
 export const BOTS_CELL = "border-b border-b-border px-3 py-2 align-middle text-[0.95rem] whitespace-nowrap";
 
-// The old .runtime-table .badge with .badge-ok / .badge-stop: fill and text only,
+// Bots state badge: fill and text only,
 // the 1px border stays transparent so the chip keeps its box.
 export const BOTS_STATE =
   "inline-block rounded-[12px] border border-transparent px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
@@ -147,7 +146,7 @@ export const CARD_DOCS = {
   proxy: "https://copycord.github.io/Copycord/docs/configuration/advanced#proxy-support",
 } as const;
 
-/** The localStorage keys the two CollapseCards keep their open state under, the old ones (Proxy has PROXY_CARD_OPEN_KEY). */
+/** The localStorage keys the two CollapseCards keep their open state under (Proxy has PROXY_CARD_OPEN_KEY). */
 export const CARD_OPEN_KEYS = {
   notifications: "cpc.notifications-card-open",
   sync: "cpc.sync-card-open",

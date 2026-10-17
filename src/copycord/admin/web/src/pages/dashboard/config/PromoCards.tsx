@@ -1,4 +1,4 @@
-// The old page's top row of three link cards: Star on GitHub, Join the
+// The Configuration page's top row of three link cards: Star on GitHub, Join the
 // Discord and Donate.
 
 import type { ReactNode } from "react";

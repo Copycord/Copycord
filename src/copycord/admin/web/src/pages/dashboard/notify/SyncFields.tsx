@@ -12,7 +12,7 @@ export function SyncFields({ form, onChange }: { form: SyncForm | null; onChange
       <p className={SECTION_HINT}>{SYNC_HINT}</p>
       <div className="proxy-settings-fields mt-2.5 flex flex-col gap-3">
         {SYNC_DELAYS.map((d) => (
-          // label.proxy-settings-field around the number box, as the old card had it.
+          // label.proxy-settings-field around the number box.
           <label key={d.key} className={PS_FIELD}>
             <div className={SETTING_LABEL}>
               <span className="font-medium">{d.label}</span>

@@ -1,6 +1,5 @@
 // Entry points for the modals the mapping cards open. openMappingModal records the
-// request in a tiny store that MappingModalHost (mounted by MappingsSection) renders;
-// openFilters is the filters modal lane's to fill in.
+// request in a tiny store that MappingModalHost (mounted by MappingsSection) renders.
 
 import type { DashboardMapping, MappingModalOptions } from "../../../types/dashboard-mappings";
 import { modeOf } from "./modal/model";

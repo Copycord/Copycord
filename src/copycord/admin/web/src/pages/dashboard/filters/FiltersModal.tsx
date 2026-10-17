@@ -1,7 +1,7 @@
 // The mapping Filters modal (#filters-modal / #form-filters): loads
 // GET /filters/{id}, edits nine chip lists, browses categories, channels and
-// roles of the host guild, and saves with POST /filters/{id}/save. The look is
-// the old 960px #filters-modal: bordered fieldsets with a purple legend, 12px
+// roles of the host guild, and saves with POST /filters/{id}/save. 960px wide:
+// bordered fieldsets with a purple legend, 12px
 // labels with the round "i" tip and the small purple picker circle.
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -84,7 +84,7 @@ interface ListFieldProps {
   mode: "ids" | "words";
   value: string[];
   onChange: (key: FilterKey, v: string[]) => void;
-  /** Picker button (and status) after the label, in the old .filters-roles-label-row. */
+  /** Picker button (and status) after the label, on the label row. */
   action?: ReactNode;
   /** The Role Blocks row: inline-flex with a 4px gap. */
   roles?: boolean;

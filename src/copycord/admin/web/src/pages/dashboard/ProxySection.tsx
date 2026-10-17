@@ -1,4 +1,4 @@
-// The Proxy card from index.html: enable toggle, proxy chips saved on a short
+// The Proxy card: enable toggle, proxy chips saved on a short
 // delay, favorites, rotation and favorite re-check, Test All with live progress
 // from the bus (proxy_test messages), the Settings modal and the favorites help.
 

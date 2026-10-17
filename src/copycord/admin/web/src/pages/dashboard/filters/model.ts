@@ -1,5 +1,4 @@
-// Calls and pure helpers for the Filters modal, ported from openFiltersModal,
-// loadFiltersIntoFormForMapping and the two picker modals in app.js.
+// Calls and pure helpers for the Filters modal and its two picker modals.
 
 import { api } from "../../../lib/api";
 import type {
@@ -29,7 +28,7 @@ export const EMPTY_FILTERS: FiltersState = {
   bl_users: [],
 };
 
-/** Field order of the form post; every key is a hidden input name in the old form. */
+/** Field order of the form post; every key is a form field name the server reads. */
 export const FILTER_KEYS = Object.keys(EMPTY_FILTERS) as FilterKey[];
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x)) : []);

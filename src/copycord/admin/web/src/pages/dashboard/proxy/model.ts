@@ -1,4 +1,4 @@
-// Calls and pure helpers for the Proxy card, ported from app.js (proxy section).
+// Calls and pure helpers for the Proxy card.
 
 import { api } from "../../../lib/api";
 import type {

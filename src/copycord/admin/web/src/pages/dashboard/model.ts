@@ -1,4 +1,4 @@
-// Calls and pure helpers for the Bots panel and the log modal, ported from app.js.
+// Calls and pure helpers for the Bots panel and the log modal.
 
 import { api } from "../../lib/api";
 import type { BusMessage, LogStream } from "../../types/api";
@@ -75,7 +75,7 @@ export function statusFromWs(frame: BusMessage): { role: BotRole; status: BotSta
   return { role: msg.source, status: patchFrom(data, "note") };
 }
 
-/** Whether both roles in /api/status report no error, as app.js checked before slowing its poll. */
+/** Whether both roles in /api/status report no error; the status poll slows down only then. */
 export function statusHealthy(res: StatusResponse | undefined): boolean {
   const ok = (r: StatusResponse["server"]) => !!r && r.ok !== false && !r.error;
   return ok(res?.server) && ok(res?.client);

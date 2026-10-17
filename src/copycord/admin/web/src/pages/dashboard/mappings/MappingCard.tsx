@@ -1,4 +1,4 @@
-// One mapping card, the old .guild-card: icon, name, host server, and the
+// One mapping card (.guild-card): icon, name, host server, and the
 // Settings, Filters, status, Clone and Delete buttons. Class names are kept
 // for the e2e helpers.
 
@@ -26,7 +26,7 @@ function IconButton({ className, ...rest }: React.ButtonHTMLAttributes<HTMLButto
 
 export interface MappingCardProps {
   mapping: DashboardMapping;
-  /** Bots are running: the old page greyed the cards out and blocked clicks. */
+  /** Bots are running: the card is greyed out and blocks clicks. */
   locked: boolean;
   busy: boolean;
   onEdit: (m: DashboardMapping) => void;

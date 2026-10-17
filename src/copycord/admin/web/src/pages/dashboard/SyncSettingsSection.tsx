@@ -1,4 +1,4 @@
-// The old #sync-settings-card card: startup delay, inter-guild delay and randomize order.
+// The Sync Settings card (#sync-settings-card): startup delay, inter-guild delay and randomize order.
 // Every change is saved 600 ms after the last one.
 
 import { useEffect, useState } from "react";

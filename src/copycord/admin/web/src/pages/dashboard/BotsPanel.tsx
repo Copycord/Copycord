@@ -1,4 +1,4 @@
-// The Bots card from index.html: server and client state, uptime and status
+// The Bots card: server and client state, uptime and status
 // note, Start/Stop, and the per bot log buttons. State comes from /api/status
 // on load, on the useStatusPoll schedule and after Start/Stop, and from the
 // status pushes on /ws/ui in between. Uptime counts from each bot's start time,
@@ -63,7 +63,7 @@ export interface BotsPanelProps {
   onRunningChange?: (running: boolean) => void;
   /** For tests. */
   WebSocketImpl?: UseWsOptions["WebSocketImpl"];
-  /** Why Start is off (missing or rejected tokens), like the old updateStartButtonOnly; null when it may start. */
+  /** Why Start is off (missing or rejected tokens); null when it may start. */
   startBlocked?: string | null;
 }
 

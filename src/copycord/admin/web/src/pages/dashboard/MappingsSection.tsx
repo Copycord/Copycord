@@ -1,7 +1,7 @@
-// The Cloning Configuration card from index.html (#guild-config-card): the mapping
-// cards from GET /api/guild-mappings with search, a status toggle, Clone and Delete
-// per card, and the Add tile. Settings, Filters, Clone and Add call the openers in
-// mappings/openers.ts, which the modal lanes fill in.
+// The Cloning Configuration card (#guild-config-card): the mapping cards from
+// GET /api/guild-mappings with search, a status toggle, Clone and Delete per
+// card, and the Add tile. Settings, Filters, Clone and Add call the openers in
+// mappings/openers.ts.
 
 import { useCallback, useEffect, useState } from "react";
 import { cx, useReveal } from "../../components/ui";
@@ -34,7 +34,7 @@ import { MappingModalHost } from "./mappings/modal/MappingModalHost";
 import { openFilters, openMappingModal } from "./mappings/openers";
 
 export interface MappingsSectionProps {
-  /** A bot is running; the cards are locked like the old setGuildCardsLocked. */
+  /** A bot is running; the cards are locked. */
   locked?: boolean;
 }
 
