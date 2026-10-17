@@ -113,7 +113,7 @@ class ScrapeInputs(BaseModel):
     include_bio: bool = Field(False, title="Bios")
     include_roles: bool = Field(False, title="Roles")
     use_proxies: bool = Field(True, title="Use the saved proxies")
-    sessions_per_token: int = Field(1, ge=1, le=5, title="Sessions per token")
+    sessions_per_token: int = Field(1, ge=1, le=1, title="Sessions per token")
     # Dev mode only (COPYCORD_ENV=dev): a JSON file of what each token sent.
     debug_report: bool = Field(False, title="Debug report")
 

@@ -267,12 +267,12 @@ async def test_sessions_per_token_defaults_to_one_and_reaches_the_scraper(svc, e
     run = await svc.start("scrape_members", {"guild_id": GID})
     assert (await _settled(svc, run.id)).status == "success"
     assert env["built"][0].config.sessions_per_token == 1
-    run = await svc.start("scrape_members", {"guild_id": GID, "sessions_per_token": 3})
+    run = await svc.start("scrape_members", {"guild_id": GID, "sessions_per_token": 1})
     assert (await _settled(svc, run.id)).status == "success"
-    assert env["built"][1].config.sessions_per_token == 3
+    assert env["built"][1].config.sessions_per_token == 1
 
 
-@pytest.mark.parametrize("bad", [0, 6])
+@pytest.mark.parametrize("bad", [0, 2, 3, 5, 6])
 def test_sessions_per_token_out_of_range_is_refused(bad):
     with pytest.raises(ValidationError) as err:
         scrape.ScrapeInputs(guild_id=GID, sessions_per_token=bad)
