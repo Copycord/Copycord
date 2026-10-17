@@ -350,7 +350,7 @@ export const PER_PAGE = 25;
 export const RUNS_COUNT_KEY = "tasks.runs";
 
 /** The filter dropdowns of the frame head in order; Task type shows on All tasks only. */
-export const FILTER_LABELS = { type: "Task type", status: "Status", context: "Mapping", actor: "Actor" } as const;
+export const FILTER_LABELS = { type: "Task type", status: "Status", context: "Target", actor: "Actor" } as const;
 export type FilterKey = keyof typeof FILTER_LABELS;
 
 /** The first option of a filter dropdown; its label is the prefix on the closed control, "Status: All". */
