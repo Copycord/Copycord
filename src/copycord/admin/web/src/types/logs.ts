@@ -42,8 +42,3 @@ export interface EventLogBulkDeleteResponse {
   ok: boolean;
   deleted: number;
 }
-
-/** Body of POST /api/event-logs/delete-bulk. */
-export interface EventLogBulkDeleteRequest {
-  ids: string[];
-}

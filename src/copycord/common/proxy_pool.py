@@ -102,10 +102,6 @@ class ProxyPool:
     def total(self) -> int:
         return len(self._all)
 
-    @property
-    def leased_count(self) -> int:
-        return len(self._in_use)
-
     def reload(self, proxy_lines: Optional[list[str]] = None) -> int:
         """(Re)load the proxy list; reads DATA_DIR/proxies.txt when proxy_lines is None. Returns the count."""
         if proxy_lines is None:

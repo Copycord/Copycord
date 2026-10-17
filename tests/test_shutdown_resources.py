@@ -86,11 +86,12 @@ def test_apply_db_config_closes_its_db(monkeypatch, tmp_db_path):
 
 def test_config_logs_a_failed_db_read_and_a_bad_number(monkeypatch, tmp_db_path, caplog):
     from copycord.common import db as dbmod
+    from copycord.common import ports
     from copycord.common.config import Config
 
     dbmod.DBManager(tmp_db_path, init_schema=True).close()
     monkeypatch.setenv("DB_PATH", tmp_db_path)
-    monkeypatch.setenv("SYNC_INTERVAL_SECONDS", "soon")
+    monkeypatch.setenv("SERVER_WS_PORT", "soon")
 
     def boom(self, key, default=""):
         raise sqlite3.OperationalError("locked")
@@ -98,9 +99,9 @@ def test_config_logs_a_failed_db_read_and_a_bad_number(monkeypatch, tmp_db_path,
     monkeypatch.setattr(dbmod.DBManager, "get_config", boom)
     with caplog.at_level(logging.DEBUG):
         cfg = Config(logger=logging.getLogger("test.config"))
-    assert cfg.SYNC_INTERVAL_SECONDS == 3600
+    assert cfg.SERVER_WS_PORT == ports.DEFAULT_SERVER_WS_PORT
     assert "DB read failed" in caplog.text
-    assert "SYNC_INTERVAL_SECONDS='soon' is not a number" in caplog.text
+    assert "SERVER_WS_PORT='soon' is not a number" in caplog.text
     cfg.db.close()
 
 

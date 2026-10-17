@@ -1,6 +1,6 @@
 // How many rows a list had when it last loaded, so its skeleton draws that many and the rows land
 // without moving anything. Kept in localStorage under skel:<key>; a first visit uses the fallback.
-//   const rows = readLastCount("scraper.tokens", 0, 6);   useLastCount("scraper.tokens", list.length)
+//   const rows = readLastCount("forwarding.rules", 0, 6);   useLastCount("forwarding.rules", list.length)
 
 import { useEffect } from "react";
 

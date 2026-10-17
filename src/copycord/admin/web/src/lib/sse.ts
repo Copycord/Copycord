@@ -1,4 +1,4 @@
-// Server-sent events for /bus/stream and /logs/stream/{which}. EventSource
+// Server-sent events for /logs/stream/{which}. EventSource
 // reconnects by itself; this adds JSON parsing and a close handle.
 
 import type { BusMessage, LogStream } from "../types/api";
@@ -35,8 +35,6 @@ export function connectSse<T = BusMessage>(url: string, opts: SseOptions<T>): Ss
   es.onerror = (ev: Event) => opts.onError?.(ev);
   return { close: () => es.close() };
 }
-
-export const busStream = (opts: SseOptions<BusMessage>) => connectSse("/bus/stream", opts);
 
 export const logStream = (which: LogStream, opts: SseOptions<string>) =>
   connectSse<string>(`/logs/stream/${encodeURIComponent(which)}`, { json: false, ...opts });
