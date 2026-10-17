@@ -42,8 +42,6 @@ logger = logging.getLogger("standalone_scraper")
 BIO_ATTEMPTS = 3
 # Profiles Discord refuses outright: no retry, the member is saved without a bio.
 BIO_REFUSED = (401, 403, 404)
-# How often the bio phase reports bios done of queued.
-BIO_PROGRESS_INTERVAL = 0.5
 
 
 @dataclass
@@ -559,6 +557,8 @@ class StandaloneScraper:
         self._running = False
         self._clock: Callable[[], float] = time.monotonic
         self._bios = {"queued": 0, "fetched": 0, "skipped": 0}
+        # Set while scrape() waits on the bios; the worker reports each bio then.
+        self._bio_phase = False
 
         self._proxy_list = [
             self._normalize_proxy(p) for p in (config.proxies or []) if p
@@ -812,6 +812,8 @@ class StandaloneScraper:
                     )
                 failures.pop(uid, None)
                 self._bios["fetched" if outcome == "ok" else "skipped"] += 1
+                if self._bio_phase:
+                    self._bio_progress()
             finally:
                 bio_queue.task_done()
 
@@ -876,36 +878,27 @@ class StandaloneScraper:
 
     async def _finish_bios(self, bio_queue: asyncio.Queue, bio_task: asyncio.Task):
         """Wait until every queued bio is fetched or skipped, or the scrape is stopped; no
-        time cap. Reports bios done of queued as they move, at most every
-        BIO_PROGRESS_INTERVAL. A worker that ended without draining the queue (it should
-        not) ends the wait too, so the scrape still saves."""
+        time cap. Reports bios done of queued now, then the worker reports each one it
+        finishes. A worker that ended without draining the queue (it should not) ends the
+        wait too, so the scrape still saves."""
         b = self._bios
         left = b["queued"] - b["fetched"] - b["skipped"]
         if left > 0:
             self._log(f"📝 Fetching bios — {left:,} to go", "info")
+        self._bio_phase = True
         self._bio_progress()
         join = asyncio.ensure_future(bio_queue.join())
         stopped = asyncio.ensure_future(self._stop_event.wait())
-        last = (b["fetched"], b["skipped"], b["queued"])
         try:
-            while True:
-                done, _ = await asyncio.wait(
-                    {join, stopped, bio_task},
-                    timeout=BIO_PROGRESS_INTERVAL,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                now = (b["fetched"], b["skipped"], b["queued"])
-                if now != last:
-                    last = now
-                    self._bio_progress()
-                if done:
-                    if done == {bio_task}:
-                        self._debug("Bio worker ended before the queue drained", "warn")
-                    break
+            done, _ = await asyncio.wait(
+                {join, stopped, bio_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if done == {bio_task}:
+                self._debug("Bio worker ended before the queue drained", "warn")
         finally:
             join.cancel()
             stopped.cancel()
-        self._bio_progress()
+            self._bio_phase = False
         if b["skipped"]:
             self._log(
                 f"⚠️ {b['skipped']:,} bio(s) skipped: the profile did not load", "warn"
@@ -1416,6 +1409,7 @@ class StandaloneScraper:
         self._stop_event.clear()
         self._members.clear()
         self._bios = {"queued": 0, "fetched": 0, "skipped": 0}
+        self._bio_phase = False
         bio_task: Optional[asyncio.Task] = None
         bio_session: Optional[aiohttp.ClientSession] = None
 
