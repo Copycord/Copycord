@@ -48,7 +48,7 @@ class ScraperConfig:
     include_avatar_url: bool = True
     include_bio: bool = False
     include_roles: bool = False
-    sessions_per_token: int = 2
+    sessions_per_token: int = 1  # one gateway session per user token keeps the account safe
     max_parallel_per_session: int = 5
     progress_callback: Optional[Callable] = None
     log_callback: Optional[Callable] = None

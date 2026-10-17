@@ -617,3 +617,9 @@ def test_old_scraper_routes_are_gone(http, method, path):
     assert getattr(tc, method)(path).status_code in (404, 405)
     assert not hasattr(app_module, "scraper_state") and not hasattr(app_module, "_run_single_scrape")
     assert not hasattr(app_module, "_scraper_token_access")
+
+
+def test_scraper_opens_one_gateway_session_per_token():
+    from copycord.admin.standalone_scraper import ScraperConfig
+
+    assert ScraperConfig(guild_id=1, tokens=["a", "b"]).sessions_per_token == 1
