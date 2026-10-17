@@ -1,40 +1,27 @@
 """StandaloneScraper's bio phase: the whole scrape() with the token check, guild info and
-gateway stubbed, and a fake Discord in place of the bio session. Nothing calls Discord."""
+gateway stubbed, and a fake Discord in place of the token's curl_cffi session. Nothing
+calls Discord."""
 import asyncio
 
-import aiohttp
 import pytest
+from curl_cffi.requests.exceptions import RequestException
 
 from copycord.admin import standalone_scraper as ss
 from copycord.admin.standalone_scraper import ScraperConfig, StandaloneScraper
 
 
 class _Resp:
+    """A curl_cffi response: status_code, a synchronous json(), headers."""
+
     def __init__(self, status=200, body=None, headers=None):
-        self.status = status
+        self.status_code = status
         self.body = body
         self.headers = headers or {}
 
-    async def json(self):
+    def json(self):
         if isinstance(self.body, BaseException):
             raise self.body
         return self.body
-
-
-class _Get:
-    def __init__(self, item, gate=None):
-        self.item = item
-        self.gate = gate
-
-    async def __aenter__(self):
-        if self.gate is not None:
-            await self.gate.wait()
-        if isinstance(self.item, BaseException):
-            raise self.item
-        return self.item
-
-    async def __aexit__(self, *exc):
-        return False
 
 
 def ok(bio):
@@ -55,11 +42,16 @@ class FakeDiscord:
         self.calls = []
         self.closed = False
 
-    def get(self, url, **kwargs):
+    async def get(self, url, **kwargs):
         uid = url.rstrip("/").split("/")[-2]
         self.calls.append((uid, asyncio.get_running_loop().time()))
         items = self.profiles[uid]
-        return _Get(items.pop(0) if len(items) > 1 else items[0], self.gate)
+        item = items.pop(0) if len(items) > 1 else items[0]
+        if self.gate is not None:
+            await self.gate.wait()
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
     def count(self, uid):
         return sum(1 for u, _ in self.calls if u == uid)
@@ -70,23 +62,17 @@ class FakeDiscord:
     async def close(self):
         self.closed = True
 
-    async def __aenter__(self):
-        return self
 
-    async def __aexit__(self, *exc):
-        return False
-
-
-def _scraper(discord, reports):
+def _scraper(discord, reports, monkeypatch):
     uids = list(discord.profiles)
     config = ScraperConfig(guild_id=1, tokens=["tok"], include_bio=True,
                            bio_progress_callback=lambda done, total, msg="": reports.append((done, total)))
     s = StandaloneScraper(config)
 
-    async def validate(session, token):
+    async def validate(token):
         return True, "user", "1"
 
-    async def guild_info(session, token, guild_id):
+    async def guild_info(token, guild_id):
         return len(uids), "Guild"
 
     async def gateway(**kwargs):
@@ -99,7 +85,7 @@ def _scraper(discord, reports):
     s._validate_token = validate
     s._get_guild_info = guild_info
     s._run_gateway_session = gateway
-    s._make_session = lambda proxy=None, **kwargs: discord
+    monkeypatch.setattr(ss, "_CurlAsyncSession", lambda **kwargs: discord)
     return s
 
 
@@ -131,11 +117,11 @@ def _bios(result):
 
 
 @pytest.mark.asyncio
-async def test_bio_wait_has_no_time_cap():
+async def test_bio_wait_has_no_time_cap(monkeypatch):
     # Discord holds each profile back 45 s once: well over the old 60 s cap in all.
     discord = FakeDiscord({uid: [limited(45), ok(f"bio {uid}")] for uid in ("1", "2", "3")})
     reports = []
-    s = _scraper(discord, reports)
+    s = _scraper(discord, reports, monkeypatch)
     skipped, undo = _fake_time(s)
     try:
         result = await s.scrape()
@@ -149,13 +135,13 @@ async def test_bio_wait_has_no_time_cap():
 
 
 @pytest.mark.asyncio
-async def test_progress_reports_bios_done_of_queued():
+async def test_progress_reports_bios_done_of_queued(monkeypatch):
     # Discord answers once the bio phase has begun (the worker runs from the start of the
     # scrape), so the first report is none of the three.
     gate = asyncio.Event()
     discord = FakeDiscord({uid: [limited(5), ok("x")] for uid in ("1", "2", "3")}, gate)
     reports = []
-    s = _scraper(discord, reports)
+    s = _scraper(discord, reports, monkeypatch)
 
     def report(done, total, msg=""):
         reports.append((done, total))
@@ -175,7 +161,7 @@ async def test_progress_reports_bios_done_of_queued():
 
 
 @pytest.mark.asyncio
-async def test_429_waits_out_retry_after_however_often():
+async def test_429_waits_out_retry_after_however_often(monkeypatch):
     discord = FakeDiscord({
         "1": [limited(7.5), ok("one")],
         # No JSON body: the Retry-After header says when.
@@ -183,7 +169,7 @@ async def test_429_waits_out_retry_after_however_often():
         # Many more 429s than BIO_ATTEMPTS: still not skipped.
         "3": [limited(2)] * (ss.BIO_ATTEMPTS * 3) + [ok("three")],
     })
-    s = _scraper(discord, [])
+    s = _scraper(discord, [], monkeypatch)
     _skipped, undo = _fake_time(s)
     try:
         result = await s.scrape()
@@ -198,11 +184,11 @@ async def test_429_waits_out_retry_after_however_often():
 
 
 @pytest.mark.asyncio
-async def test_failing_profiles_are_skipped_after_their_tries():
+async def test_failing_profiles_are_skipped_after_their_tries(monkeypatch):
     discord = FakeDiscord({
         "ok": [ok("hello")],
         "500": [_Resp(500)],
-        "network": [aiohttp.ClientConnectionError("proxy refused the connection")],
+        "network": [RequestException("proxy refused the connection")],
         "timeout": [asyncio.TimeoutError()],
         "bad json": [_Resp(200, ValueError("not json"))],
         "not a dict": [_Resp(200, ["?"])],
@@ -211,7 +197,7 @@ async def test_failing_profiles_are_skipped_after_their_tries():
         "401": [_Resp(401)],
         "flaky": [_Resp(502)] * (ss.BIO_ATTEMPTS - 1) + [ok("late")],
     })
-    s = _scraper(discord, [])
+    s = _scraper(discord, [], monkeypatch)
     _skipped, undo = _fake_time(s)
     try:
         result = await s.scrape()
@@ -232,12 +218,12 @@ async def test_failing_profiles_are_skipped_after_their_tries():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_task", [True, False])
-async def test_cancel_during_the_bio_phase_stops_within_a_second(cancel_task):
+async def test_cancel_during_the_bio_phase_stops_within_a_second(cancel_task, monkeypatch):
     # The worker sits in a 1000 s retry_after (a real wait) when the cancel lands. The task
     # runner both stops the scraper and cancels its task; stop() alone must do too.
     discord = FakeDiscord({"1": [limited(1000)], "2": [ok("never")]})
     reports = []
-    s = _scraper(discord, reports)
+    s = _scraper(discord, reports, monkeypatch)
     task = asyncio.ensure_future(s.scrape())
     for _ in range(300):
         if discord.calls and reports:
