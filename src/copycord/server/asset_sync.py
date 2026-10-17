@@ -251,6 +251,11 @@ class AssetSync:
                     await manager._sync(guild=guild, stickers=stickers, host_id=host_id,
                                         hooks=hooks, delete_removed=delete_extras)
                     await manager.refresh_cache(guild.id)
+            except asyncio.CancelledError:
+                # The job's cancel landed mid-pass: the asset in flight is dropped, never
+                # counted, and the step ends cancelled below with what was done.
+                if not job.cancelled:
+                    raise
             except Exception as exc:
                 counts["error"] = str(exc) or type(exc).__name__
                 await self._step(job, kind, "failed", note=counts["error"],

@@ -36,7 +36,9 @@ from .registry import TaskType, register
 log = logging.getLogger("copycord.tasks.export_dms")
 
 TYPE_KEY = "export_dms"
-CANCEL_WAIT = 15.0
+# How long a cancel waits for the client's export_dm_done; the client cancels at once, so this
+# only bounds a client that went quiet.
+CANCEL_WAIT = 1.0
 FRAMES = ("export_dm_progress", "export_dm_done")
 
 ERRORS = {
@@ -359,8 +361,12 @@ async def _wait(ctx: Any, job: _Job) -> None:
         # Bots stopped (ctx.cancel_note): the service already ended the steps and no client is left to tell.
         if ctx.cancel_note is None:
             await ctx.log("Stopping the export", level="warning")
-            await _send({"type": "export_dm_cancel",
-                         "data": {"user_id": int(job.inputs.user_id), "job_id": job.job_id}})
+            # The client cancels the exporter's task at once; a slow link never holds this up.
+            try:
+                await asyncio.wait_for(_send({"type": "export_dm_cancel", "data": {
+                    "user_id": int(job.inputs.user_id), "job_id": job.job_id}}), CANCEL_WAIT)
+            except asyncio.TimeoutError:
+                pass
             try:
                 await asyncio.wait_for(asyncio.shield(done), timeout=CANCEL_WAIT)
             except asyncio.TimeoutError:
