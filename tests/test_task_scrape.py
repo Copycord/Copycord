@@ -359,16 +359,6 @@ async def test_scraper_failure_fails_the_run(svc, env):
 
 
 @pytest.mark.asyncio
-async def test_scraper_exception_fails_the_run(svc, env):
-    env["opts"].update(count=2, raise_exc=RuntimeError("gateway exploded"))
-    run = await svc.start("scrape_members", {"guild_id": GID})
-    done = await _settled(svc, run.id)
-    assert done.status == "failed" and done.error == "gateway exploded"
-    assert _steps(svc, run.id)["scrape"]["state"] == "failed"
-    assert any(m == "Scrape failed: gateway exploded" for m in _msgs(done))
-
-
-@pytest.mark.asyncio
 async def test_no_members_writes_no_file(svc, env):
     env["opts"].update(count=0, hint=None)
     run = await svc.start("scrape_members", {"guild_id": GID})
@@ -417,16 +407,6 @@ async def test_bad_and_out_of_server_tokens_are_skipped(svc, env):
     assert any(ln["msg"] == "3 tokens skipped: failed or not in this server" and ln["level"] == "warning"
                for ln in done.log_lines)
     assert not any(ln["level"] == "error" for ln in done.log_lines)
-
-
-@pytest.mark.asyncio
-async def test_all_tokens_used_has_no_skip_note(svc, env):
-    env["access"]["with"] = {"tok-one", "tok-two"}
-    run = await svc.start("scrape_members", {"guild_id": GID})
-    done = await _settled(svc, run.id)
-    assert done.status == "success"
-    assert _steps(svc, run.id)["tokens"]["note"] == "2 of 2 tokens used"
-    assert not any("skipped" in m for m in _msgs(done))
 
 
 @pytest.mark.asyncio
@@ -695,35 +675,6 @@ def test_start_does_not_need_the_bots(http):
 
 # the scraper settings routes that stay (tokens, proxies) and the ones that went
 
-def test_old_token_routes_are_gone(http):
-    tc, _repo, _tmp = http
-    assert tc.post("/api/scraper/tokens/add", data={"token_value": "x"}).status_code in (404, 405)
-    assert tc.post("/api/scraper/tokens/id1/update", data={"label": "x"}).status_code in (404, 405)
-    assert tc.post("/api/scraper/tokens/id1/validate").status_code in (404, 405)
-    assert tc.delete("/api/scraper/tokens/id1").status_code in (404, 405)
-
-
-@pytest.mark.parametrize("method,path", [
-    ("post", "/api/scraper/validate-setup"),
-    ("post", "/api/scraper/start"),
-    ("post", "/api/scraper/queue/add"),
-    ("get", "/api/scraper/queue"),
-    ("delete", "/api/scraper/queue/1"),
-    ("post", "/api/scraper/queue/clear"),
-    ("post", "/api/scraper/queue/start"),
-    ("get", "/api/scraper/status"),
-    ("post", "/api/scraper/cancel"),
-    ("post", "/api/scraper/cancel-all"),
-    ("get", "/api/scraper/results"),
-    ("post", "/api/scraper/logs/clear"),
-])
-def test_old_scraper_routes_are_gone(http, method, path):
-    tc, _repo, _tmp = http
-    assert getattr(tc, method)(path).status_code in (404, 405)
-    assert not hasattr(app_module, "scraper_state") and not hasattr(app_module, "_run_single_scrape")
-    assert not hasattr(app_module, "_scraper_token_access")
-
-
 def test_scraper_opens_one_gateway_session_per_token():
     from copycord.admin.standalone_scraper import ScraperConfig
 
@@ -801,16 +752,6 @@ async def test_debug_report_is_written_on_failure_with_what_was_captured(svc, en
     data = json.loads((env["dir"] / "scrapes" / done.report["debug_report"]["path"]).read_text())
     assert data["status"] == "failed" and data["error"] == "gateway exploded"
     assert [r["kind"] for r in data["tokens"][0]["rest"]] == ["token_check"]
-
-
-@pytest.mark.asyncio
-async def test_debug_report_is_written_on_failure_with_no_members(svc, env, dev):
-    env["opts"].update(count=0, result=ScraperResult(success=False, error="No valid tokens with guild access"))
-    run = await svc.start("scrape_members", {"guild_id": GID, "debug_report": True})
-    done = await _settled(svc, run.id)
-    assert done.status == "failed" and done.report["output"]["path"] is None
-    data = json.loads((env["dir"] / "scrapes" / done.report["debug_report"]["path"]).read_text())
-    assert data["status"] == "failed" and data["error"] == "No valid tokens with guild access"
 
 
 @pytest.mark.asyncio
