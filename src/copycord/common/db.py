@@ -3163,14 +3163,18 @@ class DBManager:
 
     @staticmethod
     def _old_messages_where(
-        older_than_seconds: int,
+        older_than_seconds: Optional[int],
         pair: Optional[tuple[int, int]] = None,
         skip_pairs: Optional[list[tuple[int, int]]] = None,
     ) -> tuple[str, list[int]]:
-        """WHERE clause and params for messages older than older_than_seconds, limited to the
-        (original_guild_id, cloned_guild_id) pair when given, else outside skip_pairs."""
-        where = "created_at < (CAST(strftime('%s','now') AS INTEGER) - ?)"
-        params: list[int] = [int(older_than_seconds)]
+        """WHERE clause and params for messages older than older_than_seconds (any age when None),
+        limited to the (original_guild_id, cloned_guild_id) pair when given, else outside skip_pairs."""
+        if older_than_seconds is None:
+            where = "1 = 1"
+            params: list[int] = []
+        else:
+            where = "created_at < (CAST(strftime('%s','now') AS INTEGER) - ?)"
+            params = [int(older_than_seconds)]
         if pair is not None:
             where += " AND original_guild_id = ? AND cloned_guild_id = ?"
             params.extend([int(pair[0]), int(pair[1])])
@@ -3189,7 +3193,7 @@ class DBManager:
 
     def count_old_messages(
         self,
-        older_than_seconds: int,
+        older_than_seconds: Optional[int],
         pair: Optional[tuple[int, int]] = None,
         skip_pairs: Optional[list[tuple[int, int]]] = None,
     ) -> int:
@@ -3201,54 +3205,17 @@ class DBManager:
 
     def delete_old_messages(
         self,
-        older_than_seconds: int = 7 * 24 * 3600,
+        older_than_seconds: Optional[int] = 7 * 24 * 3600,
         skip_pairs: Optional[list[tuple[int, int]]] = None,
         pair: Optional[tuple[int, int]] = None,
     ) -> int:
-        """Delete messages older than older_than_seconds: only the (original_guild_id, cloned_guild_id)
-        pair when given, else all but the pairs in skip_pairs. Returns rows deleted."""
-        if pair is not None:
-            where, params = self._old_messages_where(older_than_seconds, pair)
-            with self._tx():
-                return self.conn.execute(f"DELETE FROM messages WHERE {where}", tuple(params)).rowcount or 0
+        """Delete messages older than older_than_seconds (any age when None): only the
+        (original_guild_id, cloned_guild_id) pair when given, else all but the pairs in skip_pairs.
+        Returns rows deleted."""
+        where, params = self._old_messages_where(older_than_seconds, pair, skip_pairs)
         with self._tx():
             before = self.conn.total_changes
-
-            if not skip_pairs:
-                self.conn.execute(
-                    """
-                    DELETE FROM messages
-                    WHERE created_at < (CAST(strftime('%s','now') AS INTEGER) - ?)
-                    """,
-                    (int(older_than_seconds),),
-                )
-            else:
-                clauses = []
-                params: list[int] = [int(older_than_seconds)]
-
-                for orig_gid, clone_gid in skip_pairs:
-                    try:
-                        og = int(orig_gid)
-                        cg = int(clone_gid)
-                    except Exception:
-                        continue
-                    clauses.append("(original_guild_id = ? AND cloned_guild_id = ?)")
-                    params.extend([og, cg])
-
-                if clauses:
-                    sql = (
-                        "DELETE FROM messages "
-                        "WHERE created_at < (CAST(strftime('%s','now') AS INTEGER) - ?) "
-                        "AND NOT (" + " OR ".join(clauses) + ")"
-                    )
-                else:
-                    sql = (
-                        "DELETE FROM messages "
-                        "WHERE created_at < (CAST(strftime('%s','now') AS INTEGER) - ?)"
-                    )
-
-                self.conn.execute(sql, tuple(params))
-
+            self.conn.execute(f"DELETE FROM messages WHERE {where}", tuple(params))
             return self.conn.total_changes - before
 
     @_in_tx

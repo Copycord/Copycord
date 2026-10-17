@@ -135,6 +135,39 @@ describe("PurgeForm", () => {
     expect(posts[0]!.inputs).toEqual({ older_than: 12, unit: "days", mapping_id: null, dry_run: true });
   });
 
+  it("All records disables the age, previews and confirms every record", async () => {
+    const { gets, posts } = serve(241);
+    renderForm();
+    expect(screen.getByRole("radio", { name: "Older than" })).toBeChecked();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Older than" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("radio", { name: "All records" }));
+    expect(screen.getByRole("spinbutton", { name: "Older than" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Unit" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview count" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(/^241 message records in all mappings\./);
+    expect(gets[0]).toContain("all_records=true");
+    expect(gets[0]).not.toContain("older_than");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete records" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete all 241 message records?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Run page r7")).toBeInTheDocument();
+    expect(posts[0]!.inputs).toEqual({ all_records: true, mapping_id: null, dry_run: false });
+  });
+
+  it("switching back to Older than validates the age again", async () => {
+    const { gets } = serve();
+    renderForm();
+    fireEvent.click(screen.getByRole("radio", { name: "All records" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Older than" }));
+    expect(screen.getByRole("spinbutton", { name: "Older than" })).toBeEnabled();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Older than" }), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview count" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a whole number above 0.");
+    expect(gets).toEqual([]);
+  });
+
   it("words the count and validates the age", () => {
     expect(recordWords(1)).toBe("1 message record");
     expect(recordWords(1234)).toBe("1,234 message records");
@@ -161,5 +194,8 @@ describe("purge_messages registration", () => {
       { label: "Dry run", value: "Yes, nothing deleted" },
     ]);
     expect(heroStat(run)).toEqual({ key: "deleted", label: "message records deleted", value: 0 });
+    const all = { ...run, inputs: { older_than: 30, unit: "days", mapping_id: null, dry_run: false, all_records: true } };
+    expect(describeRunInputs(all)[0]).toEqual({ label: "Records", value: "All records" });
+    expect(describeRunInputs(all)[1]).toEqual({ label: "Mapping", value: "All mappings" });
   });
 });

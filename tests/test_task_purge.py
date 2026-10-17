@@ -69,8 +69,24 @@ def test_registered_with_a_schema():
     t = registry.get("purge_messages")
     assert t is not None and t.title == "Purge messages"
     props = t.inputs_schema()["properties"]
-    assert set(props) == {"older_than", "unit", "mapping_id", "dry_run"}
+    assert set(props) == {"older_than", "unit", "mapping_id", "dry_run", "all_records"}
     assert props["unit"]["default"] == "days" and props["older_than"]["default"] == 30
+    assert props["all_records"]["default"] is False
+
+
+def test_old_inputs_still_parse():
+    old = purge.PurgeInputs(**{"older_than": 900, "unit": "weeks", "mapping_id": None, "dry_run": False})
+    assert old.all_records is False and old.seconds == 900 * 7 * DAY
+    assert purge.PurgeInputs(all_records=True).seconds is None
+
+
+def test_count_and_delete_any_age(db, maps):
+    assert db.count_old_messages(None) == 8
+    assert db.count_old_messages(None, pair=A) == 4
+    assert db.count_old_messages(None, skip_pairs=[A, B]) == 1
+    assert db.delete_old_messages(None, pair=A) == 4
+    assert db.delete_old_messages(None, skip_pairs=[B]) == 1
+    assert _left(db) == 3 and _left(db, B) == 3
 
 
 def test_count_and_delete_by_pair(db, maps):
@@ -106,6 +122,37 @@ async def test_delete_all_mappings(svc, db, maps):
     assert done.summary == {"matched": 6, "deleted": 6}
     assert _left(db) == 2 and _left(db, STRAY) == 0
     assert [r["deleted"] for r in done.report["mappings"]] == [3, 2, 1]
+
+
+@pytest.mark.asyncio
+async def test_delete_all_records(svc, db, maps):
+    # 900 weeks finds nothing; All records ignores the age and takes the 1 and 2 day old ones too.
+    run = await svc.start("purge_messages", {"older_than": 900, "unit": "weeks", "all_records": True})
+    done = await _settled(svc, run.id)
+    assert done.status == "success"
+    assert done.title == "Delete all message records"
+    assert done.summary == {"matched": 8, "deleted": 8}
+    assert _left(db) == 0
+    assert [r["deleted"] for r in done.report["mappings"]] == [4, 3, 1]
+    assert done.report["all_records"] is True and done.report["older_than_seconds"] is None
+    assert done.report["inputs"]["all_records"] is True
+
+
+@pytest.mark.asyncio
+async def test_all_records_dry_run(svc, db, maps):
+    run = await svc.start("purge_messages", {"all_records": True, "dry_run": True})
+    done = await _settled(svc, run.id)
+    assert done.title == "Count all message records"
+    assert done.summary == {"matched": 8, "deleted": 0} and _left(db) == 8
+
+
+@pytest.mark.asyncio
+async def test_all_records_one_mapping(svc, db, maps):
+    run = await svc.start("purge_messages", {"all_records": True, "mapping_id": maps["Beta"]})
+    done = await _settled(svc, run.id)
+    assert done.title == "Delete all message records" and done.context["label"] == "Beta"
+    assert done.summary == {"matched": 3, "deleted": 3}
+    assert _left(db, B) == 0 and _left(db, A) == 4 and _left(db, STRAY) == 1
 
 
 @pytest.mark.asyncio
@@ -183,3 +230,7 @@ async def test_options_preview(maps):
     assert scoped["matched"] == 3 and len(scoped["mappings"]) == 1
     bad = await purge.options({"older_than": "0"})
     assert "older_than" in bad["errors"]
+    every = await purge.options({"all_records": True})
+    assert every["matched"] == 8 and [r["matched"] for r in every["mappings"]] == [4, 3, 1]
+    one = await purge.options({"all_records": "true", "mapping_id": maps["Alpha"]})
+    assert one["matched"] == 4

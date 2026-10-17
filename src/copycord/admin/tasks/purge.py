@@ -50,6 +50,8 @@ class PurgeInputs(BaseModel):
     unit: Literal["hours", "days", "weeks"] = Field("days", title="Unit")
     mapping_id: Optional[str] = Field(None, title="Mapping")
     dry_run: bool = Field(False, title="Dry run")
+    # Every record whatever its age; older_than and unit are then ignored.
+    all_records: bool = Field(False, title="All records")
 
     @field_validator("older_than", mode="before")
     @classmethod
@@ -73,8 +75,14 @@ class PurgeInputs(BaseModel):
         return s or None
 
     @property
-    def seconds(self) -> int:
-        return self.older_than * UNIT_SECONDS[self.unit]
+    def seconds(self) -> Optional[int]:
+        """The age cutoff in seconds, None for all records."""
+        return None if self.all_records else self.older_than * UNIT_SECONDS[self.unit]
+
+    @property
+    def scope_words(self) -> str:
+        """"older than 30 days" or "of any age"."""
+        return "of any age" if self.all_records else f"older than {age_words(self.older_than, self.unit)}"
 
 
 def age_words(n: int, unit: str) -> str:
@@ -128,13 +136,13 @@ def _scopes(db: Any, inputs: PurgeInputs) -> list[dict]:
     return out
 
 
-def _count(db: Any, seconds: int, scope: dict) -> int:
+def _count(db: Any, seconds: Optional[int], scope: dict) -> int:
     if scope["pair"] is not None:
         return db.count_old_messages(seconds, pair=scope["pair"])
     return db.count_old_messages(seconds, skip_pairs=scope["skip"])
 
 
-def _delete(db: Any, seconds: int, scope: dict) -> int:
+def _delete(db: Any, seconds: Optional[int], scope: dict) -> int:
     if scope["pair"] is not None:
         return db.delete_old_messages(seconds, pair=scope["pair"])
     return db.delete_old_messages(seconds, skip_pairs=scope["skip"])
@@ -142,8 +150,6 @@ def _delete(db: Any, seconds: int, scope: dict) -> int:
 
 def describe(inputs: PurgeInputs, lookups: Any = None) -> tuple[str, dict]:
     db = _db(lookups)
-    age = age_words(inputs.older_than, inputs.unit)
-    verb = "Count" if inputs.dry_run else "Purge"
     context: dict = {"label": "All mappings", "mapping_id": inputs.mapping_id, "guild_id": None}
     if inputs.mapping_id:
         mapping = None
@@ -154,7 +160,12 @@ def describe(inputs: PurgeInputs, lookups: Any = None) -> tuple[str, dict]:
         context["label"] = (_name(mapping) if mapping else None) or inputs.mapping_id
         if mapping:
             context["guild_id"] = str(mapping.get("original_guild_id") or "") or None
-    return f"{verb} messages older than {age}", context
+    if inputs.all_records:
+        title = "Count all message records" if inputs.dry_run else "Delete all message records"
+    else:
+        age = age_words(inputs.older_than, inputs.unit)
+        title = f"{'Count' if inputs.dry_run else 'Purge'} messages older than {age}"
+    return title, context
 
 
 async def options(params: dict) -> dict:
@@ -163,7 +174,7 @@ async def options(params: dict) -> dict:
     db = _wiring.db
     if db is None:
         return {"matched": 0, "mappings": [], "error": "Database not configured"}
-    raw = {k: v for k, v in (params or {}).items() if k in ("older_than", "unit", "mapping_id")}
+    raw = {k: v for k, v in (params or {}).items() if k in ("older_than", "unit", "mapping_id", "all_records")}
     try:
         inputs = PurgeInputs(**raw)
     except Exception as exc:
@@ -186,10 +197,9 @@ async def run(ctx: Any, inputs: PurgeInputs) -> None:
     if db is None:
         raise RuntimeError("Database not configured")
     seconds = inputs.seconds
-    age = age_words(inputs.older_than, inputs.unit)
     # The records under no mapping get a step only when there are some.
     scopes = [s for s in _scopes(db, inputs) if s["mapping_id"] is not None or _count(db, seconds, s)]
-    await ctx.log(f"{'Counting' if inputs.dry_run else 'Purging'} message records older than {age}"
+    await ctx.log(f"{'Counting' if inputs.dry_run else 'Purging'} message records {inputs.scope_words}"
                   f"{' (dry run, nothing is deleted)' if inputs.dry_run else ''}")
 
     results: list[dict] = []
@@ -238,6 +248,7 @@ async def run(ctx: Any, inputs: PurgeInputs) -> None:
     await ctx.report({
         "inputs": inputs.model_dump(mode="json"),
         "older_than_seconds": seconds,
+        "all_records": inputs.all_records,
         "dry_run": inputs.dry_run,
         "mappings": shown,
         "summary": summary,
@@ -255,7 +266,7 @@ async def run(ctx: Any, inputs: PurgeInputs) -> None:
 PURGE = register(TaskType(
     key=TYPE_KEY,
     title="Purge messages",
-    description="Delete Copycord's stored message records older than a cutoff. Discord messages are not touched.",
+    description="Delete Copycord's stored message records older than a cutoff, or all of them. Discord messages are not touched.",
     run=run,
     inputs=PurgeInputs,
     describe=describe,
