@@ -135,6 +135,7 @@ describe("card menu", () => {
     await user.click(screen.getByRole("button", { name: "Alpha" }));
     expect(screen.queryByRole("menu")).toBeNull();
   });
+});
 
 describe("guild details dialog", () => {
   it("fetches the guild and shows its fields, then closes with X, Close and Escape", async () => {
