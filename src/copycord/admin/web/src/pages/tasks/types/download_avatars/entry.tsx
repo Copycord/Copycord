@@ -80,7 +80,7 @@ function DownloadCard({ download }: { download: AvatarDownload }) {
   };
   return (
     <section aria-label="Download" className={RUN_CARD}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate text-sm text-text">{download.filename}</span>
           <span className="text-xs text-muted">
