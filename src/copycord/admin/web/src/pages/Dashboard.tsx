@@ -42,7 +42,7 @@ export function Dashboard({ WebSocketImpl, EventSourceImpl }: DashboardProps = {
         startBlocked={startBlocked}
         WebSocketImpl={WebSocketImpl}
       />
-      <GlobalConfigSection onStartBlockedChange={setStartBlocked} />
+      <GlobalConfigSection onStartBlockedChange={setStartBlocked} botsRunning={running} />
       <MappingsSection locked={running} />
       <NotificationsSection />
       <SyncSettingsSection />
