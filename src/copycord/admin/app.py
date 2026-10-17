@@ -96,6 +96,7 @@ from copycord.admin.tasks import sync_assets as task_sync_assets
 from copycord.admin.tasks import purge as task_purge
 from copycord.admin.tasks import purge_assets as task_purge_assets
 from copycord.admin.tasks import avatars as task_avatars
+from copycord.admin.tasks import scrape as task_scrape
 from copycord.admin.tasks import routes as task_routes
 from copycord.admin import messages as messages_api
 from copycord.admin.tasks.repo import SqliteTaskRepo
@@ -2087,6 +2088,8 @@ async def _startup_tasks():
     task_purge_assets.configure(db=db, send=lambda frame, timeout: _ws_cmd(SERVER_AGENT_URL, frame, timeout=timeout))
     task_avatars.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=task_avatars.SEND_TIMEOUT),
                            user_guilds=_user_guilds, data_dir=DATA_DIR, bus=hub)
+    task_scrape.configure(db=db, data_dir=DATA_DIR, token_access=_scraper_token_access,
+                          user_guilds=_user_guilds, log_path=out_dir() / "scraper.out")
     try:
         recovered = service.recover()
         if recovered:
@@ -3842,6 +3845,25 @@ async def api_scraper_tokens_delete(token_id: str):
     return JSONResponse({"ok": True})
 
 
+async def _scraper_token_access(gid: int) -> tuple[list[dict], list[dict]]:
+    """The valid scraper tokens that can see guild gid, and one {token_id, label, has_access}
+    per valid token. Shared by validate-setup and the scrape_members task."""
+    access: list[dict] = []
+    results: list[dict] = []
+    for token in db.get_valid_scraper_tokens():
+        has_access = await _selfbot_in_guild(token["token_value"], gid)
+        results.append(
+            {
+                "token_id": token["token_id"],
+                "label": token.get("label") or token.get("username") or "Unknown",
+                "has_access": has_access,
+            }
+        )
+        if has_access:
+            access.append(token)
+    return access, results
+
+
 @app.post("/api/scraper/validate-setup", response_class=JSONResponse)
 async def api_scraper_validate_setup(guild_id: str = Form(...)):
     """Validate that all tokens have access to the specified guild."""
@@ -3850,8 +3872,7 @@ async def api_scraper_validate_setup(guild_id: str = Form(...)):
     except ValueError:
         raise HTTPException(400, detail="Invalid guild_id")
 
-    tokens = db.get_valid_scraper_tokens()
-    if not tokens:
+    if not db.get_valid_scraper_tokens():
         return JSONResponse(
             {
                 "ok": False,
@@ -3862,23 +3883,9 @@ async def api_scraper_validate_setup(guild_id: str = Form(...)):
             status_code=400,
         )
 
-    results = []
-    in_guild = 0
-    missing = 0
-
-    for token in tokens:
-        has_access = await _selfbot_in_guild(token["token_value"], gid)
-        results.append(
-            {
-                "token_id": token["token_id"],
-                "label": token.get("label") or token.get("username") or "Unknown",
-                "has_access": has_access,
-            }
-        )
-        if has_access:
-            in_guild += 1
-        else:
-            missing += 1
+    access, results = await _scraper_token_access(gid)
+    in_guild = len(access)
+    missing = len(results) - in_guild
 
     return JSONResponse(
         {
@@ -4888,31 +4895,9 @@ async def _run_single_scrape(queue_item: dict):
 
     def _save_results_to_disk(members, metadata, total_count, elapsed_seconds):
         """Save results to /data/scrapes/{guild_id}/; returns filename or None."""
-        if not members:
-            return None
-        try:
-            guild_dir = DATA_DIR / "scrapes" / str(guild_id)
-            guild_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            g_name = (metadata or {}).get("guild_name") or ""
-            fname = f"scrape_{guild_id}_{ts}.json"
-            save_data = {
-                "guild_id": str(guild_id),
-                "guild_name": g_name,
-                "total_count": total_count,
-                "elapsed_seconds": round(elapsed_seconds, 2),
-                "scraped_at": datetime.now().isoformat(),
-                "metadata": metadata,
-                "members": members,
-            }
-            (guild_dir / fname).write_text(
-                json.dumps(save_data, indent=2), encoding="utf-8"
-            )
-            LOGGER.info("Scrape results saved to %s/%s", guild_id, fname)
-            return f"{guild_id}/{fname}"
-        except Exception as save_err:
-            LOGGER.exception("Failed to save scrape results: %s", save_err)
-            return None
+        return task_scrape.save_scrape_file(
+            DATA_DIR, guild_id, members, metadata, total_count, elapsed_seconds
+        )
 
     try:
         result = await scraper.scrape()
