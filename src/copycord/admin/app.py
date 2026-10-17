@@ -91,17 +91,11 @@ from copycord.admin.web_config import router as links_router
 from copycord.admin.web_config import startup_links, shutdown_links
 import copycord.admin.tasks  # noqa: F401  task types register at import
 from copycord.admin.tasks import backfill as task_backfill
-<<<<<<< HEAD
 from copycord.admin.tasks import export_dms as task_export_dms
-=======
 from copycord.admin.tasks import sync_assets as task_sync_assets
->>>>>>> origin/v4/tasks-L66
 from copycord.admin.tasks import purge as task_purge
-<<<<<<< HEAD
 from copycord.admin.tasks import purge_assets as task_purge_assets
-=======
 from copycord.admin.tasks import avatars as task_avatars
->>>>>>> origin/v4/tasks-L68
 from copycord.admin.tasks import routes as task_routes
 from copycord.admin import messages as messages_api
 from copycord.admin.tasks.repo import SqliteTaskRepo
@@ -819,13 +813,10 @@ async def _backfill_job_listener():
         p = ev.get("payload") or {}
         if p.get("type") in task_backfill.JOB_FRAMES:
             await task_backfill.dispatch(p)
-<<<<<<< HEAD
         elif p.get("type") in task_export_dms.FRAMES:
             await task_export_dms.dispatch(p)
-=======
         elif p.get("type") in task_sync_assets.FRAMES:
             await task_sync_assets.dispatch(p)
->>>>>>> origin/v4/tasks-L66
 
 
 async def _close_ws_quietly(
@@ -2090,18 +2081,12 @@ async def _startup_tasks():
     service = TaskService(SqliteTaskRepo(db), publish=_publish_task_event)
     task_routes.set_service(service)
     task_backfill.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame))
-<<<<<<< HEAD
     task_export_dms.configure(send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=5.0))
-=======
     task_sync_assets.configure(db=db, send=lambda frame: _ws_cmd(SERVER_AGENT_URL, frame, timeout=5.0))
->>>>>>> origin/v4/tasks-L66
     task_purge.configure(db=db)
-<<<<<<< HEAD
     task_purge_assets.configure(db=db, send=lambda frame, timeout: _ws_cmd(SERVER_AGENT_URL, frame, timeout=timeout))
-=======
     task_avatars.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=task_avatars.SEND_TIMEOUT),
                            user_guilds=_user_guilds, data_dir=DATA_DIR, bus=hub)
->>>>>>> origin/v4/tasks-L68
     try:
         recovered = service.recover()
         if recovered:

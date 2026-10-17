@@ -69,12 +69,8 @@ const FIRST_TITLES: Record<string, string> = { export_dms: "Export DMs" };
 export function typeLabel(key: string): TypeLabel {
   const held = read<TypeLabel>(TYPES_KEY)[key];
   if (held && typeof held.title === "string") return { title: held.title, description: held.description ?? "" };
-<<<<<<< HEAD
-  return { title: FIRST_TITLES[key] ?? humanizeTypeKey(key), description: "" };
-=======
   if (key === "download_avatars") return { title: "Download avatars", description: "Zip the profile pictures of every member the client account can see in one of its servers." };
-  return { title: humanizeTypeKey(key), description: "" };
->>>>>>> origin/v4/tasks-L68
+  return { title: FIRST_TITLES[key] ?? humanizeTypeKey(key), description: "" };
 }
 
 /** Keep which type each run is, for the run page's first paint. */
