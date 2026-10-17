@@ -160,6 +160,17 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
         return get_build_info()
 
 
+def _launch_signature() -> str:
+    """UUID4 with a fixed scatter of bits zeroed — the shape the Discord web client produces.
+    Ported from Wizard core/headers.py which ported it from discord.py-self discord/tracking.py:888."""
+    mask = int(
+        "00000000100000000001000000010000000010000001000000001000000000000010"
+        "000010000001000000000100000000000001000000000000100000000000",
+        2,
+    )
+    return str(uuid.UUID(int=uuid.uuid4().int & ~mask & ((1 << 128) - 1)))
+
+
 def make_fingerprint(token: str) -> dict:
     """Build a stable device fingerprint for a token."""
     seed = int(hashlib.sha256(token.encode("utf-8")).hexdigest()[:16], 16)
@@ -168,7 +179,7 @@ def make_fingerprint(token: str) -> dict:
     build = get_build_info()
     install_id = _installation_id(rng)
     launch_id = str(uuid.uuid4())
-    launch_signature = str(uuid.uuid4())
+    launch_signature = _launch_signature()
 
     user_agent = build["browser_user_agent"]
 
