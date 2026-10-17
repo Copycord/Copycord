@@ -16,6 +16,7 @@ import aiohttp
 import logging
 from copycord.server.rate_limiter import ActionType
 from copycord.server import logctx
+from copycord.server.item_hooks import ItemHooks
 
 logger = logging.getLogger("server.stickers")
 
@@ -277,8 +278,13 @@ class StickerManager:
         guild: discord.Guild,
         stickers: list[dict],
         host_id: int | None,
+        hooks: ItemHooks | None = None,
+        delete_removed: bool = True,
     ) -> Tuple[int, int, int]:
-        """Sync stickers for host_id -> guild.id, touching only mappings for that pair."""
+        """Sync stickers for host_id -> guild.id, touching only mappings for that pair.
+        hooks hears about each sticker as it is done and can stop the pass between stickers;
+        delete_removed=False keeps the clones of stickers the host no longer has."""
+        hooks = hooks or ItemHooks()
         deleted = renamed = created = 0
         skipped_limit = size_failed = 0
 
@@ -304,17 +310,29 @@ class StickerManager:
                 current[int(row["original_sticker_id"])] = row
 
         incoming = {int(s["id"]): s for s in stickers if s.get("id")}
+        removed = set(current) - set(incoming)
+        await hooks.begin(len(incoming) + (len(removed) if delete_removed else 0))
 
-        for orig_id in set(current) - set(incoming):
+        for orig_id in removed:
+            if hooks.stop():
+                break
             row = current[orig_id]
+            if not delete_removed:
+                # The clone stays as it is; only the mapping to the gone host sticker goes.
+                self.db.delete_sticker_mapping_for_clone(orig_id, cloned_guild_id=guild.id)
+                continue
             cloned = clone_by_id.get(row["cloned_sticker_id"])
-            if cloned:
+            if not cloned:
+                # Already gone from the clone: only the mapping is left to drop.
+                await hooks.item(row["cloned_sticker_name"], "unchanged")
+            else:
                 try:
                     await self.ratelimit.acquire_for_guild(
                         ActionType.STICKER_CREATE, guild.id
                     )
                     await cloned.delete()
                     deleted += 1
+                    await hooks.item(row["cloned_sticker_name"], "deleted")
                     current_count = max(0, current_count - 1)
                     self._log(
                         "info",
@@ -335,6 +353,7 @@ class StickerManager:
                         "[⚠️] No permission to delete sticker %s",
                         row["cloned_sticker_name"],
                     )
+                    await hooks.item(row["cloned_sticker_name"], "failed", "No permission to delete it")
                 except discord.HTTPException as e:
                     self._log(
                         "error",
@@ -342,10 +361,13 @@ class StickerManager:
                         row["cloned_sticker_name"],
                         e,
                     )
+                    await hooks.item(row["cloned_sticker_name"], "failed", str(e))
 
             self.db.delete_sticker_mapping_for_clone(orig_id, cloned_guild_id=guild.id)
 
         for orig_id, info in incoming.items():
+            if hooks.stop():
+                break
             name = info.get("name") or f"sticker_{orig_id}"
             url = info.get("url") or ""
             mapping = current.get(orig_id)
@@ -372,6 +394,7 @@ class StickerManager:
                     )
                     await cloned.edit(name=name)
                     renamed += 1
+                    outcome, why = "updated", None
                     self.db.upsert_sticker_mapping(
                         orig_id,
                         name,
@@ -401,9 +424,12 @@ class StickerManager:
                         cloned.name,
                         e,
                     )
+                    outcome, why = "failed", str(e)
+                await hooks.item(name, outcome, why)
                 continue
 
             if mapping:
+                await hooks.item(name, "unchanged")
                 continue
 
             if not url:
@@ -412,10 +438,12 @@ class StickerManager:
                     "[⚠️] Sticker %s has no URL; skipping",
                     name,
                 )
+                await hooks.item(name, "skipped", "The host sent no image for it")
                 continue
 
             if current_count >= limit:
                 skipped_limit += 1
+                await hooks.item(name, "skipped", f"The clone server is at its {limit} sticker limit")
                 continue
 
             raw = None
@@ -432,7 +460,7 @@ class StickerManager:
                     url,
                     e,
                 )
-
+                await hooks.item(name, "failed", f"Could not download it: {e}")
                 continue
 
             if raw and len(raw) > 512 * 1024:
@@ -442,6 +470,7 @@ class StickerManager:
                     name,
                 )
                 size_failed += 1
+                await hooks.item(name, "skipped", "Over the 512 KiB sticker size limit")
                 continue
 
             fmt = int((info.get("format_type") or 0))
@@ -488,6 +517,7 @@ class StickerManager:
                     guild_name=getattr(guild, "name", None),
                     extra={"original_sticker_id": int(orig_id), "clone_sticker_id": int(created_stk.id)},
                 )
+                await hooks.item(name, "created")
 
             except discord.HTTPException as e:
 
@@ -497,6 +527,7 @@ class StickerManager:
                         "[🎟️] Sticker limit reached; stopping sticker sync (%d created so far)",
                         created,
                     )
+                    await hooks.item(name, "skipped", "The clone server is at its sticker limit")
                     break
 
                 else:
@@ -506,6 +537,7 @@ class StickerManager:
                         name,
                         e,
                     )
+                    await hooks.item(name, "failed", str(e))
 
         if skipped_limit:
             self._log(

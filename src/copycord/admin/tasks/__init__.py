@@ -25,6 +25,7 @@ from . import purge  # noqa: F401,E402  registers purge_messages
 from . import purge_assets  # noqa: F401,E402  registers purge_assets
 from . import export_dms  # noqa: F401,E402  registers export_dms
 from . import avatars  # noqa: F401,E402  registers download_avatars
+from . import sync_assets  # noqa: F401,E402  registers sync_assets
 
 __all__ = (
     "MemoryRunRepo", "RunContext", "RunFinished", "RunRepo",
