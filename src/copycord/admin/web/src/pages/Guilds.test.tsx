@@ -1,9 +1,9 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast";
-import { CSRF_HEADER } from "../lib/api";
-import type { ExportMessagesRequest, GuildDetails, GuildSummary } from "../types/guilds";
+import type { GuildDetails, GuildSummary } from "../types/guilds";
 import { holdFetch } from "../test/holdFetch";
 import { Guilds } from "./Guilds";
 
@@ -23,7 +23,6 @@ const DETAILS: GuildDetails = {
 interface Server {
   up?: boolean;
   details?: { status: number; body: unknown };
-  exportReply?: { status: number; body: unknown };
 }
 
 const json = (body: unknown, status = 200) =>
@@ -41,10 +40,6 @@ function serve(s: Server = {}) {
       const d = s.details ?? { status: 200, body: { ok: true, item: DETAILS } };
       return json(d.body, d.status);
     }
-    if (url === "/api/export/messages") {
-      const r = s.exportReply ?? { status: 200, body: { ok: true, accepted: true } };
-      return json(r.body, r.status);
-    }
     return json({ error: "not-found" }, 404);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -54,10 +49,20 @@ function serve(s: Server = {}) {
 const calls = (m: ReturnType<typeof serve>, url: string) =>
   m.mock.calls.filter(([u]) => String(u) === url) as unknown as Array<[string, RequestInit]>;
 
+function Where() {
+  const loc = useLocation();
+  return <p data-testid="where">{loc.pathname + loc.search}</p>;
+}
+
 function renderPage() {
   return render(
     <ToastProvider>
-      <Guilds />
+      <MemoryRouter initialEntries={["/guilds"]}>
+        <Routes>
+          <Route path="/guilds" element={<Guilds />} />
+          <Route path="/tasks" element={<Where />} />
+        </Routes>
+      </MemoryRouter>
     </ToastProvider>,
   );
 }
@@ -181,89 +186,15 @@ describe("guild details dialog", () => {
   });
 });
 
-describe("export dialog", () => {
-  async function openExport(user: ReturnType<typeof userEvent.setup>) {
+describe("export messages", () => {
+  it("opens the Export messages task with the guild picked", async () => {
+    const user = userEvent.setup();
+    serve();
+    renderPage();
     await openMenu(user, "Alpha");
     await user.click(screen.getByRole("menuitem", { name: "Export messages" }));
-    return screen.getByRole("dialog", { name: "Export messages" });
-  }
-
-  const body = (f: ReturnType<typeof serve>) => {
-    const [, init] = calls(f, "/api/export/messages")[0]!;
-    return { payload: JSON.parse(String(init.body)) as ExportMessagesRequest, init };
-  };
-
-  it("posts the options with the CSRF header, toasts and closes", async () => {
-    const user = userEvent.setup();
-    const f = serve();
-    renderPage();
-    const dialog = await openExport(user);
-    await user.type(within(dialog).getByLabelText("Channel ID (optional)"), " 555 ");
-    await user.click(within(dialog).getByLabelText("Include system messages"));
-    await user.click(within(dialog).getByLabelText("Include threads"));
-    await user.click(within(dialog).getByLabelText("Images"));
-    await user.click(within(dialog).getByLabelText("Other files"));
-    await user.clear(within(dialog).getByLabelText("Min total reactions"));
-    await user.type(within(dialog).getByLabelText("Min total reactions"), "3");
-    await user.click(within(dialog).getByRole("button", { name: "Start export" }));
-
-    expect(await screen.findByText("Export started. You’ll see progress in logs.")).toBeInTheDocument();
+    expect(await screen.findByTestId("where")).toHaveTextContent("/tasks?type=export_messages&guild=100");
     expect(screen.queryByRole("dialog")).toBeNull();
-    const { payload, init } = body(f);
-    expect(init.method).toBe("POST");
-    expect(new Headers(init.headers).get(CSRF_HEADER)).toBe("1");
-    expect(payload.guild_id).toBe("100");
-    expect(payload.channel_id).toBe("555");
-    expect(payload.user_id).toBeNull();
-    expect(payload.filters.system).toBe(true);
-    expect(payload.filters.threads).toBe(false);
-    expect(payload.filters.private_threads).toBe(false);
-    expect(payload.filters.min_reactions).toBe(3);
-    expect(payload.filters.download_media).toEqual({ images: true, videos: false, audio: false, other: true });
-  });
-
-  it("picks attachment types in the sub dialog, Cancel and Escape keep the export dialog open", async () => {
-    const user = userEvent.setup();
-    const f = serve();
-    renderPage();
-    const dialog = await openExport(user);
-    const tip = within(dialog).getByRole("button", { name: "Attachment types" });
-
-    await user.click(tip);
-    let sub = screen.getByRole("dialog", { name: "Attachment types" });
-    expect(within(sub).getByLabelText("Images")).toHaveFocus();
-    await user.click(within(sub).getByLabelText("Videos"));
-    await user.click(within(sub).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog", { name: "Attachment types" })).toBeNull();
-    expect(screen.getByRole("dialog", { name: "Export messages" })).toBeInTheDocument();
-
-    await user.click(tip);
-    sub = screen.getByRole("dialog", { name: "Attachment types" });
-    expect(within(sub).getByLabelText("Videos")).toBeChecked();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "Attachment types" })).toBeNull();
-    expect(screen.getByRole("dialog", { name: "Export messages" })).toBeInTheDocument();
-
-    await user.click(tip);
-    sub = screen.getByRole("dialog", { name: "Attachment types" });
-    await user.click(within(sub).getByLabelText("Videos"));
-    await user.click(within(sub).getByRole("button", { name: "Apply" }));
-    expect(within(dialog).getByText("Images, Audio, Other files")).toBeInTheDocument();
-
-    await user.click(within(dialog).getByRole("button", { name: "Start export" }));
-    await screen.findByText("Export started. You’ll see progress in logs.");
-    expect(body(f).payload.filters.att_types).toEqual({ images: true, videos: false, audio: true, other: true });
-  });
-
-  it("keeps the dialog open and toasts a plain error when the client is down", async () => {
-    const user = userEvent.setup();
-    serve({ exportReply: { status: 502, body: { ok: false, error: "client-agent-unreachable" } } });
-    renderPage();
-    const dialog = await openExport(user);
-    await user.click(within(dialog).getByRole("button", { name: "Start export" }));
-    expect(await screen.findByText("The client is not running, so the export could not start.")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Export messages" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Start export" })).toBeEnabled();
   });
 });
 

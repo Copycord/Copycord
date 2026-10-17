@@ -49,7 +49,7 @@ function serverText(msg: string): string {
 
 function Check({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 text-sm text-text has-disabled:cursor-not-allowed has-disabled:opacity-60">
+    <label className="flex cursor-pointer items-center gap-2 text-sm text-text has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
       <Checkbox checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       {label}
     </label>
