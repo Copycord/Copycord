@@ -1,12 +1,12 @@
-// One-time cleanup of the keys the old Channels "Clone messages" UI left in
+// One-time cleanup of the keys a former Channels "Clone messages" UI left in
 // browser storage: the bf:* running sets, task map and cancel marks, and the
-// persisted toast receipts keyed by bf:*. Cloning now lives on the Tasks page.
+// persisted toast receipts keyed by bf:*. Cloning lives on the Tasks page.
 
 const PREFIXES = ["bf:", "toast:persist:bf:", "toast:receipt:bf:"];
 
 let cleared = false;
 
-/** Removes every old clone UI key from the given storages; returns how many went. */
+/** Removes every leftover clone UI key from the given storages; returns how many went. */
 export function clearLegacyCloneStorage(stores?: Storage[]): number {
   let removed = 0;
   for (const store of stores ?? defaultStores()) {

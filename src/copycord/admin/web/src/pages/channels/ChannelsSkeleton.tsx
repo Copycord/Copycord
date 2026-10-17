@@ -51,7 +51,7 @@ export const DELETE_ALL_BTN =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28 " +
   "disabled:cursor-not-allowed disabled:border-border disabled:text-muted";
 
-/** .card-titlebar: the h2, then one wrapping row of controls (.titlebar-actions). The old visible h2 is the page's top heading. */
+/** .card-titlebar: the h2, then one wrapping row of controls (.titlebar-actions). The visible h2 is the page's top heading. */
 export function ChannelsTitle() {
   return (
     <h2 aria-level={1} className="my-[0.83em] text-[24px] font-bold">

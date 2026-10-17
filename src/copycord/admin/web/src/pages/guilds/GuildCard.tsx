@@ -31,7 +31,7 @@ export function GuildCard({ guild, menuOpen, onOpenMenu }: GuildCardProps) {
   };
 
   return (
-    // .guild-card: 12px card with the old lift on hover; the body is the button that opens the menu.
+    // .guild-card: 12px card that lifts on hover; the body is the button that opens the menu.
     <article
       data-gid={guild.id}
       className={cx(GUILD_CARD, CARD_HOVER)}

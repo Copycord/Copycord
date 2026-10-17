@@ -1,6 +1,5 @@
-// Pure logic of the Channels page, ported from frontend/src/js/channels.js:
-// category pins, search, the orphan merge, the filter and the sort of the
-// tree (applyFilterAndSort, mergeOrphansIntoGroups and render).
+// Pure logic of the Channels page: category pins, search, the orphan merge,
+// the filter and the sort of the tree.
 
 import type { ChannelRow, GuildMapping, Orphans } from "../../types/channels";
 
@@ -18,7 +17,7 @@ export const FILTER_OPTIONS: ReadonlyArray<{ value: FilterMode; label: string }>
   { value: "nonorphans", label: "Non-orphans only" },
 ];
 
-/** Lowercase, no leading "#", no diacritics, as normalize() did. */
+/** Lowercase, no leading "#", no diacritics. */
 export function normalize(s: unknown): string {
   const v = String(s ?? "")
     .toLowerCase()
@@ -70,13 +69,13 @@ export function deleteOrphansLabel(n: number): string {
   return `Delete ${n} ${n === 1 ? "orphan" : "orphans"}`;
 }
 
-/** Option text of #mapping-select, as the Jinja template rendered it. */
+/** Option text of #mapping-select: the mapping name, else "host → clone". */
 export function mappingLabel(m: GuildMapping): string {
   const name = (m.mapping_name ?? "").trim();
   return name || `${m.original_guild_name ?? ""} → ${m.cloned_guild_name ?? ""}`;
 }
 
-// The labels stay plain: updateSortUI bailed out early because channels.html has no #ch-sortdir.
+// The labels stay plain, with no sort direction marker.
 export const SORT_OPTIONS: ReadonlyArray<{ value: SortMode; label: string }> = [
   { value: "name", label: "Name" },
   { value: "category", label: "Category" },
@@ -105,7 +104,7 @@ export interface CategoryPins {
   origByEither: Map<string, string>;
 }
 
-/** rebuildCategoryPinMaps without the window globals. */
+/** Maps between original and customized category names, from the channel rows. */
 export function buildCategoryPins(rows: readonly ChannelRow[]): CategoryPins {
   const pinByOrig = new Map<string, string>();
   const origByEither = new Map<string, string>();
@@ -222,7 +221,7 @@ interface Group {
 
 /**
  * Groups the searched rows by category, merges the orphans in, then filters
- * and sorts, as render() did. Sections keep API order unless sorted by
+ * and sorts. Sections keep API order unless sorted by
  * category; channels inside a section sort by name, or by type then name.
  */
 export function buildTree(
@@ -311,7 +310,7 @@ export function buildTree(
   return { sections, empty: false };
 }
 
-/** The GET url for a mapping; no mapping lists every channel, as load() did. */
+/** The GET url for a mapping; no mapping lists every channel. */
 export function channelsUrl(mappingId: string): string {
   return mappingId ? `/api/channels?mapping_id=${encodeURIComponent(mappingId)}` : "/api/channels";
 }

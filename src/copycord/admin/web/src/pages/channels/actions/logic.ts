@@ -1,5 +1,5 @@
-// Payloads and state logic of the row actions, ported from channels.js
-// (resolveCategoryIdsByName, the customize and blacklist saves, the orphan deletes).
+// Payloads and state logic of the row actions: category id lookup, the
+// customize and blacklist saves, the orphan deletes.
 
 import type {
   BlacklistBody,
@@ -77,7 +77,7 @@ export function deleteOnePayload(kind: "channel" | "category", id: string): Orph
   return { action: "delete_one", kind, id: String(id) };
 }
 
-/** Categories first, then channels, as the old button collected them. */
+/** Categories first, then channels. */
 export function orphanIds(o: Orphans): string[] {
   return [...o.categories.map((c) => String(c.id)), ...o.channels.map((c) => String(c.id))];
 }

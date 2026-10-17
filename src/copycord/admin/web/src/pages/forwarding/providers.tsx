@@ -1,4 +1,4 @@
-// Provider half of the rule modal: the old custom provider dropdown
+// Provider half of the rule modal: the custom provider dropdown
 // (#providerSelectBtn / #providerSelectMenu) and the three field groups
 // (#provider_pushover, #provider_discord, #provider_telegram).
 
@@ -179,7 +179,7 @@ export function TelegramFields({ form, patch }: { form: RuleForm; patch: Patch }
 
 /**
  * Webhook URL chips. ChipInput caps words at 100 characters and webhook URLs
- * run longer, so this keeps the old chip rules (Enter, comma or blur commits,
+ * run longer, so this keeps the same chip rules (Enter, comma or blur commits,
  * Backspace on empty drops the last one) without the cap.
  */
 function UrlChips({ value, onChange }: { value: string[]; onChange: (urls: string[]) => void }) {

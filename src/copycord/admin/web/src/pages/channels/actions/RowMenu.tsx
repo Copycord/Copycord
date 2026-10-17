@@ -1,5 +1,5 @@
 // The "⋯" button of a channel card or category chip and its popup menu
-// (the old #ch-menu). The menu is portaled and placed under the button.
+// (#ch-menu). The menu is portaled and placed under the button.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -7,7 +7,7 @@ import { cx } from "../../../components/ui";
 import { CATEGORY_MENU_BTN, CHANNEL_MENU_BTN } from "../treeClasses";
 
 export interface MenuItem {
-  /** The old data-act value. */
+  /** The item's data-act value. */
   act: string;
   /** Optional element id. */
   id?: string;

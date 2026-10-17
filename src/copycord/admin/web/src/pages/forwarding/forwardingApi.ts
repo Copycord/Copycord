@@ -1,5 +1,4 @@
-// Forwarding calls and the small helpers the old forwarding.js used to read
-// the replies: counts arrive as numbers or strings, filters as lists or CSV.
+// Forwarding calls and the small helpers that read the replies: counts arrive as numbers or strings, filters as lists or CSV.
 
 import { api } from "../../lib/api";
 import type {
@@ -20,7 +19,7 @@ export function deleteRule(id: string): Promise<ForwardingDeleteResponse> {
   return api.del<ForwardingDeleteResponse>(ruleUrl(id));
 }
 
-/** The old card's Enable/Disable button: the whole rule posted back with enabled flipped. */
+/** The card's Enable/Disable button: the whole rule posted back with enabled flipped. */
 export function setRuleEnabled(rule: ForwardingRule, enabled: boolean): Promise<ForwardingSaveResponse> {
   return api.post<ForwardingSaveResponse>(RULES_URL, { ...rule, enabled });
 }
@@ -49,7 +48,7 @@ export function describeProvider(provider: string): string {
   }
 }
 
-/** The old search: label, provider and both keyword lists, case insensitive. */
+/** Search over label, provider and both keyword lists, case insensitive. */
 export function filterRules(rules: ForwardingRule[], query: string): ForwardingRule[] {
   const q = query.trim().toLowerCase();
   if (!q) return rules;

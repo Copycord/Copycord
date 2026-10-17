@@ -1,13 +1,12 @@
-// The old page's ghost buttons, which the shared Button does not cover: a
-// ghost styled download link (a.btn.btn-ghost), the 13px label the old page
-// gave <button> elements, and .btn-ghost-red, a ghost button that turns red
-// on hover. Classes follow components/ui/Button.tsx.
+// The System page's ghost buttons, which the shared Button does not cover: a
+// ghost styled download link, a 13px label on <button> elements, and a ghost
+// button that turns red on hover. Classes follow components/ui/Button.tsx.
 
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes } from "react";
 import { BUSY_HOST, BusyContent, cx } from "../../components/ui";
 import { DANGER_OUTLINE } from "../../components/ui/Button";
 
-// The old .btn had no gap; only the loading spinner gets one.
+// Only the loading spinner gets a gap.
 const BASE =
   "inline-flex min-h-[42px] items-center justify-center has-[svg]:gap-2 rounded-control border border-border bg-wash-4 " +
   "px-4 py-2.5 font-semibold leading-none text-accent no-underline select-none outline-none " +
@@ -16,7 +15,7 @@ const BASE =
 const LIFT =
   "hover:-translate-y-0.5 hover:border-accent/30 hover:bg-line-1 hover:shadow-soft active:translate-y-0 active:scale-[0.97]";
 
-/** The old card collapse button (.btn.btn-ghost.btn-icon.card-toggle) and its .chev glyph. */
+/** The card collapse button and its chevron. */
 export const CHEV_BUTTON =
   "inline-flex size-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-btn border border-border " +
   "bg-wash-4 text-[14px] font-semibold leading-none text-accent outline-none transition duration-200 " +
@@ -27,7 +26,7 @@ export const CHEV = "inline-block text-[16px] leading-none text-accent";
 export interface LinkButtonProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   /** Drops the href and greys the link out. */
   disabled?: boolean;
-  /** Keep full opacity while disabled, as the old System page did (.is-disabled had no style). */
+  /** Keep full opacity while disabled. */
   keepOpacity?: boolean;
 }
 
@@ -50,9 +49,9 @@ export function LinkButton({ disabled = false, keepOpacity = false, href, classN
 }
 
 export interface GhostButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  /** 13px label, as the old page rendered <button> elements. */
+  /** 13px label. */
   compact?: boolean;
-  /** The old .btn-ghost-red: red text and border on hover. */
+  /** Red text and border on hover. */
   danger?: boolean;
   loading?: boolean;
 }

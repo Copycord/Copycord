@@ -1,5 +1,4 @@
-// Pure logic of the Guilds page, ported from frontend/src/js/guilds.js:
-// search and sort of the grid, the export payload and the menu position.
+// Pure logic of the Guilds page: search and sort of the grid, the export payload and the menu position.
 
 import type { ExportMessagesRequest, GuildSummary, MediaTypes } from "../../types/guilds";
 
@@ -67,7 +66,7 @@ export const MEDIA_LABELS: ReadonlyArray<[keyof MediaTypes, string]> = [
   ["other", "Other files"],
 ];
 
-/** Same defaults as the checkboxes of the old dialog. */
+/** Defaults of the export dialog's checkboxes. */
 export const DEFAULT_EXPORT_FORM: ExportForm = {
   channelId: "",
   userId: "",
@@ -159,7 +158,7 @@ export interface Point {
 
 /**
  * Top-left corner of the card menu: 8px below and right of the click, kept
- * inside the viewport and below the header, as openMenuAsPopover did.
+ * inside the viewport and below the header.
  */
 export function placeMenu(
   at: Point,

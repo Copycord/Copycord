@@ -1,6 +1,6 @@
 // Backup calls for the System page. Mutations post multipart forms, which
 // lib/api.ts sends as is with the CSRF header; a reply without ok: true is
-// treated as a failure, as on the old page.
+// treated as a failure.
 
 import { api } from "../../lib/api";
 import type {

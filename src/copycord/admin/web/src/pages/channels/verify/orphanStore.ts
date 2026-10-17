@@ -1,4 +1,4 @@
-// The orphan list shared by the verify lane and the row-actions lane.
+// The orphan list shared by the verify scan and the row actions.
 // useVerify() writes it from the "orphans" verify event; Channels.tsx reads it
 // with useOrphans() and hands it to useRowActions, which only prunes it on the
 // "deleted" event (that event is handled in pages/channels/actions, not here).

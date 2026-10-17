@@ -1,4 +1,4 @@
-// Formatting copied from the old system.js so sizes and times read the same.
+// Size and time formatting for the System page.
 
 export const SHRUG = String.raw`¯\_(ツ)_/¯`;
 /** Shown before the info has loaded or for an unreadable time. */

@@ -24,7 +24,7 @@ export const ACTIONS_CELL = cx(CELL, "pr-4 text-right");
 export const ROW_ACTIONS = "inline-flex flex-col items-end gap-2 md:flex-row md:whitespace-nowrap";
 export const ROW_BUTTON = "max-md:min-h-[34px] max-md:px-3";
 
-/** No page panel (rule f): the title sits on the page at the container edge, as on every page, and the
+/** No page panel: the title sits on the page at the container edge, as on every page, and the
  *  Database card is the one card under it. */
 export function SystemTitle() {
   return (

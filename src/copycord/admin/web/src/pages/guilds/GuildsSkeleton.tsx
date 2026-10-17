@@ -29,7 +29,7 @@ export const ICON_FRAME =
   "mx-auto mt-1.5 mb-2.5 grid size-24 place-items-center rounded-[20px] border border-wash-6";
 export const GUILD_NAME = "mb-2.5 flow-root max-w-full truncate font-semibold";
 
-/** The old visible h2, still the page's top heading. */
+/** The visible h2, the page's top heading. */
 export function GuildsTitle() {
   return (
     <h2 aria-level={1} className="my-[0.83em] text-[24px] font-bold">

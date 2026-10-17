@@ -1,11 +1,11 @@
-// The rule create/edit modal of the old forwarding.html (#fwdModal). It keeps
-// the old ids and the old "show" class on #fwdModal for the e2e specs, so it
-// carries its own shell instead of components/Modal (which takes no id): the
-// same focus trap, Escape and overlay close, and focus back to the opener.
-// The look is the old .modal-content: uppercase section titles with the
-// gradient bar, 12px labels, the .dd guild dropdown, the More filters row of
-// label toggles and the footer at the end of the scroll, not sticky.
-// Saving runs the old checks, asks POST /api/forwarding/validate for Telegram
+// The rule create/edit modal (#fwdModal). The e2e specs need its ids and the
+// "show" class on #fwdModal, so it carries its own shell instead of
+// components/Modal (which takes no id): the same focus trap, Escape and
+// overlay close, and focus back to the opener.
+// Uppercase section titles with the gradient bar, 12px labels, the guild
+// dropdown, the More filters row of label toggles and the footer at the end
+// of the scroll, not sticky.
+// Saving runs the client checks, asks POST /api/forwarding/validate for Telegram
 // and Pushover, then posts the rule to POST /api/forwarding.
 
 import { useEffect, useRef, useState } from "react";
@@ -107,7 +107,7 @@ function LabelToggle({ id, label, title, checked, enabled, onChange }: {
   );
 }
 
-/** The old .dd toggle the guild <select> was turned into: 34px, 13px, purple caret; FieldSelect adds the caret room. */
+/** The guild dropdown toggle: 34px, 13px, purple caret; FieldSelect adds the caret room. */
 const GUILD_TOGGLE =
   "input dd-toggle min-h-[34px] rounded-btn border border-border-input bg-control py-2 pl-2.5 font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus-visible:border-accent";
 
@@ -135,7 +135,7 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
-    // The old page left focus on the opener; the dialog box takes it so Tab starts inside.
+    // The dialog box takes focus so Tab starts inside.
     dialog?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

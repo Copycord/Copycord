@@ -1,7 +1,6 @@
-// Form state of the rule modal and the old forwarding.js logic around it:
-// openEditModal (prefill), openDuplicateModal, buildPayloadFromForm and the
-// client side half of validateProviderConfig. Secrets are prefilled as they
-// come from GET /api/forwarding, exactly like the old page's plain text inputs.
+// Form state of the rule modal: prefill for edit and duplicate, the payload
+// built from the form, and the client side provider checks. Secrets are
+// prefilled as they come from GET /api/forwarding, in plain text inputs.
 
 import { api, ApiError, errorText } from "../../lib/api";
 import type {
@@ -16,7 +15,7 @@ import { RULES_URL, toList } from "./forwardingApi";
 export const VALIDATE_URL = "/api/forwarding/validate";
 export const CLIENT_GUILDS_URL = "/api/client-guilds";
 
-// The old loadGuilds warning toast, shown when there is no working client token.
+// Warning shown when there is no working client token.
 export const CLIENT_TOKEN_MESSAGE =
   "We couldn’t load any guilds yet. It looks like your Discord client token isn’t configured. Open the Configuration page, add your tokens, then come back here.";
 export const GUILDS_RATE_LIMITED_MESSAGE = "Discord is rate limiting guild lookups. Try again in a few seconds.";
@@ -181,7 +180,7 @@ export function buildPayload(form: RuleForm): ForwardingRulePayload {
   };
 }
 
-/** The checks the old page ran before asking the server; null when they pass. */
+/** The checks run before asking the server; null when they pass. */
 export function localProblem(payload: ForwardingRulePayload): string | null {
   const cfg = payload.config;
   if (!payload.provider) return "Please choose a provider.";
@@ -201,7 +200,7 @@ export function localProblem(payload: ForwardingRulePayload): string | null {
   return null;
 }
 
-/** Old behaviour: only Telegram and Pushover are checked by the server before saving. */
+/** Only Telegram and Pushover are checked by the server before saving. */
 export function needsServerValidation(provider: string): boolean {
   return provider === "telegram" || provider === "pushover";
 }
@@ -214,7 +213,7 @@ export function saveRule(payload: ForwardingRulePayload): Promise<ForwardingSave
   return api.post<ForwardingSaveResponse>(RULES_URL, payload);
 }
 
-/** The text the old page toasted for a failed validate call. */
+/** The toast text for a failed validate call. */
 export function validateFailure(e: unknown): string {
   if (e instanceof ApiError) {
     const body = e.body as { errors?: unknown; detail?: unknown } | string | undefined;

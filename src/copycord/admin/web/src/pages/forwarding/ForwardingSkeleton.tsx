@@ -41,7 +41,7 @@ export const PROVIDER_ICON = "block size-3.5 shrink-0";
 export const RULE_FOOTER = "mt-3 flex items-center gap-2 pt-3 max-[640px]:flex-wrap max-[480px]:flex-col";
 export const RULE_STAT = "ml-auto flex items-center gap-2 text-xs leading-[1.2] opacity-60";
 
-// The old .fwd-card-footer .btn: a 32px ghost button with a 12px label; it grows to fill the
+// Footer button: a 32px ghost button with a 12px label; it grows to fill the
 // wrapped row under 640px and takes the full width under 480px.
 const FOOTER_BUTTON =
   "inline-flex min-h-8 cursor-pointer items-center justify-center rounded-control border border-border bg-wash-4 " +

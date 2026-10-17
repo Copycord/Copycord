@@ -34,7 +34,7 @@ import {
 
 export interface ChannelTreeProps extends ChannelTreeSlots {
   tree: Tree;
-  /** Hidden until the status gate first opens, as the old page did. */
+  /** Hidden until the status gate first opens. */
   hidden?: boolean;
   /** A refetch is running: the rows stay, marked busy. */
   busy?: boolean;
@@ -141,7 +141,6 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions }: ChannelCa
       </div>
       <div className={ID_ROW}>
         <span title="Original channel ID">{ids.original ?? <NoId title="No channel in the host server" />}</span>
-        {/* .muted: 0.9em at 80% opacity, as the old clone id. */}
         <span title="Cloned channel ID" className="text-[0.9em] opacity-80">
           → {ids.cloned ?? <NoId title="Not cloned yet" />}
         </span>

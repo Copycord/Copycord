@@ -1,4 +1,4 @@
-// Dialog frame of the old guild modals (.scraper-card): icon and accent title
+// Dialog frame of the guild modals: icon and accent title
 // in the header, a close X, body and footer. Kept local because the shared
 // Modal has no icon, subtitle, width or stacking: the export dialog opens the
 // attachment types dialog on top of itself, and only the top one answers
@@ -118,8 +118,8 @@ export function GuildDialog({
         tabIndex={-1}
         className={cx(
           "absolute left-1/2 flex -translate-x-1/2 flex-col overflow-hidden border border-border outline-none",
-          // The details dialog is the old .scraper-card (16px radius, 18px lower, no shadow); the
-          // export dialogs are the old .export-modal card.
+          // The details dialog has a 16px radius, sits 18px lower and has no shadow; the
+          // export dialogs use the export card look.
           top
             ? "top-[calc(var(--spacing-header)+8vh)] mt-[18px] max-h-[80vh] rounded-panel text-text"
             : "top-1/2 max-h-[min(84vh,860px)] -translate-y-1/2 rounded-[14px] text-dialog-text shadow-popover",

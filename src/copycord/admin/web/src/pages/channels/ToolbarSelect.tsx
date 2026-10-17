@@ -1,5 +1,4 @@
-// The old enhanced select of the channels toolbar (.dd from app.js initDropdown):
-// the native select stays in the DOM, hidden, and keeps its id and value; a
+// The enhanced select of the toolbars: the native select stays in the DOM, hidden, and keeps its id and value; a
 // toggle button shows the chosen label with a caret and opens a listbox.
 // The wrappers are spans so the toolbar header stays the nearest block around the select.
 // The field variant (FieldSelect in components/ui/Field.tsx) is the same dropdown as a
@@ -10,7 +9,7 @@
 // placeholder: the toggle shows it muted and the list leaves it out.
 // A searchable field draws the toggle as a text input with the same look: closed it shows the
 // chosen label, focused it empties and opens the list, and typing keeps the options whose label or
-// value holds the text. Escape closes and keeps the old value, Tab and a click outside close.
+// value holds the text. Escape closes and keeps the previous value, Tab and a click outside close.
 // While the options load the same input stands there read only, its label shimmering, so the box
 // a user clicked or focused stays the one they get once the list lands.
 
@@ -34,7 +33,7 @@ export interface ToolbarSelectProps {
   options: readonly ToolbarOption[];
   onChange: (value: string) => void;
   disabled?: boolean;
-  /** Takes the native select out of the layout, as the old page did until the status gate opened. */
+  /** Takes the native select out of the layout (the Channels page does until the status gate opens). */
   nativeHidden?: boolean;
   /** The options are still loading: a bar stands where the chosen label goes. */
   pending?: boolean;
@@ -173,7 +172,7 @@ export function ToolbarSelect({
     if (!o || o.disabled) return;
     setOpen(false);
     setQuery("");
-    // Like the old dropdown, picking the current option fires change again (Name twice flips the direction);
+    // Picking the current option fires change again (Name twice flips the direction);
     // the field variant acts like a native select and stays quiet.
     if (!field || o.value !== value) onChange(o.value);
   };

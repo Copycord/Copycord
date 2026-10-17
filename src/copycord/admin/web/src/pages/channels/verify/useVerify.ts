@@ -46,7 +46,7 @@ export function useVerify(mappingId: string, store: OrphanStore = orphanStore): 
     send();
   }, [send]);
 
-  // The old page asked for the list once at boot so the tree shows orphans right away.
+  // Ask for the list once on mount so the tree shows orphans right away.
   useEffect(() => {
     if (mappingId) send();
   }, [mappingId, send]);

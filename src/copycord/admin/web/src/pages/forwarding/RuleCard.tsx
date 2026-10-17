@@ -1,6 +1,6 @@
-// One rule card from the old forwarding.js renderList: title, provider badge,
-// status pill, the Edit, Enable/Disable, Duplicate and Delete buttons and the
-// per rule forwarded count. Old class names stay as hooks for the e2e specs.
+// One rule card: title, provider badge, status pill, the Edit, Enable/Disable,
+// Duplicate and Delete buttons and the per rule forwarded count. The plain
+// class names are hooks for the e2e specs.
 
 import { CARD_HOVER, cx } from "../../components/ui";
 import type { ForwardingRule } from "../../types/forwarding";
