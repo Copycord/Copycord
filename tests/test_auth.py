@@ -209,7 +209,7 @@ class TestLogout:
 # Dashboard pages: the SPA at the root, behind the login guard
 # ---------------------------------------------------------------------------
 
-PAGES = ["/", "/channels", "/guilds", "/forwarding", "/scraper", "/system", "/logs"]
+PAGES = ["/", "/channels", "/guilds", "/forwarding", "/system", "/logs"]
 
 
 def _get_page(tc, path, with_session):

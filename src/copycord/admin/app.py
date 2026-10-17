@@ -366,7 +366,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
 # Dashboard pages, all rendered by the SPA (router basename "/").
-SPA_PAGES = ("/", "/channels", "/messages", "/guilds", "/forwarding", "/scraper", "/system", "/logs", "/tasks")
+SPA_PAGES = ("/", "/channels", "/messages", "/guilds", "/forwarding", "/system", "/logs", "/tasks")
 # First path segments that are never SPA pages: an unknown path under one is a plain 404.
 NON_PAGE_SEGMENTS = frozenset(
     {"api", "ws", "bus", "logs", "static", "assets", "version", "health", "filters", "login", "logout"}
