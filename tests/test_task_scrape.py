@@ -1,5 +1,5 @@
 """Scrape members task type: a fake scraper in place of StandaloneScraper, a fake
-token store and token access check, files under tmp_path."""
+token store and per token membership check, files under tmp_path."""
 import asyncio
 import json
 
@@ -17,8 +17,8 @@ from copycord.admin.tasks.service import MemoryRunRepo, TaskRun, TaskService
 GID = "222333444555666777"
 DASH = chr(0x2014)
 TOKENS = [
-    {"token_id": "t1", "token_value": "tok-one", "label": "one"},
-    {"token_id": "t2", "token_value": "tok-two", "label": "two"},
+    {"token_id": "t1", "token_value": "tok-one", "label": "one", "is_valid": 1, "use_count": 0},
+    {"token_id": "t2", "token_value": "tok-two", "label": "two", "is_valid": 1, "use_count": 0},
 ]
 
 
@@ -28,10 +28,10 @@ class FakeDb:
         self.used = []
 
     def get_valid_scraper_tokens(self):
-        return list(self.tokens)
+        raise AssertionError("tokens are not validated: the task uses every saved token")
 
     def list_scraper_tokens(self):
-        return list(self.tokens) + [{"token_id": "bad", "token_value": "x", "is_valid": False}]
+        return list(self.tokens)
 
     def increment_scraper_token_usage(self, token_id):
         self.used.append(token_id)
@@ -106,22 +106,26 @@ def env(tmp_path, monkeypatch):
     db = FakeDb(TOKENS)
     built = []
     opts = {}
-    access = {"gate": None, "with": {"t1"}, "calls": 0}
+    # with: token ids in the server; fail: token values Discord refuses (the check raises).
+    access = {"gate": None, "with": {"t1"}, "fail": set(), "calls": 0}
 
     def make(config):
         s = FakeScraper(config, **opts)
         built.append(s)
         return s
 
-    async def token_access(gid):
+    async def in_guild(token_value, gid):
         access["calls"] += 1
         if access["gate"] is not None:
             await access["gate"].wait()
-        results = [{"token_id": t["token_id"], "label": t["label"], "has_access": t["token_id"] in access["with"]}
-                   for t in db.tokens]
-        return [t for t in db.tokens if t["token_id"] in access["with"]], results
+        if token_value in access["fail"]:
+            raise app_module.DiscordGuildsError("client-token-invalid")
+        access.setdefault("guilds", []).append(gid)
+        return any(t["token_value"] == token_value and t["token_id"] in access["with"] for t in db.tokens)
 
     async def user_guilds(token):
+        if token in access["fail"]:
+            raise app_module.DiscordGuildsError("client-token-invalid")
         if token == "tok-one":
             return [{"id": GID, "name": "Zeta"}, {"id": "111", "name": "alpha"}]
         if token == "tok-two":
@@ -129,7 +133,7 @@ def env(tmp_path, monkeypatch):
         return []
 
     monkeypatch.setattr(scrape, "_wiring", scrape._Wiring(
-        db=db, data_dir=tmp_path, token_access=token_access, user_guilds=user_guilds,
+        db=db, data_dir=tmp_path, in_guild=in_guild, user_guilds=user_guilds,
         log_path=tmp_path / "logs" / "scraper.out", make_scraper=make))
     monkeypatch.setattr(scrape, "CANCEL_WAIT", 1.0)
     scrape._guild_names.clear()
@@ -201,7 +205,7 @@ async def test_progress_then_success_saves_the_file(svc, env):
     await _until(lambda: _steps(svc, run.id)["scrape"]["label"] == "3 of about 10 members found")
     steps = _steps(svc, run.id)
     assert steps["tokens"]["state"] == "success"
-    assert steps["tokens"]["note"] == "1 of 2 tokens can see this server"
+    assert steps["tokens"]["note"] == "1 of 2 tokens used, 1 skipped"
     assert steps["scrape"]["state"] == "running" and steps["scrape"]["total"] == 10
     assert steps["save"]["state"] == "queued"
     cfg = env["built"][0].config
@@ -217,7 +221,7 @@ async def test_progress_then_success_saves_the_file(svc, env):
     steps = _steps(svc, run.id)
     assert steps["scrape"]["state"] == "success" and steps["scrape"]["note"] == "3 members found"
     assert steps["save"]["state"] == "success" and steps["save"]["note"] == "Saved 3 members"
-    assert done.summary == {"members": 3, "tokens": 1, "tokens_missing": 1}
+    assert done.summary == {"members": 3, "tokens": 1, "tokens_skipped": 1}
 
     out = done.report["output"]
     assert out["path"].startswith(f"{GID}/scrape_{GID}_") and out["path"].endswith(".json")
@@ -287,24 +291,80 @@ async def test_no_members_writes_no_file(svc, env):
 
 @pytest.mark.asyncio
 async def test_no_token_can_see_the_server(svc, env):
-    env["access"]["with"] = set()
+    # Zero usable tokens: one out of the server, one Discord refuses. The only case that fails.
+    env["access"]["with"] = {"t2"}
+    env["access"]["fail"] = {"tok-two"}
     run = await svc.start("scrape_members", {"guild_id": GID})
     done = await _settled(svc, run.id)
-    assert done.status == "failed" and done.error == "None of the scraper tokens can see this server"
+    assert done.status == "failed" and done.error == "None of the 2 scraper tokens work in this server"
     steps = _steps(svc, run.id)
     assert steps["tokens"]["state"] == "failed"
+    assert steps["tokens"]["note"] == "None of the 2 scraper tokens work in this server"
     assert steps["scrape"]["state"] == "skipped" and steps["save"]["state"] == "skipped"
-    assert done.summary == {"members": 0, "tokens": 0, "tokens_missing": 2}
-    assert env["built"] == []
+    assert done.summary == {"members": 0, "tokens": 0, "tokens_skipped": 2}
+    assert done.report["error"] == done.error
+    assert env["access"]["calls"] == 2 and env["built"] == [] and env["db"].used == []
 
 
 @pytest.mark.asyncio
-async def test_no_valid_tokens(svc, env):
+async def test_bad_and_out_of_server_tokens_are_skipped(svc, env):
+    # No validation: an unvalidated token is used, a refused one and one out of the server
+    # are skipped with a note, and the run goes on with the rest.
+    env["db"].tokens = [
+        {"token_id": "t1", "token_value": "tok-one", "label": "one", "is_valid": 0, "use_count": 4},
+        {"token_id": "t2", "token_value": "tok-two", "label": "two", "is_valid": 1, "use_count": 0},
+        {"token_id": "t3", "token_value": "tok-bad", "label": "bad", "is_valid": 1, "use_count": 1},
+        {"token_id": "t4", "token_value": "tok-four", "label": "four", "is_valid": None, "use_count": 2},
+        {"token_id": "t5", "token_value": "tok-out", "label": "out", "is_valid": 0, "use_count": 3},
+    ]
+    env["access"]["with"] = {"t1", "t3", "t4"}
+    env["access"]["fail"] = {"tok-bad"}
+    run = await svc.start("scrape_members", {"guild_id": GID})
+    done = await _settled(svc, run.id)
+    assert done.status == "success" and done.error is None
+    steps = _steps(svc, run.id)
+    assert steps["tokens"]["state"] == "success"
+    assert steps["tokens"]["note"] == "2 of 5 tokens used, 3 skipped"
+    # Least used first.
+    assert env["built"][0].config.tokens == ["tok-four", "tok-one"]
+    assert sorted(env["db"].used) == ["t1", "t4"]
+    assert done.summary == {"members": 3, "tokens": 2, "tokens_skipped": 3}
+    msgs = _msgs(done)
+    assert "2 of 5 tokens used, 3 skipped" in msgs
+    assert any(ln["msg"] == "3 tokens skipped: failed or not in this server" and ln["level"] == "warning"
+               for ln in done.log_lines)
+    assert not any(ln["level"] == "error" for ln in done.log_lines)
+
+
+@pytest.mark.asyncio
+async def test_all_tokens_used_has_no_skip_note(svc, env):
+    env["access"]["with"] = {"t1", "t2"}
+    run = await svc.start("scrape_members", {"guild_id": GID})
+    done = await _settled(svc, run.id)
+    assert done.status == "success"
+    assert _steps(svc, run.id)["tokens"]["note"] == "2 of 2 tokens used"
+    assert not any("skipped" in m for m in _msgs(done))
+
+
+@pytest.mark.asyncio
+async def test_no_tokens_saved(svc, env):
     env["db"].tokens = []
     run = await svc.start("scrape_members", {"guild_id": GID})
     done = await _settled(svc, run.id)
-    assert done.status == "failed" and done.error == "No valid scraper tokens"
+    assert done.status == "failed" and done.error == "No scraper tokens saved"
     assert env["access"]["calls"] == 0 and env["built"] == []
+
+
+@pytest.mark.asyncio
+async def test_bots_stopping_leaves_a_scrape_running(svc, env):
+    release = asyncio.Event()
+    env["opts"].update(count=1, release=release)
+    run = await svc.start("scrape_members", {"guild_id": GID})
+    await _until(lambda: _found(svc, run.id) == 1)
+    assert await svc.stop_all() == []
+    assert svc.get(run.id).status == "running"
+    release.set()
+    assert (await _settled(svc, run.id)).status == "success"
 
 
 @pytest.mark.asyncio
@@ -406,18 +466,32 @@ async def test_options(env):
     out = await scrape.options({})
     assert out == {
         "guilds": [{"id": "111", "name": "alpha", "tokens": 1}, {"id": GID, "name": "Zeta", "tokens": 2}],
-        "tokens": {"valid": 2, "total": 3},
+        "tokens": {"total": 2, "skipped": 0},
         "proxies": 2,
     }
+    # No validation gate: a guild_id adds nothing and checks no token.
     out = await scrape.options({"guild_id": GID})
-    assert out["setup"] == {"ok": True, "tokens_in_guild": 1, "tokens_missing": 1, "results": [
-        {"token_id": "t1", "label": "one", "has_access": True},
-        {"token_id": "t2", "label": "two", "has_access": False}]}
-    assert (await scrape.options({"guild_id": "x1"}))["setup"]["ok"] is False
+    assert "setup" not in out and env["access"]["calls"] == 0
+    assert [g["id"] for g in out["guilds"]] == ["111", GID]
+
+    # Unvalidated tokens list their servers; one Discord refuses is skipped, not an error.
+    env["db"].tokens = [dict(t, is_valid=0) for t in TOKENS] + [
+        {"token_id": "t3", "token_value": "tok-bad", "label": "bad", "is_valid": 1, "use_count": 0}]
+    env["access"]["fail"] = {"tok-bad"}
+    out = await scrape.options({})
+    assert out["tokens"] == {"total": 3, "skipped": 1} and "error" not in out
+    assert [g["id"] for g in out["guilds"]] == ["111", GID]
+
+    # Only when no token lists anything is it an error.
+    env["db"].tokens = [env["db"].tokens[2]]
+    out = await scrape.options({})
+    assert out["guilds"] == [] and out["tokens"] == {"total": 1, "skipped": 1}
+    assert out["error"] == "Discord did not accept a scraper token."
+
     env["db"].tokens = []
     out = await scrape.options({"guild_id": GID})
-    assert out["guilds"] == [] and out["tokens"] == {"valid": 0, "total": 1}
-    assert out["error"] == "No valid scraper tokens." and "setup" not in out
+    assert out["guilds"] == [] and out["tokens"] == {"total": 0, "skipped": 0}
+    assert out["error"] == "No scraper tokens. Add one first." and "setup" not in out
 
 
 def test_save_scrape_file(tmp_path):
@@ -453,9 +527,9 @@ def http(tmp_path, monkeypatch):
 def _finished_run(repo, path, type_key="scrape_members"):
     run = TaskRun(type=type_key, number=2, status="success", title="Scrape members of Zeta", trigger="manual",
                   actor="admin", inputs={"guild_id": GID}, context={"label": "Zeta", "guild_id": GID},
-                  summary={"members": 3, "tokens": 1, "tokens_missing": 0},
+                  summary={"members": 3, "tokens": 1, "tokens_skipped": 0},
                   report={"output": {"path": path, "size": None},
-                          "summary": {"members": 3, "tokens": 1, "tokens_missing": 0}})
+                          "summary": {"members": 3, "tokens": 1, "tokens_skipped": 0}})
     return repo.insert_run(run)
 
 
@@ -535,3 +609,71 @@ def test_start_does_not_need_the_bots(http):
     assert resp.status_code == 422
     resp = tc.post("/api/tasks/runs", json={"type": "scrape_members", "inputs": {"guild_id": GID}})
     assert resp.status_code == 201
+
+
+# the scraper settings routes that stay (tokens, proxies) and the ones that went
+
+class TokenDb:
+    def __init__(self):
+        self.rows = {}
+
+    def list_scraper_tokens(self):
+        return list(self.rows.values())
+
+    def add_scraper_token(self, token_value, label=None):
+        tid = f"id{len(self.rows) + 1}"
+        self.rows[tid] = {"token_id": tid, "token_value": token_value, "label": label, "is_valid": None,
+                          "use_count": 0}
+        return tid
+
+    def get_scraper_token(self, token_id):
+        return self.rows.get(token_id)
+
+    def update_scraper_token(self, token_id, **fields):
+        self.rows[token_id].update(fields)
+
+    def delete_scraper_token(self, token_id):
+        return self.rows.pop(token_id, None) is not None
+
+
+def test_token_routes_do_not_validate(http, monkeypatch):
+    tc, _repo, _tmp = http
+    tdb = TokenDb()
+    monkeypatch.setattr(app_module, "db", tdb)
+
+    async def no_discord(*a, **k):
+        raise AssertionError("token validation is gone")
+
+    monkeypatch.setattr(app_module, "_check_client_token_valid", no_discord)
+    resp = tc.post("/api/scraper/tokens/add", data={"token_value": " tok-new ", "label": "mine"})
+    assert resp.status_code == 200 and resp.json() == {"ok": True, "token_id": "id1"}
+    assert tdb.rows["id1"]["token_value"] == "tok-new"
+    assert tc.post("/api/scraper/tokens/add", data={"token_value": "tok-new"}).status_code == 400
+    resp = tc.post("/api/scraper/tokens/id1/update", data={"label": "renamed"})
+    assert resp.status_code == 200 and tdb.rows["id1"]["label"] == "renamed"
+    toks = tc.get("/api/scraper/tokens").json()["tokens"]
+    assert [t["token_id"] for t in toks] == ["id1"] and "tok-new" not in json.dumps(toks)
+    assert tc.post("/api/scraper/tokens/id1/validate").status_code in (404, 405)
+    assert tc.delete("/api/scraper/tokens/id1").status_code == 200 and tdb.rows == {}
+    assert tc.delete("/api/scraper/tokens/id1").status_code == 404
+
+
+@pytest.mark.parametrize("method,path", [
+    ("post", "/api/scraper/validate-setup"),
+    ("post", "/api/scraper/start"),
+    ("post", "/api/scraper/queue/add"),
+    ("get", "/api/scraper/queue"),
+    ("delete", "/api/scraper/queue/1"),
+    ("post", "/api/scraper/queue/clear"),
+    ("post", "/api/scraper/queue/start"),
+    ("get", "/api/scraper/status"),
+    ("post", "/api/scraper/cancel"),
+    ("post", "/api/scraper/cancel-all"),
+    ("get", "/api/scraper/results"),
+    ("post", "/api/scraper/logs/clear"),
+])
+def test_old_scraper_routes_are_gone(http, method, path):
+    tc, _repo, _tmp = http
+    assert getattr(tc, method)(path).status_code in (404, 405)
+    assert not hasattr(app_module, "scraper_state") and not hasattr(app_module, "_run_single_scrape")
+    assert not hasattr(app_module, "_scraper_token_access")

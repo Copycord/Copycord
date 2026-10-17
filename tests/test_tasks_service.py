@@ -86,8 +86,11 @@ TYPES = [
     registry.TaskType(key="t_boom", title="Boom", run=_boom, inputs=NoopInputs),
     registry.TaskType(key="t_soft", title="Soft", run=_soft_fail, inputs=NoopInputs),
     registry.TaskType(key="t_slow", title="Slow", run=_slow, inputs=NoopInputs),
-    registry.TaskType(key="t_stubborn", title="Stubborn", run=_stubborn, inputs=NoopInputs),
-    registry.TaskType(key="t_gated", title="Gated", run=_gated, inputs=NoopInputs, concurrency=1),
+    registry.TaskType(key="t_stubborn", title="Stubborn", run=_stubborn, inputs=NoopInputs,
+                      requires_bots=True),
+    registry.TaskType(key="t_gated", title="Gated", run=_gated, inputs=NoopInputs, concurrency=1,
+                      requires_bots=True),
+    registry.TaskType(key="t_free", title="Free", run=_gated, inputs=NoopInputs),
 ]
 
 
@@ -234,13 +237,38 @@ async def test_bots_stopped_cancels_running_and_queued_runs_at_once(svc, events)
 
 
 @pytest.mark.asyncio
+async def test_bots_stopped_leaves_runs_that_do_not_need_the_bots(svc):
+    # Both are run number 1 of their type, so both wait on GATES[1].
+    GATES[1] = Gate()
+    free = await svc.start("t_free", {})
+    needs = await svc.start("t_gated", {})
+    await asyncio.wait_for(GATES[1].started.wait(), 1)
+    await asyncio.sleep(0.05)
+    assert svc.get(free.id).status == "running" and svc.get(needs.id).status == "running"
+
+    stopped = await svc.stop_all()
+
+    assert [r.id for r in stopped] == [needs.id]
+    assert svc.get(needs.id).status == "cancelled"
+    assert svc.get(free.id).status == "running" and free.id in svc._active
+    assert not any(ln["msg"] == "Bots stopped" for ln in svc.get(free.id).log_lines)
+    GATES[1].release.set()
+    assert (await _settled(svc, free.id)).status == "success"
+    assert (await _settled(svc, needs.id)).status == "cancelled"
+
+
+@pytest.mark.asyncio
 async def test_shutdown_ends_runs_cancelled_bots_stopped(svc, monkeypatch):
     monkeypatch.setattr(service_module, "SHUTDOWN_WAIT", 0.05)
+    GATES[1] = Gate()
     run = await svc.start("t_stubborn", {})
+    free = await svc.start("t_free", {})
     await asyncio.sleep(0.02)
     await svc.shutdown()
     row = svc.repo.get_run(run.id)
     assert row.status == "cancelled" and row.steps[0]["note"] == "Bots stopped"
+    # Shutdown ends the runs that do not need the bots too.
+    assert svc.repo.get_run(free.id).status == "cancelled"
     assert svc._active == {} and svc._watchdogs == {}
 
 

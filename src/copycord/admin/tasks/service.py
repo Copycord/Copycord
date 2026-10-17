@@ -379,14 +379,19 @@ class TaskService:
         finally:
             self._watchdogs.pop(ctx.run.id, None)
 
-    async def stop_all(self, note: str = BOTS_STOPPED) -> list[TaskRun]:
-        """The bots went down: every queued and running run ends cancelled now, its open steps
-        noted, instead of waiting on frames that will never come. Each runner still sees the
+    async def stop_all(self, note: str = BOTS_STOPPED, bots_only: bool = True) -> list[TaskRun]:
+        """The bots went down: every queued and running run of a type that needs them ends
+        cancelled now, its open steps noted, instead of waiting on frames that will never come.
+        Runs of a type with requires_bots=False (a scrape) go on, unless bots_only=False
+        (app shutdown) ends them too. Each runner still sees the
         cancel and unwinds (a report it writes lands on the ended run); one still going after
         the grace period is cancelled by force."""
         stopped: list[TaskRun] = []
         for run_id, (ctx, task) in list(self._active.items()):
             if ctx.run.status in FINAL:
+                continue
+            task_type = registry.get(ctx.run.type)
+            if bots_only and task_type is not None and not task_type.requires_bots:
                 continue
             ctx.cancel_note = note
             ctx.cancelled.set()
@@ -442,7 +447,7 @@ class TaskService:
     async def shutdown(self) -> None:
         """App shutdown: the bots go with it, so every active run ends cancelled (stop_all), its
         runner gets SHUTDOWN_WAIT to finish and is then cancelled."""
-        await self.stop_all()
+        await self.stop_all(bots_only=False)
         runners = [task for _, task in self._active.values()]
         if runners:
             await asyncio.wait(runners, timeout=SHUTDOWN_WAIT)
