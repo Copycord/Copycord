@@ -20,6 +20,7 @@ import logging
 import os
 import random
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
@@ -603,6 +604,7 @@ class StandaloneScraper:
         self._slot_proxies: Dict[tuple, Optional[str]] = {}
         self._http_sessions: Dict[tuple, Any] = {}
         self._bio_failures: Dict[str, int] = {}
+        self._heartbeat_ids: Dict[str, str] = {}
         self._recorder: Optional[DebugRecorder] = (
             DebugRecorder(
                 config.tokens,
@@ -1075,6 +1077,7 @@ class StandaloneScraper:
         # on connecting: its upgrade headers and its IDENTIFY. Sessions of the same token
         # share the token's fingerprint, as the client's do.
         identity = GatewayClient(token, reconnect=False)
+        identity.heartbeat_session_id = self._heartbeat_ids.get(token, identity.heartbeat_session_id)
 
         max_reconnects = 5
         max_total_reconnects = 999
@@ -1254,7 +1257,6 @@ class StandaloneScraper:
 
                             if op == 0 and t == "READY":
                                 ready = True
-                                set_heartbeat_session_id(token, identity.heartbeat_session_id)
                                 self._sessions_ready += 1
                                 self._log(
                                     f"🟢 Session {session_index + 1} connected",
@@ -1474,6 +1476,11 @@ class StandaloneScraper:
         self._bio_failures = {}
         bio_tasks: List[asyncio.Task] = []
         self._plan_proxies(self.config.tokens)
+        # One heartbeat session id per token for the whole run, shared by REST and the
+        # gateway, as a launched web client keeps one per launch.
+        self._heartbeat_ids = {t: str(uuid.uuid4()) for t in self.config.tokens}
+        for t, hb in self._heartbeat_ids.items():
+            set_heartbeat_session_id(t, hb)
 
         guild_id = self.config.guild_id
         guild_name = None
