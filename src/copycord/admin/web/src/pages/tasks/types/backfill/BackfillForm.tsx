@@ -1,5 +1,5 @@
-// Start form of Backfill channels: mapping, channel picker, how far back (v3 wording and
-// validation), Ignore cloned with the v3 tip, and Resume previous / Start new when a picked
+// Start form of Backfill channels: mapping, channel picker, how far back (with its
+// validation), Ignore cloned with its tip, and Resume previous / Start new when a picked
 // channel has a checkpoint. Start posts the run and opens it.
 
 import { useMemo, useState } from "react";

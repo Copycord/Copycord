@@ -1,7 +1,7 @@
 // Start form of Export messages: one of the client account's servers (from the type's options, typed into
 // the server box to filter by name or ID), channel and user filters, the content filters with the
-// attachment types, a webhook to forward to, a date range and the media to download. The body is the one
-// the Guilds page export dialog sent, built by buildExportPayload.
+// attachment types, a webhook to forward to, a date range and the media to download. The body is built
+// by buildExportPayload.
 
 import { useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";

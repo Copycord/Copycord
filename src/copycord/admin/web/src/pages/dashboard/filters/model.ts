@@ -107,7 +107,7 @@ export function parentLabel(obj: GuildObject, cats: Map<string, string>): string
   return (pid && cats.get(pid)) || "";
 }
 
-/** Search over name, ID and (for channels) category name, as the picker box did. */
+/** Search over name, ID and (for channels) category name. */
 export function filterObjects(
   items: GuildObject[],
   query: string,

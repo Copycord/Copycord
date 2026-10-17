@@ -1,4 +1,4 @@
-// Pure helpers for the Event logs page, ported from frontend/src/js/logs.js.
+// Pure helpers for the Event logs page.
 
 import type { EventLog } from "../../types/logs";
 
@@ -71,7 +71,7 @@ export function typeMeta(type: string): TypeMeta {
   return TYPE_META[type] ?? { label: titleCase(type), tone: "default" };
 }
 
-/** Dropdown options sorted by label, as the old filter did. */
+/** Dropdown options sorted by label. */
 export function typeOptions(types: readonly string[]): Array<{ value: string; label: string }> {
   return [...new Set(types)]
     .map((t) => ({ value: t, label: typeMeta(t).label }))
@@ -148,7 +148,7 @@ function show(v: unknown): string {
   return String(v);
 }
 
-/** Label/value pairs for the expandable detail row, in the old page's order. */
+/** Label/value pairs for the expandable detail row. */
 export function metadataRows(log: EventLog): Array<[string, string]> {
   const extra = parseExtra(log);
   const rows: Array<[string, string]> = [];
@@ -227,7 +227,7 @@ export function pageRange(current: number, pages: number): Array<number | null> 
   return out;
 }
 
-/** "Showing 1-50 of 120", or the old wording when the page came back empty. */
+/** "Showing 1-50 of 120", or the empty wording when the page came back empty. */
 /** The held rows then `more`, a log already held kept once (new logs on top shift the offsets). */
 export function appendLogs(held: EventLog[], more: EventLog[]): EventLog[] {
   const ids = new Set(held.map((l) => l.log_id));

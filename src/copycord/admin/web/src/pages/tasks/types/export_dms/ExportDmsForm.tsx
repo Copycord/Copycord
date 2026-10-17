@@ -1,5 +1,4 @@
-// Start form of Export DMs: the user ID, Save a JSON file and an optional webhook URL, the inputs the
-// /export_dms slash command took. Nothing is deleted, so Export DMs starts without a confirm.
+// Start form of Export DMs: the user ID, Save a JSON file and an optional webhook URL. Nothing is deleted, so Export DMs starts without a confirm.
 
 import { useState } from "react";
 import type { FormEvent } from "react";

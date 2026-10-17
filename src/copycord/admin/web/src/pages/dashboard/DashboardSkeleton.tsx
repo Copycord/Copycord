@@ -79,7 +79,7 @@ export function BackupIcon() {
   );
 }
 
-/** The Add Bot to Server link in the full accent (6.6:1 on the card, rule b); INVITE_OFF, muted and dimmed as a disabled
+/** The Add Bot to Server link in the full accent (6.6:1 on the card); INVITE_OFF, muted and dimmed as a disabled
  *  control, until the bot's client id is known. */
 export const INVITE_LINK = "inline-flex items-center gap-[5px] text-xs font-medium text-accent no-underline hover:underline max-sm:self-start";
 export const INVITE_OFF = "pointer-events-none cursor-default text-muted! opacity-60";

@@ -1,4 +1,4 @@
-// "Scraper tokens and proxies" card on the Scrape members type page, moved off the old Scraper page:
+// "Scraper tokens and proxies" card on the Scrape members type page:
 // the saved tokens and the proxy list, each a plain textbox with one entry per line, saved as a whole
 // list (JSON PUT, a text file on the server) by itself shortly after the last edit. Collapsed by default.
 

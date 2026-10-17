@@ -1,4 +1,4 @@
-// Heroicons outline paths used by the old logs.html toolbar and rows.
+// Heroicons outline paths used by the Event logs toolbar and rows.
 
 import type { SVGProps } from "react";
 

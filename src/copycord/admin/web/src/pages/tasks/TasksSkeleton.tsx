@@ -480,7 +480,7 @@ export function badgeText(active: number, queued = 0): string {
   const running = Math.max(0, active - queued);
   return running > 0 ? `${running} running` : `${queued} queued`;
 }
-// The active count says "running" in words too (rule a): the pulsing accent dot alone was a colour-only signal.
+// The active count says "running" in words too, so the pulsing accent dot is not a colour-only signal.
 
 export function RailCounts({ total, active = 0, queued = 0 }: { total: number | null; active?: number; queued?: number }) {
   const onlyQueued = active > 0 && queued >= active;

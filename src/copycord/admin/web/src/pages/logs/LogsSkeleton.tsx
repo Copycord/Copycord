@@ -31,7 +31,7 @@ export const TOOLBAR_RIGHT = "flex items-center gap-3";
 export const COUNT = "text-xs whitespace-nowrap text-muted";
 
 // The table height leaves room for the header and toolbar so the page fits the screen. On phones the
-// table keeps the old fixed layout without Guild, so Details runs past the edge and the wrap scrolls.
+// table keeps its fixed layout without Guild, so Details runs past the edge and the wrap scrolls.
 export const TABLE_WRAP = cx(
   "h-[calc(100vh-280px)] min-h-[400px] overflow-auto rounded-xl border border-border",
   "bg-linear-to-b from-card-a50 to-well-a60 max-md:h-[calc(100vh-320px)] max-md:min-h-[300px]",

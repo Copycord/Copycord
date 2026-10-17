@@ -1,5 +1,5 @@
-// Pure helpers of the Backfill channels form: the range validation copied from
-// pages/channels/backfill/logic.ts (v3 rules) and the POST /api/tasks/runs inputs.
+// Pure helpers of the Backfill channels form: the range validation and the
+// POST /api/tasks/runs inputs.
 
 export type RangeMode = "all" | "since" | "between" | "last_n";
 export type RunMode = "resume" | "new";

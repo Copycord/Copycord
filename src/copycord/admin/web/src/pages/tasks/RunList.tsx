@@ -31,7 +31,7 @@ import {
   runCountText,
 } from "./TasksSkeleton";
 
-// rerun: runs stored before Re-run was removed still say how they started; nothing starts one now.
+// rerun: kept so stored runs with that trigger still say how they started; nothing starts one.
 const TRIGGER: Record<string, string> = { manual: "Manual", rerun: "Re-run", api: "API" };
 
 /** How the run started: "Manual". */
