@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { busStream, connectSse, logStream } from "./sse";
+import { connectSse, logStream } from "./sse";
 
 class FakeSource {
   static last: FakeSource | undefined;
@@ -25,9 +25,9 @@ const Impl = FakeSource as unknown as typeof EventSource;
 describe("sse", () => {
   it("parses JSON events, skips heartbeats and closes", () => {
     const got: unknown[] = [];
-    const client = busStream({ onMessage: (m) => got.push(m), EventSourceImpl: Impl });
+    const client = connectSse("/events", { onMessage: (m) => got.push(m), EventSourceImpl: Impl });
     const src = FakeSource.last!;
-    expect(src.url).toBe("/bus/stream");
+    expect(src.url).toBe("/events");
     expect(src.init?.withCredentials).toBe(true);
     src.emit('{"kind":"status"}');
     src.emit(": ping");

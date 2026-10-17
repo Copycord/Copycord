@@ -39,15 +39,6 @@ export interface TaskStep {
   note?: string | null;
 }
 
-/** One friendly log line in the run detail's log_lines; seq numbers the line, step names a step key. */
-export interface TaskLogLine {
-  seq: number;
-  ts: string;
-  level: "info" | "warn" | "error" | string;
-  step?: string | null;
-  msg: string;
-}
-
 export interface TaskRun {
   id: string;
   type: string;
@@ -144,9 +135,4 @@ export interface PurgePreviewResponse {
   mappings: { mapping_id: string | null; name: string; matched: number }[];
   errors?: Record<string, string>;
   error?: string;
-}
-
-/** A 422 from POST /api/tasks/runs: one message per input field. */
-export interface TaskInputErrors {
-  errors: Record<string, string>;
 }
