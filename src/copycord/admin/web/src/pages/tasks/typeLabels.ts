@@ -66,6 +66,7 @@ export function rememberTypes(list: TaskType[]): void {
 export function typeLabel(key: string): TypeLabel {
   const held = read<TypeLabel>(TYPES_KEY)[key];
   if (held && typeof held.title === "string") return { title: held.title, description: held.description ?? "" };
+  if (key === "download_avatars") return { title: "Download avatars", description: "Zip the profile pictures of every member the client account can see in one of its servers." };
   return { title: humanizeTypeKey(key), description: "" };
 }
 
