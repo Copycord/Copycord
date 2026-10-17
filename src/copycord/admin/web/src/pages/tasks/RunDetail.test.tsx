@@ -631,6 +631,15 @@ describe("RunSummary", () => {
     expect(countsText(makeRun({ steps: [], summary: null }))).toBe("");
   });
 
+  it("keeps a skipped item count when the type labels it as items, not steps", () => {
+    const run = makeRun({
+      type: "sync_assets",
+      steps: ["success", "success", "success", "success"].map((state, i): TaskStep => ({ key: `s${i}`, title: `#s${i}`, state: state as TaskStep["state"] })),
+      summary: { created: 11, updated: 9, deleted: 0, reordered: 6, skipped: 1, failed: 0 },
+    });
+    expect(countsText(run, "created")).toBe("4 done · 9 assets updated · 6 roles reordered · 1 assets skipped");
+  });
+
   it("counts the steps by outcome from a run's summary when it holds no steps", () => {
     const counts = stepCounts({ summary: { success: 2, failed: 0, skipped: 0, cancelled: 4, delivered: 92 }, step_count: 6 });
     expect(counts).toEqual({ total: 6, success: 2, failed: 0, skipped: 0, cancelled: 4 });

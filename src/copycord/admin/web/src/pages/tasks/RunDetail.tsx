@@ -132,11 +132,15 @@ const STEP_KEYS = new Set<string>(COUNT_WORDS.map(([state]) => state));
  */
 export function countsText(run: TaskRun, heroKey?: string): string {
   const stats = summaryStats(run);
+  const labels = entryFor(run.type).summaryLabels ?? {};
+  // A summary key named like a step state counts steps unless its type labels it as something else
+  // ("skipped" assets in Sync and Purge assets), in which case it is an item count like any other.
+  const isStepCount = (key: string) => STEP_KEYS.has(key) && (!labels[key] || labels[key].startsWith("Steps"));
   const byState = new Map<string, number>();
   if (run.steps?.length) for (const s of run.steps) byState.set(s.state, (byState.get(s.state) ?? 0) + 1);
-  else for (const s of stats) if (STEP_KEYS.has(s.key)) byState.set(s.key, s.value);
+  else for (const s of stats) if (isStepCount(s.key)) byState.set(s.key, s.value);
   const parts = COUNT_WORDS.filter(([state]) => byState.get(state)).map(([state, word]) => `${formatCount(byState.get(state)!)} ${word}`);
-  for (const s of stats) if (!STEP_KEYS.has(s.key) && s.key !== heroKey && s.value) parts.push(`${formatCount(s.value)} ${s.label.toLowerCase()}`);
+  for (const s of stats) if (!isStepCount(s.key) && s.key !== heroKey && s.value) parts.push(`${formatCount(s.value)} ${s.label.toLowerCase()}`);
   return parts.join(" · ");
 }
 
