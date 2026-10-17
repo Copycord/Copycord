@@ -5,7 +5,6 @@ import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import { CSRF_HEADER, resetLoginRedirect } from "../lib/api";
 import type { StatusResponse, VersionInfo } from "../types/dashboard";
-import { holdFetch } from "../test/holdFetch";
 import { Dashboard, DashboardSkeleton } from "./Dashboard";
 import { appendCapped, mergeStatus, statusFromWs } from "./dashboard/model";
 import { mappingSkeletons } from "./dashboard/DashboardSkeleton";
