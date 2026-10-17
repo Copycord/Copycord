@@ -76,9 +76,7 @@ async def _cmd(port, payload):
         return json.loads(await ws.recv())
 
 
-# --------------------------------------------------------------------------
 # Restart with backoff
-# --------------------------------------------------------------------------
 
 
 def test_crash_restarts_only_that_role_with_backoff():
@@ -177,9 +175,7 @@ def test_system_exit_in_role_is_treated_as_crash():
     asyncio.run(main())
 
 
-# --------------------------------------------------------------------------
 # Shutdown
-# --------------------------------------------------------------------------
 
 
 def test_shutdown_order_client_server_admin():
@@ -209,9 +205,7 @@ def test_shutdown_order_client_server_admin():
     assert log == ["client", "server", "admin"]
 
 
-# --------------------------------------------------------------------------
 # Control protocol
-# --------------------------------------------------------------------------
 
 
 def test_control_protocol_start_stop_status():
@@ -286,9 +280,7 @@ def test_control_status_while_crash_looping_reports_running():
     asyncio.run(main())
 
 
-# --------------------------------------------------------------------------
 # Single mode
-# --------------------------------------------------------------------------
 
 
 def test_role_env_guard_exits_before_starting(monkeypatch, caplog):
@@ -307,9 +299,7 @@ def test_role_env_guard_exits_before_starting(monkeypatch, caplog):
     assert "compose file" in caplog.text
 
 
-# --------------------------------------------------------------------------
 # ThreadedRole (how real server/client run in-process)
-# --------------------------------------------------------------------------
 
 
 class _BlockingRole:
@@ -379,9 +369,7 @@ def test_threaded_role_crash_is_restarted():
     asyncio.run(main())
 
 
-# --------------------------------------------------------------------------
 # Busy ports at startup
-# --------------------------------------------------------------------------
 
 
 def _held_port():

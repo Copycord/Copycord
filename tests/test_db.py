@@ -3,9 +3,7 @@ import sqlite3
 import pytest
 
 
-# ---------------------------------------------------------------------------
 # Schema initialisation
-# ---------------------------------------------------------------------------
 
 class TestSchemaInit:
     """Verify the schema is created correctly."""
@@ -17,9 +15,7 @@ class TestSchemaInit:
         assert db.get_config("test_key") == "hello"
 
 
-# ---------------------------------------------------------------------------
 # App config
-# ---------------------------------------------------------------------------
 
 class TestAppConfig:
 
@@ -39,9 +35,7 @@ class TestAppConfig:
         assert cfg["B"] == "2"
 
 
-# ---------------------------------------------------------------------------
 # Settings (version tracking)
-# ---------------------------------------------------------------------------
 
 class TestSettings:
 
@@ -49,9 +43,7 @@ class TestSettings:
         db.set_version("v3.20.0")
         assert db.get_version() == "v3.20.0"
 
-# ---------------------------------------------------------------------------
 # Guild mappings
-# ---------------------------------------------------------------------------
 
 class TestGuildMappings:
 
@@ -142,9 +134,7 @@ class TestGuildMappings:
         assert db.is_clone_guild_id(999) is False
 
 
-# ---------------------------------------------------------------------------
 # Category mappings
-# ---------------------------------------------------------------------------
 
 class TestCategoryMappings:
 
@@ -167,9 +157,7 @@ class TestCategoryMappings:
         assert db.count_categories() == 0
 
 
-# ---------------------------------------------------------------------------
 # Channel mappings
-# ---------------------------------------------------------------------------
 
 class TestChannelMappings:
 
@@ -231,9 +219,7 @@ class TestChannelMappings:
         assert source == "assumed_original"
 
 
-# ---------------------------------------------------------------------------
 # Role mappings
-# ---------------------------------------------------------------------------
 
 class TestRoleMappings:
 
@@ -252,9 +238,7 @@ class TestRoleMappings:
         assert db.get_all_role_mappings() == []
 
 
-# ---------------------------------------------------------------------------
 # Emoji mappings
-# ---------------------------------------------------------------------------
 
 class TestEmojiMappings:
 
@@ -265,9 +249,7 @@ class TestEmojiMappings:
         assert row["cloned_emoji_id"] == 800
 
 
-# ---------------------------------------------------------------------------
 # Sticker mappings
-# ---------------------------------------------------------------------------
 
 class TestStickerMappings:
 
@@ -277,9 +259,7 @@ class TestStickerMappings:
         assert db.get_all_sticker_mappings() == []
 
 
-# ---------------------------------------------------------------------------
 # Blocked keywords
-# ---------------------------------------------------------------------------
 
 class TestBlockedKeywords:
 
@@ -293,9 +273,7 @@ class TestBlockedKeywords:
         assert added is False
 
 
-# ---------------------------------------------------------------------------
 # Event logs
-# ---------------------------------------------------------------------------
 
 class TestEventLogs:
 
@@ -371,9 +349,7 @@ class TestEventLogs:
         logs = db.get_event_logs(limit=2, offset=3)
         assert len(logs) == 2
 
-# ---------------------------------------------------------------------------
 # Message mappings
-# ---------------------------------------------------------------------------
 
 class TestMessageMappings:
 
@@ -388,9 +364,7 @@ class TestMessageMappings:
         assert deleted >= 1
 
 
-# ---------------------------------------------------------------------------
 # Thread mappings
-# ---------------------------------------------------------------------------
 
 class TestThreadMappings:
 
@@ -420,9 +394,7 @@ class TestThreadMappings:
         assert db.get_all_threads() == []
 
 
-# ---------------------------------------------------------------------------
 # Mapping user tokens (self-bot senders)
-# ---------------------------------------------------------------------------
 
 class TestMappingUserTokens:
 
@@ -573,9 +545,7 @@ class TestMappingTokenIdentities:
         assert db.list_token_identities(mid) == []
 
 
-# ---------------------------------------------------------------------------
 # Cascade: deleting a guild mapping cleans child tables
-# ---------------------------------------------------------------------------
 
 class TestGuildMappingCascade:
 
@@ -608,9 +578,7 @@ class TestGuildMappingCascade:
         assert db.count_event_logs() == 1
 
 
-# ---------------------------------------------------------------------------
 # WAL journal, backups and concurrent writers
-# ---------------------------------------------------------------------------
 
 class TestWal:
 

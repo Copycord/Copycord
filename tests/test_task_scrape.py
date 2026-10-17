@@ -452,7 +452,7 @@ async def test_cancel_stops_the_scraper_within_a_second(svc, env):
     assert steps["scrape"]["state"] == "cancelled"
     assert steps["scrape"]["note"] == f"Cancelled after {found} members found"
     assert steps["scrape"]["done"] == found
-    # What was found before the cancel is kept, as the old page did.
+    # What was found before the cancel is kept.
     assert steps["save"]["state"] == "success"
     assert steps["save"]["note"] == f"Saved {found} members found before the cancel"
     saved = env["dir"] / "scrapes" / done.report["output"]["path"]
@@ -673,7 +673,7 @@ def test_start_does_not_need_the_bots(http):
     assert resp.status_code == 201
 
 
-# the scraper settings routes that stay (tokens, proxies) and the ones that went
+# scraper settings
 
 def test_scraper_opens_one_gateway_session_per_token():
     from copycord.admin.standalone_scraper import ScraperConfig

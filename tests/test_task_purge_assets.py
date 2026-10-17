@@ -1,4 +1,4 @@
-"""Purge assets task type (lane L65): dry run, cloned-only deletes, partial failure, a rate limit
+"""Purge assets task type: dry run, cloned-only deletes, partial failure, a rate limit
 wait, a kind the bot cannot purge, cancel and the preview, with a fake server bot sender, run
 through TaskService like the other tasks."""
 import asyncio

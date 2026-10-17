@@ -1,8 +1,7 @@
-"""Cancel stops every task type at once (lane L77): each run is held mid-way on a fake Discord or
+"""Cancel stops every task type at once: each run is held mid-way on a fake Discord or
 agent call that never returns (an asyncio.Event never set), cancelled, and must end cancelled
 within 1 s with nothing changed after the cancel. Sync assets runs end to end, the admin task
-wired to the server's AssetSync and the real StickerManager, as in the "Created sticker 6 s
-after Cancelling" report."""
+wired to the server's AssetSync and the real StickerManager."""
 import asyncio
 import time
 
@@ -191,8 +190,7 @@ def wired(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sync_assets_cancel_during_the_sticker_rate_limit_wait_creates_nothing_more(svc, db, wired):
-    """Mac's log: Cancelling job ...:assets at 02:30:16, Created sticker benny_wizard at 02:30:22.
-    The first sticker takes the one slot a minute; benny_wizard waits out the limit when the
+    """The first sticker takes the one slot a minute; benny_wizard waits out the limit when the
     cancel lands and must never be created."""
     make, holder = wired
     guild = _CloneGuild()

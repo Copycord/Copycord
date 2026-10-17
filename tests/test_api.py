@@ -58,9 +58,7 @@ def _clean_db():
         pass
 
 
-# ---------------------------------------------------------------------------
 # Health
-# ---------------------------------------------------------------------------
 
 class TestHealth:
 
@@ -71,9 +69,7 @@ class TestHealth:
         assert resp.text == "ok"
 
 
-# ---------------------------------------------------------------------------
 # Event logs API
-# ---------------------------------------------------------------------------
 
 class TestEventLogsAPI:
 
@@ -157,9 +153,7 @@ class TestEventLogsAPI:
         assert "alpha" in body["types"]
         assert "beta" in body["types"]
 
-# ---------------------------------------------------------------------------
 # Guild mappings API
-# ---------------------------------------------------------------------------
 
 class TestGuildMappingsAPI:
 
@@ -254,9 +248,7 @@ class TestGuildMappingsAPI:
         body = resp.json()
         assert body["status"] == "active"
 
-# ---------------------------------------------------------------------------
 # Mapping user tokens API
-# ---------------------------------------------------------------------------
 
 class TestMappingUserTokensAPI:
 
@@ -484,13 +476,9 @@ class TestMappingUserTokensAPI:
         )
         assert resp.status_code == 400
 
-# ---------------------------------------------------------------------------
 # Version endpoint
-# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
 # Role logs: <home>/logs, and the old data dir location for one release
-# ---------------------------------------------------------------------------
 
 class TestRoleLogLocations:
 
@@ -533,9 +521,7 @@ class TestRoleLogLocations:
         assert (new / "server.out").read_text() == ""
 
 
-# ---------------------------------------------------------------------------
 # Forwarding rules: provider validation only runs for enabled rules
-# ---------------------------------------------------------------------------
 
 class TestForwardingSaveValidation:
 
@@ -581,9 +567,7 @@ class TestForwardingSaveValidation:
         assert db.get_message_forwarding_rule("fwd-dead-token")["enabled"] is False
 
 
-# ---------------------------------------------------------------------------
 # Account guild list: cache, single-flight, rate limits (Discord is faked)
-# ---------------------------------------------------------------------------
 
 class _GuildsResp:
     def __init__(self, status, body, headers=None, delay=0.0):
@@ -729,9 +713,7 @@ class TestUserGuildsHelper:
         assert int(resp.headers["Retry-After"]) >= 1
 
 
-# ---------------------------------------------------------------------------
 # Mapping save: membership checks
-# ---------------------------------------------------------------------------
 
 class TestMappingSaveChecks:
 

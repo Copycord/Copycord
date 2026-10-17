@@ -116,7 +116,7 @@ class TestFetchAvatar:
         assert await fetch_avatar(_Session(_Resp(200, huge)), URL) is None
 
 
-# --- the change-detection and skip logic in the identity manager -------------
+# the change-detection and skip logic in the identity manager
 
 import logging  # noqa: E402
 import os  # noqa: E402

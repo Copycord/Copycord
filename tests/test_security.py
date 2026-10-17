@@ -160,9 +160,7 @@ class TestScrapeTraversal:
         resp = await client.get("/api/scraper/scrapes/top.json")
         assert resp.status_code == 200
 
-# ---------------------------------------------------------------------------
 # Websocket authentication
-# ---------------------------------------------------------------------------
 
 from starlette.testclient import TestClient  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
@@ -292,9 +290,7 @@ class TestInternalClientHeaders:
         (headers,) = kwargs.values()
         assert headers == {INTERNAL_TOKEN_HEADER: TOKEN}
 
-# ---------------------------------------------------------------------------
 # Login brute-force limit
-# ---------------------------------------------------------------------------
 
 
 class FakeClock:
@@ -382,9 +378,7 @@ class TestLoginLimiter:
         assert "a" not in lim._state
 
 
-# ---------------------------------------------------------------------------
 # CSRF
-# ---------------------------------------------------------------------------
 
 from copycord.admin.security import CSRF_HEADER  # noqa: E402
 

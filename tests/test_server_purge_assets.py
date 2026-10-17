@@ -1,4 +1,4 @@
-"""Server side of the Purge assets task (lane L65): purge_assets_list and purge_assets_delete through
+"""Server side of the Purge assets task: purge_assets_list and purge_assets_delete through
 ServerReceiver._on_ws against a fake clone guild and a real DB. Only mapped assets go in a cloned
 purge, the scope is checked again on delete, a delete drops its mapping row, and Forbidden, a
 missing asset and a 429 come back as skipped, skipped and rate_limited."""

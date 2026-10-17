@@ -113,7 +113,7 @@ class TestFailureRotation:
     @pytest.mark.asyncio
     async def test_repeated_failures_on_one_proxy_suspend_it(self):
         # Failures are counted per PROXY. Because report_failure rotates away,
-        # they only accumulate on one proxy if it keeps being handed back --
+        # they only accumulate on one proxy if it keeps being handed back,
         # which is what a single-entry pool forces.
         p = _pool([PROXIES[0]])
         for _ in range(p.MAX_FAILURES):

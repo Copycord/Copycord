@@ -81,9 +81,7 @@ def test_not_built_is_404(tc, tmp_path, monkeypatch):
     assert "npm run build" in resp.text
 
 
-# ---------------------------------------------------------------------------
 # Login: the SPA renders the form; POST /login keeps its checks
-# ---------------------------------------------------------------------------
 
 ORIGIN = "http://testserver"
 

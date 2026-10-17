@@ -1,7 +1,7 @@
 """
 Custom emoji an account without Nitro cannot send.
 
-Discord does not reject these - it strips the `<...>` wrapper and delivers the
+Discord does not reject these: it strips the `<...>` wrapper and delivers the
 bare `:name:`, so a cloned message arrives reading "Hello all :wave:". We remove
 them instead, but only the ones the account genuinely cannot use.
 """

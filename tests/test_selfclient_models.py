@@ -107,9 +107,7 @@ def make_member(guild, roles=(), user_id=MEMBER_ID, **extra):
     return Member(data, guild)
 
 
-# ---------------------------------------------------------------------------
 # permissions_for
-# ---------------------------------------------------------------------------
 
 
 class TestPermissionsFor:
@@ -211,9 +209,7 @@ class TestPermissionsFor:
         assert isinstance(thread, Thread)
         assert thread.permissions_for(make_member(guild)).read_message_history
 
-# ---------------------------------------------------------------------------
 # guild / channel / role wrappers
-# ---------------------------------------------------------------------------
 
 
 class TestGuildWrappers:
@@ -302,9 +298,7 @@ class TestGuildWrappers:
         assert str(e.url) == "https://cdn.discordapp.com/emojis/800000000000000001.png"
 
 
-# ---------------------------------------------------------------------------
 # message / user wrappers
-# ---------------------------------------------------------------------------
 
 
 def _message_payload(**overrides):

@@ -53,9 +53,7 @@ def _saved(data_dir):
     return json.loads((data_dir / "update.json").read_text(encoding="utf-8"))
 
 
-# --------------------------------------------------------------------------
 # saved channel
-# --------------------------------------------------------------------------
 
 
 def test_default_channel_is_stable(data_dir):
@@ -80,9 +78,7 @@ def test_bad_saved_channel_falls_back_to_stable(data_dir, text):
     assert update.load_channel() == update.Channel("stable")
 
 
-# --------------------------------------------------------------------------
 # release resolution (GitHub releases API)
-# --------------------------------------------------------------------------
 
 
 def test_stable_skips_prereleases_and_drafts():
@@ -113,9 +109,7 @@ def test_missing_wheel_asset_is_a_clear_error():
         r.wheel()
 
 
-# --------------------------------------------------------------------------
 # command per installer
-# --------------------------------------------------------------------------
 
 WHEEL = wheel_url("v4.0.0")
 
@@ -142,9 +136,7 @@ def test_git_spec_defaults_to_main():
     assert update.git_spec("v4-dev") == GIT_SPEC.format("v4-dev")
 
 
-# --------------------------------------------------------------------------
 # fakes
-# --------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -206,9 +198,7 @@ def uv(spec):
     return ["uv", "tool", "install", "--force", "--python", "3.12", spec]
 
 
-# --------------------------------------------------------------------------
 # copycord update
-# --------------------------------------------------------------------------
 
 
 def test_plain_update_installs_latest_stable_wheel(env, data_dir, fake_net):
@@ -491,9 +481,7 @@ def test_docker_and_source_need_no_network(env, monkeypatch, fake_net, capsys, k
     assert f"installed with {kind}" in capsys.readouterr().out
 
 
-# --------------------------------------------------------------------------
 # --no-install (used by install.sh / install.ps1)
-# --------------------------------------------------------------------------
 
 
 def test_no_install_only_saves_the_channel(env, data_dir, fake_net):
@@ -509,14 +497,10 @@ def test_no_install_dev_branch(env, data_dir):
     assert _saved(data_dir) == {"channel": "dev", "branch": "v4-dev"}
 
 
-# --------------------------------------------------------------------------
 # version
-# --------------------------------------------------------------------------
 
 
-# --------------------------------------------------------------------------
 # update status
-# --------------------------------------------------------------------------
 
 GITHUB_HEAD = {
     "sha": "0123456789abcdef0123456789abcdef01234567",
@@ -581,9 +565,7 @@ def test_check_dev_shows_branch_head(data_dir, fake_net, no_install, monkeypatch
     assert seen == [(url, 5.0)]
 
 
-# --------------------------------------------------------------------------
 # copycord update when already up to date
-# --------------------------------------------------------------------------
 
 REAL_NOTHING_NEW = update.nothing_new
 HEAD_URL = "https://api.github.com/repos/Copycord/Copycord/commits/{}"
@@ -680,9 +662,7 @@ def test_force_installs_even_when_up_to_date(current, monkeypatch, dev):
     assert len(rec.calls) == 1 and backups == [1]
 
 
-# --------------------------------------------------------------------------
 # version comparator
-# --------------------------------------------------------------------------
 
 
 def test_version_ordering():
@@ -711,9 +691,7 @@ def test_is_prerelease():
     assert not update.is_prerelease("4.0.0.post1")
 
 
-# --------------------------------------------------------------------------
 # installed_commit
-# --------------------------------------------------------------------------
 
 
 class _Dist:
@@ -759,9 +737,7 @@ def test_installed_commit_from_the_build_stamp_of_a_release_wheel(monkeypatch):
     assert update.installed_commit() == "c" * 40
 
 
-# --------------------------------------------------------------------------
 # reinstall (copycord doctor --fix)
-# --------------------------------------------------------------------------
 
 
 def test_reinstall_installs_this_exact_release_again(env, data_dir, fake_net):
@@ -830,9 +806,7 @@ def test_reinstall_with_pipx_forces_a_new_venv():
     assert cmd == ["pipx", "install", "--force", "spec"]
 
 
-# --------------------------------------------------------------------------
 # Windows: the install runs after copycord exits
-# --------------------------------------------------------------------------
 
 PREFIX = r"C:\Users\u\AppData\Roaming\uv\tools\copycord"
 
@@ -1018,9 +992,7 @@ def test_running_without_powershell_does_not_block(monkeypatch):
     assert winupdate.running()[1] is None
 
 
-# --------------------------------------------------------------------------
 # copycord update asks before it changes anything
-# --------------------------------------------------------------------------
 
 
 def test_update_shows_the_versions_and_no_changes_nothing(current, tty, monkeypatch, capsys):

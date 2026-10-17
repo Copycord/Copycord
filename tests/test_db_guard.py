@@ -57,9 +57,7 @@ def _make_db(path, version=SCHEMA_VERSION):
     _set_version(path, version)
 
 
-# --------------------------------------------------------------------------
 # refusing a newer schema
-# --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("init_schema", [True, False])
@@ -104,9 +102,7 @@ def test_set_schema_version_never_lowers(data_dir):
     m.conn.close()
 
 
-# --------------------------------------------------------------------------
 # copycord run / doctor
-# --------------------------------------------------------------------------
 
 
 def test_run_refuses_with_message(data_dir, monkeypatch, capsys):
@@ -143,9 +139,7 @@ def test_doctor_fails_on_newer_schema(data_dir):
     assert cli.check_db(path).status == cli.PASS
 
 
-# --------------------------------------------------------------------------
 # pre-update backup
-# --------------------------------------------------------------------------
 
 
 def _counts(path):

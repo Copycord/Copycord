@@ -240,7 +240,7 @@ async def test_links_only_skips_upload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_forced_token_id_is_tried_first(monkeypatch):
-    """When the identity manager pre-selects a token, that account posts , 
+    """When the identity manager pre-selects a token, that account posts,
     regardless of the strategy ordering."""
 
     class _DB:
@@ -357,7 +357,7 @@ async def test_sticky_exclusive_never_falls_back_to_other_tokens(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
-    """Regression: when an attachment is re-uploaded as a file (links_only off),
+    """When an attachment is re-uploaded as a file (links_only off),
     its URL must be removed from the text so it isn't shown as a link *and* a
     file."""
     s = _make_sender()
@@ -534,7 +534,7 @@ async def test_pace_shows_typing_for_the_delay():
 
 @pytest.mark.asyncio
 async def test_send_serializes_typing_then_send_per_channel():
-    """Regression: with typing + delay, queued messages to one channel take
+    """With typing + delay, queued messages to one channel take
     strict turns, typing → send → typing → send. A message's typing must never
     fire before the previous message is sent (which would clear the indicator)."""
     import asyncio as _a
@@ -1144,10 +1144,9 @@ class TestSendStatusTaxonomy:
 
 
 class TestMessagePayload:
-    """The JSON body a real desktop client posts, from a capture 2026-08-21.
+    """The JSON body a real desktop client posts, from a capture.
 
-    We used to send `{"content": ...}` alone, which is a smaller body than any
-    real client sends.
+    `{"content": ...}` alone would be a smaller body than any real client sends.
     """
 
     def test_keys_and_order_match_the_capture(self):
@@ -1185,7 +1184,7 @@ class TestMessagePayload:
 
 
 class TestReplyPayload:
-    """A reply body, from a captured desktop-client reply 2026-08-21."""
+    """A reply body, from a captured desktop-client reply."""
 
     def _built(self):
         from copycord.server.token_sender import _reply_bits, message_payload

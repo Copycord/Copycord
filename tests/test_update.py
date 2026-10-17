@@ -38,9 +38,7 @@ def _data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
 
 
-# --------------------------------------------------------------------------
 # installer detection
-# --------------------------------------------------------------------------
 
 
 def test_detect_uv_tool_by_receipt(tmp_path):
@@ -77,9 +75,7 @@ def test_install_commands():
     assert cmd is None and "uv pip install --upgrade" in hint and WHEEL in hint
 
 
-# --------------------------------------------------------------------------
 # update status
-# --------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -129,9 +125,7 @@ def test_is_newer():
     assert not update.is_newer("3.28.0", "4.0.0")
 
 
-# --------------------------------------------------------------------------
 # upgrade + restart
-# --------------------------------------------------------------------------
 
 
 class Recorder:
@@ -215,9 +209,7 @@ def test_update_on_the_latest_release_installs_nothing(uv_tool, monkeypatch, cap
     assert "Copycord is up to date (4.0.0)" in capsys.readouterr().out
 
 
-# --------------------------------------------------------------------------
 # auto-update: record, check, roll back
-# --------------------------------------------------------------------------
 
 OLD_WHEEL = wheel_url("v3.28.0")
 

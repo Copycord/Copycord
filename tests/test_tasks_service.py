@@ -400,7 +400,7 @@ async def test_publish_throttle_transitions_immediate_progress_coalesced():
 @pytest.mark.asyncio
 async def test_frame_lists_changed_steps_in_run_order():
     """New steps reach the SPA in a frame and are appended in frame order, so the frame keeps
-    the run's order (a set of dirty keys did not)."""
+    the run's order."""
     events = []
 
     async def publish(event):

@@ -1,4 +1,4 @@
-"""Purge messages task type (lane L59): dry run, delete, mapping scope, validation and cancel
+"""Purge messages task type: dry run, delete, mapping scope, validation and cancel
 against a real DB, run through TaskService like backfill."""
 import asyncio
 import time

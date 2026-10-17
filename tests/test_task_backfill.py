@@ -1,4 +1,4 @@
-"""Backfill channels task type (Tasks framework, lane L6): a fake client sender
+"""Backfill channels task type: a fake client sender
 and job frames handed straight to the dispatcher, as the admin bus watcher does."""
 import asyncio
 import gc

@@ -98,9 +98,7 @@ def _serve(lt, handler, port=PORT):
     return mgr
 
 
-# --------------------------------------------------------------------------
 # WebsocketManager
-# --------------------------------------------------------------------------
 
 
 def test_request_crosses_loops_on_different_threads(reg, loops):
@@ -230,9 +228,7 @@ def test_closed_loop_endpoint_is_dropped(reg):
         reg.dispatch(URL, {"type": "x"})
 
 
-# --------------------------------------------------------------------------
 # AdminBus
-# --------------------------------------------------------------------------
 
 
 class FakeHub:
@@ -331,9 +327,7 @@ def test_admin_request_hits_registered_agent(reg, loops):
     assert reply["ok"] is True and reply["type"] == "status_query"
 
 
-# --------------------------------------------------------------------------
 # Split mode and selection
-# --------------------------------------------------------------------------
 
 
 @pytest.fixture

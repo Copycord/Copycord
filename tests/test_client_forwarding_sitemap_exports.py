@@ -171,9 +171,7 @@ def guild():
     return Guild(guild_payload())
 
 
-# ---------------------------------------------------------------------------
 # forwarding
-# ---------------------------------------------------------------------------
 
 
 def _manager():
@@ -271,9 +269,7 @@ class TestForwardingOnSelfclientMessages:
         assert dispatched[0][1]["channel_id"] == CHAT
 
 
-# ---------------------------------------------------------------------------
 # sitemap
-# ---------------------------------------------------------------------------
 
 
 class _SitemapDB:
@@ -483,9 +479,7 @@ class TestSitemapClassification:
         assert svc.role_change_is_relevant(before, guild.default_role) is False
 
 
-# ---------------------------------------------------------------------------
 # export runners
-# ---------------------------------------------------------------------------
 
 
 class _HistoryBot:
@@ -597,9 +591,7 @@ class TestExportRunnersOnClient:
         assert who.id == FRIEND
 
 
-# ---------------------------------------------------------------------------
 # selfclient: the oldest-first bounded walk export_runners relies on
-# ---------------------------------------------------------------------------
 
 
 class TestMessagesAfter:

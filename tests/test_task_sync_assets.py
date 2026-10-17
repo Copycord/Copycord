@@ -1,4 +1,4 @@
-"""Sync assets (lane L66): the task with a fake server sender and job frames handed straight
+"""Sync assets: the task with a fake server sender and job frames handed straight
 to the dispatcher, plan_role_order, and the server's sync_assets job with a fake guild."""
 import asyncio
 

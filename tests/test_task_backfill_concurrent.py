@@ -102,8 +102,6 @@ async def _finish(job_id, delivered, ok=True, error=None):
     await _frame("backfill_job_end", job_id=job_id, ok=ok, error=error, delivered=delivered)
 
 
-# 1
-
 @pytest.mark.asyncio
 async def test_two_runs_on_disjoint_channels_keep_their_own_counts(svc, sent, mapping):
     a, b = await asyncio.gather(_start(svc, mapping, CH[:2]), _start(svc, mapping, CH[2:4]))
@@ -138,8 +136,6 @@ async def test_two_runs_on_disjoint_channels_keep_their_own_counts(svc, sent, ma
     assert set(_steps(svc, b.id)) == set(_ids(CH[2:4]))
     assert backfill._jobs == {} and backfill.busy_channels() == {}
 
-
-# 2
 
 @pytest.mark.asyncio
 async def test_same_channel_skips_in_the_second_run_and_frees_after_the_first(svc, sent, mapping):
@@ -192,8 +188,6 @@ async def test_runs_starting_together_never_both_take_a_channel(svc, sent, mappi
         await _settled(svc, run.id)
 
 
-# 3
-
 @pytest.mark.asyncio
 async def test_cancel_one_run_leaves_the_other_running(svc, sent, mapping):
     a = await _start(svc, mapping, CH[:3])
@@ -223,8 +217,6 @@ async def test_cancel_one_run_leaves_the_other_running(svc, sent, mapping):
     assert db_.summary == {"success": 3, "failed": 0, "skipped": 0, "cancelled": 0, "delivered": 24}
     assert len(_of(sent, "backfill_cancel")) == 3
 
-
-# 6
 
 @pytest.mark.asyncio
 async def test_bots_stopped_ends_both_active_runs(svc, sent, mapping, monkeypatch):
@@ -262,8 +254,6 @@ async def test_bots_stopped_ends_both_active_runs(svc, sent, mapping, monkeypatc
     assert seen == []
 
 
-# 7
-
 @pytest.mark.asyncio
 async def test_deleting_a_finished_run_leaves_the_live_run_alone(svc, sent, mapping):
     old = await _start(svc, mapping, [CH[0]])
@@ -291,7 +281,7 @@ async def test_deleting_a_finished_run_leaves_the_live_run_alone(svc, sent, mapp
     await _settled(svc, nxt.id)
 
 
-# 4: the client's one queue across runs
+# the client's one queue across runs
 
 class _FakeWs:
     def __init__(self):
@@ -384,7 +374,7 @@ async def test_client_cancel_drops_only_that_runs_jobs():
     assert ends[f"2:{CH[1]}"]["ok"] is True and ends[f"1:{CH[0]}"]["ok"] is True
 
 
-# 5: the server's per clone state
+# the server's per clone state
 
 CLONE = [5555555555555555551, 5555555555555555552]
 ORIG = [CH[0], CH[1]]

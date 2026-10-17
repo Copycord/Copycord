@@ -3,7 +3,7 @@ The client's attachment upload flow.
 
 A real desktop client never posts file bytes inline. It reserves an upload
 slot, PUTs the bytes to the signed URL it gets back, then posts a message
-referencing the stored file. Captured 2026-08-21.
+referencing the stored file, as a captured desktop session shows.
 """
 import logging
 

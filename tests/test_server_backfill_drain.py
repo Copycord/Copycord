@@ -374,17 +374,15 @@ def test_sends_stuck_for_the_stall_window_are_cancelled_with_the_counts(ServerRe
 
 
 def test_slow_sends_that_keep_completing_are_not_cut_off(ServerReceiver, monkeypatch):
-    """Live run, #12367686: Discord limits shared by six channels slowed its sends below the 2 s per
-    message the cap allowed, and the 120 s floor cancelled 12 sends that were still going out. Scaled
-    down: each send takes longer than its share of the cap, yet one finishes well inside the stall
-    window, so the drain waits for all of them."""
+    """Discord limits shared by several channels can slow sends below a fixed per-message budget.
+    Scaled down: each send takes longer than its share of such a cap, yet one finishes well inside
+    the stall window, so the drain waits for all of them."""
     monkeypatch.delenv("BACKFILL_DRAIN_HARD_CAP_SECS", raising=False)
     monkeypatch.setenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "0.3")
 
     async def go():
         rx = _rx(ServerReceiver, asyncio.Event())
-        # The removed per-message cap, scaled down: the 0.2 s floor that made this test fail before
-        # the fix. The drain no longer reads these.
+        # A per-message cap, scaled down, that would cut these sends off; the drain must not read it.
         rx.backfill.DRAIN_CAP_FLOOR_SECS = 0.2
         rx.backfill.DRAIN_CAP_PER_MESSAGE_SECS = 0.01
         pace = asyncio.Lock()

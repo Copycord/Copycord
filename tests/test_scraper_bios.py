@@ -118,7 +118,7 @@ def _bios(result):
 
 @pytest.mark.asyncio
 async def test_bio_wait_has_no_time_cap(monkeypatch):
-    # Discord holds each profile back 45 s once: well over the old 60 s cap in all.
+    # Discord holds each profile back 45 s once, 135 s for the three: no overall cap may cut that short.
     discord = FakeDiscord({uid: [limited(45), ok(f"bio {uid}")] for uid in ("1", "2", "3")})
     reports = []
     s = _scraper(discord, reports, monkeypatch)

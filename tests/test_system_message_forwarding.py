@@ -1,10 +1,10 @@
 """
 Forwarding Discord's own system messages (joins, boosts, pins, thread creation).
 
-These messages carry no content of their own, Discord renders the visible
-text on the client from the message type, so the forwarder saw them as empty
-and sent them on as a bare "New message" placeholder, with no way to turn them
-off. They now have a filter of their own and carry their rendered text.
+These messages carry no content of their own (Discord renders the visible
+text on the client from the message type), so treated as empty they would go
+out as a bare "New message" placeholder. They have a filter of their own and
+carry their rendered text.
 
 The tests call the real filter and the real attribute builder.
 """

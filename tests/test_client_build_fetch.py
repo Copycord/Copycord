@@ -1,6 +1,6 @@
 """Pinning the client's Discord build number before login.
 
-A slow proxy used to leave the session on a fallback build that never existed.
+A slow proxy must not leave the session on a fallback build that never existed.
 """
 import pytest
 
@@ -90,7 +90,7 @@ class TestItPinsTheLiveBuild:
 class TestItRetriesAcrossProxies:
     @pytest.mark.asyncio
     async def test_it_rotates_and_retries_on_failure(self, monkeypatch):
-        # A single slow proxy used to poison the whole session.
+        # A single slow proxy must not poison the whole session.
         rot = _Rotator()
         self, calls = _listener(
             monkeypatch,
@@ -111,7 +111,7 @@ class TestItRetriesAcrossProxies:
 
     @pytest.mark.asyncio
     async def test_failure_is_not_fatal(self, monkeypatch):
-        # A False return falls back as before and must never raise.
+        # A False return falls back and must never raise.
         self, _ = _listener(monkeypatch, results=[OSError("x")] * 5)
         assert await self._resolve_client_build() is False
 

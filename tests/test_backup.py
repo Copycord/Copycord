@@ -106,9 +106,7 @@ def _answers(monkeypatch, *replies):
     return asked
 
 
-# --------------------------------------------------------------------------
 # the integrity check
-# --------------------------------------------------------------------------
 
 
 def test_integrity_problems(tmp_path):
@@ -169,9 +167,7 @@ def test_an_older_failure_does_not_hide_a_newer_backup(tmp_path):
     assert cli.check_backups(backups, db, now).name == "last backup 1 hour ago"
 
 
-# --------------------------------------------------------------------------
 # what an archive holds
-# --------------------------------------------------------------------------
 
 
 def test_backup_includes_the_key_and_a_manifest(data_dir, capsys):
@@ -219,9 +215,7 @@ def test_backup_json(data_dir, capsys):
                    "includes_key": True}
 
 
-# --------------------------------------------------------------------------
 # restore
-# --------------------------------------------------------------------------
 
 
 @pytest.fixture()

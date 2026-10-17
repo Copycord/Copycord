@@ -105,8 +105,8 @@ class TestFingerprintShape:
         assert f'"Chromium";v="{major}"' in h["Sec-CH-UA"]
 
     def test_the_chrome_major_is_derived_not_written_down(self):
-        # Pins the derivation itself: hardcoding the version is what let the
-        # two drift apart in the first place.
+        # Pins the derivation itself: a hardcoded version lets the two drift
+        # apart.
         import re
 
         assert sh.CHROME_MAJOR == re.search(r"(\d+)", sh.TLS_IMPERSONATE).group(1)
@@ -220,10 +220,7 @@ class _ScrapeSession:
 
 
 class TestRefreshBuildInfo:
-    """The build number is scraped from Discord's own assets.
-
-    There is no third-party build feed any more, so these drive the scrape.
-    """
+    """The build number is scraped from Discord's own assets."""
 
     @pytest.mark.asyncio
     async def test_refresh_applies_scraped_build(self):

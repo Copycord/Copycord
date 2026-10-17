@@ -1,4 +1,4 @@
-"""Messages page backend (lane L60a): message metadata columns, /api/messages list, facets and live preview."""
+"""Messages page backend: message metadata columns, /api/messages list, facets and live preview."""
 import importlib
 import logging
 
@@ -82,7 +82,7 @@ def _ids(res):
     return [it["original_message_id"] for it in res.json()["items"]]
 
 
-# --- schema ---
+# schema
 
 def test_migration_adds_columns_on_old_schema(tmp_db_path):
     db1 = DBManager(tmp_db_path, init_schema=True)
@@ -151,7 +151,7 @@ def test_server_message_meta(ServerReceiver):
                     "attachment_count": 2, "embed_count": 1}
 
 
-# --- list ---
+# list
 
 def test_list_default_sort_and_row_shape(client):
     res = client.get("/api/messages")
@@ -229,7 +229,7 @@ def test_sorts(client):
     assert client.get("/api/messages", params={"order": "up"}).status_code == 400
 
 
-# column sorts (L71): the row field each one orders by, compared the way SQL does (LOWER, NULL as 0 or '')
+# column sorts: the row field each one orders by, compared the way SQL does (LOWER, NULL as 0 or '')
 _SORT_FIELDS = {
     "author_id": lambda it: int(it["author_id"] or 0),
     "channel_id": lambda it: int(it["original_channel_id"] or 0),
@@ -313,7 +313,7 @@ def test_facets(client):
     assert chans["12"]["name"] is None and chans["12"]["count"] == 1
 
 
-# --- live content ---
+# live content
 
 def test_content_ok_and_cached(client, sent):
     url = f"/api/messages/{_mid(0)}/content"

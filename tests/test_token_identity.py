@@ -49,7 +49,7 @@ class TestSelectToken:
         assert reset is None
 
     def test_bad_token_swaps_to_free_token(self):
-        # X's token "a" is no longer enabled (went bad); Y holds "b" → X → "c".
+        # X's token "a" went bad and is disabled; Y holds "b" → X → "c".
         identities = [_ident("X", "a", 0), _ident("Y", "b", 0)]
         chosen, reset = select(identities, "X", ["b", "c"])
         assert chosen == "c"
@@ -63,13 +63,13 @@ class TestSelectToken:
         assert reset is None
 
     def test_disabled_token_forces_reassignment(self):
-        # X was on "a" but "a" is no longer enabled → swap + reset "a".
+        # X was on "a" but "a" is disabled → swap + reset "a".
         identities = [_ident("X", "a", 0)]
         chosen, reset = select(identities, "X", ["b", "c"])
         assert chosen == "b"
         assert reset == "a"
 
-# ── prepare() idempotency with fakes ─────────────────────────────────────────
+# prepare() idempotency with fakes
 
 
 class _Role:
@@ -350,7 +350,7 @@ class TestPrepareSwapAndExhaust:
 
     @pytest.mark.asyncio
     async def test_failure_does_not_bench_token_for_future_messages(self):
-        # Regression: a token that fails once (excluded for one message) must
+        # A token that fails once (excluded for one message) must
         # still be available for the next message, no persistent benching.
         m_a = _Member(500)
         db = _DB()

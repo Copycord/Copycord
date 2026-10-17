@@ -121,10 +121,9 @@ class _Thread:
 class TestInScopeThread:
     """The gate every message inside a thread passes through.
 
-    A forum post filtered out of the sitemap is simply never created, so it
-    looked like thread filtering worked. A text-channel thread is created on
-    demand from the message, so it needs this check to be thread-aware, it
-    was not, and those messages were forwarded regardless.
+    A forum post filtered out of the sitemap is never created, but a
+    text-channel thread is created on demand from the message, so this check
+    has to be thread-aware.
     """
 
     def _service(self, view):
@@ -133,7 +132,7 @@ class TestInScopeThread:
         svc = SitemapService.__new__(SitemapService)
         svc.logger = logging.getLogger("test")
         # A guild with no mappings, so the guild-level view below is what gets
-        # consulted. Without a real db here the new per-mapping lookup raises
+        # consulted. Without a real db here the per-mapping lookup raises
         # into in_scope_thread's catch-all, which returns True, so every
         # "stays in scope" case would pass without testing anything.
         svc.db = _FakeDB([], {})
@@ -194,14 +193,13 @@ class _FakeDB:
 
 
 class TestFiltersAreEvaluatedPerMapping:
-    """The root cause behind thread filters appearing to do nothing.
+    """Thread filters are evaluated per mapping, not at guild scope.
 
-    should_ignore() has no clone context, so scope was resolved at guild
-    scope, a lookup that structurally cannot see mapping-scoped filter rows
-    and therefore always answered "keep everything". Channel filters only
-    looked like they worked because a filtered channel is never cloned, so its
-    messages had nowhere to land. A text-channel thread is created on demand
-    from the message, so nothing upstream covered for it.
+    should_ignore() has no clone context, and a guild-scoped lookup cannot see
+    mapping-scoped filter rows, so it would always answer "keep everything".
+    A filtered channel is never cloned, so its messages have nowhere to land,
+    but a text-channel thread is created on demand from the message and
+    nothing upstream covers for it.
     """
 
     ORIGIN, CLONE_A, CLONE_B = 700, 800, 801

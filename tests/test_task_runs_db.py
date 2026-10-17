@@ -1,4 +1,4 @@
-"""task_runs table and the DBManager task-run methods (Tasks framework, lane L2)."""
+"""task_runs table and the DBManager task-run methods."""
 
 import json
 import sqlite3

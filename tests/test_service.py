@@ -43,9 +43,7 @@ def system_dir(tmp_path, monkeypatch):
 EXE = ["/home/u/.local/bin/copycord"]
 
 
-# --------------------------------------------------------------------------
 # Linux: systemd
-# --------------------------------------------------------------------------
 
 
 def test_systemd_unit_runs_absolute_executable_with_data_dir():
@@ -267,9 +265,7 @@ def test_install_data_dir_uses_sudo_users_home(monkeypatch, tmp_path):
     ).resolve()
 
 
-# --------------------------------------------------------------------------
 # macOS: launchd
-# --------------------------------------------------------------------------
 
 
 def test_launchd_plist_contents(tmp_path):
@@ -340,9 +336,7 @@ def test_launchd_start_when_not_loaded_bootstraps(tmp_path, monkeypatch):
     assert fake.calls[-1] == ["launchctl", "bootstrap", "gui/501", str(svc.plist_path)]
 
 
-# --------------------------------------------------------------------------
 # Windows: Scheduled Task
-# --------------------------------------------------------------------------
 
 WIN_EXE = [r"C:\Users\Mac Doe\.local\bin\copycord.exe"]
 
@@ -653,9 +647,7 @@ def test_port_free_sees_a_listening_socket():
         assert not service.port_free("127.0.0.1", s.getsockname()[1])
 
 
-# --------------------------------------------------------------------------
 # CLI
-# --------------------------------------------------------------------------
 
 
 class StatusSvc:

@@ -1,12 +1,9 @@
 """
 Recognising a dead proxy so the client rotates instead of giving up.
 
-A 502 from the proxy at startup killed the client outright: it logged
-"Unexpected error while running client" and shut down, rather than trying
-another route. Two separate reasons the check missed it.
-
-The client already knows how to rotate on a proxy failure. It just never got
-told that this was one.
+A 502 from the proxy at startup must not end in "Unexpected error while
+running client" and a shutdown. The client already rotates on a proxy
+failure; these tests check that such errors are recognised as one.
 """
 import pytest
 
@@ -43,7 +40,7 @@ class TestTheReportedCrash:
 
     def test_a_bare_curl_error_is_a_proxy_error(self):
         # CurlError inherits from Exception, not OSError, so an isinstance
-        # test against the socket error types never matched it, even though
+        # test against the socket error types does not match it, even though
         # curl_cffi raises it for every gateway dial through a dead proxy.
         from curl_cffi.curl import CurlError
 
@@ -76,7 +73,7 @@ class TestWhatItMustNotSwallow:
         assert _is_proxy_error(None, ValueError("bad value")) is False
 
     def test_an_unrelated_attributeerror_is_left_alone(self):
-        # The fix keys on the chained cause, not on AttributeError itself.
+        # Detection keys on the chained cause, not on AttributeError itself.
         exc = AttributeError("'Foo' object has no attribute 'bar'")
         assert _is_proxy_error(None, exc) is False
 
@@ -121,7 +118,7 @@ class TestMaskedProxiesAreDistinguishable:
     """Rotating-proxy pools differ only in the credentials.
 
     Every entry shares a host and port and carries its own session id, so
-    masking the credentials alone printed all of them identically and a
+    masking the credentials alone would print all of them identically and a
     rotation log could not be told from a loop on one dead proxy.
     """
 

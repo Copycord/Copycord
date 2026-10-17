@@ -57,9 +57,7 @@ def _check(doc, text):
     return next(c for c in doc["checks"] if text in c["text"])
 
 
-# --------------------------------------------------------------------------
 # --version
-# --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("argv", [["--version", "--json"], ["--json", "-V"]])
@@ -96,9 +94,7 @@ def test_json_only_on_reporting_commands(argv, data_dir, capsys):
     assert "--json" in captured.err
 
 
-# --------------------------------------------------------------------------
 # doctor
-# --------------------------------------------------------------------------
 
 
 def test_doctor_json_all_good(doctor_env, capsys):
@@ -194,9 +190,7 @@ def test_doctor_fix_json_sends_fix_output_to_stderr(doctor_env, monkeypatch, cap
     assert doc["fixes"][0]["result"] == "done"
 
 
-# --------------------------------------------------------------------------
 # update status
-# --------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -251,9 +245,7 @@ def test_update_status_json_without_github(status_env, monkeypatch, capsys):
     assert doc["latest"] is None and doc["update_available"] is None
 
 
-# --------------------------------------------------------------------------
 # config
-# --------------------------------------------------------------------------
 
 
 def test_config_get_json(data_dir, capsys):

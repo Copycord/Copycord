@@ -69,9 +69,7 @@ def doctor_env(data_dir, monkeypatch):
     return data_dir
 
 
-# --------------------------------------------------------------------------
 # version
-# --------------------------------------------------------------------------
 
 
 def test_version_prints_current_version(data_dir, capsys, monkeypatch):
@@ -93,9 +91,7 @@ def test_bare_copycord_prints_the_overview(data_dir, capsys):
     assert "Usage: copycord <command>" in out and "Examples:" in out
 
 
-# --------------------------------------------------------------------------
 # uninstall
-# --------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -297,9 +293,7 @@ def test_uninstall_linux_runs_uv_without_moving_files(win_uninstall, monkeypatch
     assert "Copycord uninstalled" in capsys.readouterr().out
 
 
-# --------------------------------------------------------------------------
 # doctor
-# --------------------------------------------------------------------------
 
 
 def test_doctor_all_good(doctor_env, capsys):
@@ -557,9 +551,7 @@ def test_check_import():
     assert cli.check_dependencies((("json", "pytest"),)).name == "dependencies OK"
 
 
-# --------------------------------------------------------------------------
 # doctor --fix
-# --------------------------------------------------------------------------
 
 
 def _fix(data_dir, *flags):
@@ -1085,9 +1077,7 @@ def test_envfile_write_template_never_overwrites(tmp_path):
     assert path.read_text(encoding="utf-8") == "PASSWORD=mine\n"
 
 
-# --------------------------------------------------------------------------
 # config
-# --------------------------------------------------------------------------
 
 
 def test_config_round_trip_with_masking(data_dir, tmp_path, capsys):
@@ -1362,9 +1352,7 @@ def test_data_dir_flag_sets_env(data_dir, tmp_path, monkeypatch):
     assert paths.db_path() == target.resolve() / "data.db"
 
 
-# --------------------------------------------------------------------------
 # data-dir defaults
-# --------------------------------------------------------------------------
 
 
 @pytest.fixture()
@@ -1464,9 +1452,7 @@ def test_supervisor_and_logging_agree(native, monkeypatch):
     assert paths.data_dir() == (native / ".copycord" / "data").resolve()
 
 
-# --------------------------------------------------------------------------
 # <home>/data and <home>/logs layout, and moving the old flat home
-# --------------------------------------------------------------------------
 
 
 def _make_db(path: Path) -> None:

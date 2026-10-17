@@ -1,4 +1,4 @@
-"""/api/tasks REST surface and the /tasks SPA pages (Tasks framework, lane L3)."""
+"""/api/tasks REST surface and the /tasks SPA pages."""
 import asyncio
 import collections
 import json

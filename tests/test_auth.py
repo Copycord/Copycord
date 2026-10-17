@@ -28,9 +28,7 @@ def password(monkeypatch):
     monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
 
 
-# ---------------------------------------------------------------------------
 # secret.key
-# ---------------------------------------------------------------------------
 
 
 class TestSecretKey:
@@ -74,9 +72,7 @@ class TestWritePrivateFile:
         assert [p.name for p in tmp_path.iterdir()] == ["a"]
 
 
-# ---------------------------------------------------------------------------
 # Client IP
-# ---------------------------------------------------------------------------
 
 
 def _request(peer, headers):
@@ -114,9 +110,7 @@ class TestClientIp:
         assert auth._client_ip(_request("10.0.0.9", xff)) == "198.51.100.7"
         assert auth._client_ip(_request("10.0.0.9", SPOOFED)) == "6.6.6.6"
 
-# ---------------------------------------------------------------------------
 # Sessions
-# ---------------------------------------------------------------------------
 
 
 class TestSessions:
@@ -189,9 +183,7 @@ class TestLogout:
         assert resp.status_code == 403
 
 
-# ---------------------------------------------------------------------------
 # Dashboard pages: the SPA at the root, behind the login guard
-# ---------------------------------------------------------------------------
 
 PAGES = ["/", "/channels", "/guilds", "/forwarding", "/system", "/logs"]
 

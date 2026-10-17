@@ -1,4 +1,4 @@
-"""Download avatars task type (lane L68): a fake client agent answering the member frames,
+"""Download avatars task type: a fake client agent answering the member frames,
 a fake CDN, the zip it writes and the expiring download route."""
 import asyncio
 import csv
