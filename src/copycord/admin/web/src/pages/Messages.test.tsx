@@ -209,7 +209,7 @@ describe("Messages page", () => {
     render(<Messages />);
     await waitFor(() => expect(f.lists()).toHaveLength(1));
     await answer(f.last(), [row(1)], null);
-    const heads = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    const heads = screen.getAllByRole("columnheader").map((h) => h.textContent?.replace(/[▲▼]/g, ""));
     expect(heads).toEqual(["Time", "Author name", "Username", "Original channel", "Mapping", "Attachments", "Links", "Message ID", "Preview"]);
     fireEvent.click(screen.getByRole("button", { name: "Columns" }));
     const menu = screen.getByRole("group", { name: "Visible columns" });
@@ -222,6 +222,90 @@ describe("Messages page", () => {
     expect(screen.getByRole("columnheader", { name: "Original guild ID" })).toBeInTheDocument();
     fireEvent.click(within(menu).getByRole("button", { name: "Restore defaults" }));
     expect(screen.queryByRole("columnheader", { name: "Original guild ID" })).toBeNull();
+  });
+
+  it("sorts on the server from the column headers and flips on a second click", async () => {
+    const f = holdingFetch();
+    render(<Messages />);
+    await waitFor(() => expect(f.lists()).toHaveLength(1));
+    await answer(f.last(), [row(1)], null);
+    const params = () => new URL(f.last().url, "http://x").searchParams;
+    const head = (name: string) => screen.getByRole("columnheader", { name });
+
+    // Newest first by default: Time carries the arrow and aria-sort, the others none.
+    expect(params().get("sort")).toBe("created_at");
+    expect(params().get("order")).toBe("desc");
+    expect(head("Time")).toHaveAttribute("aria-sort", "descending");
+    expect(head("Time")).toHaveTextContent("▼");
+    expect(head("Attachments")).not.toHaveAttribute("aria-sort");
+
+    fireEvent.click(within(head("Attachments")).getByRole("button", { name: "Attachments" }));
+    await waitFor(() => expect(f.lists()).toHaveLength(2));
+    expect(params().get("sort")).toBe("attachments");
+    expect(params().get("order")).toBe("asc");
+    expect(params().get("cursor")).toBeNull();
+    expect(head("Attachments")).toHaveAttribute("aria-sort", "ascending");
+    expect(head("Attachments")).toHaveTextContent("▲");
+    expect(head("Time")).not.toHaveAttribute("aria-sort");
+    expect(head("Time")).not.toHaveTextContent(/[▲▼]/);
+    expect(document.getElementById("messages-sort")).toHaveValue("attachments");
+    expect(screen.getByRole("button", { name: /^Sorted ascending/ })).toBeInTheDocument();
+    await answer(f.last(), [row(2)], null);
+
+    // A second click on the same header flips the direction.
+    fireEvent.click(within(head("Attachments")).getByRole("button"));
+    await waitFor(() => expect(f.lists()).toHaveLength(3));
+    expect(params().get("sort")).toBe("attachments");
+    expect(params().get("order")).toBe("desc");
+    expect(head("Attachments")).toHaveAttribute("aria-sort", "descending");
+    expect(head("Attachments")).toHaveTextContent("▼");
+    await answer(f.last(), [row(3)], null);
+
+    // The next page keeps the header's sort.
+    fireEvent.click(within(head("Username")).getByRole("button"));
+    await waitFor(() => expect(f.lists()).toHaveLength(4));
+    await answer(f.last(), [row(4)], "CUR4");
+    act(() => intersect());
+    await waitFor(() => expect(params().get("cursor")).toBe("CUR4"));
+    expect(params().get("sort")).toBe("username");
+    expect(params().get("order")).toBe("asc");
+    expect(params().get("cursor")).toBe("CUR4");
+  });
+
+  it("drives the same sort from the toolbar dropdown and direction button", async () => {
+    const f = holdingFetch();
+    render(<Messages />);
+    await waitFor(() => expect(f.lists()).toHaveLength(1));
+    await answer(f.last(), [row(1)], null);
+    const params = () => new URL(f.last().url, "http://x").searchParams;
+
+    fireEvent.change(document.getElementById("messages-sort")!, { target: { value: "author" } });
+    await waitFor(() => expect(f.lists()).toHaveLength(2));
+    expect([params().get("sort"), params().get("order")]).toEqual(["author", "asc"]);
+    expect(screen.getByRole("columnheader", { name: "Author name" })).toHaveAttribute("aria-sort", "ascending");
+    await answer(f.last(), [row(2)], null);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sorted ascending, sort descending" }));
+    await waitFor(() => expect(f.lists()).toHaveLength(3));
+    expect([params().get("sort"), params().get("order")]).toEqual(["author", "desc"]);
+    expect(screen.getByRole("columnheader", { name: "Author name" })).toHaveAttribute("aria-sort", "descending");
+    expect(screen.getByRole("button", { name: "Sorted descending, sort ascending" })).toBeInTheDocument();
+  });
+
+  it("leaves the headers without a server sort as plain text", async () => {
+    const f = holdingFetch();
+    render(<Messages />);
+    await waitFor(() => expect(f.lists()).toHaveLength(1));
+    await answer(f.last(), [row(1)], null);
+    const links = screen.getByRole("columnheader", { name: "Links" });
+    expect(within(links).queryByRole("button")).toBeNull();
+    expect(links).not.toHaveAttribute("aria-sort");
+    expect(within(screen.getByRole("columnheader", { name: "Preview" })).queryByRole("button")).toBeNull();
+    fireEvent.click(links);
+    expect(f.lists()).toHaveLength(1);
+    for (const name of ["Time", "Author name", "Username", "Original channel", "Mapping", "Attachments", "Message ID"]) {
+      expect(within(screen.getByRole("columnheader", { name })).getByRole("button")).toBeInTheDocument();
+    }
   });
 
   it("puts one value in each cell: display name, username, names and ids", async () => {

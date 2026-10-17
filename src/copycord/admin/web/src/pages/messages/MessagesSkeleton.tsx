@@ -7,10 +7,20 @@ import { cx } from "../../components/ui/cx";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import type { ToolbarOption } from "../channels/ToolbarSelect";
-import { CONTROL, COUNT, HEAD_ROW, ICON_BTN, TH } from "../logs/LogsSkeleton";
+import { CONTROL, COUNT, HEAD_ROW, ICON_BTN, SORT_BTN, TH } from "../logs/LogsSkeleton";
 import { MessagesIcon } from "./icons";
-import { COLUMNS, NO_FILTERS, PREVIEW_WIDTH, SORT_OPTIONS, loadColumns, tableMinWidth } from "./model";
-import type { ColumnKey, Filters, SortKey } from "./model";
+import {
+  COLUMN_SORT,
+  COLUMNS,
+  DEFAULT_SORT,
+  NO_FILTERS,
+  PREVIEW_WIDTH,
+  SORT_OPTIONS,
+  loadColumns,
+  sortBy,
+  tableMinWidth,
+} from "./model";
+import type { ColumnKey, Filters, SortField, SortState } from "./model";
 
 export const TOOLBAR = cx(
   "mb-3 flex flex-col gap-2.5 rounded-xl border border-border px-3.5 py-2.5",
@@ -77,8 +87,8 @@ export interface ToolbarProps {
   onSearch: (v: string) => void;
   filters: Filters;
   onFilter: (patch: Partial<Filters>) => void;
-  sort: SortKey;
-  onSort: (s: SortKey) => void;
+  sort: SortState;
+  onSort: (s: SortState) => void;
   mappingOptions?: ToolbarOption[];
   channelOptions?: ToolbarOption[];
   facetsPending?: boolean;
@@ -120,10 +130,22 @@ export function MessagesToolbar({
           id="messages-sort"
           label="Sort messages"
           prefix="Sort"
-          value={sort}
+          value={sort.by}
           options={SORT_OPTIONS}
-          onChange={(v) => onSort(v as SortKey)}
+          onChange={(v) => v !== sort.by && onSort(sortBy(v as SortField))}
         />
+        <button
+          type="button"
+          id="messages-sort-dir"
+          className={COLUMNS_BTN}
+          aria-label={sort.dir === "asc" ? "Sorted ascending, sort descending" : "Sorted descending, sort ascending"}
+          onClick={() => onSort({ by: sort.by, dir: sort.dir === "asc" ? "desc" : "asc" })}
+        >
+          <span aria-hidden="true" className="text-[11px] text-accent">
+            {sort.dir === "asc" ? "▲" : "▼"}
+          </span>
+          {sort.dir === "asc" ? "Ascending" : "Descending"}
+        </button>
         {columnsMenu ?? (
           <button type="button" className={COLUMNS_BTN} aria-expanded={false}>
             <MessagesIcon name="columns" size={15} />
@@ -186,16 +208,45 @@ export function MessagesToolbar({
   );
 }
 
-export function MessagesHead({ columns }: { columns: readonly ColumnKey[] }) {
+/** The table head. A header with a server sort is a button: a click sorts by it, a second click flips the
+ * direction; the active one shows the arrow and aria-sort. Links has no sort and stays plain text. */
+export function MessagesHead({
+  columns,
+  sort = DEFAULT_SORT,
+  onSort,
+}: {
+  columns: readonly ColumnKey[];
+  sort?: SortState;
+  onSort?: (by: SortField) => void;
+}) {
   const on = new Set(columns);
   return (
     <thead className="sticky top-0 z-[2]">
       <tr className={HEAD_ROW}>
-        {COLUMNS.filter((c) => on.has(c.key)).map((c) => (
-          <th key={c.key} scope="col" className={cx(TH, "px-3 text-left")} style={{ width: c.width }}>
-            {c.label}
-          </th>
-        ))}
+        {COLUMNS.filter((c) => on.has(c.key)).map((c) => {
+          const by = COLUMN_SORT[c.key];
+          const active = by !== undefined && by === sort.by;
+          return (
+            <th
+              key={c.key}
+              scope="col"
+              className={cx(TH, "px-3 text-left")}
+              style={{ width: c.width }}
+              aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
+            >
+              {by ? (
+                <button type="button" data-sort={by} className={cx(SORT_BTN, active && "text-text")} onClick={() => onSort?.(by)}>
+                  {c.label}
+                  <span aria-hidden="true" className="ml-1 text-[11px] text-accent">
+                    {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+                  </span>
+                </button>
+              ) : (
+                c.label
+              )}
+            </th>
+          );
+        })}
         <th scope="col" className={PREVIEW_TH} style={{ width: PREVIEW_WIDTH }}>
           <span className="sr-only">Preview</span>
         </th>
@@ -269,7 +320,7 @@ export function MessagesSkeleton() {
           onSearch={() => {}}
           filters={NO_FILTERS}
           onFilter={() => {}}
-          sort="newest"
+          sort={DEFAULT_SORT}
           onSort={() => {}}
           facetsPending
         />
