@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
@@ -465,5 +466,119 @@ describe("ScraperSettingsCard", () => {
     expect(input).toHaveValue("a.b.c");
     expect(input).not.toHaveAttribute("readonly");
     expect(container.querySelectorAll("[data-skeleton]").length).toBe(0);
+  });
+});
+
+const OPTIONS_URL = "/api/tasks/types/scrape_members/options";
+
+/** The type page's two parts: the settings card, and Run task mounting a fresh form as Tasks.tsx does. */
+function TypePage() {
+  const [open, setOpen] = useState(false);
+  return (
+    <ToastProvider>
+      <MemoryRouter initialEntries={["/tasks"]}>
+        <ScraperSettingsCard />
+        <button type="button" onClick={() => setOpen(true)}>
+          Run task
+        </button>
+        {open ? <ScrapeMembersForm type={TYPE} open onClose={() => setOpen(false)} /> : null}
+      </MemoryRouter>
+    </ToastProvider>
+  );
+}
+
+/** The card's lists (tokens as given, no proxies, a save echoes its list); the form's options wait for `answer`. */
+function servePage(tokens: string[]) {
+  let reply: (r: Response) => void = () => {};
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (url === OPTIONS_URL) return new Promise<Response>((r) => (reply = r));
+      if (method === "PUT") return Promise.resolve(Response.json({ ok: true, ...(JSON.parse(String(init?.body)) as object) }));
+      return Promise.resolve(Response.json(url === TOKENS_URL ? { ok: true, tokens } : { ok: true, proxies: [] }));
+    }),
+  );
+  return { answer: (body: unknown) => act(async () => reply(Response.json(body))) };
+}
+
+/** Whether the start form (its explainer) is ever added to the page from now on, however briefly. */
+function watchForm() {
+  let shown = false;
+  const scan = (records: MutationRecord[]) => {
+    for (const r of records) if (Array.from(r.addedNodes).some((n) => n.textContent?.includes(SCRAPE_EXPLAINER))) shown = true;
+  };
+  const obs = new MutationObserver(scan);
+  obs.observe(document.body, { childList: true, subtree: true });
+  return () => {
+    scan(obs.takeRecords());
+    obs.disconnect();
+    return shown;
+  };
+}
+
+const runTask = () => fireEvent.click(screen.getByRole("button", { name: "Run task" }));
+const NO_TOKENS = { guilds: [], tokens: { total: 0 }, proxies: 0, error: "No valid scraper tokens. Add one first." };
+
+describe("Run task on the Scrape members page", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("opens straight to the empty state when the card loaded no tokens, before the options answer", async () => {
+    const page = servePage([]);
+    render(<TypePage />);
+    await screen.findByText("0 tokens, 0 proxies");
+    const formShown = watchForm();
+    runTask();
+    expect(screen.getByText("No scraper tokens saved")).toBeInTheDocument();
+    expect(screen.queryByText(SCRAPE_EXPLAINER)).not.toBeInTheDocument();
+    await page.answer(NO_TOKENS);
+    expect(screen.getByText("No scraper tokens saved")).toBeInTheDocument();
+    expect(formShown()).toBe(false);
+  });
+
+  it("opens straight to the form when the card loaded saved tokens", async () => {
+    const page = servePage(["a.b.c", "d.e.f"]);
+    render(<TypePage />);
+    await screen.findByText("2 tokens, 0 proxies");
+    runTask();
+    expect(screen.getByText(SCRAPE_EXPLAINER)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scrape members" })).toBeInTheDocument();
+    expect(screen.queryByText("No scraper tokens saved")).not.toBeInTheDocument();
+    await page.answer({ guilds: GUILDS, tokens: { total: 2 }, proxies: 0 });
+    expect(await screen.findByText("No proxies saved, so none are used.")).toBeInTheDocument();
+    expect(screen.queryByText("No scraper tokens saved")).not.toBeInTheDocument();
+  });
+
+  it("opens to the form after a token was autosaved", async () => {
+    const page = servePage([]);
+    render(<TypePage />);
+    await screen.findByText("0 tokens, 0 proxies");
+    expand();
+    editWith(screen.getByRole("textbox", { name: "Tokens" }), "a.b.c\n", () => act(() => vi.advanceTimersByTime(AUTOSAVE_MS)));
+    expect(await screen.findByText("1 token saved")).toBeInTheDocument();
+    runTask();
+    expect(screen.getByText(SCRAPE_EXPLAINER)).toBeInTheDocument();
+    expect(screen.queryByText("No scraper tokens saved")).not.toBeInTheDocument();
+    await page.answer({ guilds: GUILDS, tokens: { total: 1 }, proxies: 0 });
+    expect(await screen.findByText("No proxies saved, so none are used.")).toBeInTheDocument();
+  });
+
+  it("without the card's count, shows the form while the options load and the empty state once they say none", async () => {
+    const page = servePage([]);
+    renderForm();
+    expect(screen.getByText(SCRAPE_EXPLAINER)).toBeInTheDocument();
+    await page.answer(NO_TOKENS);
+    expect(await screen.findByText("No scraper tokens saved")).toBeInTheDocument();
+    expect(screen.queryByText(SCRAPE_EXPLAINER)).not.toBeInTheDocument();
+  });
+
+  it("trusts the options reply when it disagrees with the card's count", async () => {
+    const page = servePage([]);
+    render(<TypePage />);
+    await screen.findByText("0 tokens, 0 proxies");
+    runTask();
+    await page.answer({ guilds: GUILDS, tokens: { total: 2 }, proxies: 0 });
+    expect(await screen.findByText(SCRAPE_EXPLAINER)).toBeInTheDocument();
+    expect(screen.queryByText("No scraper tokens saved")).not.toBeInTheDocument();
   });
 });
