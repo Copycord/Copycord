@@ -15,6 +15,7 @@ from copycord.admin.tasks import routes as task_routes
 from copycord.admin.tasks.service import MemoryRunRepo, TaskRun, TaskService
 
 GID = "222333444555666777"
+DASH = chr(0x2014)
 TOKENS = [
     {"token_id": "t1", "token_value": "tok-one", "label": "one"},
     {"token_id": "t2", "token_value": "tok-two", "label": "two"},
@@ -59,11 +60,11 @@ class FakeScraper:
         n = len(self._members) + 1
         self._members[str(n)] = {"id": str(n), "username": f"user{n}"}
         self.config.progress_callback(n, self.hint, f"Found {n:,} members")
-        self.config.log_callback(f"⛏️ Scraping — found {n:,} members so far", "info")
+        self.config.log_callback(f"{scrape.PROGRESS_MARK} Scraping {DASH} found {n:,} members so far", "info")
 
     async def scrape(self):
         self.config.log_callback(f"\U0001f680 Starting scraper for guild {self.config.guild_id}", "info")
-        self.config.log_callback("Token 2 is invalid — skipping", "warn")
+        self.config.log_callback(f"Token 2 is invalid {DASH} skipping", "warn")
         try:
             while self.endless or len(self._members) < self.count:
                 await asyncio.sleep(0.01)
@@ -235,7 +236,7 @@ async def test_progress_then_success_saves_the_file(svc, env):
     msgs = _msgs(done)
     assert f"\U0001f680 Starting scraper for guild {GID}" in msgs
     assert "Token 2 is invalid: skipping" in msgs
-    assert not any("⛏" in m or "—" in m for m in msgs)
+    assert not any(scrape.PROGRESS_MARK in m or DASH in m for m in msgs)
     assert msgs[-1] == "Done: 3 members from Guild"
     log_file = (env["dir"] / "logs" / "scraper.out").read_text()
     assert f"[Guild {GID}]" in log_file and "found 3 members so far" in log_file

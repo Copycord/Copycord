@@ -59,6 +59,8 @@ PROXY_FILE = "proxies.txt"
 # The scraper's own progress lines (every 1.5 s); the step's progress shows them instead.
 PROGRESS_MARK = "⛏"
 LEVELS = {"warn": "warning", "warning": "warning", "error": "error"}
+# The scraper's messages use this dash; run log lines get ": " or "-" instead.
+DASH = chr(0x2014)
 
 
 # wiring
@@ -271,7 +273,7 @@ def _members(n: int) -> str:
 
 
 def _clean(message: Any) -> str:
-    return str(message).replace(" — ", ": ").replace("—", "-").strip()
+    return str(message).replace(f" {DASH} ", ": ").replace(DASH, "-").strip()
 
 
 @dataclass
