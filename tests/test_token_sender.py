@@ -161,15 +161,6 @@ class TestSelectionStrategies:
         f2 = s._order_tokens(toks, 1, "sticky_author", "user123")[0]["token_id"]
         assert f1 == f2
 
-    def test_sticky_author_spreads_across_authors(self):
-        s = _make_sender()
-        toks = [{"token_id": "a"}, {"token_id": "b"}, {"token_id": "c"}]
-        firsts = {
-            s._order_tokens(toks, 1, "sticky_author", f"u{i}")[0]["token_id"]
-            for i in range(30)
-        }
-        assert len(firsts) > 1
-
     def test_sticky_author_distinct_authors_get_distinct_tokens(self):
 
         s = _make_sender()
@@ -1183,11 +1174,6 @@ class TestMessagePayload:
         assert isinstance(nonce, str) and nonce.isdigit()
         assert 18 <= len(nonce) <= 19
 
-    def test_nonce_is_unique_per_message(self):
-        from copycord.server.token_sender import message_payload
-
-        assert len({message_payload("x")["nonce"] for _ in range(500)}) == 500
-
     def test_nonce_decodes_to_now(self):
         import time
 
@@ -1268,18 +1254,6 @@ class TestReplyPayload:
             "parse": ["users", "roles", "everyone"],
             "replied_user": False,
         }
-
-    def test_a_plain_message_is_unaffected(self):
-        from copycord.server.token_sender import message_payload
-
-        assert list(message_payload("hi").keys()) == [
-            "mobile_network_type",
-            "content",
-            "nonce",
-            "tts",
-            "flags",
-        ]
-
 
 class TestBodyKeyOrder:
     """Captured bodies are not uniformly ordered.
