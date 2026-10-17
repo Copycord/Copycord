@@ -71,7 +71,7 @@ describe("useConfirm", () => {
     expect(ok.className).toContain("enabled:hover:text-danger");
     expect(ok.className).not.toContain("var(--color-danger-deep)");
     expect(ok.className).toContain("ring-0!");
-    expect(cancel.className).toContain("bg-wash-4");
+    expect(cancel.className).toContain("bg-primary-a10");
   });
 
   it("defaults to an OK ghost button and honours confirmVariant and cancelVariant", async () => {
@@ -96,7 +96,7 @@ describe("useConfirm", () => {
     );
     await user.click(screen.getByText("Plain"));
     const ok = screen.getByRole("button", { name: "OK" });
-    expect(ok.className).toContain("enabled:hover:border-accent-a30");
+    expect(ok.className).toContain("enabled:hover:border-primary-a50");
     expect(ok.className).not.toContain("hover:text-danger");
     await user.keyboard("{Escape}");
     await user.click(screen.getByText("Primary"));

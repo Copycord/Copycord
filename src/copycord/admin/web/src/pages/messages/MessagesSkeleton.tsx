@@ -3,6 +3,7 @@
 // without pulling the page chunk in.
 
 import type { ReactNode } from "react";
+import { GHOST_PURPLE_TINT } from "../../components/ui/Button";
 import { cx } from "../../components/ui/cx";
 import { Skeleton } from "../../components/ui/Skeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
@@ -26,10 +27,7 @@ export const COLUMNS_BTN = cx(
   PILL_BTN,
   "border-border-input bg-panel-a60 text-text hover:border-accent/50 aria-expanded:border-accent",
 );
-export const RESET_BTN = cx(
-  PILL_BTN,
-  "border-primary-a30 bg-primary-a10 text-accent-soft hover:border-primary-a50 hover:bg-primary-a20",
-);
+export const RESET_BTN = cx(PILL_BTN, GHOST_PURPLE_TINT);
 
 // The wrap scrolls the rows under a sticky head; its height leaves room for the header and the
 // two toolbar rows so the page fits the screen, which keeps its sideways scrollbar (cc-hscroll) at
