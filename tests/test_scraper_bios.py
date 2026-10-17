@@ -101,7 +101,8 @@ def _scraper(discord, reports):
 
 def _fake_time(scraper):
     """The scraper's waits jump the loop's clock forward instead of sleeping, so every
-    timer (a wait_for cap included) sees the skipped time. Returns (skipped, undo)."""
+    timer (a wait_for cap included) sees the skipped time. Returns (skipped, undo). Under
+    it a wait_for guard around scrape() would fire too, so the tests await it bare."""
     loop = asyncio.get_running_loop()
     real = loop.time
     skipped = [0.0]
@@ -133,7 +134,7 @@ async def test_bio_wait_has_no_time_cap():
     s = _scraper(discord, reports)
     skipped, undo = _fake_time(s)
     try:
-        result = await asyncio.wait_for(s.scrape(), timeout=10)
+        result = await s.scrape()
     finally:
         undo()
     assert skipped[0] > 120
@@ -150,7 +151,7 @@ async def test_progress_reports_bios_done_of_queued():
     s = _scraper(discord, reports)
     _skipped, undo = _fake_time(s)
     try:
-        await asyncio.wait_for(s.scrape(), timeout=10)
+        await s.scrape()
     finally:
         undo()
     assert reports[0] == (0, 3) and reports[-1] == (3, 3)
@@ -172,7 +173,7 @@ async def test_429_waits_out_retry_after_however_often():
     s = _scraper(discord, [])
     _skipped, undo = _fake_time(s)
     try:
-        result = await asyncio.wait_for(s.scrape(), timeout=10)
+        result = await s.scrape()
     finally:
         undo()
     t1, t2 = discord.times("1"), discord.times("2")
@@ -200,7 +201,7 @@ async def test_failing_profiles_are_skipped_after_their_tries():
     s = _scraper(discord, [])
     _skipped, undo = _fake_time(s)
     try:
-        result = await asyncio.wait_for(s.scrape(), timeout=10)
+        result = await s.scrape()
     finally:
         undo()
     assert result.success
