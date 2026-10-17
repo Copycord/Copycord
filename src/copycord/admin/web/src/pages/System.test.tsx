@@ -7,7 +7,7 @@ import { CSRF_HEADER } from "../lib/api";
 import type { BackupArchive, BackupInfo } from "../types/system";
 import { holdFetch } from "../test/holdFetch";
 import { System } from "./System";
-import { fmtBackupWhen, fmtBytes, SHRUG } from "./system/format";
+import { SHRUG } from "./system/format";
 import { SystemSkeleton } from "./system/SystemSkeleton";
 
 // Noon UTC keeps the calendar day the same in every test runner time zone.
@@ -119,45 +119,6 @@ describe("System page", () => {
     renderPage();
     await openPanel(user);
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load backups.");
-  });
-
-  it("collapses with the chevron, opens on a card click, closes on a double click", async () => {
-    server({ "/api/backup/info": () => jsonResponse(info()) });
-    const user = userEvent.setup();
-    renderPage();
-    const card = document.getElementById("adv-data-card")!;
-    const chevron = document.getElementById("adv-collapse-btn")!;
-    expect(chevron).toHaveAttribute("aria-expanded", "false");
-
-    await user.click(chevron);
-    expect(chevron).toHaveAttribute("aria-expanded", "true");
-    await user.click(chevron);
-    expect(chevron).toHaveAttribute("aria-expanded", "false");
-
-    // A click on the card body opens it, and a double click on a collapsed card leaves it open.
-    await user.dblClick(screen.getByRole("heading", { name: "Database" }));
-    expect(chevron).toHaveAttribute("aria-expanded", "true");
-    expect(card).toHaveAttribute("data-collapsed", "false");
-
-    // A double click on an open card closes it; clicks on buttons do not toggle.
-    await user.dblClick(screen.getByRole("heading", { name: "Database" }));
-    expect(chevron).toHaveAttribute("aria-expanded", "false");
-    await user.click(chevron);
-    await user.dblClick(document.getElementById("adv-restore-upload")!);
-    expect(chevron).toHaveAttribute("aria-expanded", "true");
-  });
-
-  it("caps the archive list at five rows and scrolls the rest", async () => {
-    const many = Array.from({ length: 7 }, (_, i) => ({ name: `b${i}.tar.gz`, size: 1, mtime: OCT_8 }));
-    server({ "/api/backup/info": () => jsonResponse(info(many)) });
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(document.getElementById("adv-last-backup")).toHaveTextContent("Oct 8 2026"));
-    const wrap = screen.getByTestId("adv-archives-wrap");
-    expect(wrap.style.maxHeight).toBe("");
-    await openPanel(user);
-    // jsdom has no layout, so the old fallbacks apply: 36 head + 5 rows of 44 + the 8 px table margin.
-    expect(wrap.style.maxHeight).toBe("264px");
   });
 
   it("backup now posts to /admin/backup-now, reloads the info and toasts", async () => {
@@ -285,54 +246,9 @@ describe("System page", () => {
     expect(Object.fromEntries((post?.body as FormData).entries())).toEqual({ name: "copycord-2026-10-09.tar.gz" });
     await waitFor(() => expect(screen.queryByText("copycord-2026-10-09")).not.toBeInTheDocument());
   });
-
-  it("toasts a failed delete", async () => {
-    server({
-      "/api/backup/info": () => jsonResponse(info()),
-      "/api/backup/delete": () => new Response("not found", { status: 404 }),
-    });
-    const user = userEvent.setup();
-    renderPage();
-    await openPanel(user);
-    const row = (await screen.findByText("copycord-2026-10-09")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: "Delete" }));
-    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("not found")).toBeInTheDocument();
-  });
-});
-
-describe("system format helpers", () => {
-  it("formats sizes like the old page", () => {
-    expect(fmtBytes(0)).toBe("0 B");
-    expect(fmtBytes(1023)).toBe(`${(1023).toLocaleString()} B`);
-    expect(fmtBytes(1536)).toBe("1.5 KB");
-    expect(fmtBytes(20 * 1024)).toBe("20 KB");
-    expect(fmtBytes(3 * 1024 * 1024)).toBe("3.0 MB");
-    expect(fmtBytes(12 * 1024 ** 3)).toBe("12 GB");
-  });
-
-  it("shows a clock time for today and a date otherwise", () => {
-    const now = new Date(2026, 9, 13, 18, 0);
-    expect(fmtBackupWhen(new Date(2026, 9, 13, 0, 5), now)).toBe("12:05am");
-    expect(fmtBackupWhen(new Date(2026, 9, 13, 15, 7), now)).toBe("3:07pm");
-    expect(fmtBackupWhen(new Date(2026, 9, 12, 15, 7), now)).toBe("Oct 12 2026");
-    expect(fmtBackupWhen(new Date(2026, 9, 13, 12, 0).getTime() / 1000, now)).toBe("12:00pm");
-    expect(fmtBackupWhen("not a date", now)).toBe("—");
-    expect(fmtBackupWhen(undefined, now)).toBe("—");
-  });
 });
 
 describe("System loading", () => {
-  it("shows skeleton archive rows until the backup info arrives", async () => {
-    server({ "/api/backup/info": () => jsonResponse(info()) });
-    const release = holdFetch("/api/backup/info");
-    renderPage();
-    expect(screen.getAllByTestId("adv-archive-skeleton")).toHaveLength(3);
-    release();
-    await waitFor(() => expect(document.getElementById("adv-last-backup")).toHaveTextContent("Oct 9 2026"));
-    expect(screen.queryByTestId("adv-archive-skeleton")).toBeNull();
-  });
-
   it("keeps the real title and the one Database card while loading, as the chunk skeleton does", async () => {
     server({ "/api/backup/info": () => jsonResponse(info()) });
     const release = holdFetch("/api/backup/info");

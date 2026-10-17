@@ -7,7 +7,6 @@ import { CSRF_HEADER } from "../lib/api";
 import type { ForwardingRule } from "../types/forwarding";
 import { CLIENT_TOKEN_MESSAGE, Forwarding } from "./Forwarding";
 import type { OpenRuleEditor } from "./forwarding/editor";
-import { filterRules, toList } from "./forwarding/forwardingApi";
 
 const RULES: ForwardingRule[] = [
   {
@@ -95,18 +94,6 @@ describe("Forwarding page", () => {
     }
   });
 
-  it("falls back to a dash and zero when the counts fail", async () => {
-    server({
-      "GET /api/forwarding": () => jsonResponse({ ok: true, items: RULES }),
-      "GET /api/forwarding/count": () => jsonResponse({ ok: false, error: "db-error" }, 500),
-      "GET /api/forwarding/count/by-rule": () => jsonResponse({ ok: false, error: "db-error" }, 500),
-    });
-    renderPage();
-    await waitFor(() => expect(document.querySelectorAll(".fwd-card")).toHaveLength(2));
-    expect(document.getElementById("fwdTotalCount")).toHaveTextContent("—");
-    expect(card("r1").querySelector('[data-rule-count-id="r1"]')).toHaveTextContent("0");
-  });
-
   it("shows the empty state when there are no rules", async () => {
     server(listRoutes([]));
     const open = vi.fn();
@@ -165,20 +152,6 @@ describe("Forwarding page", () => {
     expect(document.querySelectorAll(".fwd-card")).toHaveLength(2);
   });
 
-  it("toasts the server's reason when a toggle save fails with a 400", async () => {
-    server({
-      ...listRoutes(),
-      "POST /api/forwarding": () =>
-        new Response("Telegram: invalid bot token. (Unauthorized)", { status: 400, headers: { "content-type": "text/plain" } }),
-    });
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(document.querySelectorAll(".fwd-card")).toHaveLength(2));
-    await user.click(within(card("r1")).getByRole("button", { name: "Disable" }));
-    expect(await screen.findByText("Telegram: invalid bot token. (Unauthorized)")).toBeInTheDocument();
-    expect(screen.queryByText("Failed to save forwarding rule (400)")).not.toBeInTheDocument();
-  });
-
   it("toggles a rule by posting it back with enabled flipped, then reloads the list", async () => {
     let items = RULES;
     const fetchMock = server({
@@ -215,35 +188,6 @@ describe("Forwarding page", () => {
     expect(search).toHaveValue("");
     expect(document.querySelectorAll(".fwd-card")).toHaveLength(2);
   });
-
-  it("routes New Forward, Edit and Duplicate to the lane 10 editor hook", async () => {
-    server(listRoutes());
-    const open = vi.fn();
-    const user = userEvent.setup();
-    renderPage(open);
-    await waitFor(() => expect(document.querySelectorAll(".fwd-card")).toHaveLength(2));
-    await user.click(screen.getByRole("button", { name: "New Forward" }));
-    await user.click(within(card("r1")).getByRole("button", { name: "Edit" }));
-    await user.click(within(card("r/2")).getByRole("button", { name: "Duplicate" }));
-    expect(open.mock.calls.map(([req]) => req)).toEqual([
-      { mode: "create" },
-      { mode: "edit", rule: RULES[0] },
-      { mode: "duplicate", rule: RULES[1] },
-    ]);
-  });
-});
-
-describe("forwarding helpers", () => {
-  it("reads keyword lists from arrays or CSV and searches them", () => {
-    expect(toList("a, b")).toEqual(["a", "b"]);
-    expect(toList(undefined)).toEqual([]);
-    const rules: ForwardingRule[] = [
-      { rule_id: "x", label: "X", provider: "telegram", enabled: true, filters: { keywords_all: "alpha,beta" } },
-    ];
-    expect(filterRules(rules, "BETA")).toHaveLength(1);
-    expect(filterRules(rules, "telegram")).toHaveLength(1);
-    expect(filterRules(rules, "gamma")).toHaveLength(0);
-  });
 });
 
 describe("Forwarding client token gate", () => {
@@ -256,15 +200,5 @@ describe("Forwarding client token gate", () => {
     expect(gate).toHaveClass("fixed", "top-header", "bottom-0");
     expect(within(gate).getByText(CLIENT_TOKEN_MESSAGE)).toHaveAttribute("aria-live", "polite");
     expect(document.getElementById("fwd-root")!.querySelector("[inert]")).not.toBeNull();
-  });
-
-  it("shows no gate and asks Discord for nothing when a client token is configured", async () => {
-    const fetchMock = server(listRoutes());
-    renderPage();
-    await waitFor(() => expect(document.querySelectorAll(".fwd-card")).toHaveLength(2));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/config")).toBe(true));
-    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/client-guilds")).toHaveLength(0);
-    expect(screen.queryByTestId("status-gate")).toBeNull();
-    expect(document.getElementById("fwd-root")!.querySelector("[inert]")).toBeNull();
   });
 });

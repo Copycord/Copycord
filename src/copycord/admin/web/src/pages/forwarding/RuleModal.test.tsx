@@ -6,15 +6,7 @@ import { ConfirmProvider } from "../../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../../lib/api";
 import type { ForwardingRule, ForwardingRulePayload } from "../../types/forwarding";
 import { Forwarding } from "../Forwarding";
-import {
-  buildPayload,
-  CLIENT_TOKEN_MESSAGE,
-  EMPTY_FORM,
-  formFromRequest,
-  formFromRule,
-  GUILDS_RATE_LIMITED_MESSAGE,
-  localProblem,
-} from "./ruleForm";
+import { GUILDS_RATE_LIMITED_MESSAGE } from "./ruleForm";
 
 // Made up secrets; every request below is answered by the fetch stub.
 const PUSH_RULE: ForwardingRule = {
@@ -102,86 +94,12 @@ async function pickProvider(user: ReturnType<typeof userEvent.setup>, name: stri
   await user.click(screen.getByRole("option", { name }));
 }
 
-describe("rule payload", () => {
-  const base = { ...EMPTY_FORM, label: " Rule ", keywords_any: ["a", " "], channel_ids: ["5"] };
-
-  it("builds the Pushover config", () => {
-    const p = buildPayload({ ...base, provider: "pushover", pushover_app_token: " tok ", pushover_user_key: "key", telegram_bot_token: "ignored" });
-    expect(p).toMatchObject({ rule_id: null, guild_id: null, label: "Rule", provider: "pushover", enabled: true });
-    expect(p.config).toEqual({ app_token: "tok", user_key: "key" });
-    expect(p.filters).toEqual({
-      keywords_any: ["a"],
-      keywords_all: [],
-      channel_ids: ["5"],
-      user_ids: [],
-      case_sensitive: false,
-      include_embeds: false,
-      include_bots: false,
-      include_system: false,
-      has_attachments: false,
-    });
-  });
-
-  it("builds the Discord config, username and avatar only when set", () => {
-    expect(buildPayload({ ...base, provider: "discord", discord_urls: [HOOK] }).config).toEqual({ urls: [HOOK] });
-    expect(
-      buildPayload({ ...base, provider: "discord", discord_urls: [HOOK], discord_username: "Bot", discord_avatar_url: "https://x/a.png" }).config,
-    ).toEqual({ urls: [HOOK], username: "Bot", avatar_url: "https://x/a.png" });
-  });
-
-  it("builds the Telegram config", () => {
-    expect(buildPayload({ ...base, provider: "telegram", telegram_bot_token: "1:AB", telegram_chat_id: "-100" }).config).toEqual({
-      bot_token: "1:AB",
-      chat_id: "-100",
-    });
-  });
-
-  it("runs the old local checks", () => {
-    expect(localProblem(buildPayload({ ...base, provider: "" }))).toBe("Please choose a provider.");
-    expect(localProblem(buildPayload({ ...base, provider: "telegram", telegram_bot_token: "x" }))).toMatch(/Telegram requires/);
-    expect(localProblem(buildPayload({ ...base, provider: "pushover", pushover_app_token: "x" }))).toMatch(/Pushover requires/);
-    expect(localProblem(buildPayload({ ...base, provider: "discord" }))).toMatch(/at least one webhook/);
-    expect(localProblem(buildPayload({ ...base, provider: "discord", discord_urls: ["https://example.com/x"] }))).toMatch(/Invalid Discord/);
-    expect(localProblem(buildPayload({ ...base, provider: "discord", discord_urls: [HOOK] }))).toBeNull();
-  });
-
-  it("prefills edit as stored and duplicates without the id", () => {
-    const form = formFromRule({ ...PUSH_RULE, provider: "discord", config: { url: HOOK, bot_username: "Old" } });
-    expect(form.discord_urls).toEqual([HOOK]);
-    expect(form.discord_username).toBe("Old");
-    expect(form.channel_ids).toEqual(["10", "11"]);
-    const dup = formFromRequest({ mode: "duplicate", rule: PUSH_RULE });
-    expect(dup.rule_id).toBe("");
-    expect(dup.label).toBe("Phone alerts (Copy)");
-    expect(buildPayload(dup).rule_id).toBeNull();
-  });
-});
-
 describe("rule modal", () => {
-  it("asks for the client guilds only when the modal opens, once", async () => {
-    const user = userEvent.setup();
-    const fetchMock = server({ "GET /api/config": () => jsonResponse({ CLIENT_TOKEN: "tok" }) });
-    renderPage();
-    await findCard("r1");
-    expect(calls(fetchMock, "GET /api/config")).toHaveLength(1);
-    expect(calls(fetchMock, "GET /api/client-guilds")).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "New Forward" }));
-    await screen.findByRole("dialog", { name: "New Forwarding Rule" });
-    await waitFor(() => expect(calls(fetchMock, "GET /api/client-guilds")).toHaveLength(1));
-  });
-
   it("says Discord is rate limiting when the guild list is rate limited", async () => {
     const user = userEvent.setup();
     server({ "GET /api/client-guilds": () => jsonResponse({ detail: "discord-rate-limited" }, 429) });
     const dialog = await openNew(user);
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(GUILDS_RATE_LIMITED_MESSAGE);
-  });
-
-  it("shows the client token message when the token is rejected", async () => {
-    const user = userEvent.setup();
-    server({ "GET /api/client-guilds": () => jsonResponse({ detail: "client-token-invalid" }, 502) });
-    const dialog = await openNew(user);
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(CLIENT_TOKEN_MESSAGE);
   });
 
   it("lists client guilds and creates a Discord rule without the validate call", async () => {

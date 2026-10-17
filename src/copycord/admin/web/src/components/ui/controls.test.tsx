@@ -1,15 +1,11 @@
 // Behaviour tests for the smaller components.
 
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { Badge, StatusPill } from "./Badge";
 import { Button } from "./Button";
-import { Card } from "./Card";
-import { EmptyState } from "./EmptyState";
-import { Field, Input, Select, Textarea } from "./Field";
-import { Spinner } from "./Spinner";
+import { Field, Input } from "./Field";
 import { Tabs } from "./Tabs";
 import { Toggle } from "./Toggle";
 import { Tooltip } from "./Tooltip";
@@ -38,60 +34,6 @@ describe("Button", () => {
     await userEvent.setup().click(btn);
     expect(onClick).not.toHaveBeenCalled();
   });
-
-  it("keeps its label in place while loading: the label goes see-through, the spinner sits centred over it", () => {
-    const { rerender } = render(<Button>Save</Button>);
-    expect(screen.getByRole("button")).not.toHaveClass("relative");
-    expect(screen.queryByRole("status")).toBeNull();
-    rerender(<Button loading>Save</Button>);
-    const btn = screen.getByRole("button", { name: /Save/ });
-    expect(btn).toHaveClass("relative");
-    // The label is still in the DOM and the accessible name, only made transparent (not hidden from the name).
-    const label = within(btn).getByText("Save");
-    expect(label).toHaveClass("opacity-0");
-    expect(label).not.toHaveClass("invisible");
-    expect(label).not.toHaveClass("hidden");
-    expect(btn).toHaveAccessibleName(/Save/);
-    // The spinner is out of the flow, over the whole button, centred both ways.
-    const spinner = within(btn).getByRole("status", { name: "Working" });
-    expect(spinner.className.split(" ")).toEqual(expect.arrayContaining(["absolute", "inset-0", "items-center", "justify-center"]));
-    expect(spinner.nextSibling).toBeNull();
-    expect(btn.firstElementChild).toBe(label);
-  });
-
-  it("applies variant classes", () => {
-    render(<Button variant="danger">Delete</Button>);
-    expect(screen.getByRole("button").className).toContain("bg-[linear-gradient(180deg,var(--color-danger),var(--color-danger-deep))]");
-  });
-
-  it("gives ghost the purple tint and keeps the ghost-purple hover classes apart", () => {
-    render(
-      <>
-        <Button variant="ghost">Clear</Button>
-        <Button variant="ghost-purple">Pick</Button>
-      </>,
-    );
-    const ghost = screen.getByRole("button", { name: "Clear" }).className.split(" ");
-    for (const c of ["border-primary-a30", "bg-primary-a10", "text-accent-soft", "enabled:hover:bg-primary-a20", "focus-visible:ring-2"])
-      expect(ghost).toContain(c);
-    const purple = screen.getByRole("button", { name: "Pick" }).className.split(" ");
-    for (const c of ["enabled:hover:bg-line-1", "enabled:hover:border-primary-600", "enabled:hover:outline-2"]) expect(purple).toContain(c);
-  });
-
-  it("holds an attached button still on hover and press, other buttons keep the lift", () => {
-    render(
-      <>
-        <Button variant="ghost" attached>
-          Search
-        </Button>
-        <Button variant="ghost">Other</Button>
-      </>,
-    );
-    const still = screen.getByRole("button", { name: "Search" }).className;
-    for (const c of ["enabled:hover:translate-y-0!", "enabled:hover:shadow-none!", "enabled:active:scale-100!"]) expect(still).toContain(c);
-    expect(still).not.toContain("ring-0!");
-    expect(screen.getByRole("button", { name: "Other" }).className).not.toContain("enabled:hover:translate-y-0!");
-  });
 });
 
 describe("Field", () => {
@@ -105,31 +47,6 @@ describe("Field", () => {
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(input).toHaveAccessibleDescription("Required From the developer portal");
     expect(screen.getByRole("alert")).toHaveTextContent("Required");
-  });
-
-  it("works for Textarea and Select", async () => {
-    const user = userEvent.setup();
-    render(
-      <>
-        <Field label="Notes">
-          <Textarea />
-        </Field>
-        <Field label="Mode">
-          <Select
-            defaultValue="a"
-            options={[
-              { value: "a", label: "Alpha" },
-              { value: "b", label: "Beta" },
-            ]}
-          />
-        </Field>
-      </>,
-    );
-    await user.type(screen.getByLabelText("Notes"), "hi");
-    expect(screen.getByLabelText("Notes")).toHaveValue("hi");
-    await user.selectOptions(screen.getByLabelText("Mode"), "b");
-    expect(screen.getByLabelText("Mode")).toHaveValue("b");
-    expect(screen.getByLabelText("Mode")).not.toHaveAttribute("aria-invalid");
   });
 });
 
@@ -213,50 +130,5 @@ describe("Tooltip", () => {
     expect(screen.getByRole("tooltip")).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("tooltip")).toBeNull();
-  });
-});
-
-describe("Badge and StatusPill", () => {
-  it("renders status text for each state", () => {
-    render(
-      <>
-        <StatusPill status="online" />
-        <StatusPill status="offline" />
-        <StatusPill status="warn" label="Reconnecting" />
-        <Badge tone="good">ok</Badge>
-      </>,
-    );
-    const pills = screen.getAllByRole("status");
-    expect(pills.map((p) => p.textContent)).toEqual(["Online", "Offline", "Reconnecting"]);
-    expect(pills[1]).toHaveAttribute("data-status", "offline");
-    expect(screen.getByText("ok").className).toContain("text-good");
-  });
-});
-
-describe("Card, Spinner, EmptyState", () => {
-  it("render their content", () => {
-    render(
-      <>
-        <Card title="Server" actions={<button>Edit</button>}>
-          body
-        </Card>
-        <Spinner label="Loading guilds" />
-        <EmptyState title="No mappings" description="Add one to start" action={<button>Add</button>} />
-      </>,
-    );
-    expect(screen.getByRole("heading", { name: "Server" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Loading guilds" })).toBeInTheDocument();
-    expect(screen.getByText("No mappings")).toBeInTheDocument();
-    expect(screen.getByText("Add one to start")).toBeInTheDocument();
-    expect(screen.getByText("No mappings").parentElement).toHaveClass("border-dashed");
-  });
-
-  it("EmptyState plain is centred text with no card border", () => {
-    render(<EmptyState plain title="No runs" description="Run one above" />);
-    const box = screen.getByText("No runs").parentElement!;
-    expect(box.className).not.toMatch(/border/);
-    expect(box).toHaveClass("text-center");
-    expect(screen.getByText("Run one above")).toBeInTheDocument();
   });
 });

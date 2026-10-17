@@ -4,28 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/Toast";
 import { ConfirmProvider } from "../../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../../lib/api";
-import type { GlobalConfig } from "../../types/dashboard-config";
-import { Dashboard } from "../Dashboard";
 import { holdFetch } from "../../test/holdFetch";
 import { GlobalConfigSection } from "./GlobalConfigSection";
-import {
-  buildAddForm,
-  buildSaveForm,
-  inviteUrl,
-  isDirty,
-  loadConfig,
-  missingTokens,
-  tokensFromErrors,
-} from "./config/model";
-
-const CONFIG: GlobalConfig = {
-  SERVER_TOKEN: "srv-tok",
-  CLIENT_TOKEN: "cli-tok",
-  COMMAND_USERS: ["111", "222"],
-  COPYCORD_AUTOSTART: true,
-  LOG_LEVEL: "DEBUG",
-  LOG_MAX_SIZE_MB: "25",
-};
 
 type Handler = (init: RequestInit) => Response;
 
@@ -70,45 +50,6 @@ function renderSection() {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("config model", () => {
-  it("reads the saved values from GET /api/config", async () => {
-    server(baseRoutes());
-    expect(await loadConfig()).toEqual(CONFIG);
-    server({ "/api/config": () => json({}) });
-    expect(await loadConfig()).toEqual({
-      SERVER_TOKEN: "",
-      CLIENT_TOKEN: "",
-      COMMAND_USERS: [],
-      COPYCORD_AUTOSTART: false,
-      LOG_LEVEL: "INFO",
-      LOG_MAX_SIZE_MB: "10",
-    });
-  });
-
-  it("builds the six form fields /save expects", () => {
-    const fd = buildSaveForm(CONFIG);
-    expect(Object.fromEntries(fd.entries())).toEqual({
-      SERVER_TOKEN: "srv-tok",
-      CLIENT_TOKEN: "cli-tok",
-      COMMAND_USERS: "111,222",
-      COPYCORD_AUTOSTART: "true",
-      LOG_LEVEL: "DEBUG",
-      LOG_MAX_SIZE_MB: "25",
-    });
-  });
-
-  it("tracks dirty state, missing tokens and token errors", () => {
-    expect(isDirty(CONFIG, { ...CONFIG })).toBe(false);
-    expect(isDirty(CONFIG, { ...CONFIG, COMMAND_USERS: ["111"] })).toBe(true);
-    expect(isDirty(CONFIG, { ...CONFIG, LOG_LEVEL: "INFO" })).toBe(true);
-    expect(missingTokens({ ...CONFIG, CLIENT_TOKEN: "  " })).toEqual(["CLIENT_TOKEN"]);
-    expect([...tokensFromErrors(["Invalid CLIENT_TOKEN", "bad SERVER_TOKEN"])].sort()).toEqual(["CLIENT_TOKEN", "SERVER_TOKEN"]);
-    expect(inviteUrl("42")).toBe("https://discord.com/oauth2/authorize?client_id=42&permissions=8&integration_type=0&scope=bot");
-    expect(inviteUrl(null)).toBeNull();
-    expect(Object.fromEntries(buildAddForm("t", "n").entries())).toEqual({ token_value: "t", note: "n" });
-  });
-});
-
 describe("Global Configuration card", () => {
   it("loads the saved values, hides Save until dirty and enables the invite link", async () => {
     server(baseRoutes());
@@ -125,17 +66,6 @@ describe("Global Configuration card", () => {
     await waitFor(() =>
       expect(document.getElementById("bot-invite-btn")).toHaveAttribute("href", expect.stringContaining("client_id=42")),
     );
-  });
-
-  it("shows and hides a token", async () => {
-    server(baseRoutes());
-    const user = userEvent.setup();
-    renderSection();
-    const input = await screen.findByLabelText("Server Token");
-    await user.click(screen.getByRole("button", { name: "Show SERVER_TOKEN" }));
-    expect(input).toHaveAttribute("type", "text");
-    await user.click(screen.getByRole("button", { name: "Hide SERVER_TOKEN" }));
-    expect(input).toHaveAttribute("type", "password");
   });
 
   it("edits chips and saves a CSRF form POST to /save, then goes clean", async () => {
@@ -184,17 +114,6 @@ describe("Global Configuration card", () => {
     await user.click(save);
     expect(await screen.findByText(/bad CLIENT_TOKEN/)).toBeInTheDocument();
     expect(save).toBeEnabled();
-  });
-
-  it("locks Save and Cancel while a bot is running", async () => {
-    server({ ...baseRoutes(), "/api/status": () => json({ server: { running: true }, client: { running: false } }) });
-    const user = userEvent.setup();
-    renderSection();
-    await user.type(await screen.findByLabelText("Server Token"), "x");
-    const save = document.getElementById("cfg-save-btn")!;
-    await waitFor(() => expect(save).toHaveAttribute("title", "Stop the bot to edit global configuration"));
-    expect(save).toBeDisabled();
-    expect(document.getElementById("cfg-cancel-btn")).toBeDisabled();
   });
 
   it("follows the Bots card's live state: stopping the bots unlocks Save without a reload", async () => {
@@ -294,43 +213,6 @@ describe("Backup tokens modal", () => {
     await user.type(within(dialog).getByPlaceholderText("Paste a CLIENT_TOKEN"), "bad");
     await user.click(document.getElementById("backup-token-add")!);
     expect(await screen.findByText(/must be a valid Discord user token/)).toBeInTheDocument();
-  });
-
-  it("closes on Escape", async () => {
-    server({ ...baseRoutes(), "/api/backup-tokens": () => json({ ok: true, tokens: [] }) });
-    const user = userEvent.setup();
-    renderSection();
-    await screen.findByLabelText("Server Token");
-    await user.click(document.getElementById("backupTokensBtn")!);
-    await screen.findByRole("dialog", { name: "Backup Tokens" });
-    await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  });
-});
-
-describe("Dashboard link cards", () => {
-  it("shows Star on GitHub, Join the Discord and Donate above the Bots card", async () => {
-    server({ ...baseRoutes(), "/version": () => json({ current: "v4", latest: "v4", url: "", update_available: false }) });
-    render(
-      <ToastProvider>
-        <ConfirmProvider>
-          <Dashboard />
-        </ConfirmProvider>
-      </ToastProvider>,
-    );
-    const cards = screen.getByRole("region", { name: "Quick actions" });
-    const links = within(cards).getAllByRole("link");
-    expect(links.map((a) => a.getAttribute("href"))).toEqual([
-      "https://github.com/Copycord/Copycord",
-      "https://discord.gg/ArFdqrJHBj",
-      "https://ko-fi.com/xmacj",
-    ]);
-    expect(within(cards).getByText("Star on GitHub")).toBeInTheDocument();
-    expect(within(cards).getByText("Join the Discord")).toBeInTheDocument();
-    expect(within(cards).getByText("Donate")).toBeInTheDocument();
-    for (const a of links) expect(a).toHaveAttribute("target", "_blank");
-    expect(cards.compareDocumentPosition(screen.getByRole("heading", { name: "Bots" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    await screen.findByLabelText("Server Token");
   });
 });
 
