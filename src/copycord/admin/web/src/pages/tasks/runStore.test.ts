@@ -1,7 +1,18 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskRun, TaskStep } from "../../types/tasks";
-import { applyFrame, FINAL_FETCH_ATTEMPTS, LIVE_REFETCH_MS, mergeIntoList, parseRunFrame, useTaskRun, useTaskRuns } from "./runStore";
+import {
+  appendRuns,
+  applyFrame,
+  FINAL_FETCH_ATTEMPTS,
+  LIVE_REFETCH_MS,
+  mergeIntoList,
+  normalizeContexts,
+  parseRunFrame,
+  refreshRuns,
+  useTaskRun,
+  useTaskRuns,
+} from "./runStore";
 
 function makeRun(over: Partial<TaskRun> = {}): TaskRun {
   return {
@@ -72,7 +83,26 @@ describe("runStore merging", () => {
     expect(added.runs.map((r) => r.id)).toEqual(["2", "1"]);
     expect(added.total).toBe(2);
     expect(mergeIntoList(state, { run: makeRun({ id: "3", type: "noop" }) }, { type: "backfill_channels" })).toBe(state);
-    expect(mergeIntoList(state, { run: makeRun({ id: "3" }) }, { page: 2 })).toBe(state);
+  });
+});
+
+describe("run list paging and mapping choices", () => {
+  it("appends a next page without repeating a held run, and a refetch keeps rows past it", () => {
+    const [a, b, c, d] = ["a", "b", "c", "d"].map((id) => makeRun({ id }));
+    expect(appendRuns([a!, b!], [b!, c!]).map((r) => r.id)).toEqual(["a", "b", "c"]);
+    expect(refreshRuns([a!, b!, c!, d!], [a!, b!]).map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+    expect(refreshRuns([a!], [d!, a!]).map((r) => r.id)).toEqual(["d", "a"]);
+  });
+
+  it("gives every mapping choice a label: strings as labels, then the mapping id, then the guild id; blanks dropped", () => {
+    expect(
+      normalizeContexts(["Main", "", "  ", { label: "", mapping_id: "m9" }, { label: "", guild_id: "g7" }, { label: "" }, "Main"]),
+    ).toEqual([
+      { label: "Main" },
+      { label: "m9", mapping_id: "m9" },
+      { label: "g7", mapping_id: null, guild_id: "g7" },
+    ]);
+    expect(normalizeContexts(undefined)).toEqual([]);
   });
 });
 

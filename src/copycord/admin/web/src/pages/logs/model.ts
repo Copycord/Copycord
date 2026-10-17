@@ -188,13 +188,15 @@ export interface LogsQuery {
   page: number;
   type: string;
   search: string;
+  /** Start after this many rows instead of at the page: the next page past the rows already loaded. */
+  offset?: number;
 }
 
 /** The query string for GET /api/event-logs. */
-export function buildLogsQuery({ page, type, search }: LogsQuery): string {
+export function buildLogsQuery({ page, type, search, offset }: LogsQuery): string {
   const params = new URLSearchParams();
   params.set("limit", String(PAGE_SIZE));
-  params.set("offset", String((Math.max(1, page) - 1) * PAGE_SIZE));
+  params.set("offset", String(offset ?? (Math.max(1, page) - 1) * PAGE_SIZE));
   if (type) params.set("event_type", type);
   const q = search.trim();
   if (q) params.set("search", q);
@@ -226,6 +228,12 @@ export function pageRange(current: number, pages: number): Array<number | null> 
 }
 
 /** "Showing 1-50 of 120", or the old wording when the page came back empty. */
+/** The held rows then `more`, a log already held kept once (new logs on top shift the offsets). */
+export function appendLogs(held: EventLog[], more: EventLog[]): EventLog[] {
+  const ids = new Set(held.map((l) => l.log_id));
+  return [...held, ...more.filter((l) => !ids.has(l.log_id))];
+}
+
 export function countText(page: number, shown: number, total: number): string {
   if (shown === 0) return total > 0 ? `No results for current filters (${total} total)` : "";
   const start = (page - 1) * PAGE_SIZE + 1;

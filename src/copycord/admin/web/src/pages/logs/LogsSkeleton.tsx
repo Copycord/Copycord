@@ -8,7 +8,6 @@ import { Skeleton } from "../../components/ui/Skeleton";
 import { ToolbarSelect } from "../channels/ToolbarSelect";
 import { LogsIcon } from "./icons";
 import type { SortColumn } from "./model";
-import { Pagination } from "./Pagination";
 
 export const CONTROL =
   "rounded-lg border border-border-input bg-panel-a60 text-[13px] text-text outline-none transition-colors focus:border-accent";
@@ -189,8 +188,6 @@ export function LogsSkeleton() {
           </tbody>
         </table>
       </div>
-
-      <Pagination page={1} pages={1} inert />
     </section>
   );
 }
