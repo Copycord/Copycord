@@ -41,9 +41,7 @@ MEDIA = "https://media.discordapp.net"
 WEB = "https://discord.com"
 
 
-# ---------------------------------------------------------------------------
 # helpers
-# ---------------------------------------------------------------------------
 
 
 def _int(value: Any) -> Optional[int]:
@@ -135,9 +133,7 @@ class _Wrapper(_Hashable):
         return f"<{self.__class__.__name__} id={self.id}{extra}>"
 
 
-# ---------------------------------------------------------------------------
 # small value types
-# ---------------------------------------------------------------------------
 
 
 class Object(_Hashable):
@@ -483,9 +479,7 @@ class Colour:
 Color = Colour
 
 
-# ---------------------------------------------------------------------------
 # users, members, roles
-# ---------------------------------------------------------------------------
 
 
 class User(_Wrapper):
@@ -761,9 +755,7 @@ class Role(_Wrapper):
         return self.name
 
 
-# ---------------------------------------------------------------------------
 # emoji, stickers
-# ---------------------------------------------------------------------------
 
 
 class PartialEmoji:
@@ -922,9 +914,7 @@ StickerItem = Sticker
 GuildSticker = Sticker
 
 
-# ---------------------------------------------------------------------------
 # permission overwrites
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -958,9 +948,7 @@ class PermissionOverwrite:
         return Permissions(self.allow), Permissions(self.deny)
 
 
-# ---------------------------------------------------------------------------
 # channels
-# ---------------------------------------------------------------------------
 
 
 class _Channel(_Wrapper):
@@ -1542,9 +1530,7 @@ def is_forum_type(value: Any) -> bool:
     return _int(getattr(value, "value", value)) in FORUM_LIKE_TYPES
 
 
-# ---------------------------------------------------------------------------
 # guild
-# ---------------------------------------------------------------------------
 
 
 class Guild(_Wrapper):
@@ -1578,7 +1564,7 @@ class Guild(_Wrapper):
         self._emojis: List[Emoji] = [Emoji(e, self, state) for e in data.get("emojis") or []]
         self._stickers: List[Sticker] = [Sticker(s, state) for s in data.get("stickers") or []]
 
-    # -- cache upkeep ------------------------------------------------------
+    # cache upkeep
 
     def _add_channel(self, raw: Dict[str, Any]) -> Optional[GuildChannel]:
         if not isinstance(raw, dict):
@@ -1600,7 +1586,7 @@ class Guild(_Wrapper):
         if member.id:
             self._members[member.id] = member
 
-    # -- scalar fields -----------------------------------------------------
+    # scalar fields
 
     @property
     def _props(self) -> Dict[str, Any]:
@@ -1753,7 +1739,7 @@ class Guild(_Wrapper):
     def joined_at(self) -> Optional[_dt.datetime]:
         return parse_time(self._get("joined_at"))
 
-    # -- collections -------------------------------------------------------
+    # collections
 
     @property
     def roles(self) -> List[Role]:
@@ -1837,9 +1823,7 @@ class Guild(_Wrapper):
         return self.name
 
 
-# ---------------------------------------------------------------------------
 # messages
-# ---------------------------------------------------------------------------
 
 
 class Attachment(_Wrapper):
@@ -2041,7 +2025,7 @@ class Message(_Wrapper):
         self._guild = guild
         self._channel = channel
 
-    # -- location ----------------------------------------------------------
+    # location
 
     @property
     def channel_id(self) -> int:
@@ -2081,7 +2065,7 @@ class Message(_Wrapper):
     def jump_url(self) -> str:
         return f"{WEB}/channels/{self.guild_id or '@me'}/{self.channel_id}/{self.id}"
 
-    # -- people ------------------------------------------------------------
+    # people
 
     @property
     def author(self) -> User:
@@ -2155,7 +2139,7 @@ class Message(_Wrapper):
     def mention_everyone(self) -> bool:
         return bool(self._data.get("mention_everyone", False))
 
-    # -- content -----------------------------------------------------------
+    # content
 
     @property
     def content(self) -> str:

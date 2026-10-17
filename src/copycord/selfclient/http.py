@@ -111,9 +111,7 @@ def _cursor_id(value: Any) -> Optional[str]:
     return str(value) if value != "" else None
 
 
-# ---------------------------------------------------------------------------
 # response reading and logging
-# ---------------------------------------------------------------------------
 
 
 def _header(resp: Any, name: str) -> Optional[str]:
@@ -195,9 +193,7 @@ def _retry_after(resp: Any) -> float:
         return FALLBACK_RETRY_AFTER
 
 
-# ---------------------------------------------------------------------------
 # client
-# ---------------------------------------------------------------------------
 
 
 class HTTPClient:
@@ -239,7 +235,7 @@ class HTTPClient:
         self._global_reset: float = 0.0
         self._explained: set = set()
 
-    # -- lifecycle ---------------------------------------------------------
+    # lifecycle
 
     @property
     def session(self) -> Any:
@@ -264,7 +260,7 @@ class HTTPClient:
             await closing
         self._session = None
 
-    # -- headers -----------------------------------------------------------
+    # headers
 
     def referer(self, channel_id: Any, guild_id: Any = None) -> Optional[str]:
         """The channel page a browser would be on, or None without a guild id."""
@@ -297,7 +293,7 @@ class HTTPClient:
             headers.update(extra)
         return headers
 
-    # -- rate limits -------------------------------------------------------
+    # rate limits
 
     async def _wait_for_bucket(self, route: str) -> None:
         now = self._clock()
@@ -323,7 +319,7 @@ class HTTPClient:
         if reset_after > 0:
             self._bucket_reset[bucket] = self._clock() + reset_after
 
-    # -- failure logging ---------------------------------------------------
+    # failure logging
 
     def _log_failure(self, method: str, path: str, resp: Any, *, quiet: bool) -> None:
         """Log one line naming the likely cause, and the full response at debug."""
@@ -373,7 +369,7 @@ class HTTPClient:
             where, status, _full_body(resp), _safe_headers(resp),
         )
 
-    # -- requests ----------------------------------------------------------
+    # requests
 
     async def request(
         self,
@@ -473,7 +469,7 @@ class HTTPClient:
     async def delete(self, path: str, **kw: Any) -> Any:
         return await self.request("DELETE", path, **kw)
 
-    # -- paginators --------------------------------------------------------
+    # paginators
 
     async def messages(
         self,
@@ -651,7 +647,7 @@ class HTTPClient:
                 return
             await self._sleep(self.page_delay)
 
-    # -- raw-dict endpoints the client role uses -----------------------------
+    # raw-dict endpoints the client role uses
 
     async def login(self) -> Dict[str, Any]:
         """GET /users/@me, turning a 401 into LoginFailure."""

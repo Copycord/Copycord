@@ -145,9 +145,7 @@ class Client:
         self._tasks: set = set()
         self._chunk_requests: Dict[str, Tuple[List[Member], asyncio.Future]] = {}
 
-    # ------------------------------------------------------------------
     # state passthrough
-    # ------------------------------------------------------------------
 
     @property
     def state(self) -> ConnectionState:
@@ -192,9 +190,7 @@ class Client:
         """Seconds between the last heartbeat and its ack; inf before one."""
         return getattr(self.gateway, "latency", float("inf"))
 
-    # ------------------------------------------------------------------
     # lifecycle
-    # ------------------------------------------------------------------
 
     def is_closed(self) -> bool:
         return self._closed
@@ -339,9 +335,7 @@ class Client:
                 status=status, custom_status=custom_status, activity=activity
             )
 
-    # ------------------------------------------------------------------
     # events
-    # ------------------------------------------------------------------
 
     def event(self, coro: Coro) -> Coro:
         """Install ``coro`` as the handler named by its ``__name__``, replacing any earlier one."""
@@ -415,9 +409,7 @@ class Client:
                 self._resolve_chunk(d.payload)
             self.dispatch(d.event, *d.args)
 
-    # ------------------------------------------------------------------
     # REST, returning model wrappers
-    # ------------------------------------------------------------------
 
     def _http(self) -> HTTPClient:
         if self.http is None:

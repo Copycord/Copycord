@@ -52,9 +52,7 @@ class Dispatch:
         return f"<Dispatch {self.event} args={len(self.args)}>"
 
 
-# ---------------------------------------------------------------------------
 # raw event payloads (discord.py's Raw*Event attribute names)
-# ---------------------------------------------------------------------------
 
 
 class RawMessageUpdateEvent:
@@ -142,9 +140,7 @@ class GuildMembersChunk:
         self.data = data
 
 
-# ---------------------------------------------------------------------------
 # lookups
-# ---------------------------------------------------------------------------
 
 
 def _guild(state: Any, guild_id: Any) -> Optional[Guild]:
@@ -188,9 +184,7 @@ def _resolve_recipients(channel: Dict[str, Any], users: Dict[str, Dict[str, Any]
     return {**channel, "recipients": resolved}
 
 
-# ---------------------------------------------------------------------------
 # parsers
-# ---------------------------------------------------------------------------
 
 
 def parse_ready(data: Dict[str, Any], state: Any = None) -> List[Dispatch]:
