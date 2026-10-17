@@ -13,8 +13,74 @@ import asyncio, logging, discord, aiohttp
 from typing import List, Dict, Tuple, Optional
 from copycord.server import logctx
 from copycord.common.http_session import shared_session
+from copycord.server.item_hooks import ItemHooks
 
 logger = logging.getLogger("server.roles")
+
+
+def plan_role_order(
+    host_roles: List[Dict],
+    mapped: Dict[int, int],
+    clone_roles: List[Dict],
+    bot_top_position: int,
+    bot_role_id: int | None = None,
+) -> Dict:
+    """Where each clone role goes so the cloned roles stand in the host's order.
+
+    host_roles: [{id, position}] of the host. mapped: {host role id: clone role id}.
+    clone_roles: [{id, name, position, managed, default}] of the clone. Only roles below
+    the bot's top role that are not managed, @everyone or the bot's own role can move;
+    a mapped role that cannot is listed in unmovable. Clone roles no host role maps to
+    keep their order above the cloned ones, as the regular sync puts them.
+
+    Returns {order: clone ids bottom to top, cloned: how many of them are mapped,
+    positions: {clone id: position from 1}, moved: roles whose place changes,
+    unmovable: [{id, name, reason}], changed}."""
+    by_id = {int(r["id"]): r for r in clone_roles}
+
+    def key(r: Dict) -> tuple:
+        return (int(r.get("position") or 0), int(r["id"]))
+
+    def why_not(r: Dict) -> Optional[str]:
+        if r.get("default"):
+            return "@everyone"
+        if r.get("managed"):
+            return "Managed by an integration"
+        if bot_role_id is not None and int(r["id"]) == int(bot_role_id):
+            return "My own role"
+        if int(r.get("position") or 0) >= int(bot_top_position):
+            return "Above my top role"
+        return None
+
+    cloned: list[int] = []
+    unmovable: list[Dict] = []
+    seen: set[int] = set()
+    for h in sorted(host_roles, key=key):
+        cid = mapped.get(int(h["id"]))
+        role = by_id.get(int(cid)) if cid else None
+        if role is None or int(role["id"]) in seen:
+            continue
+        seen.add(int(role["id"]))
+        reason = why_not(role)
+        if reason is None:
+            cloned.append(int(role["id"]))
+        elif not role.get("default"):
+            unmovable.append({"id": int(role["id"]), "name": role.get("name") or str(role["id"]),
+                              "reason": reason})
+    mapped_ids = {int(c) for c in mapped.values() if c}
+    others = [int(r["id"]) for r in sorted(clone_roles, key=key)
+              if int(r["id"]) not in mapped_ids and why_not(r) is None]
+    order = cloned + others
+    current = sorted(order, key=lambda i: key(by_id[i]))
+    moved = sum(1 for a, b in zip(current, order) if a != b)
+    return {
+        "order": order,
+        "cloned": len(cloned),
+        "positions": {rid: n for n, rid in enumerate(order, 1)},
+        "moved": moved,
+        "unmovable": unmovable,
+        "changed": moved > 0,
+    }
 
 
 class RoleManager:
@@ -405,8 +471,11 @@ class RoleManager:
         rearrange_roles: bool,
         clone_role_icons: bool = False,
         clone_role_styles: bool = False,
+        hooks: ItemHooks | None = None,
     ) -> Tuple[int, int, int]:
-        """Mirror roles (and permissions if enabled) from one host guild into one clone guild."""
+        """Mirror roles (and permissions if enabled) from one host guild into one clone guild.
+        hooks hears about each role as it is done and can stop the pass between roles."""
+        hooks = hooks or ItemHooks()
         me = guild.me
         bot_top = me.top_role.position if me and me.top_role else 0
 
@@ -455,11 +524,17 @@ class RoleManager:
 
         deleted = updated = created = 0
 
+        removed = [o for o in current if o not in incoming_filtered]
+        await hooks.begin(len(incoming_filtered) + (len(removed) if delete_roles else 0))
+
         for orig_id in list(current.keys()):
+            if hooks.stop():
+                break
             if orig_id not in incoming_filtered:
                 row = current[orig_id]
                 cloned_id = row.get("cloned_role_id")
                 cloned_role = clone_by_id.get(int(cloned_id)) if cloned_id else None
+                gone_name = getattr(cloned_role, "name", None) or row.get("cloned_role_name") or str(orig_id)
 
                 if not delete_roles:
 
@@ -493,14 +568,17 @@ class RoleManager:
                             cloned_role.name,
                             cloned_role.id,
                         )
+                        await hooks.item(gone_name, "skipped", "Not deleted: managed or above my top role")
                     else:
                         self._log("info", "[🧩] Cloned role missing; removed mapping.")
+                        await hooks.item(gone_name, "unchanged")
                     continue
 
                 try:
                     await cloned_role.delete()
                     await asyncio.sleep(self._ROLE_OP_DELAY)
                     deleted += 1
+                    await hooks.item(gone_name, "deleted")
                     self._log(
                         "info",
                         "[🧩] Deleted role %s (%d)",
@@ -523,6 +601,7 @@ class RoleManager:
                         cloned_id,
                         e,
                     )
+                    await hooks.item(gone_name, "failed", str(e) or type(e).__name__)
                 finally:
                     self.db.delete_role_mapping_for_clone(orig_id, clone_id)
 
@@ -540,7 +619,11 @@ class RoleManager:
         clone_by_id = {r.id: r for r in guild.roles}
 
         for orig_id, info in incoming_filtered.items():
+            if hooks.stop():
+                break
             mapping = current.get(orig_id)
+            # What the role's last word to hooks is when the pass falls through to the next role.
+            outcome, why = "unchanged", None
 
             cloned_role = None
             if mapping:
@@ -578,6 +661,7 @@ class RoleManager:
                         )
                 if mapping:
                     self.db.delete_role_mapping_for_clone(orig_id, clone_id)
+                await hooks.item(info.get("name") or str(orig_id), "skipped", "On the role blocklist")
                 continue
 
             want_name = info["name"]
@@ -614,7 +698,9 @@ class RoleManager:
                 )
                 created += add
                 if not cloned_role:
+                    await hooks.item(want_name, "failed", "Could not recreate the deleted clone role")
                     continue
+                outcome = "created"
 
             if not mapping:
                 if not can_create:
@@ -625,6 +711,7 @@ class RoleManager:
                             self.MAX_ROLES,
                         )
                         create_suppressed_logged = True
+                    await hooks.item(want_name, "skipped", f"The clone server is at the {self.MAX_ROLES} role limit")
                     continue
 
                 try:
@@ -680,6 +767,7 @@ class RoleManager:
                     )
 
                     can_create = len(guild.roles) < self.MAX_ROLES
+                    await hooks.item(want_name, "created")
                     continue
 
                 except Exception as e:
@@ -703,9 +791,11 @@ class RoleManager:
                                 e,
                             )
                             can_create = len(guild.roles) < self.MAX_ROLES
+                            await hooks.item(want_name, "created", "Created without its icon, Discord rejected it")
                             continue
                         except Exception as e2:
                             self._log("warning", "[⚠️] Failed creating role %s: %s", want_name, e2)
+                            why = str(e2) or type(e2).__name__
                     else:
                         self._log(
                             "warning",
@@ -713,6 +803,8 @@ class RoleManager:
                             want_name,
                             e,
                         )
+                        why = str(e) or type(e).__name__
+                    await hooks.item(want_name, "failed", why)
                     continue
 
             if (
@@ -730,6 +822,8 @@ class RoleManager:
                         cloned_role.name,
                         cloned_role.id,
                     )
+                    await hooks.item(want_name, outcome if outcome == "created" else "skipped",
+                                     None if outcome == "created" else "Role updates are off")
                     continue
 
                 changes: list[str] = []
@@ -853,6 +947,8 @@ class RoleManager:
                         await cloned_role.edit(**kwargs)
                         await asyncio.sleep(self._ROLE_OP_DELAY)
                         updated += 1
+                        if outcome == "unchanged":
+                            outcome = "updated"
 
                         self.db.upsert_role_mapping(
                             orig_id,
@@ -883,6 +979,9 @@ class RoleManager:
                                 await cloned_role.edit(**kwargs)
                                 await asyncio.sleep(self._ROLE_OP_DELAY)
                                 updated += 1
+                                if outcome == "unchanged":
+                                    outcome = "updated"
+                                why = "Updated without its icon, Discord rejected it"
                                 self._log(
                                     "warning",
                                     "[⚠️] Role '%s' updated without icon — Discord rejected the icon (%s). "
@@ -897,6 +996,7 @@ class RoleManager:
                                     getattr(cloned_role, "name", "?"),
                                     e2,
                                 )
+                                outcome, why = "failed", str(e2) or type(e2).__name__
                         else:
                             self._log(
                                 "warning",
@@ -904,6 +1004,10 @@ class RoleManager:
                                 getattr(cloned_role, "name", "?"),
                                 e,
                             )
+                            outcome, why = "failed", str(e) or type(e).__name__
+            elif cloned_role is not None and outcome != "created":
+                outcome, why = "skipped", "Managed or above my top role, I cannot edit it"
+            await hooks.item(want_name, outcome, why)
         rearranged = 0
         if rearrange_roles:
             try:
@@ -953,6 +1057,31 @@ class RoleManager:
                 removed.append(name)
         return added, removed
 
+    def mapped_roles(self, host_id: int | None, clone_id: int) -> Dict[int, int]:
+        """{host role id: clone role id} of the role mappings for this host and clone."""
+        out: Dict[int, int] = {}
+        for r in self.db.get_all_role_mappings():
+            row = dict(r)
+            if (
+                host_id is None
+                or int(row.get("original_guild_id") or 0) == int(host_id)
+            ) and int(row.get("cloned_guild_id") or 0) == int(clone_id):
+                cloned_id = int(row.get("cloned_role_id") or 0)
+                if cloned_id:
+                    out[int(row["original_role_id"])] = cloned_id
+        return out
+
+    @staticmethod
+    def role_facts(role) -> Dict:
+        """What plan_role_order reads of a discord.Role."""
+        return {
+            "id": int(role.id),
+            "name": role.name,
+            "position": int(role.position),
+            "managed": bool(role.managed),
+            "default": bool(role.is_default()),
+        }
+
     async def _rearrange_roles(
         self,
         *,
@@ -975,97 +1104,37 @@ class RoleManager:
             self._log("warning", "[🧩] Bot has no top role; cannot rearrange roles")
             return 0
 
-        bot_position = bot_role.position
+        plan = plan_role_order(
+            incoming,
+            self.mapped_roles(host_id, clone_id),
+            [self.role_facts(r) for r in guild.roles],
+            bot_role.position,
+            bot_role.id,
+        )
 
-        rows = self.db.get_all_role_mappings()
-        cloned_role_ids = set()
-        original_to_cloned = {}
+        for role in plan["unmovable"]:
+            if role["reason"] == "Above my top role":
+                self._log(
+                    "warning",
+                    "[⚠️] Cloned role '%s' is above my role — skipping reorder for it. "
+                    "Move it below my role to include it in reordering.",
+                    role["name"],
+                )
 
-        for r in rows:
-            row = dict(r)
-            if (
-                host_id is None
-                or int(row.get("original_guild_id") or 0) == int(host_id)
-            ) and int(row.get("cloned_guild_id") or 0) == int(clone_id):
-                orig_id = int(row["original_role_id"])
-                cloned_id = int(row.get("cloned_role_id") or 0)
-                if cloned_id:
-                    cloned_role_ids.add(cloned_id)
-                    original_to_cloned[orig_id] = cloned_id
-
-        skipped_above = []
-        for cloned_id in list(cloned_role_ids):
-            cloned_role = guild.get_role(cloned_id)
-            if cloned_role and cloned_role.position > bot_position:
-                skipped_above.append(cloned_role)
-                cloned_role_ids.discard(cloned_id)
-                # Remove from mapping so it won't be included in ordering
-                original_to_cloned = {
-                    k: v
-                    for k, v in original_to_cloned.items()
-                    if v != cloned_id
-                }
-
-        for role in skipped_above:
-            self._log(
-                "warning",
-                "[⚠️] Cloned role '%s' is above my role — skipping reorder for it. "
-                "Move it below my role to include it in reordering.",
-                role.name,
-            )
-
-        non_cloned_roles = []
-        for role in guild.roles:
-            if (
-                role.id not in cloned_role_ids
-                and not role.is_default()
-                and not role.managed
-                and role.id != bot_role.id
-                and role.position <= bot_position
-            ):
-                non_cloned_roles.append(role)
-
-        non_cloned_roles.sort(key=lambda r: r.position, reverse=True)
-
-        cloned_roles_ordered = []
-        for role_info in sorted(incoming, key=lambda x: x.get("position", 0)):
-            orig_id = int(role_info["id"])
-            if orig_id in original_to_cloned:
-                cloned_id = original_to_cloned[orig_id]
-                cloned_role = guild.get_role(cloned_id)
-                if (
-                    cloned_role
-                    and not cloned_role.is_default()
-                    and not cloned_role.managed
-                ):
-                    cloned_roles_ordered.append(cloned_role)
-
-        if not cloned_roles_ordered:
+        if not plan["cloned"]:
             self._log("debug", "[🧩] No cloned roles to rearrange")
             return 0
 
-        desired_order = list(cloned_roles_ordered)
-        desired_order.extend(reversed(non_cloned_roles))
-
-        current_below_bot = sorted(
-            [r for r in desired_order],
-            key=lambda r: r.position,
-        )
-        if [r.id for r in current_below_bot] == [r.id for r in desired_order]:
+        if not plan["changed"]:
             self._log("debug", "[🧩] All roles already in correct positions")
             return 0
 
         # Count up from 1, not down from the bot role: its reported position can
         # be stale after role creation and high moves then fail with 50013.
-        positions = {}
-        current_pos = 1
-        for role in desired_order:
-            positions[role] = current_pos
-            current_pos += 1
-
-        payload = []
-        for role, pos in positions.items():
-            payload.append({"id": str(role.id), "position": pos})
+        positions = {
+            guild.get_role(rid) or discord.Object(id=rid): pos
+            for rid, pos in plan["positions"].items()
+        }
 
         try:
             await guild.edit_role_positions(

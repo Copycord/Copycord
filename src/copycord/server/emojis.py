@@ -14,6 +14,7 @@ import aiohttp, discord, logging
 from PIL import Image, ImageSequence
 from copycord.server.rate_limiter import ActionType
 from copycord.server import logctx
+from copycord.server.item_hooks import ItemHooks
 
 logger = logging.getLogger("server.emojis")
 
@@ -215,9 +216,13 @@ class EmojiManager:
                     self._tasks.pop(clone_gid, None)
 
     async def _sync(
-        self, guild, emojis, host_guild_id: Optional[int]
+        self, guild, emojis, host_guild_id: Optional[int],
+        hooks: ItemHooks | None = None, delete_removed: bool = True,
     ) -> tuple[int, int, int]:
-        """Mirror host custom emojis to the clone guild: deletions, renames and creations."""
+        """Mirror host custom emojis to the clone guild: deletions, renames and creations.
+        hooks hears about each emoji as it is done and can stop the pass between emojis;
+        delete_removed=False keeps the clones of emojis the host no longer has."""
+        hooks = hooks or ItemHooks()
         deleted = renamed = created = 0
         skipped_limit_static = skipped_limit_animated = size_failed = 0
 
@@ -236,15 +241,27 @@ class EmojiManager:
                 current[int(row["original_emoji_id"])] = row
 
         incoming = {e["id"]: e for e in emojis}
+        removed = set(current) - set(incoming)
+        await hooks.begin(len(incoming) + (len(removed) if delete_removed else 0))
 
-        for orig_id in set(current) - set(incoming):
+        for orig_id in removed:
+            if hooks.stop():
+                break
             row = current[orig_id]
+            if not delete_removed:
+                # The clone stays as it is; only the mapping to the gone host emoji goes.
+                self.db.delete_emoji_mapping_for_clone(orig_id, cloned_guild_id=guild.id)
+                continue
             cloned = discord.utils.get(guild.emojis, id=row["cloned_emoji_id"])
-            if cloned:
+            if not cloned:
+                # Already gone from the clone: only the mapping is left to drop.
+                await hooks.item(row["cloned_emoji_name"], "unchanged")
+            else:
                 try:
                     await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
                     await cloned.delete()
                     deleted += 1
+                    await hooks.item(row["cloned_emoji_name"], "deleted")
                     self._log(
                         "info",
                         "[😊] Deleted emoji %s",
@@ -263,15 +280,19 @@ class EmojiManager:
                         "[⚠️] No permission to delete emoji %s",
                         getattr(cloned, "name", orig_id),
                     )
+                    await hooks.item(row["cloned_emoji_name"], "failed", "No permission to delete it")
                 except discord.HTTPException as e:
                     self._log(
                         "error",
                         "[⛔] Error deleting emoji: %s",
                         e,
                     )
+                    await hooks.item(row["cloned_emoji_name"], "failed", str(e))
             self.db.delete_emoji_mapping_for_clone(orig_id, cloned_guild_id=guild.id)
 
         for orig_id, info in incoming.items():
+            if hooks.stop():
+                break
             name = info["name"]
             url = info["url"]
             is_animated = info.get("animated", False)
@@ -294,6 +315,7 @@ class EmojiManager:
                     await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
                     await cloned.edit(name=name)
                     renamed += 1
+                    outcome, why = "updated", None
                     self._log(
                         "info",
                         "[😊] Restored emoji %s → %s",
@@ -322,6 +344,8 @@ class EmojiManager:
                         getattr(cloned, "name", "?"),
                         e,
                     )
+                    outcome, why = "failed", str(e)
+                await hooks.item(name, outcome, why)
                 continue
 
             if mapping and cloned and mapping["original_emoji_name"] != name:
@@ -329,6 +353,7 @@ class EmojiManager:
                     await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
                     await cloned.edit(name=name)
                     renamed += 1
+                    outcome, why = "updated", None
                     self._log(
                         "info",
                         "[😊] Renamed emoji %s → %s",
@@ -357,16 +382,21 @@ class EmojiManager:
                         getattr(cloned, "name", "?"),
                         e,
                     )
+                    outcome, why = "failed", str(e)
+                await hooks.item(name, outcome, why)
                 continue
 
             if mapping:
+                await hooks.item(name, "unchanged")
                 continue
 
             if is_animated and animated_count >= limit:
                 skipped_limit_animated += 1
+                await hooks.item(name, "skipped", f"The clone server is at its {limit} animated emoji limit")
                 continue
             if not is_animated and static_count >= limit:
                 skipped_limit_static += 1
+                await hooks.item(name, "skipped", f"The clone server is at its {limit} emoji limit")
                 continue
 
             try:
@@ -381,6 +411,7 @@ class EmojiManager:
                     name,
                     e,
                 )
+                await hooks.item(name, "failed", f"Could not download it: {e}")
                 continue
 
             try:
@@ -424,6 +455,7 @@ class EmojiManager:
                     animated_count += 1
                 else:
                     static_count += 1
+                await hooks.item(name, "created")
             except discord.HTTPException as e:
                 if "30008" in str(e):
                     self._log(
@@ -431,9 +463,11 @@ class EmojiManager:
                         "[😊] Emoji limit reached; stopping emoji sync (%d created so far)",
                         created,
                     )
+                    await hooks.item(name, "skipped", "The clone server is at its emoji limit")
                     break
                 elif "50138" in str(e):
                     size_failed += 1
+                    await hooks.item(name, "failed", "Still over 256 KiB after shrinking")
                 else:
                     self._log(
                         "error",
@@ -441,6 +475,7 @@ class EmojiManager:
                         name,
                         e,
                     )
+                    await hooks.item(name, "failed", str(e))
 
         if skipped_limit_static or skipped_limit_animated:
             self._log(
