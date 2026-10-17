@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../lib/api";
@@ -97,6 +97,37 @@ function setup(initial: EventLog[] = SEED) {
 
 const tbody = () => document.getElementById("logs-tbody")!;
 
+/** Observers the LoadMore sentinel made; scrollToEnd tells the live ones their target came into view. */
+let observers: Array<{ cb: IntersectionObserverCallback; el: Element | null; live: boolean }> = [];
+
+class FakeObserver {
+  entry: { cb: IntersectionObserverCallback; el: Element | null; live: boolean };
+  constructor(cb: IntersectionObserverCallback) {
+    this.entry = { cb, el: null, live: true };
+    observers.push(this.entry);
+  }
+  observe(el: Element) {
+    this.entry.el = el;
+  }
+  unobserve() {}
+  disconnect() {
+    this.entry.live = false;
+  }
+  takeRecords() {
+    return [];
+  }
+}
+
+function scrollToEnd() {
+  for (const o of observers.filter((x) => x.live && x.el))
+    o.cb([{ isIntersecting: true, target: o.el } as unknown as IntersectionObserverEntry], {} as IntersectionObserver);
+}
+
+beforeEach(() => {
+  observers = [];
+  vi.stubGlobal("IntersectionObserver", FakeObserver);
+});
+
 async function loaded(text = "Created channel #general") {
   await waitFor(() => expect(tbody()).toHaveTextContent(text));
 }
@@ -155,21 +186,45 @@ describe("Logs page", () => {
     expect(screen.getByLabelText("Search logs")).toHaveValue("");
   });
 
-  it("pages through results with offset and disables the ends", async () => {
+  it("loads the next 50 by offset when the end of the table scrolls into view, then stops at the end", async () => {
     const many = Array.from({ length: 120 }, (_, i) => entry(`id${i}`, { details: `Row ${i}`, created_at: 2_000 - i }));
     const { user, lists } = setup(many);
     await loaded("Row 0");
     expect(screen.getByText("Showing 1-50 of 120")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Page 3" }));
+    expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeNull();
+    await act(async () => scrollToEnd());
+    await loaded("Row 99");
+    expect(lists().at(-1)!.url.searchParams.get("offset")).toBe("50");
+    // Appended: the first page is still there.
+    expect(tbody()).toHaveTextContent("Row 0");
+    expect(screen.getByText("Showing 1-100 of 120")).toBeInTheDocument();
+    await act(async () => scrollToEnd());
     await loaded("Row 119");
     expect(lists().at(-1)!.url.searchParams.get("offset")).toBe("100");
-    expect(screen.getByText("Showing 101-120 of 120")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Previous page" }));
-    await loaded("Row 50");
-    expect(lists().at(-1)!.url.searchParams.get("offset")).toBe("50");
+    expect(screen.getByText("Showing 1-120 of 120")).toBeInTheDocument();
+    // Everything is in: no sentinel, no Loading more, no further fetch.
+    expect(document.querySelector("[data-load-more]")).toBeNull();
+    const n = lists().length;
+    await act(async () => scrollToEnd());
+    expect(lists()).toHaveLength(n);
+    // A new filter starts again from the first page.
+    await user.type(screen.getByLabelText("Search logs"), "Row 1");
+    await waitFor(() => expect(lists().at(-1)!.url.searchParams.get("search")).toBe("Row 1"));
+    expect(lists().at(-1)!.url.searchParams.get("offset")).toBe("0");
+    await waitFor(() => expect(tbody()).not.toHaveTextContent("Row 99"));
+  });
+
+  it("fetches the next page once while it is out, showing Loading more", async () => {
+    const many = Array.from({ length: 120 }, (_, i) => entry(`id${i}`, { details: `Row ${i}`, created_at: 2_000 - i }));
+    const { lists } = setup(many);
+    await loaded("Row 0");
+    await act(async () => {
+      scrollToEnd();
+      scrollToEnd();
+    });
+    expect(lists().filter((c) => c.url.searchParams.get("offset") === "50")).toHaveLength(1);
+    await loaded("Row 99");
+    expect(screen.queryByText("Loading more")).toBeNull();
   });
 
   it("clear all asks first: cancel sends nothing, confirm sends DELETE and shows the empty state", async () => {

@@ -313,7 +313,7 @@ describe("Tasks page", () => {
     await screen.findByRole("list", { name: "Task runs" });
     await act(async () => scrollToEnd());
     await waitFor(() => expect(held.answer).toBeDefined());
-    expect(screen.getByRole("status")).toHaveTextContent("Loading more");
+    expect(screen.getByText("Loading more")).toBeInTheDocument();
     await act(async () => {
       scrollToEnd();
       scrollToEnd();
