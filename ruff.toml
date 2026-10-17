@@ -1,5 +1,4 @@
-# Ruff linter configuration for Copycord
-# Runs on PRs to catch syntax errors, undefined names, and unused imports
+# Ruff configuration: syntax errors, undefined names and unused imports.
 
 target-version = "py312"
 
@@ -14,7 +13,7 @@ select = [
 ]
 ignore = []
 
-# Files that already had broad excepts when BLE001/S110 were turned on (audit F23).
+# Files that already had broad excepts when BLE001/S110 were turned on.
 # New files are checked; drop a file from this list once its handlers log or narrow.
 [lint.per-file-ignores]
 "src/copycord/admin/app.py" = ["BLE001", "S110"]

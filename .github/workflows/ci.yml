@@ -13,16 +13,14 @@ concurrency:
 permissions:
   contents: read
 
-# Explicit bash so run steps get pipefail — otherwise `cmd | tee` swallows
-# cmd's exit code and failing tests/lint leave the job green.
+# Explicit bash so run steps get pipefail; otherwise `cmd | tee` swallows
+# cmd's exit code and failing tests or lint leave the job green.
 defaults:
   run:
     shell: bash
 
 jobs:
-  # -----------------------------------------------------------------------
-  # 1. Lint — ruff on Python, syntax check via py_compile
-  # -----------------------------------------------------------------------
+  # Lint: ruff on Python, syntax check via py_compile.
   lint:
     name: Lint & syntax check
     runs-on: ubuntu-latest
@@ -72,9 +70,7 @@ jobs:
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  # -----------------------------------------------------------------------
-  # 2. DB unit tests
-  # -----------------------------------------------------------------------
+  # DB unit tests.
   test-db:
     name: DB unit tests
     runs-on: ubuntu-latest
@@ -105,12 +101,7 @@ jobs:
           tail -20 /tmp/db-tests.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-  # -----------------------------------------------------------------------
-  # 3. Unit tests — API, user-token sending/identity, fingerprint, routing.
-  #    Runs the whole tests/ tree except the dependency-light DB tests (which
-  #    the test-db job covers). Using the directory (not a file list) means new
-  #    test files are picked up automatically.
-  # -----------------------------------------------------------------------
+  # Unit tests: the whole tests/ tree except the DB tests, which test-db covers.
   test-suite:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -141,9 +132,7 @@ jobs:
           tail -25 /tmp/tests.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-  # -----------------------------------------------------------------------
-  # 4. Frontend build check
-  # -----------------------------------------------------------------------
+  # Frontend build check.
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
@@ -171,10 +160,8 @@ jobs:
           tail -15 /tmp/frontend-build.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-  # -----------------------------------------------------------------------
-  # 5. Package — wheel with the built frontend, installed into a fresh venv,
-  #    smoke-tested with `copycord --version` and `copycord doctor`.
-  # -----------------------------------------------------------------------
+  # Package: wheel with the built frontend, installed into a fresh venv and
+  # smoke-tested with `copycord --version` and `copycord doctor`.
   package:
     name: Wheel build & smoke test
     runs-on: ubuntu-latest

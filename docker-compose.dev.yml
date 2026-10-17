@@ -1,4 +1,4 @@
-# This docker-compose file is used to build & run CopyCord in your local environment
+# Builds and runs Copycord from the local checkout.
 services:
   copycord:
     build:
