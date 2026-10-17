@@ -13,7 +13,7 @@ export interface FiltersResponse {
   bl_users?: Array<string | number>;
 }
 
-/** The chip lists of the form, keyed by the old hidden input ids. */
+/** The chip lists of the form, keyed by their form field names. */
 export interface FiltersState {
   wl_categories: string[];
   wl_channels: string[];

@@ -1,4 +1,4 @@
-// Page frame from the old templates: a fixed header at every width, the side menu as a drawer under it,
+// Page frame: a fixed header at every width, the side menu as a drawer under it,
 // the content column (one centered column for every page) and the page footer.
 
 import { useEffect, useState } from "react";
@@ -11,11 +11,11 @@ import { Z } from "./ui/cx";
 import { Sidebar } from "./Sidebar";
 
 interface Frame {
-  /** Classes for <main>, the old .container plus the page's variant class. */
+  /** Classes for <main>: the container plus the page's variant class. */
   main: string;
-  /** The old page put #fixed-footer inside the container rather than after it. */
+  /** Put #fixed-footer inside the container rather than after it. */
   footerInside?: boolean;
-  /** The old 404 page had no page footer and a shorter menu. */
+  /** The 404 frame: no page footer and a shorter menu. */
   bare?: boolean;
   sidebarFooter?: "version" | "social";
 }
@@ -39,7 +39,7 @@ const FRAMES: Record<string, Frame> = {
   "/_kit": { main: PAGE_COLUMN },
 };
 
-// 404.html: main.page-main fills the width and the page has no footer.
+// 404: main.page-main fills the width and the page has no footer.
 const NOT_FOUND: Frame = { main: "w-full flex-[1_0_auto]", bare: true };
 const NOT_FOUND_HIDE: SidebarItem["key"][] = ["forwarding"];
 

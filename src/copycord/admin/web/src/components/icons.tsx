@@ -1,5 +1,4 @@
-// Heroicons outline paths used by the side menu, same as templates/_sidebar.html,
-// and the Discord logo the menu and page footers share.
+// Heroicons outline paths used by the side menu, and the Discord logo the menu and page footers share.
 
 import type { SidebarItem } from "../types/api";
 

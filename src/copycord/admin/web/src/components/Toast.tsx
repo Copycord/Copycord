@@ -1,7 +1,6 @@
 // Toast stack shared by every page: useToast().show("Saved") or
-// show("Failed", { kind: "error" }). Matches the old showToast in app.js and
-// the .toast rules in main.css: top right under the header, a coloured bar on
-// the left, fades and drops in, and a click anywhere on it closes it.
+// show("Failed", { kind: "error" }). Toasts sit top right under the header with
+// a coloured bar on the left, fade and drop in, and close on a click anywhere.
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -22,7 +21,7 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi | null>(null);
 
-// The old close() dropped .show, then removed the element 200 ms later.
+// A closing toast fades out for this long before it is removed.
 const LEAVE_MS = 200;
 
 // .toast-info / .toast-success / .toast-error .toast-bar

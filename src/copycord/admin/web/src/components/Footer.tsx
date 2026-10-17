@@ -1,4 +1,4 @@
-// Page footer from the old pages (#fixed-footer): a centered pill at the end of the page flow with the
+// Page footer (#fixed-footer): a centered pill at the end of the page flow with the
 // Copycord name, the version and GitHub, Discord and donate links.
 
 import { PROMO_LINKS } from "../pages/dashboard/config/model";
@@ -10,7 +10,7 @@ import { DISCORD_PATH } from "./icons";
 const LINK_BASE =
   "inline-flex items-center justify-center text-accent opacity-90 transition duration-200 hover:-translate-y-px hover:opacity-100";
 const LINK = `${LINK_BASE} size-7`;
-// The old version link reused the 28 px icon box, so a long version ran into "Copycord"; it sizes to its text here.
+// Sized to its text rather than the 28 px icon box, so a long version does not run into "Copycord".
 const VERSION_LINK = `${LINK_BASE} h-7`;
 
 const GITHUB_PATH =

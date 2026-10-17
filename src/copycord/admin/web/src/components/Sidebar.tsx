@@ -1,4 +1,4 @@
-// Side menu with the same items, icons, order and footer as templates/_sidebar.html.
+// Side menu: page links with icons, then a footer.
 
 import { useState } from "react";
 import { NavLink } from "react-router";
@@ -7,7 +7,7 @@ import { PROMO_LINKS } from "../pages/dashboard/config/model";
 import type { SidebarItem } from "../types/api";
 import { DISCORD_PATH, MenuIcon } from "./icons";
 
-/** A menu entry; Tasks and Messages are v4 pages the old sidebar never had, so their keys sit outside SidebarItem. */
+/** A menu entry; the Tasks and Messages keys sit outside SidebarItem. */
 export type MenuItem = Omit<SidebarItem, "key"> & { key: SidebarItem["key"] | "tasks" | "messages" };
 
 export const SIDEBAR_ITEMS: MenuItem[] = [
@@ -43,7 +43,7 @@ export async function logout(go: (url: string) => void = (url) => window.locatio
 
 export interface SidebarProps {
   onNavigate?: () => void;
-  /** Items to leave out, like the old sidebar_hide. */
+  /** Items to leave out. */
   hide?: MenuItem["key"][];
   /** "social" shows GitHub and Discord links in the footer instead of GitHub and the version. */
   footer?: "version" | "social";

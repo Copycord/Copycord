@@ -1,4 +1,4 @@
-// The old .card: translucent purple gradient, 18px radius, 18px padding.
+// Card: translucent purple gradient, 18px radius, 18px padding.
 
 import type { HTMLAttributes, ReactNode } from "react";
 import { cx } from "./cx";
@@ -35,7 +35,7 @@ export const CARD_HOVER = cx(
   "hover:-translate-y-0.5 hover:border-accent hover:bg-card-hover hover:[box-shadow:0_8px_20px_var(--color-shadow-60)]",
 );
 
-/** No panel (rule f): a page's title, controls and cards sit on the page with no side inset, so the title, toolbar
+/** No panel: a page's title, controls and cards sit on the page with no side inset, so the title, toolbar
  *  and first card start on the container edge like Dashboard, Scraper, Logs and Tasks. */
 export function PageFrame({ className, children, ...rest }: HTMLAttributes<HTMLElement>) {
   return (

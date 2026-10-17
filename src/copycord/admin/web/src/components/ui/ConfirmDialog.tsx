@@ -4,10 +4,9 @@
 // The promise resolves true on Confirm and false on Cancel, Escape, the close
 // button or an overlay click. ConfirmProvider must sit above the page.
 //
-// Like the old openConfirm: Cancel then the confirm button at the right, 8px
-// apart, both sized as #confirm-modal .btns .btn with no focus ring; the
-// confirm button is "OK" in .btn-ghost unless the caller passes confirmClass,
-// here confirmVariant.
+// Cancel then the confirm button at the right, 8px apart, with no focus ring;
+// the confirm button is "OK" in the ghost variant unless the caller passes
+// confirmVariant.
 
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -20,9 +19,9 @@ export interface ConfirmOptions {
   body?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** The old confirmClass; default "ghost" (.btn-ghost). */
+  /** Variant of the confirm button; default "ghost". */
   confirmVariant?: ButtonVariant;
-  /** The old btnClassCancel; default "ghost". */
+  /** Variant of the Cancel button; default "ghost". */
   cancelVariant?: ButtonVariant;
   /** Alias for confirmVariant "ghost-red" when confirmVariant is not set. */
   danger?: boolean;

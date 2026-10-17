@@ -46,13 +46,13 @@ export interface GuildMappingListResponse {
   mappings: GuildMapping[];
 }
 
-/** An orphan category from the verify scan (lane 23 fills these in). */
+/** An orphan category from the verify scan. */
 export interface OrphanCategory {
   id: string;
   name: string;
 }
 
-/** An orphan channel from the verify scan (lane 23 fills these in). */
+/** An orphan channel from the verify scan. */
 export interface OrphanChannel {
   id: string;
   name: string;
@@ -128,7 +128,7 @@ export interface DeletedResult {
   success?: boolean;
 }
 
-// Lane 24: verify results.
+// Verify results.
 
 /** The "orphans" verify event on /ws/out. */
 export interface OrphansEvent {

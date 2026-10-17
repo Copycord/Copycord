@@ -1,12 +1,11 @@
-// Chip input with the behaviour of the old ChipsInput / WordChipsInput in
-// frontend/src/js/app.js and the forwarding chips:
+// Chip input:
 //  - Enter (and comma in "words" mode) commits the typed text
 //  - paste is split and committed at once
 //  - Backspace or Delete on an empty entry removes the last chip
 //  - clicking a chip, or Enter/Space/Backspace/Delete on a focused chip, removes it
 //  - duplicates are dropped, words are capped at 100 characters
-//  - "ids" mode keeps only positive integer runs, as the old ID chips did
-//  - `locked` freezes everything (the old data-locked="1")
+//  - "ids" mode keeps only positive integer runs
+//  - `locked` freezes everything
 
 import { useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent } from "react";
@@ -17,7 +16,7 @@ export type ChipMode = "words" | "ids";
 
 export const WORD_MAX = 100;
 
-/** Splits raw text the way the old inputs did, before dedupe and validation. */
+/** Splits raw text into candidates, before dedupe and validation. */
 export function splitChips(text: string, mode: ChipMode = "words"): string[] {
   if (mode === "ids") {
     const out: string[] = [];

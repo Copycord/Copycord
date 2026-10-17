@@ -1,6 +1,5 @@
-// Same look as the old .btn, .btn-primary, .btn-danger, .btn-outline,
-// .btn-ghost, .btn-ghost-red, .btn-ghost-purple and .btn-ghost-green classes
-// in main.css.
+// Button variants: primary, danger, outline and the ghost family (plain, red,
+// purple, green).
 
 import type { ButtonHTMLAttributes, Ref } from "react";
 import { cx } from "./cx";
@@ -23,14 +22,14 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize;
   loading?: boolean;
   wide?: boolean;
-  /** No focus ring and no shadow, as the old #confirm-modal .btns .btn. */
+  /** No focus ring and no shadow, as on the confirm dialog buttons. */
   flat?: boolean;
   /** Joined to an input, as the runs search submit: hover only tints, no lift, no press scale, no shadow. */
   attached?: boolean;
   ref?: Ref<HTMLButtonElement>;
 }
 
-// The old .btn-ghost-red and .btn-ghost-green: no lift, the accent label and
+// Ghost red and ghost green: no lift, the accent label and
 // border turn red or green on hover, a white outline on keyboard focus.
 // pages/system/buttons.tsx and pages/dashboard/parts.tsx build on these.
 export const GHOST_TINT_FILL =
@@ -39,18 +38,18 @@ export const GHOST_TINT_FOCUS =
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/28";
 export const GHOST_RED_HOVER = "enabled:hover:border-danger enabled:hover:text-danger";
 export const GHOST_GREEN_HOVER = "enabled:hover:border-good enabled:hover:text-good";
-/** The danger outline for destructive triggers (delete, remove, clear, reset), first built for Delete N orphans:
+/** The danger outline for destructive triggers (delete, remove, clear, reset):
  *  danger text and border, no fill, the soft danger fill on hover. Important, so it wins over a base border and fill. */
 export const DANGER_OUTLINE =
   "border-danger! bg-transparent! text-danger! enabled:hover:bg-danger-a10! enabled:active:bg-danger/18! " +
   "enabled:hover:translate-y-0! enabled:hover:shadow-none! " +
   // Disabled drops the red: the neutral border and muted icon and text, so it never reads as live.
   "disabled:cursor-not-allowed! disabled:border-border! disabled:text-muted!";
-/** The purple tint first built for the Messages Reset filters button: the ghost look, also used by RESET_BTN. */
+/** The purple tint on the ghost look, as on the Messages Reset filters button; also used by RESET_BTN. */
 export const GHOST_PURPLE_TINT =
   "border-primary-a30 bg-primary-a10 text-accent-soft enabled:hover:border-primary-a50 enabled:hover:bg-primary-a20";
 
-// The old .btn had no gap; only buttons with an icon get one.
+// Only buttons with an icon get a gap.
 const BASE =
   "inline-flex items-center justify-center has-[svg]:gap-2 border font-semibold leading-none " +
   "cursor-pointer select-none outline-none disabled:cursor-not-allowed";

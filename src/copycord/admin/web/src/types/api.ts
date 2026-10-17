@@ -1,4 +1,4 @@
-// Hand written shapes of the server replies, filled in page by page.
+// Hand written shapes of the server replies.
 
 /** Messages pushed on /ws/ui and /ws/out. */
 export interface BusMessage {

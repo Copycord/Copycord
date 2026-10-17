@@ -69,7 +69,7 @@ export function useFieldControl(props: { id?: string; "aria-describedby"?: strin
   };
 }
 
-// The old .input and select.input: 12px 14px padding, 12px radius, dark gradient, 14px text;
+// Input and select look: 12px 14px padding, 12px radius, dark gradient, 14px text;
 // the select draws its own caret.
 const CONTROL_BASE =
   "w-full rounded-control border border-border-input px-3.5 py-3 text-sm text-text " +

@@ -66,7 +66,7 @@ export interface ClientGuildsResponse {
   items: ClientGuild[];
 }
 
-/** The filters object the old buildPayloadFromForm posted. */
+/** The filters object the rule form posts. */
 export interface ForwardingRuleFiltersPayload {
   keywords_any: string[];
   keywords_all: string[];

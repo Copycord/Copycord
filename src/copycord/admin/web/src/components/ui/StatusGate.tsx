@@ -1,6 +1,6 @@
 // Covers a page while useStatusGate says the bot is not ready: the content is
 // faded to grey (no blur: it smeared accent fills into a glow) and inert, and the gate message
-// is announced politely. Like the old #status-gate the dim is fixed over the whole viewport under the header, below the side menu drawer (see Z).
+// is announced politely. The dim is fixed over the whole viewport under the header, below the side menu drawer (see Z).
 
 import type { ReactNode } from "react";
 import type { StatusGateState } from "../../hooks/useStatusGate";

@@ -41,8 +41,7 @@
     "Noto Sans", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  /* The old stylesheet never set a line height on text, so every size uses
-     the browser's normal one. */
+  /* Every text size uses the browser's normal line height. */
   --text-xs--line-height: normal;
   --text-sm--line-height: normal;
   --text-base--line-height: normal;
@@ -80,7 +79,7 @@
   --layout-max: 1320px;
 }
 
-/* Role tokens for colours the components used to hardcode. Static so the
+/* Role tokens for component colours. Static so the
    ones only read through var() in inline styles are always emitted. */
 @theme static {
   --color-border-strong: #34344a;
@@ -247,10 +246,10 @@
 }
 
 :root {
-  /* .card and .side-menu background: a flat surface (no purple wash), kept as
+  /* Card and side menu background: a flat surface (no purple wash), kept as
      an image because the components set it through bg-(image:...). */
   --card-gradient: linear-gradient(var(--color-card-solid), var(--color-card-solid));
-  /* .input and select.input background: flat, the mapping card surface. */
+  /* Input and select background: flat, the mapping card surface. */
   --control-gradient: linear-gradient(var(--color-control-top), var(--color-control));
   --select-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23a3a3b8' d='M1.41 0L6 4.58 10.59 0 12 1.41l-6 6-6-6z'/%3E%3C/svg%3E")
       no-repeat right 14px center,
@@ -262,7 +261,7 @@
 }
 
 @layer base {
-  /* Old body: a flex column with the content column growing to push the
+  /* Body: a flex column with the content column growing to push the
      footer down, 28px side padding, header and footer room top and bottom. */
   html,
   body {
@@ -289,7 +288,7 @@
   #root {
     display: contents;
   }
-  /* The old pages left form controls on the browser font. */
+  /* Form controls keep the browser font. */
   button,
   input,
   select,
@@ -389,8 +388,8 @@
   }
 }
 
-/* Dashboard link cards (PromoCards.tsx): the old star wobble, its spin on
-   hover and the donate heart beat, copied from main.css. */
+/* Dashboard link cards (PromoCards.tsx): the star wobble, its spin on
+   hover and the donate heart beat. */
 @keyframes cc-star-wobble {
   0% {
     transform: rotate(-12deg);

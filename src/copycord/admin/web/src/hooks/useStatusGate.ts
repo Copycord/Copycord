@@ -1,10 +1,10 @@
-// Port of frontend/src/js/status-gate.js: polls /api/status and gates a page
+// Polls /api/status and gates a page
 // until the bot is connected to Discord.
 //  - a recent "up" (sessionStorage bot:lastUpAt, 20 s) skips the gate on load
 //  - otherwise the gate appears after 350 ms, so a fast "up" never flashes it
 //  - while down or unreachable it re-checks every 5 s, while up every 10 s
-//  - require: "either" (default), "both" or "server", as in the old pages
-//  - onUp / onDown fire on transitions, like the old callbacks
+//  - require: "either" (default), "both" or "server"
+//  - onUp / onDown fire on transitions
 
 import { useEffect, useRef, useState } from "react";
 

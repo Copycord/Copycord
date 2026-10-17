@@ -1,4 +1,4 @@
-// Badge matches the old .badge.good / .badge-ok pills, fill and text only: the 1px border stays
+// Badge: a pill with fill and text only; the 1px border stays
 // transparent so the pill keeps its box. StatusPill is the dot plus text used for server and client state.
 
 import type { ReactNode } from "react";

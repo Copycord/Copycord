@@ -10,7 +10,7 @@ export interface VersionInfo {
 
 export type BotRole = "server" | "client";
 
-/** One row of the Bots table, as the old renderStatusRow read it. */
+/** One row of the Bots table. */
 export interface BotStatus {
   running: boolean;
   uptime_sec?: number | null;

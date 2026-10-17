@@ -1,22 +1,21 @@
 // Accessible modal: renders into document.body, traps Tab focus, closes on
 // Escape and on overlay click, and gives focus back to the opener on close.
-// The look is the old .modal / .modal-content / .modal-header / .verify-close:
-// the box hangs 6vh below the header instead of being centered, and the
+// The box hangs 6vh below the header instead of being centered, and the
 // MODAL_* classes let the dialogs with their own shell match it.
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-/** The old .modal: fixed below the header, the box at the top center. */
+/** Overlay fixed below the header, the box at the top center. */
 export const MODAL_OVERLAY = "fixed inset-x-0 top-header bottom-0 z-40 flex items-start justify-center";
 export const MODAL_BACKDROP = "absolute inset-0 bg-black/[0.68]";
-/** The old .modal-content without its width (min(900px, 92vw) unless a dialog sets its own). */
+/** The dialog box without its width (min(900px, 92vw) unless a dialog sets its own). */
 export const MODAL_CARD =
   "relative z-[1] mt-[6vh] flex max-h-[80vh] flex-col rounded-panel border border-border bg-surface-deep text-text shadow-popover outline-none";
 export const MODAL_HEADER = "flex items-center justify-between px-4 py-3";
 export const MODAL_TITLE = "m-0 text-base font-bold text-text";
-/** The old .icon-btn.verify-close square close button. */
+/** Square close button. */
 export const MODAL_CLOSE =
   "ml-auto inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-btn border border-border bg-control px-2 py-0.5 text-base leading-none text-text outline-none transition-colors hover:border-danger hover:text-danger focus-visible:border-danger focus-visible:text-danger active:border-danger-strong active:text-danger-strong";
 
@@ -24,20 +23,20 @@ export interface ModalProps {
   open: boolean;
   onClose: () => void;
   title: string;
-  /** Second header line; the title then becomes the old plain .modal-title-main. */
+  /** Second header line; the title then renders as a plain main title. */
   subtitle?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   /** Close when the dark overlay is clicked (default true). */
   closeOnOverlay?: boolean;
-  /** Width classes of the box (default the old confirm dialog, min(420px, 92vw)). */
+  /** Width classes of the box (default the confirm dialog width, min(420px, 92vw)). */
   className?: string;
   bodyClassName?: string;
   id?: string;
   closeId?: string;
 }
 
-// The old .body-lock-scroll / body.modal-open: the page behind an open dialog does not scroll.
+// The page behind an open dialog does not scroll.
 // Counted so closing the inner of two stacked dialogs keeps the lock; the last one restores
 // the overflow the body had before the first opened.
 let scrollLocks = 0;
@@ -166,7 +165,7 @@ export function Modal({
 
 const BUBBLE_ALIGN = {
   /**
-   * The old .tip-bubble: at the label's left edge, one line when it fits, else wraps at 360px.
+   * At the label's left edge, one line when it fits, else wraps at 360px.
    * No bubble sets overflow: a clipped bubble scrolls vertically and hides the arrow.
    */
   start: "left-0 max-w-[min(360px,calc(100vw-32px))] break-words whitespace-normal after:left-3.5",
@@ -178,7 +177,7 @@ const BUBBLE_ALIGN = {
   wrap: "left-0 max-w-[260px] min-w-[200px] break-words whitespace-normal after:left-3.5",
 } as const;
 
-/** Below the label with the arrow on top (the old look), or above it with the arrow underneath. */
+/** Below the label with the arrow on top, or above it with the arrow underneath. */
 const BUBBLE_PLACEMENT = {
   below:
     "top-[calc(100%+8px)] -translate-y-1 data-[open=true]:translate-y-0 " +
@@ -220,7 +219,7 @@ export interface TipLabelProps {
 }
 
 /**
- * The old label.has-tip: 12px muted label text, the round "i" .info-dot and its
+ * Label with a tip: 12px muted label text, the round "i" .info-dot and its
  * .tip-bubble. Click the dot to show the tip; another click, a click elsewhere
  * or Escape hides it. The bubble opens below the label, or above it when the label
  * sits in the lower half of its scroll container, so it does not lengthen the scroller.
