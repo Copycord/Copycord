@@ -559,6 +559,8 @@ class StandaloneScraper:
         self._bios = {"queued": 0, "fetched": 0, "skipped": 0}
         # Set while scrape() waits on the bios; the worker reports each bio then.
         self._bio_phase = False
+        # Gateway sessions that reached READY.
+        self._sessions_ready = 0
 
         self._proxy_list = [
             self._normalize_proxy(p) for p in (config.proxies or []) if p
@@ -1130,6 +1132,7 @@ class StandaloneScraper:
 
                                 if op == 0 and t == "READY":
                                     ready = True
+                                    self._sessions_ready += 1
                                     self._log(
                                         f"🟢 Session {session_index + 1} connected",
                                         "info",
@@ -1344,64 +1347,6 @@ class StandaloneScraper:
             f"(consecutive_failures={attempt}, total_cycles={total_attempts}), session ending"
         )
 
-    async def _scrape_with_rest_api(self, token: str) -> None:
-        """Fallback: fetch members via REST /guilds/{id}/members (bot tokens)."""
-        self._debug("Starting REST API scraping (fallback mode)")
-        try:
-            async with self._make_session(self._next_proxy()) as session:
-                after = None
-                while not self._stop_event.is_set():
-                    params: dict = {"limit": 1000}
-                    if after:
-                        params["after"] = after
-                    proxy = self._next_proxy()
-                    async with session.get(
-                        f"{self.DISCORD_API}/guilds/{self.config.guild_id}/members",
-                        headers=_build_headers(token),
-                        params=params,
-                        timeout=aiohttp.ClientTimeout(total=10),
-                        **self._proxy_kwarg(proxy),
-                    ) as resp:
-                        if resp.status != 200:
-                            self._log(
-                                f"❌ REST API returned error ({resp.status})", "error"
-                            )
-                            return
-                        chunk = await resp.json()
-                        if not chunk:
-                            break
-                        for member in chunk:
-                            user = member.get("user", {})
-                            uid = str(user.get("id"))
-                            if uid and uid not in self._members:
-                                rec: Dict[str, Any] = {
-                                    "id": uid,
-                                    "bot": user.get("bot", False),
-                                }
-                                if self.config.include_username:
-                                    rec["username"] = user.get("username")
-                                if self.config.include_avatar_url:
-                                    av = user.get("avatar")
-                                    if av:
-                                        rec["avatar_url"] = self._build_avatar_url(
-                                            uid, av
-                                        )
-                                if self.config.include_roles:
-                                    rec["roles"] = [
-                                        str(r) for r in (member.get("roles") or [])
-                                    ]
-                                self._members[uid] = rec
-                        self._progress(
-                            len(self._members),
-                            None,
-                            f"Found {len(self._members):,} members (REST)",
-                        )
-                        after = chunk[-1]["user"]["id"] if chunk else None
-                        if len(chunk) < 1000:
-                            break
-        except Exception as e:
-            self._log(f"❌ REST API scraping failed: {e}", "error")
-
     async def scrape(self) -> ScraperResult:
         """Execute the scraping operation and return results."""
         t0 = time.perf_counter()
@@ -1410,6 +1355,7 @@ class StandaloneScraper:
         self._members.clear()
         self._bios = {"queued": 0, "fetched": 0, "skipped": 0}
         self._bio_phase = False
+        self._sessions_ready = 0
         bio_task: Optional[asyncio.Task] = None
         bio_session: Optional[aiohttp.ClientSession] = None
 
@@ -1555,7 +1501,7 @@ class StandaloneScraper:
 
             progress_task = asyncio.create_task(progress_reporter())
 
-            gateway_ok = True
+            gateway_error: Optional[str] = None
             try:
                 n_tok = len(valid_tokens)
                 par = self.config.max_parallel_per_session
@@ -1595,20 +1541,40 @@ class StandaloneScraper:
                         session_idx += 1
                 await asyncio.gather(*tasks)
             except Exception as e:
-                self._log(
-                    f"⚠️ Gateway connection failed, trying alternative method...", "warn"
-                )
                 self._debug(f"Gateway scraping failed: {e}")
-                gateway_ok = False
-
-            if not gateway_ok or (
-                len(self._members) == 0 and not self._stop_event.is_set()
-            ):
-                self._log("🔄 Switching to REST API method...", "info")
-                await self._scrape_with_rest_api(valid_tokens[0])
+                gateway_error = f"Gateway scrape failed: {e}"
 
             progress_stop.set()
             await progress_task
+
+            if (
+                gateway_error is None
+                and not self._members
+                and not self._stop_event.is_set()
+            ):
+                if self._sessions_ready:
+                    gateway_error = "The Discord gateway returned no members"
+                else:
+                    gateway_error = (
+                        f"No gateway session connected to Discord "
+                        f"({total_sessions} tried)"
+                    )
+            if gateway_error is not None:
+                self._log(f"❌ {gateway_error}", "error")
+                return ScraperResult(
+                    members=list(self._members.values()),
+                    total_count=len(self._members),
+                    success=False,
+                    error=gateway_error,
+                    elapsed_seconds=time.perf_counter() - t0,
+                    metadata={
+                        "method": "gateway",
+                        "tokens_used": len(valid_tokens),
+                        "member_count_hint": member_count,
+                        "guild_name": guild_name,
+                        "cancelled": False,
+                    },
+                )
 
             if (
                 bio_queue is not None
@@ -1642,7 +1608,7 @@ class StandaloneScraper:
                 success=True,
                 elapsed_seconds=elapsed,
                 metadata={
-                    "method": "gateway" if gateway_ok else "rest_api",
+                    "method": "gateway",
                     "tokens_used": len(valid_tokens),
                     "member_count_hint": member_count,
                     "guild_name": guild_name,
