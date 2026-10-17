@@ -100,7 +100,7 @@ def strip_unusable_emoji(text: str, usable_ids: set) -> str:
     the bare `:name:`, so the cloned message reads "Hello all :wave:". Removing
     them is closer to the original than leaving the shortcode behind.
 
-    Kept: static emoji owned by the guild being posted into -- any member may
+    Kept: static emoji owned by the guild being posted into: any member may
     use those. Dropped: animated emoji, which need Nitro anywhere, and any
     emoji belonging to another guild, which is what an uncloned one still is.
     """
@@ -234,9 +234,8 @@ class UserTokenSender:
         reply_to: Optional[dict] = None,
         guild_id=None,
     ) -> str:
-        """
-        Attempt to post a message into ``target_channel_id`` (a channel or thread
-        id in the clone guild) as one of the mapping's user tokens.
+        """Post a message into ``target_channel_id`` (a channel or thread in the clone
+        guild) as one of the mapping's user tokens. Returns a ``SEND_*`` status.
 
         ``reply_to``: ``{"message_id", "channel_id", "guild_id"}`` of the cloned
         message this one answers. Tokens are real accounts, so this posts an
@@ -480,10 +479,7 @@ class UserTokenSender:
         sticky_exclusive: bool = False,
         use_proxy: bool = False,
     ) -> Optional[int]:
-        """
-        Create a forum thread whose starter message is authored by one of the
-        mapping's user tokens.
-        """
+        """Create a forum thread whose starter message is authored by one of the mapping's user tokens."""
         if not mapping_id or not forum_channel_id or not thread_name:
             return None
 
@@ -590,9 +586,7 @@ class UserTokenSender:
         sticky_exclusive: bool = False,
         use_proxy: bool = False,
     ) -> Optional[int]:
-        """
-        Create a text-channel thread as one of the mapping's user tokens.
-        """
+        """Create a text-channel thread as one of the mapping's user tokens."""
         if not mapping_id or not parent_channel_id or not thread_name:
             return None
 
@@ -886,10 +880,9 @@ class UserTokenSender:
     ) -> tuple[str, Optional[dict]]:
         """Call the API as one account, with rate-limit gating and retries.
 
-        ``not_found_status`` lets a caller separate 404 from 403, which matter
-        differently once this is used for more than sending: a delete whose
-        target is already gone is done, while one that is forbidden is not.
-        Sends keep conflating them, which is the behaviour they had.
+        ``not_found_status`` lets a caller separate 404 from 403: a delete whose target
+        is already gone is done, while one that is forbidden is not. Sends leave it at
+        SEND_UNDELIVERABLE, the same status a 403 gets.
         """
         r429 = 0
         rnet = 0
@@ -1095,7 +1088,7 @@ class UserTokenSender:
     ) -> bool:
         """Step two: the bytes go straight to the signed URL, not to Discord.
 
-        No Discord headers here -- the URL carries its own authorisation, and
+        No Discord headers here: the URL carries its own authorisation, and
         sending a token to storage would be handing it to a third party.
         """
         try:

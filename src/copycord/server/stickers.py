@@ -65,9 +65,7 @@ class StickerManager:
                 pass
 
     def _log(self, level: str, msg: str, *args):
-        """
-        Sticker sync logging with sync context.
-        """
+        """Sticker sync logging with sync context."""
         prefix = logctx.format_prefix()
         line = prefix + msg
 
@@ -88,9 +86,7 @@ class StickerManager:
         self.session = session
 
     def _ensure_state(self, clone_gid: int) -> dict:
-        """
-        Get or create the state bucket for this clone guild.
-        """
+        """Get or create the state bucket for this clone guild."""
         if clone_gid not in self._state:
             self._state[clone_gid] = {
                 "host_id": None,
@@ -201,9 +197,7 @@ class StickerManager:
         host_id: int | None,
         clone_gid: int,
     ) -> None:
-        """
-        Run the actual sync for a single clone guild.
-        """
+        """Run the sync for a single clone guild."""
         lock = self._get_lock_for_clone(clone_gid)
 
         async with lock:
