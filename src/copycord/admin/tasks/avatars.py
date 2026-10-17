@@ -260,7 +260,7 @@ def sweep(now: Optional[float] = None, partials: bool = False) -> int:
         return 0
     now = _wiring.clock() if now is None else now
     gone = 0
-    for p in root.iterdir():
+    for p in list(root.iterdir()):
         name = p.name
         if name.endswith(".json"):
             token = name[:-5]
@@ -269,7 +269,7 @@ def sweep(now: Optional[float] = None, partials: bool = False) -> int:
                 _remove(token)
                 gone += 1
         elif name.endswith(".zip"):
-            if not _paths(name[:-4])[1].exists():
+            if p.exists() and not _paths(name[:-4])[1].exists():
                 _remove(name[:-4])
                 gone += 1
         elif partials and name.endswith(".zip.part"):
