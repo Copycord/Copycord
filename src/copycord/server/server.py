@@ -5342,13 +5342,6 @@ class ServerReceiver:
 
         return items
 
-    def _can_create_category(self, guild: discord.Guild) -> bool:
-        """Whether a new category can be created in the clone guild."""
-        return (
-            len(guild.categories) < self.MAX_CATEGORIES
-            and len(guild.channels) < self.MAX_GUILD_CHANNELS
-        )
-
     def _can_create_in_category(
         self, guild: discord.Guild, category: Optional[discord.CategoryChannel]
     ) -> bool:
@@ -10030,25 +10023,6 @@ class ServerReceiver:
                         ),
                     )
                     continue
-
-    def _coerce_embeds(self, lst):
-        result = []
-        for e in lst or []:
-            if isinstance(e, discord.Embed):
-                result.append(e)
-            elif isinstance(e, dict):
-                emb = discord.Embed(
-                    title=e.get("title"),
-                    description=e.get("description"),
-                )
-                img = e.get("image") or {}
-                if isinstance(img, dict) and img.get("url"):
-                    emb.set_image(url=img["url"])
-                thumb = e.get("thumbnail") or {}
-                if isinstance(thumb, dict) and thumb.get("url"):
-                    emb.set_thumbnail(url=thumb["url"])
-                result.append(emb)
-        return result
 
     async def _get_message_mappings_with_retry(
         self,

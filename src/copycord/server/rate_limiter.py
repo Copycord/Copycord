@@ -77,12 +77,6 @@ class RateLimiter:
             else:
                 self._allowance -= 1.0
 
-    def backoff(self, seconds: float):
-        now = time.monotonic()
-        candidate_end = now + max(0.0, seconds)
-        if candidate_end > self._cooldown_until:
-            self._cooldown_until = candidate_end
-
     def reset(self):
         self._cooldown_until = 0.0
 
@@ -94,10 +88,6 @@ class RateLimiter:
         if self._cooldown_until > now:
             remaining = self._cooldown_until - now
             self._cooldown_until = now + remaining * max(0.0, min(1.0, factor))
-
-    def remaining_cooldown(self) -> float:
-        return max(0.0, self._cooldown_until - time.monotonic())
-
 
 class RateLimitManager:
     def __init__(self, config: Dict[ActionType, Tuple[int, float]] = None):
@@ -115,7 +105,6 @@ class RateLimitManager:
             ActionType.STICKER_CREATE: (1, 60.0),
         }
         self._cfg = cfg
-        self._proxy_bypass: bool = False
 
         self._webhook_config = cfg[ActionType.WEBHOOK_MESSAGE]
         self._webhook_limiters: Dict[str, RateLimiter] = {}
@@ -153,61 +142,22 @@ class RateLimitManager:
             bucket[scope] = lim
         return lim
 
-    def set_proxy_bypass(self, on: bool) -> None:
-        """When on, acquire and acquire_for_guild become no-ops.
-
-        Used during structure sync while proxies are active: each proxy has its own IP,
-        so Discord's per-IP limits do not apply.
-        """
-        self._proxy_bypass = bool(on)
-
-    @property
-    def proxy_bypass(self) -> bool:
-        return self._proxy_bypass
-
     async def acquire(self, action: ActionType, key: str | None = None,
                       stop: Optional[asyncio.Event] = None):
-        if self._proxy_bypass:
-            return
         lim = self._get(action, key)
         if lim:
             await lim.acquire(stop)
 
     async def acquire_for_guild(self, action: ActionType, clone_guild_id: int,
                                 stop: Optional[asyncio.Event] = None):
-        if self._proxy_bypass:
-            return
         await self.acquire(action, key=str(int(clone_guild_id)), stop=stop)
-
-    def penalize(self, action: ActionType, seconds: float, key: str | None = None):
-        lim = self._get(action, key)
-        if lim:
-            lim.backoff(seconds)
-
-    def penalize_for_guild(
-        self, action: ActionType, seconds: float, clone_guild_id: int
-    ):
-        self.penalize(action, seconds, key=str(int(clone_guild_id)))
 
     def relax(self, action: ActionType, factor: float = 0.5, key: str | None = None):
         lim = self._get(action, key)
         if lim:
             lim.relax(factor)
 
-    def relax_for_guild(self, action: ActionType, factor: float, clone_guild_id: int):
-        self.relax(action, factor, key=str(int(clone_guild_id)))
-
     def reset(self, action: ActionType, key: str | None = None):
         lim = self._get(action, key)
         if lim:
             lim.reset()
-
-    def reset_for_guild(self, action: ActionType, clone_guild_id: int):
-        self.reset(action, key=str(int(clone_guild_id)))
-
-    def remaining(self, action: ActionType, key: str | None = None) -> float:
-        lim = self._get(action, key)
-        return lim.remaining_cooldown() if lim else 0.0
-
-    def remaining_for_guild(self, action: ActionType, clone_guild_id: int) -> float:
-        return self.remaining(action, key=str(int(clone_guild_id)))

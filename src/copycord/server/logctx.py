@@ -36,13 +36,3 @@ def format_prefix() -> str:
 
     return " ".join(parts) + " " if parts else ""
 
-
-def guild_prefix() -> str:
-    """
-    Returns something like "[Guild A] " if a guild_name is set
-    for this task/context, else "".
-    """
-    g = guild_name.get()
-    if g:
-        return f"[{g}] "
-    return ""

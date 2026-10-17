@@ -575,9 +575,6 @@ class ForwardingManager:
     async def drain(self) -> None:
         await asyncio.gather(*(q.join() for q in self._queues.values()))
 
-    def queue_sizes(self) -> dict[str, int]:
-        return {k: q.qsize() for k, q in self._queues.items()}
-
     async def reload_config(self) -> None:
         try:
             rows = self.db.list_message_forwarding_rules(guild_id=None) or []
