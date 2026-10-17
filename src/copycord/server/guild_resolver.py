@@ -46,10 +46,8 @@ class GuildResolver:
         host_guild_id: Optional[int],
         explicit_clone_id: Optional[int] = None,
     ) -> Optional[int]:
-        """
-        Prefer an explicit clone id if it's one of our clones, otherwise map host->clone.
-        Finally, fall back to single-guild CLONE_GUILD_ID if configured.
-        """
+        """The clone guild to target: explicit_clone_id when it is one of ours (else None),
+        otherwise the active clone of host_guild_id, else CLONE_GUILD_ID if configured."""
         if explicit_clone_id is not None:
             return (
                 int(explicit_clone_id)

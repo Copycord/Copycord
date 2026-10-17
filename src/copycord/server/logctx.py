@@ -17,11 +17,7 @@ guild_name = contextvars.ContextVar("guild_name", default=None)
 
 
 def format_prefix() -> str:
-    """
-    Build a prefix like:
-      - "[<mapping>][<task>]" when a per-clone mapping label is set, else
-      - "[<host>][<task>]" as a fallback.
-    """
+    """Log prefix "[<mapping>][<task>]", or "[<host>][<task>]" when no mapping label is set."""
     mapping = guild_name.get()
     host = sync_host_name.get()
     disp = sync_display_id.get()

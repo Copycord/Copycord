@@ -161,7 +161,7 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
 
 
 def _launch_signature() -> str:
-    """UUID4 with a fixed scatter of bits zeroed — the shape the Discord web client produces."""
+    """UUID4 with a fixed scatter of bits zeroed: the shape the Discord web client produces."""
     mask = int(
         "00000000100000000001000000010000000010000001000000001000000000000010"
         "000010000001000000000100000000000001000000000000100000000000",
