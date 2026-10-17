@@ -19,7 +19,11 @@ LIMIT_DEFAULT = 50
 LIMIT_MAX = 200
 CONTENT_TTL = 300.0
 CONTENT_CACHE_MAX = 500
-SORTS = ("created_at", "author", "channel", "username", "guild")
+SORTS = (
+    "created_at", "author", "channel", "username", "guild",
+    "author_id", "channel_id", "cloned_channel", "cloned_channel_id", "guild_id",
+    "cloned_guild", "cloned_guild_id", "mapping", "attachments", "embeds", "message_id", "cloned_message_id",
+)
 
 _state: dict = {"db": None, "send": None}
 # (original_message_id, cloned_guild_id) -> (expires_at, payload)
