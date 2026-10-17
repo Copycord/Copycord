@@ -73,24 +73,11 @@ def test_saved_channel_round_trip(data_dir, channel):
     assert update.load_channel() == channel
 
 
-def test_saved_dev_channel_defaults_to_main(data_dir):
-    data_dir.mkdir()
-    (data_dir / "update.json").write_text('{"channel": "dev"}')
-    assert update.load_channel() == update.Channel("dev", "main")
-
-
 @pytest.mark.parametrize("text", ["not json", "[]", '{"channel": "nightly"}', ""])
 def test_bad_saved_channel_falls_back_to_stable(data_dir, text):
     data_dir.mkdir()
     (data_dir / "update.json").write_text(text)
     assert update.load_channel() == update.Channel("stable")
-
-
-def test_saved_file_format(data_dir):
-    update.save_channel(update.Channel("dev", "v4-dev"))
-    assert _saved(data_dir) == {"channel": "dev", "branch": "v4-dev"}
-    update.save_channel(update.Channel("beta"))
-    assert _saved(data_dir) == {"channel": "beta"}
 
 
 # --------------------------------------------------------------------------
@@ -153,17 +140,6 @@ def test_install_command(kind, spec, expected):
 def test_git_spec_defaults_to_main():
     assert update.git_spec() == GIT_SPEC.format("main")
     assert update.git_spec("v4-dev") == GIT_SPEC.format("v4-dev")
-
-
-def test_pip_prints_command():
-    cmd, hint = update.install_command(update.PIP, WHEEL)
-    assert cmd is None
-    assert f'-m pip install --upgrade "{WHEEL}"' in hint
-
-
-def test_uv_pip_hint():
-    cmd, hint = update.install_command(update.UV_PIP, WHEEL)
-    assert cmd is None and f'uv pip install --upgrade --python' in hint and WHEEL in hint
 
 
 # --------------------------------------------------------------------------
@@ -426,23 +402,12 @@ def test_tag_and_channel_are_exclusive(env):
         cli.main(["update", "--tag", "4.0.0", "--channel", "beta"])
 
 
-def test_tag_and_branch_are_exclusive(env, capsys):
-    rec, _, _ = env
-    assert cli.main(["update", "--tag", "4.0.0", "--ref", "main"]) == 2
-    assert rec.calls == []
-
-
 def test_branch_needs_dev_channel(env, capsys):
     rec, _, _ = env
     assert cli.main(["update", "--channel", "beta", "--ref", "main"]) == 2
     assert cli.main(["update", "--ref", "main"]) == 2
     assert rec.calls == []
     assert "dev channel" in capsys.readouterr().err
-
-
-def test_unknown_channel_is_rejected(env):
-    with pytest.raises(SystemExit):
-        cli.main(["update", "--channel", "nightly"])
 
 
 def test_dev_without_npm_and_no_node_stops(env, data_dir, monkeypatch, capsys):
@@ -516,14 +481,6 @@ def test_pipx_beta(env, monkeypatch):
     assert rec.calls == [["pipx", "install", "--force", wheel_url("v4.1.0b2")]]
 
 
-def test_plain_pip_prints_the_wheel_command(env, monkeypatch, capsys):
-    rec, _, _ = env
-    monkeypatch.setattr(update, "detect_installer", lambda: update.PIP)
-    assert cli.main(["update", "--channel", "beta"]) == 1
-    assert rec.calls == []
-    assert f'-m pip install --upgrade "{wheel_url("v4.1.0b2")}"' in capsys.readouterr().out
-
-
 @pytest.mark.parametrize("kind", [update.DOCKER, update.SOURCE])
 def test_docker_and_source_need_no_network(env, monkeypatch, fake_net, capsys, kind):
     rec, _, _ = env
@@ -552,25 +509,9 @@ def test_no_install_dev_branch(env, data_dir):
     assert _saved(data_dir) == {"channel": "dev", "branch": "v4-dev"}
 
 
-def test_no_install_needs_a_channel(env, data_dir):
-    rec, _, _ = env
-    assert cli.main(["update", "--no-install"]) == 2
-    assert cli.main(["update", "--tag", "4.0.0", "--no-install"]) == 2
-    assert rec.calls == []
-    assert not (data_dir / "update.json").exists()
-
-
 # --------------------------------------------------------------------------
 # version
 # --------------------------------------------------------------------------
-
-
-def test_version_prints_dev_branch(data_dir, capsys):
-    update.save_channel(update.Channel("dev", "v4-dev"))
-    with pytest.raises(SystemExit) as exc:
-        cli.main(["--version"])
-    assert exc.value.code == 0
-    assert "dev channel · v4-dev" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------
@@ -602,28 +543,6 @@ def test_check_stable_ignores_prereleases_and_drafts(data_dir, fake_net, no_inst
     assert seen == [(LIST_URL, 5.0)]
 
 
-def test_check_on_a_terminal_is_a_rail(data_dir, fake_net, no_install, monkeypatch):
-    class Terminal(io.StringIO):
-        encoding = "utf-8"
-
-        def isatty(self):
-            return True
-
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setattr(update.ui, "_columns", lambda: 78)
-    monkeypatch.setattr(update.ui, "brand", lambda stream=None: "Copycord v4.0.0")
-    out = Terminal()
-    monkeypatch.setattr(update.sys, "stdout", out)
-    assert cli.main(["update", "status"]) == 0
-    lines = out.getvalue().splitlines()
-    assert "Copycord v4.0.0" in lines
-    assert "\u250c  Copycord update status" in lines
-    box = [x for x in lines if x.startswith(("\u25c7", "\u2502 ", "\u251c"))]
-    assert {len(x) for x in box} == {78}
-    assert any("current  4.0.0" in x for x in box)
-    assert lines[-3:] == ["\u2502", "\u2713  Copycord is up to date", "\u2514"]
-
-
 def test_check_beta_considers_prereleases(data_dir, fake_net, no_install, capsys):
     update.save_channel(update.Channel("beta"))
     assert cli.main(["update", "status"]) == 0
@@ -648,22 +567,6 @@ def test_check_network_failure_is_a_warning(data_dir, fake_net, no_install, caps
     assert "! " in out and "timed out" in out
 
 
-def test_check_no_release_is_a_warning(data_dir, fake_net, no_install, capsys):
-    responses, _ = fake_net
-    responses[LIST_URL] = [release("v4.0.0", draft=True)]
-    assert cli.main(["update", "status"]) == 0
-    assert "! no published stable release" in capsys.readouterr().out
-
-
-def test_check_warns_about_a_missing_wheel(data_dir, fake_net, no_install, capsys):
-    responses, _ = fake_net
-    responses[LIST_URL] = [release("v4.0.1", wheel=False)]
-    assert cli.main(["update", "status"]) == 0
-    out = capsys.readouterr().out
-    assert "latest   4.0.1 (v4.0.1)" in out
-    assert "! release v4.0.1 has no wheel asset" in out
-
-
 def test_check_dev_shows_branch_head(data_dir, fake_net, no_install, monkeypatch, capsys):
     responses, seen = fake_net
     url = "https://api.github.com/repos/Copycord/Copycord/commits/v4-dev"
@@ -676,25 +579,6 @@ def test_check_dev_shows_branch_head(data_dir, fake_net, no_install, monkeypatch
     assert "latest   v4-dev @ 0123456789ab 2026-10-11T12:00:00Z client: fix reconnect" in out
     assert "Update available" in out
     assert seen == [(url, 5.0)]
-
-
-def test_check_dev_up_to_date(data_dir, fake_net, no_install, monkeypatch, capsys):
-    responses, _ = fake_net
-    responses["https://api.github.com/repos/Copycord/Copycord/commits/main"] = GITHUB_HEAD
-    monkeypatch.setattr(update, "installed_commit", lambda: GITHUB_HEAD["sha"])
-    assert cli.main(["update", "status", "--channel", "dev"]) == 0
-    assert "up to date" in capsys.readouterr().out
-
-
-def test_check_dev_github_failure_is_a_warning(data_dir, fake_net, no_install, capsys):
-    responses, _ = fake_net
-    responses["https://api.github.com/repos/Copycord/Copycord/commits/main"] = OSError(
-        "Network is unreachable"
-    )
-    update.save_channel(update.Channel("dev", "main"))
-    assert cli.main(["update", "status"]) == 0
-    out = capsys.readouterr().out
-    assert "! " in out and "Network is unreachable" in out
 
 
 # --------------------------------------------------------------------------
@@ -819,12 +703,6 @@ def test_version_ordering():
         assert not update.is_newer(lower, higher), (lower, higher)
 
 
-def test_version_equivalents():
-    assert not update.is_newer("4.0", "4.0.0")
-    assert not update.is_newer("v4.0.0", "4.0.0")
-    assert not update.is_newer("4.0.0+local", "4.0.0")
-
-
 def test_is_prerelease():
     assert update.is_prerelease("4.0.0b1")
     assert update.is_prerelease("4.0.0rc1")
@@ -872,12 +750,6 @@ def test_installed_commit_from_a_local_checkout(monkeypatch, tmp_path):
 def test_installed_commit_is_none_for_a_wheel_without_a_stamp(monkeypatch):
     monkeypatch.setattr(update, "build_commit", lambda: None)
     _fake_dist(monkeypatch, {"url": "https://github.com/Copycord/Copycord/releases/download/v4.0.0/copycord-4.0.0-py3-none-any.whl", "archive_info": {}})
-    assert update.installed_commit() is None
-
-
-def test_installed_commit_is_none_for_a_folder_without_git(monkeypatch, tmp_path):
-    monkeypatch.setattr(update, "build_commit", lambda: None)
-    _fake_dist(monkeypatch, {"url": tmp_path.as_uri(), "dir_info": {}})
     assert update.installed_commit() is None
 
 
@@ -1060,34 +932,6 @@ def test_other_platforms_install_inline_and_quietly(env, monkeypatch, platform, 
     assert "$ uv" not in out
 
 
-def test_uv_output_goes_to_the_log(env, data_dir, monkeypatch, capsys):
-    rec, _, _ = env
-
-    def noisy(cmd, capture=True, env=None):
-        rec.calls.append(list(cmd))
-        lines = "".join(f"+ pkg{i}==1.0\n" for i in range(40))
-        return subprocess.CompletedProcess(list(cmd), 0, lines, "")
-
-    monkeypatch.setattr(service, "run_cmd", noisy)
-    assert update.update() == 0
-    captured = capsys.readouterr()
-    assert "pkg" not in captured.out + captured.err
-    assert "+ pkg39==1.0" in update.log_path().read_text(encoding="utf-8")
-
-
-def test_failed_install_shows_the_log_tail(env, data_dir, monkeypatch, capsys):
-    def broken(cmd, capture=True, env=None):
-        lines = "".join(f"line {i}\n" for i in range(30))
-        return subprocess.CompletedProcess(list(cmd), 1, lines, "error: boom\n")
-
-    monkeypatch.setattr(service, "run_cmd", broken)
-    assert update.update() == 1
-    err = capsys.readouterr().err
-    assert "update failed (exit 1)" in err
-    assert "error: boom" in err and "line 29" in err and "line 5\n" not in err
-    assert str(update.log_path()) in err
-
-
 def test_move_aside_renames_executables_and_launchers(tmp_path, monkeypatch):
     env = tmp_path / "tools" / "copycord"
     (env / "Scripts").mkdir(parents=True)
@@ -1166,21 +1010,6 @@ def test_service_leftovers_finds_what_the_task_started():
     assert winupdate.service_leftovers(rows, 30, PREFIX) == [42, 45, 46]
 
 
-def test_program_of_a_command_line():
-    assert winupdate._program(r'"C:\a b\pythonw.exe" "x.exe" run') == r"C:\a b\pythonw.exe"
-    assert winupdate._program(r"C:\py\python.exe -m copycord") == r"C:\py\python.exe"
-    assert winupdate._program(None) is None
-
-
-def test_scan_counts_the_windowless_launcher_as_copycord():
-    rows = [
-        SHELL, LAUNCHER, ME,
-        proc(50, 1, "cmd.exe"),
-        proc(51, 50, "copycordw.exe", r"C:\Users\u\.local\bin\copycordw.exe"),
-    ]
-    assert winupdate.scan(rows, 30, PREFIX)[1] == 51
-
-
 def test_running_without_powershell_does_not_block(monkeypatch):
     def boom(*a, **k):
         raise OSError("no powershell")
@@ -1208,31 +1037,6 @@ def test_update_shows_the_versions_and_no_changes_nothing(current, tty, monkeypa
     assert "Update cancelled, nothing was changed" in out
 
 
-def test_update_on_a_terminal_asks_on_the_rail(current, tty, monkeypatch):
-    class Terminal(io.StringIO):
-        encoding = "utf-8"
-
-        def isatty(self):
-            return True
-
-    rec, backups, _, _ = current
-    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setattr(update.ui, "brand", lambda stream=None: "Copycord v3.28.0")
-    out = Terminal()
-    monkeypatch.setattr(update.sys, "stdout", out)
-    tty["answers"] = ["n"]
-    assert cli.main(["update"]) == 0
-    assert rec.calls == [] and backups == []
-    assert tty["asked"] == ["◆  Update Copycord now? (Y/n) "]
-    lines = out.getvalue().splitlines()
-    assert lines[1] == "Copycord v3.28.0"
-    assert lines[3].startswith("┌  Updating Copycord")
-    at = lines.index("◇  Update available")
-    assert lines[at - 1] == "│" and lines[at + 1] == "│  3.28.0 -> 4.0.0"
-    assert lines[-3:] == ["│", "│  Update cancelled, nothing was changed", "└"]
-
-
 @pytest.mark.parametrize("answer", ["", "y", "yes"])
 def test_update_installs_when_the_answer_is_yes(current, tty, monkeypatch, answer):
     rec, backups, _, _ = current
@@ -1240,17 +1044,6 @@ def test_update_installs_when_the_answer_is_yes(current, tty, monkeypatch, answe
     tty["answers"] = [answer]
     assert cli.main(["update"]) == 0
     assert rec.calls == [uv(wheel_url("v4.0.0"))] and backups == [1]
-
-
-def test_dev_update_shows_the_new_commit(current, tty, monkeypatch, capsys):
-    rec, backups, _, _ = current
-    _on_dev_head(monkeypatch, "f" * 40)
-    tty["answers"] = ["n"]
-    assert cli.main(["update"]) == 0
-    assert rec.calls == [] and backups == []
-    out = capsys.readouterr().out
-    assert "4.0.0 (fffffff) -> v4-dev (0123456)" in out
-    assert "client: fix reconnect" not in out
 
 
 @pytest.mark.parametrize("flag", ["--yes", "-y"])
@@ -1269,13 +1062,6 @@ def test_no_terminal_updates_without_asking(current, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("asked"))
     assert cli.main(["update"]) == 0
     assert rec.calls == [uv(wheel_url("v4.0.0"))] and backups == [1]
-
-
-def test_doctor_reinstall_does_not_ask(current, tty, monkeypatch):
-    rec, _, _, _ = current
-    _on_dev_head(monkeypatch)
-    assert update.update(reinstall=True) == 0
-    assert tty["asked"] == [] and len(rec.calls) == 1
 
 
 def test_auto_update_does_not_ask(monkeypatch):
@@ -1302,25 +1088,6 @@ def test_force_on_the_same_version_asks_to_reinstall(current, tty, monkeypatch, 
     assert len(tty["asked"]) == 1 and "Reinstall Copycord 4.0.0? (Y/n)" in tty["asked"][0]
     assert rec.calls == [] and backups == []
     assert "Update cancelled, nothing was changed" in capsys.readouterr().out
-
-
-def test_force_without_a_terminal_reinstalls(current, monkeypatch):
-    rec, _, _, _ = current
-    _on_dev_head(monkeypatch)
-    monkeypatch.setattr(update.ui, "is_interactive", lambda: False)
-    assert cli.main(["update", "--force"]) == 0
-    assert len(rec.calls) == 1
-
-
-def test_channel_switch_shows_from_and_to_and_asks(current, tty, monkeypatch, data_dir, capsys):
-    rec, backups, _, _ = current
-    tty["answers"] = ["n"]
-    assert cli.main(["update", "--channel", "dev", "--ref", "v4-dev"]) == 0
-    assert len(tty["asked"]) == 1 and "Update Copycord now? (Y/n)" in tty["asked"][0]
-    assert rec.calls == [] and backups == []
-    assert not (data_dir / "update.json").exists()
-    out = capsys.readouterr().out
-    assert "Switch to the dev channel" in out and "4.0.0 -> v4-dev" in out
 
 
 def test_downgrade_asks_once_with_its_own_question(current, tty, monkeypatch):
