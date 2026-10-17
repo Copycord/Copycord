@@ -158,25 +158,70 @@ function safeStorage(): Storage | null {
   }
 }
 
-export type SortKey = "newest" | "oldest" | "author" | "username" | "channel" | "guild";
+/** The server's sort names (SORTS in admin/messages.py). The list is paged, so sorting is always server side. */
+export type SortField =
+  | "created_at"
+  | "author"
+  | "username"
+  | "author_id"
+  | "channel"
+  | "channel_id"
+  | "cloned_channel"
+  | "cloned_channel_id"
+  | "guild"
+  | "guild_id"
+  | "cloned_guild"
+  | "cloned_guild_id"
+  | "mapping"
+  | "attachments"
+  | "embeds"
+  | "message_id"
+  | "cloned_message_id";
+export type SortDir = "asc" | "desc";
+export interface SortState {
+  by: SortField;
+  dir: SortDir;
+}
 
-export const SORT_OPTIONS: ReadonlyArray<{ value: SortKey; label: string }> = [
-  { value: "newest", label: "Newest" },
-  { value: "oldest", label: "Oldest" },
-  { value: "author", label: "Author name" },
-  { value: "username", label: "Username" },
-  { value: "channel", label: "Channel" },
-  { value: "guild", label: "Original guild" },
-];
+export const DEFAULT_SORT: SortState = { by: "created_at", dir: "desc" };
 
-const SORT_PARAMS: Record<SortKey, { sort: string; order: string }> = {
-  newest: { sort: "created_at", order: "desc" },
-  oldest: { sort: "created_at", order: "asc" },
-  author: { sort: "author", order: "asc" },
-  username: { sort: "username", order: "asc" },
-  channel: { sort: "channel", order: "asc" },
-  guild: { sort: "guild", order: "asc" },
+/** The server sort behind each column header; a column missing here (Links) has none and its header is plain text. */
+export const COLUMN_SORT: Partial<Record<ColumnKey, SortField>> = {
+  time: "created_at",
+  created: "created_at",
+  author_name: "author",
+  username: "username",
+  author_id: "author_id",
+  original_channel: "channel",
+  original_channel_id: "channel_id",
+  cloned_channel: "cloned_channel",
+  cloned_channel_id: "cloned_channel_id",
+  original_guild: "guild",
+  original_guild_id: "guild_id",
+  cloned_guild: "cloned_guild",
+  cloned_guild_id: "cloned_guild_id",
+  mapping: "mapping",
+  attachments: "attachments",
+  embeds: "embeds",
+  message_id: "message_id",
+  cloned_message_id: "cloned_message_id",
 };
+
+/** The toolbar sort dropdown: one entry per server sort, named after its first column. */
+export const SORT_OPTIONS: ReadonlyArray<{ value: SortField; label: string }> = COLUMNS.flatMap((c) => {
+  const by = COLUMN_SORT[c.key];
+  return by && COLUMNS.find((d) => COLUMN_SORT[d.key] === by) === c ? [{ value: by, label: c.label }] : [];
+});
+
+/** A new sort starts newest first for time and ascending otherwise. */
+export function sortBy(by: SortField): SortState {
+  return { by, dir: by === "created_at" ? "desc" : "asc" };
+}
+
+/** Header click: the active sort flips direction, another column starts at its default direction. */
+export function nextSort(prev: SortState, by: SortField): SortState {
+  return prev.by === by ? { by, dir: prev.dir === "asc" ? "desc" : "asc" } : sortBy(by);
+}
 
 export interface Filters {
   q: string;
@@ -203,7 +248,7 @@ export function dayBound(day: string, end: boolean): number | null {
   return Math.floor(d.getTime() / 1000);
 }
 
-export function messagesUrl(f: Filters, sort: SortKey, cursor: string | null = null, limit = PAGE_SIZE): string {
+export function messagesUrl(f: Filters, sort: SortState, cursor: string | null = null, limit = PAGE_SIZE): string {
   const p = new URLSearchParams();
   const q = f.q.trim();
   if (q) p.set("q", q);
@@ -214,9 +259,8 @@ export function messagesUrl(f: Filters, sort: SortKey, cursor: string | null = n
   const to = dayBound(f.to, true);
   if (from !== null) p.set("created_from", String(from));
   if (to !== null) p.set("created_to", String(to));
-  const s = SORT_PARAMS[sort];
-  p.set("sort", s.sort);
-  p.set("order", s.order);
+  p.set("sort", sort.by);
+  p.set("order", sort.dir);
   p.set("limit", String(limit));
   if (cursor) p.set("cursor", cursor);
   return `/api/messages?${p.toString()}`;

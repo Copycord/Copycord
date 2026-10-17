@@ -229,9 +229,57 @@ def test_sorts(client):
     assert client.get("/api/messages", params={"order": "up"}).status_code == 400
 
 
+# column sorts (L71): the row field each one orders by, compared the way SQL does (LOWER, NULL as 0 or '')
+_SORT_FIELDS = {
+    "author_id": lambda it: int(it["author_id"] or 0),
+    "channel_id": lambda it: int(it["original_channel_id"] or 0),
+    "cloned_channel": lambda it: (it["cloned_channel_name"] or "").lower(),
+    "cloned_channel_id": lambda it: int(it["cloned_channel_id"] or 0),
+    "guild_id": lambda it: int(it["original_guild_id"] or 0),
+    "cloned_guild": lambda it: (it["cloned_guild_name"] or "").lower(),
+    "cloned_guild_id": lambda it: int(it["cloned_guild_id"] or 0),
+    "mapping": lambda it: (it["mapping_name"] or "").lower(),
+    "attachments": lambda it: it["attachment_count"] or 0,
+    "embeds": lambda it: it["embed_count"] or 0,
+    "message_id": lambda it: int(it["original_message_id"]),
+    "cloned_message_id": lambda it: int(it["cloned_message_id"] or 0),
+}
+
+
+@pytest.mark.parametrize("sort", sorted(_SORT_FIELDS))
+@pytest.mark.parametrize("order", ["asc", "desc"])
+def test_column_sorts_order_with_id_tie_break(client, sort, order):
+    items = client.get("/api/messages", params={"sort": sort, "order": order, "limit": 200}).json()["items"]
+    assert len(items) == 12
+    key = _SORT_FIELDS[sort]
+
+    def full(it):
+        return (key(it), int(it["original_message_id"]), int(it["cloned_guild_id"] or 0))
+
+    assert [full(it) for it in items] == sorted((full(it) for it in items), reverse=order == "desc")
+    # every sort but embeds (one per seeded message) sees more than one value, so the order is not just the ids
+    if sort != "embeds":
+        assert len({key(it) for it in items}) > 1
+
+
+def test_column_sorts_on_seed_values(client):
+    def g(sort, order="asc"):
+        return client.get("/api/messages", params={"sort": sort, "order": order, "limit": 200}).json()["items"]
+
+    assert g("cloned_guild", "desc")[0]["cloned_guild_name"] == "Clone2"
+    assert g("cloned_guild_id", "desc")[0]["cloned_guild_id"] == str(CG2)
+    assert g("mapping", "desc")[0]["mapping_name"] == "Beta"
+    assert [it["attachment_count"] for it in g("attachments", "desc")][:3] == [2, 2, 2]
+    # ties on the count fall back to the message id in the same direction
+    assert [it["original_message_id"] for it in g("attachments", "desc")][:3] == [str(_mid(i)) for i in (8, 4, 0)]
+    assert [it["cloned_message_id"] for it in g("cloned_message_id")] == [str(9_000 + i) for i in range(12)]
+    assert [it["original_message_id"] for it in g("embeds", "desc")] == [str(_mid(i)) for i in reversed(range(12))]
+
+
 @pytest.mark.parametrize("sort,order", [("created_at", "desc"), ("created_at", "asc"),
                                         ("author", "asc"), ("author", "desc"), ("channel", "asc"),
-                                        ("username", "asc"), ("guild", "desc")])
+                                        ("username", "asc"), ("guild", "desc")]
+                         + [(s, o) for s in sorted(_SORT_FIELDS) for o in ("asc", "desc")])
 def test_cursor_pagination_no_gaps_or_duplicates(client, sort, order):
     full = _ids(client.get("/api/messages", params={"sort": sort, "order": order, "limit": 200}))
     seen, cursor, pages = [], None, 0

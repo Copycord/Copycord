@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
 import {
   COLUMN_GROUPS,
+  COLUMN_SORT,
   COLUMNS,
   COLUMNS_KEY,
   COLUMNS_KEY_V1,
   DEFAULT_COLUMNS,
+  DEFAULT_SORT,
+  SORT_OPTIONS,
   migrateV1,
+  nextSort,
+  sortBy,
   tableMinWidth,
   NO_FILTERS,
   dayBound,
@@ -70,15 +75,31 @@ describe("columns persistence", () => {
   });
 
   it("sorts by username and original guild through the API", () => {
-    expect(new URL(messagesUrl(NO_FILTERS, "username"), "http://x").searchParams.get("sort")).toBe("username");
-    expect(new URL(messagesUrl(NO_FILTERS, "guild"), "http://x").searchParams.get("sort")).toBe("guild");
+    expect(new URL(messagesUrl(NO_FILTERS, sortBy("username")), "http://x").searchParams.get("sort")).toBe("username");
+    expect(new URL(messagesUrl(NO_FILTERS, sortBy("guild")), "http://x").searchParams.get("sort")).toBe("guild");
+  });
+
+  it("gives every column but Links a server sort, one dropdown entry per sort", () => {
+    expect(COLUMNS.filter((c) => !COLUMN_SORT[c.key]).map((c) => c.key)).toEqual(["links"]);
+    const values = SORT_OPTIONS.map((o) => o.value);
+    expect(new Set(values).size).toBe(values.length);
+    expect(SORT_OPTIONS[0]).toEqual({ value: "created_at", label: "Time" });
+    expect(SORT_OPTIONS.find((o) => o.value === "cloned_guild")?.label).toBe("Cloned guild");
+  });
+
+  it("flips the active sort and starts another one at its default direction", () => {
+    expect(DEFAULT_SORT).toEqual({ by: "created_at", dir: "desc" });
+    expect(nextSort(DEFAULT_SORT, "created_at")).toEqual({ by: "created_at", dir: "asc" });
+    expect(nextSort({ by: "created_at", dir: "asc" }, "created_at")).toEqual({ by: "created_at", dir: "desc" });
+    expect(nextSort(DEFAULT_SORT, "attachments")).toEqual({ by: "attachments", dir: "asc" });
+    expect(nextSort({ by: "attachments", dir: "asc" }, "attachments")).toEqual({ by: "attachments", dir: "desc" });
   });
 });
 
 describe("messagesUrl", () => {
   it("maps sort, filters, dates and the cursor to query params", () => {
     const url = new URL(
-      messagesUrl({ ...NO_FILTERS, q: " ann ", mapping: "m1", channel: "10", attachments: "yes", from: "2026-10-01", to: "2026-10-02" }, "oldest", "CUR"),
+      messagesUrl({ ...NO_FILTERS, q: " ann ", mapping: "m1", channel: "10", attachments: "yes", from: "2026-10-01", to: "2026-10-02" }, { by: "created_at", dir: "asc" }, "CUR"),
       "http://x",
     );
     const p = url.searchParams;
@@ -96,7 +117,7 @@ describe("messagesUrl", () => {
   });
 
   it("sends only sort, order and limit without filters", () => {
-    const p = new URL(messagesUrl(NO_FILTERS, "author"), "http://x").searchParams;
+    const p = new URL(messagesUrl(NO_FILTERS, sortBy("author")), "http://x").searchParams;
     expect([...p.keys()].sort()).toEqual(["limit", "order", "sort"]);
     expect(p.get("sort")).toBe("author");
     expect(filtersActive(NO_FILTERS)).toBe(false);

@@ -24,16 +24,18 @@ import {
 import { COUNT } from "./logs/LogsSkeleton";
 import {
   DEFAULT_COLUMNS,
+  DEFAULT_SORT,
   NO_FILTERS,
   SEARCH_DEBOUNCE_MS,
   filtersActive,
   loadColumns,
   messagesUrl,
+  nextSort,
   rowKey,
   saveColumns,
   toggleColumn,
 } from "./messages/model";
-import type { ColumnKey, Filters, SortKey } from "./messages/model";
+import type { ColumnKey, Filters, SortState } from "./messages/model";
 import { PreviewModal } from "./messages/PreviewModal";
 
 export { SEARCH_DEBOUNCE_MS };
@@ -46,7 +48,7 @@ export function Messages() {
   const [columns, setColumns] = useState<ColumnKey[]>(() => loadColumns());
   const [searchInput, setSearchInput] = useState("");
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  const [sort, setSort] = useState<SortKey>("newest");
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
   const [reloadTick, setReloadTick] = useState(0);
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -258,7 +260,7 @@ export function Messages() {
 
       <div ref={wrapRef} className={cx(TABLE_WRAP, busy && everLoaded && "opacity-70")} aria-busy={busy || undefined}>
         <table id="messages-table" className={TABLE} style={tableStyle(visible)}>
-          <MessagesHead columns={visible} />
+          <MessagesHead columns={visible} sort={sort} onSort={(by) => setSort((s) => nextSort(s, by))} />
           <tbody className={reveal}>
             {firstLoad ? (
               <MessagesLoadingRows columns={visible} />

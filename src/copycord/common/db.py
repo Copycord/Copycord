@@ -2944,6 +2944,18 @@ class DBManager:
         "channel": "LOWER(COALESCE(cm.original_channel_name, t.original_thread_name, ''))",
         "username": "LOWER(COALESCE(m.author_username, ''))",
         "guild": "LOWER(COALESCE(gm.original_guild_name, ''))",
+        "author_id": "COALESCE(m.author_id, 0)",
+        "channel_id": "COALESCE(m.original_channel_id, 0)",
+        "cloned_channel": "LOWER(COALESCE(cm.clone_channel_name, t.original_thread_name, ''))",
+        "cloned_channel_id": "COALESCE(m.cloned_channel_id, 0)",
+        "guild_id": "COALESCE(m.original_guild_id, 0)",
+        "cloned_guild": "LOWER(COALESCE(gm.cloned_guild_name, ''))",
+        "cloned_guild_id": "COALESCE(m.cloned_guild_id, 0)",
+        "mapping": "LOWER(COALESCE(gm.mapping_name, ''))",
+        "attachments": "COALESCE(m.attachment_count, 0)",
+        "embeds": "COALESCE(m.embed_count, 0)",
+        "message_id": "m.original_message_id",
+        "cloned_message_id": "COALESCE(m.cloned_message_id, 0)",
     }
 
     _MESSAGE_FROM = """
