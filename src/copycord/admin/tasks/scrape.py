@@ -107,6 +107,7 @@ class ScrapeInputs(BaseModel):
     include_bio: bool = Field(False, title="Bios")
     include_roles: bool = Field(False, title="Roles")
     use_proxies: bool = Field(True, title="Use the saved proxies")
+    sessions_per_token: int = Field(1, ge=1, le=5, title="Sessions per token")
 
     @field_validator("guild_id", mode="before")
     @classmethod
@@ -474,6 +475,7 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
         include_avatar_url=inputs.include_avatar_url,
         include_bio=inputs.include_bio,
         include_roles=inputs.include_roles,
+        sessions_per_token=inputs.sessions_per_token,
         progress_callback=job.on_progress,
         log_callback=job.on_log,
     )

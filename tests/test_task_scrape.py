@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import pytest
+from pydantic import ValidationError
 from starlette.testclient import TestClient
 
 from copycord.admin import app as app_module
@@ -166,7 +167,8 @@ def test_registered_one_at_a_time_without_bots():
     assert t.requires_bots is False
     assert t.options is scrape.options
     assert set(t.inputs_schema()["properties"]) == {
-        "guild_id", "include_username", "include_avatar_url", "include_bio", "include_roles", "use_proxies"}
+        "guild_id", "include_username", "include_avatar_url", "include_bio", "include_roles", "use_proxies",
+        "sessions_per_token"}
 
 
 @pytest.mark.asyncio
@@ -229,6 +231,24 @@ async def test_progress_then_success_saves_the_file(svc, env):
     assert msgs[-1] == "Done: 3 members from Guild"
     log_file = (env["dir"] / "logs" / "scraper.out").read_text()
     assert f"[Guild {GID}]" in log_file and "found 3 members so far" in log_file
+
+
+@pytest.mark.asyncio
+async def test_sessions_per_token_defaults_to_one_and_reaches_the_scraper(svc, env):
+    assert scrape.ScrapeInputs(guild_id=GID).sessions_per_token == 1
+    run = await svc.start("scrape_members", {"guild_id": GID})
+    assert (await _settled(svc, run.id)).status == "success"
+    assert env["built"][0].config.sessions_per_token == 1
+    run = await svc.start("scrape_members", {"guild_id": GID, "sessions_per_token": 3})
+    assert (await _settled(svc, run.id)).status == "success"
+    assert env["built"][1].config.sessions_per_token == 3
+
+
+@pytest.mark.parametrize("bad", [0, 6])
+def test_sessions_per_token_out_of_range_is_refused(bad):
+    with pytest.raises(ValidationError) as err:
+        scrape.ScrapeInputs(guild_id=GID, sessions_per_token=bad)
+    assert err.value.errors()[0]["loc"] == ("sessions_per_token",)
 
 
 @pytest.mark.asyncio
