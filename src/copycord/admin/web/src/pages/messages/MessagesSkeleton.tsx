@@ -235,7 +235,13 @@ export function MessagesHead({
               aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
             >
               {by ? (
-                <button type="button" data-sort={by} className={cx(SORT_BTN, active && "text-text")} onClick={() => onSort?.(by)}>
+                // [font:inherit]: the base layer reverts button fonts, the label keeps the header's size and weight
+                <button
+                  type="button"
+                  data-sort={by}
+                  className={cx(SORT_BTN, "[font:inherit]", active && "text-text")}
+                  onClick={() => onSort?.(by)}
+                >
                   {c.label}
                   <span aria-hidden="true" className="ml-1 text-[11px] text-accent">
                     {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
