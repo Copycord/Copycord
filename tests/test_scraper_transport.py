@@ -263,6 +263,38 @@ async def test_cancel_closes_every_session_and_socket(fakes):
 
 
 @pytest.mark.asyncio
+async def test_gateway_reconnect_rotates_to_another_proxy(fakes, monkeypatch):
+    _sessions, sockets, _ = fakes
+    fake_open = ss.open_websocket
+    tried = []
+
+    async def open_ws(url, headers, proxy=None, **kwargs):
+        tried.append(proxy)
+        if len(tried) == 1:
+            # Discord drops the first connection, as it does on a choked proxy.
+            raise ConnectionError("1011 keepalive ping timeout")
+        return await fake_open(url, headers, proxy, **kwargs)
+
+    monkeypatch.setattr(ss, "open_websocket", open_ws)
+    config = ScraperConfig(guild_id=1, tokens=["tok-a"], proxies=list(PROXIES[:2]),
+                           sessions_per_token=1)
+    s = StandaloneScraper(config)
+
+    async def pause(seconds):
+        await asyncio.sleep(0)
+        return s._stop_event.is_set()
+
+    s._pause = pause
+    result = await asyncio.wait_for(s.scrape(), timeout=30)
+
+    assert result.success, result.error
+    assert tried[:2] == [PROXY_URLS[0], PROXY_URLS[1]]
+    assert [sock.proxy for sock in sockets] == [PROXY_URLS[1]]
+    # The REST side keeps the planned proxy.
+    assert s._proxy_for("tok-a", 0) == PROXY_URLS[0]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("ready,error", [
     (0, "No gateway session connected to Discord (2 tried)"),
     (1, "The Discord gateway returned no members"),

@@ -1004,15 +1004,27 @@ class StandaloneScraper:
         max_total_reconnects = 999
         attempt = 0
         total_attempts = 0
+        # The first connection uses the planned proxy; each reconnect rotates to another
+        # proxy in the pool, so a slow or dead proxy is dropped rather than retried.
+        current_proxy = proxy_url
         while attempt < max_reconnects and total_attempts < max_total_reconnects:
             if self._stop_event.is_set():
                 return
+
+            if total_attempts > 0 and self._proxy_list:
+                next_proxy = self._next_proxy()
+                if next_proxy == current_proxy and len(self._proxy_list) > 1:
+                    next_proxy = self._next_proxy()
+                current_proxy = next_proxy
+                self._debug(
+                    f"[S{session_index}] Reconnecting via proxy: {_mask_proxy_for_log(current_proxy)}"
+                )
 
             connection_productive = False
             hb_task: Optional[asyncio.Task] = None
             try:
                 async with self._gateway_socket(
-                    identity, proxy_url, session_index, session_slot
+                    identity, current_proxy, session_index, session_slot
                 ) as ws:
                     inflater = ZlibStreamInflater()
 
