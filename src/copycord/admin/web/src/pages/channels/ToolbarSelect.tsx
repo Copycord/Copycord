@@ -290,7 +290,7 @@ export function ToolbarSelect({
       ref={wrap}
       data-disabled={disabled || undefined}
       aria-busy={(search && pending) || undefined}
-      className={cx("relative", field ? "block w-full" : "inline-block", className)}
+      className={cx("relative", field ? "block w-full" : "inline-block max-w-64", className)}
     >
       {field ? null : (
         <select
@@ -360,6 +360,7 @@ export function ToolbarSelect({
           aria-activedescendant={field && open && focus >= 0 ? `${listId}-${focus}` : undefined}
           {...aria}
           disabled={disabled}
+          title={field ? undefined : options[selected]?.label}
           onClick={() => (open ? setOpen(false) : show())}
           onKeyDown={onKey}
           className={cx(
@@ -371,7 +372,7 @@ export function ToolbarSelect({
           {pending ? (
             <Skeleton.Text className="align-middle">{pendingLabel}</Skeleton.Text>
           ) : (
-            <span className={cx(field && "block truncate", placeholderShown && "text-muted")}>
+            <span className={cx("block truncate", placeholderShown && "text-muted")}>
               {prefix && options[selected] ? `${prefix}: ${options[selected].label}` : options[selected]?.label || (field ? "\u00a0" : "")}
             </span>
           )}
