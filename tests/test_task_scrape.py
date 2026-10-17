@@ -27,15 +27,19 @@ class FakeScraper:
     """Finds `count` members, one per tick, then waits for `release` (when given) and
     returns `result` (or raises `raise_exc`). With endless=True it keeps finding members.
     Like the real one it turns a cancel into a Cancelled result unless stubborn, which
-    keeps reporting after the cancel and never ends."""
+    keeps reporting after the cancel and never ends. With bios=True (and Bios on) it then
+    reports bios one per tick, waiting for bio_release after bio_hold of them, and skips
+    bio_skipped of them."""
 
     def __init__(self, config, *, count=3, hint=10, endless=False, release=None, result=None,
-                 raise_exc=None, stubborn=False):
+                 raise_exc=None, stubborn=False, bios=False, bio_hold=None, bio_release=None,
+                 bio_skipped=0):
         self.config = config
         self._members = {}
         self.count, self.hint, self.endless = count, hint, endless
         self.release, self.result, self.raise_exc = release, result, raise_exc
         self.stubborn = stubborn
+        self.bios, self.bio_hold, self.bio_release, self.bio_skipped = bios, bio_hold, bio_release, bio_skipped
         self.stopped = False
         self.cancelled = False
         self.ticks = 0
@@ -55,6 +59,13 @@ class FakeScraper:
             while self.endless or len(self._members) < self.count:
                 await asyncio.sleep(0.01)
                 self._find()
+            if self.bios and self.config.include_bio:
+                total = len(self._members)
+                for done in range(total + 1):
+                    self.config.bio_progress_callback(done, total, f"Fetched {done:,} of {total:,} bios")
+                    if done == self.bio_hold:
+                        await self.bio_release.wait()
+                    await asyncio.sleep(0.01)
             if self.release is not None:
                 await self.release.wait()
         except asyncio.CancelledError:
@@ -77,10 +88,13 @@ class FakeScraper:
         if self.result is not None:
             return self.result
         members = list(self._members.values())
+        metadata = {"method": "gateway", "tokens_used": len(self.config.tokens),
+                    "member_count_hint": self.hint, "guild_name": "Guild", "cancelled": False}
+        if self.bios and self.config.include_bio:
+            metadata["bios"] = {"queued": len(members), "fetched": len(members) - self.bio_skipped,
+                                "skipped": self.bio_skipped}
         return ScraperResult(members=members, total_count=len(members), success=True, elapsed_seconds=1.25,
-                             metadata={"method": "gateway", "tokens_used": len(self.config.tokens),
-                                       "member_count_hint": self.hint, "guild_name": "Guild",
-                                       "cancelled": False})
+                             metadata=metadata)
 
     def stop(self):
         self.stopped = True
@@ -229,6 +243,63 @@ async def test_progress_then_success_saves_the_file(svc, env):
     assert msgs[-1] == "Done: 3 members from Guild"
     log_file = (env["dir"] / "logs" / "scraper.out").read_text()
     assert f"[Guild {GID}]" in log_file and "found 3 members so far" in log_file
+
+
+@pytest.mark.asyncio
+async def test_fetch_bios_step_reports_bios_done_of_queued(svc, env):
+    release = asyncio.Event()
+    env["opts"].update(count=3, hint=3, bios=True, bio_hold=1, bio_release=release, bio_skipped=1)
+    run = await svc.start("scrape_members", {"guild_id": GID, "include_bio": True})
+    await _until(lambda: _steps(svc, run.id).get("bios", {}).get("label") == "1 of 3 bios")
+    assert [s["key"] for s in svc.get(run.id).steps] == ["tokens", "scrape", "bios", "save"]
+    steps = _steps(svc, run.id)
+    assert steps["bios"]["title"] == "Fetch bios"
+    assert steps["bios"]["state"] == "running"
+    assert (steps["bios"]["done"], steps["bios"]["total"]) == (1, 3)
+    # Scrape members is done once the bios begin.
+    assert steps["scrape"]["state"] == "success" and steps["scrape"]["note"] == "3 members found"
+    assert steps["save"]["state"] == "queued"
+    assert env["built"][0].config.bio_progress_callback is not None
+
+    release.set()
+    done = await _settled(svc, run.id)
+    assert done.status == "success"
+    steps = _steps(svc, run.id)
+    assert steps["bios"]["state"] == "success" and steps["bios"]["note"] == "2 bios fetched, 1 skipped"
+    assert (steps["bios"]["done"], steps["bios"]["total"]) == (3, 3)
+    assert steps["save"]["state"] == "success" and steps["save"]["note"] == "Saved 3 members"
+    assert done.report["result"]["bios"] == {"queued": 3, "fetched": 2, "skipped": 1}
+    assert done.summary == {"members": 3, "tokens": 1, "tokens_skipped": 1}
+
+
+@pytest.mark.asyncio
+async def test_bios_off_has_no_fetch_bios_step(svc, env):
+    env["opts"].update(bios=True)
+    run = await svc.start("scrape_members", {"guild_id": GID})
+    assert (await _settled(svc, run.id)).status == "success"
+    assert [s["key"] for s in svc.get(run.id).steps] == ["tokens", "scrape", "save"]
+    assert "bios" not in svc.get(run.id).report["result"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_the_bios_stops_within_a_second(svc, env):
+    env["opts"].update(count=3, hint=3, bios=True, bio_hold=1, bio_release=asyncio.Event())
+    run = await svc.start("scrape_members", {"guild_id": GID, "include_bio": True})
+    await _until(lambda: _steps(svc, run.id).get("bios", {}).get("label") == "1 of 3 bios")
+    scraper = env["built"][0]
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    await svc.cancel(run.id)
+    done = await _settled(svc, run.id, timeout=1.0)
+    assert loop.time() - t0 < 1.0
+    assert done.status == "cancelled"
+    assert scraper.stopped and scraper.cancelled and scraper.ended
+    steps = _steps(svc, run.id)
+    assert steps["scrape"]["state"] == "success"
+    assert steps["bios"]["state"] == "cancelled" and steps["bios"]["note"] == "Cancelled after 1 of 3 bios"
+    assert steps["save"]["state"] == "success"
+    assert steps["save"]["note"] == "Saved 3 members found before the cancel"
+    assert done.report["result"]["bios"] == {"queued": 3, "fetched": 1, "skipped": 0}
 
 
 @pytest.mark.asyncio

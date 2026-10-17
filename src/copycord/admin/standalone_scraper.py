@@ -886,7 +886,7 @@ class StandaloneScraper:
         self._bio_progress()
         join = asyncio.ensure_future(bio_queue.join())
         stopped = asyncio.ensure_future(self._stop_event.wait())
-        last = None
+        last = (b["fetched"], b["skipped"], b["queued"])
         try:
             while True:
                 done, _ = await asyncio.wait(
