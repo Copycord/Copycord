@@ -312,9 +312,10 @@ export function useTaskRuns(filters: RunFilters, onCountsChange?: () => void): T
 
   const loading = loadedUrl === null;
   const settled = loadedUrl === url;
-  const hasMore = settled && state.runs.length < state.total;
+  // Off while a refetch is out, so the sentinel mounts again after it and fires if it is still in view.
+  const hasMore = settled && !refreshing && state.runs.length < state.total;
   const canMore = useRef(false);
-  canMore.current = hasMore && !refreshing;
+  canMore.current = hasMore;
   useEffect(() => () => moreCtl.current?.abort(), []);
   const loadMore = useCallback(() => {
     if (moreCtl.current || !canMore.current) return;

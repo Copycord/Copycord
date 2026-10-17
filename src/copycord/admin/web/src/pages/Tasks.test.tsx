@@ -92,6 +92,18 @@ function scrollToEnd() {
     o.cb([{ isIntersecting: true, target: o.el } as unknown as IntersectionObserverEntry], {} as IntersectionObserver);
 }
 
+/** Waits for the sentinel's observer (its effect runs after the rows paint), then scrolls to it. */
+async function scrollWhenReady() {
+  await waitFor(() => expect(observers.some((o) => o.live && o.el)).toBe(true));
+  await act(async () => scrollToEnd());
+}
+
+/** The run rows (the rail is a list too). */
+const runRows = () => within(screen.getByRole("list", { name: "Task runs" })).getAllByRole("listitem");
+
+/** The ?page= of a list URL (per_page holds "page=" too). */
+const pageOf = (u: string) => new URL(u, "http://x").searchParams.get("page");
+
 /** `count` runs r1..rN served a page at a time by ?page= and ?per_page=; `wait` can hold a page. */
 function servePaged(count: number, wait?: (page: number) => Promise<void> | void) {
   const all = Array.from({ length: count }, (_, i) => run({ id: `r${i + 1}`, number: count - i }));
@@ -294,9 +306,9 @@ describe("Tasks page", () => {
     expect(within(list).getAllByRole("listitem")).toHaveLength(25);
     expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
-    await act(async () => scrollToEnd());
+    await scrollWhenReady();
     await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(50));
-    expect(listCalls(fn).at(-1)).toContain("page=2");
+    expect(pageOf(listCalls(fn).at(-1)!)).toBe("2");
     expect(listCalls(fn).at(-1)).toContain("per_page=25");
     // The first page's rows are still there, in order, the second page under them.
     const ids = within(list).getAllByRole("listitem").map((li) => li.getAttribute("data-run-id"));
@@ -311,16 +323,16 @@ describe("Tasks page", () => {
     });
     renderAt("/tasks");
     await screen.findByRole("list", { name: "Task runs" });
-    await act(async () => scrollToEnd());
+    await scrollWhenReady();
     await waitFor(() => expect(held.answer).toBeDefined());
     expect(screen.getByText("Loading more")).toBeInTheDocument();
     await act(async () => {
       scrollToEnd();
       scrollToEnd();
     });
-    expect(listCalls(fn).filter((u) => u.includes("page=2"))).toHaveLength(1);
+    expect(listCalls(fn).filter((u) => pageOf(u) === "2")).toHaveLength(1);
     await act(async () => held.answer!());
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(50));
+    await waitFor(() => expect(runRows()).toHaveLength(50));
     expect(screen.queryByText("Loading more")).toBeNull();
   });
 
@@ -328,8 +340,8 @@ describe("Tasks page", () => {
     const fn = servePaged(30);
     renderAt("/tasks");
     await screen.findByRole("list", { name: "Task runs" });
-    await act(async () => scrollToEnd());
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(30));
+    await scrollWhenReady();
+    await waitFor(() => expect(runRows()).toHaveLength(30));
     expect(document.querySelector("[data-load-more]")).toBeNull();
     const n = listCalls(fn).length;
     await act(async () => scrollToEnd());
@@ -341,16 +353,17 @@ describe("Tasks page", () => {
     const fn = servePaged(60);
     renderAt("/tasks");
     await screen.findByRole("list", { name: "Task runs" });
-    await act(async () => scrollToEnd());
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(50));
+    await scrollWhenReady();
+    await waitFor(() => expect(runRows()).toHaveLength(50));
     fireEvent.change(sel("actor"), { target: { value: "bot" } });
     await waitFor(() => expect(listCalls(fn).at(-1)).toContain("actor=bot"));
-    expect(listCalls(fn).at(-1)).toContain("page=1");
+    expect(pageOf(listCalls(fn).at(-1)!)).toBe("1");
     expect(listCalls(fn).at(-1)).toContain("per_page=25");
-    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(25));
+    await waitFor(() => expect(runRows()).toHaveLength(25));
+    await waitFor(() => expect(screen.getByRole("list", { name: "Task runs" })).not.toHaveAttribute("aria-busy"));
     // The next page after the change is page 2 of the new filters.
-    await act(async () => scrollToEnd());
-    await waitFor(() => expect(listCalls(fn).at(-1)).toMatch(/actor=bot.*page=2/));
+    await scrollWhenReady();
+    await waitFor(() => expect(listCalls(fn).at(-1)).toMatch(/actor=bot.*&page=2&/));
   });
 
   it("names every Mapping option: plain string contexts and ones without a label fall back to the mapping id", async () => {
@@ -375,7 +388,7 @@ describe("Tasks page", () => {
       ["m9", "m9"],
       ["m2", "Other"],
     ]);
-    for (const [, text] of opts) expect(text.trim()).not.toBe("");
+    for (const [, text] of opts) expect(String(text).trim()).not.toBe("");
   });
 
   it("shows No runs match these filters with Clear filters when a filtered list is empty", async () => {
