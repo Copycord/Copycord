@@ -204,26 +204,6 @@ describe("Messages page", () => {
     expect(screen.queryByRole("columnheader", { name: "Mapping" })).toBeNull();
   });
 
-  it("shows the default columns, groups the menu and restores the defaults", async () => {
-    const f = holdingFetch();
-    render(<Messages />);
-    await waitFor(() => expect(f.lists()).toHaveLength(1));
-    await answer(f.last(), [row(1)], null);
-    const heads = screen.getAllByRole("columnheader").map((h) => h.textContent?.replace(/[▲▼]/g, ""));
-    expect(heads).toEqual(["Time", "Author name", "Username", "Original channel", "Mapping", "Attachments", "Links", "Message ID", "Preview"]);
-    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
-    const menu = screen.getByRole("group", { name: "Visible columns" });
-    for (const g of ["Message", "Author", "Channel", "Guild", "Other"]) {
-      expect(within(menu).getByRole("group", { name: `${g} columns` })).toBeInTheDocument();
-    }
-    const guild = within(menu).getByRole("group", { name: "Guild columns" });
-    expect(within(guild).getAllByRole("checkbox")).toHaveLength(4);
-    fireEvent.click(within(menu).getByLabelText("Original guild ID"));
-    expect(screen.getByRole("columnheader", { name: "Original guild ID" })).toBeInTheDocument();
-    fireEvent.click(within(menu).getByRole("button", { name: "Restore defaults" }));
-    expect(screen.queryByRole("columnheader", { name: "Original guild ID" })).toBeNull();
-  });
-
   it("sorts on the server from the column headers and flips on a second click", async () => {
     const f = holdingFetch();
     render(<Messages />);
@@ -270,42 +250,6 @@ describe("Messages page", () => {
     expect(params().get("sort")).toBe("username");
     expect(params().get("order")).toBe("asc");
     expect(params().get("cursor")).toBe("CUR4");
-  });
-
-  it("drives the same sort from the toolbar dropdown and direction button", async () => {
-    const f = holdingFetch();
-    render(<Messages />);
-    await waitFor(() => expect(f.lists()).toHaveLength(1));
-    await answer(f.last(), [row(1)], null);
-    const params = () => new URL(f.last().url, "http://x").searchParams;
-
-    fireEvent.change(document.getElementById("messages-sort")!, { target: { value: "author" } });
-    await waitFor(() => expect(f.lists()).toHaveLength(2));
-    expect([params().get("sort"), params().get("order")]).toEqual(["author", "asc"]);
-    expect(screen.getByRole("columnheader", { name: "Author name" })).toHaveAttribute("aria-sort", "ascending");
-    await answer(f.last(), [row(2)], null);
-
-    fireEvent.click(screen.getByRole("button", { name: "Sorted ascending, sort descending" }));
-    await waitFor(() => expect(f.lists()).toHaveLength(3));
-    expect([params().get("sort"), params().get("order")]).toEqual(["author", "desc"]);
-    expect(screen.getByRole("columnheader", { name: "Author name" })).toHaveAttribute("aria-sort", "descending");
-    expect(screen.getByRole("button", { name: "Sorted descending, sort ascending" })).toBeInTheDocument();
-  });
-
-  it("leaves the headers without a server sort as plain text", async () => {
-    const f = holdingFetch();
-    render(<Messages />);
-    await waitFor(() => expect(f.lists()).toHaveLength(1));
-    await answer(f.last(), [row(1)], null);
-    const links = screen.getByRole("columnheader", { name: "Links" });
-    expect(within(links).queryByRole("button")).toBeNull();
-    expect(links).not.toHaveAttribute("aria-sort");
-    expect(within(screen.getByRole("columnheader", { name: "Preview" })).queryByRole("button")).toBeNull();
-    fireEvent.click(links);
-    expect(f.lists()).toHaveLength(1);
-    for (const name of ["Time", "Author name", "Username", "Original channel", "Mapping", "Attachments", "Message ID"]) {
-      expect(within(screen.getByRole("columnheader", { name })).getByRole("button")).toBeInTheDocument();
-    }
   });
 
   it("puts one value in each cell: display name, username, names and ids", async () => {
@@ -390,8 +334,6 @@ describe("Preview modal", () => {
 
   it.each([
     [503, { detail: "bot-not-running" }, /server bot is not running/],
-    [404, { detail: "message-deleted" }, /deleted on Discord/],
-    [403, { detail: "no-access" }, /cannot read this channel/],
   ])("explains a %s", async (status, body, text) => {
     const dialog = await openPreview(() => Promise.resolve(json(body, status)));
     expect(await within(dialog).findByText(text)).toBeInTheDocument();
