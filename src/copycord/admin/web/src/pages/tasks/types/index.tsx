@@ -16,6 +16,7 @@ import { EXPORT_DMS_ENTRY } from "./export_dms/entry";
 import { DOWNLOAD_AVATARS_ENTRY } from "./download_avatars/entry";
 import { PurgeForm } from "./purge/PurgeForm";
 import { PURGE_ASSETS } from "./purge_assets/entry";
+import { SYNC_ASSETS } from "./sync_assets/entry";
 import { useStartRun, type TaskFormProps } from "./start";
 
 export type { TaskFormProps } from "./start";
@@ -207,6 +208,7 @@ export const TASK_TYPES: Record<string, TaskTypeEntry> = {
     hero: { key: "deleted", label: "message records deleted" },
   },
   purge_assets: PURGE_ASSETS,
+  sync_assets: SYNC_ASSETS,
   export_dms: EXPORT_DMS_ENTRY,
   download_avatars: DOWNLOAD_AVATARS_ENTRY,
 };
