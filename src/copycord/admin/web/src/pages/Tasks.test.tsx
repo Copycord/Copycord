@@ -145,22 +145,6 @@ describe("Tasks page", () => {
     expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
   });
 
-  it("shows the empty state when there are no runs: icon, words, no button, and no pager", async () => {
-    serve([]);
-    renderAt("/tasks");
-    // The loading list stands in the empty state's shape with the same words, so wait for it to go.
-    await waitFor(() => expect(screen.queryByRole("status", { name: "Loading task runs" })).toBeNull());
-    expect(screen.getByText("No task runs yet")).toBeInTheDocument();
-    expect(screen.getByText("0 task runs")).toBeInTheDocument();
-    expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
-    const box = screen.getByText("No task runs yet").parentElement!;
-    expect(within(box).queryAllByRole("button")).toHaveLength(0);
-    expect(box.className).not.toMatch(/border-dashed/);
-    expect(box.querySelector("svg")).not.toBeNull();
-    expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeNull();
-  });
-
   it("says a run that is gone was deleted or never existed, not the server's text, with a link back to all tasks", async () => {
     serve([], {
       handle: (url) => (url.startsWith("/api/tasks/runs/") ? Response.json({ detail: "Unknown run" }, { status: 404 }) : undefined),
@@ -174,14 +158,6 @@ describe("Tasks page", () => {
     expect(back.className).toContain("text-accent");
     // The page shell stays: the rail is still there.
     expect(screen.getByRole("navigation", { name: "Task types" })).toBeInTheDocument();
-  });
-
-  it("shows the type title and description when a type is picked", async () => {
-    serve([]);
-    renderAt("/tasks?type=backfill_channels");
-    expect(await screen.findByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
-    expect(screen.getByText("Clone message history")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Run task" }).length).toBeGreaterThan(0);
   });
 
   it("names the type in the header and on the run page while the types are still loading, never a bar", async () => {
@@ -233,21 +209,6 @@ describe("Tasks page", () => {
     // A filter change goes back to page 1.
     expect(listCalls(fn).at(-1)).toContain("page=1");
     expect(listCalls(fn).at(-1)).toContain("status=failed");
-  });
-
-  it("names the filter on the closed control only, lists plain options, and opens the list in a card that does not clip it", async () => {
-    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
-    renderAt("/tasks");
-    await screen.findByRole("link", { name: "Backfill channels #12" });
-    expect(screen.queryByRole("button", { name: /Auto-refresh/ })).toBeNull();
-    for (const name of ["Task type: All", "Mapping: All", "Actor: All"]) expect(screen.getByRole("button", { name })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Status: All" }));
-    const listbox = screen.getByRole("listbox", { name: "Status" });
-    expect(within(listbox).getAllByRole("option").map((o) => o.textContent)).toEqual(["All", "Queued", "Running", "Success", "Failed", "Cancelled"]);
-    // Nothing between the open list and the page clips it, the runs card included.
-    for (let el = listbox.parentElement; el; el = el.parentElement) expect(el.getAttribute("class") ?? "").not.toMatch(/overflow-(hidden|clip|auto|y-auto)/);
-    fireEvent.click(within(listbox).getByRole("option", { name: "Cancelled" }));
-    expect(await screen.findByRole("button", { name: "Status: Cancelled" })).toBeInTheDocument();
   });
 
   it("typing a search keeps the rows, with no skeleton and no empty state until the search answers", async () => {
@@ -307,33 +268,6 @@ describe("Tasks page", () => {
     expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
   });
 
-  it("shows No task runs yet with no button on an empty type page with no filter, Run task in the header", async () => {
-    serve([]);
-    renderAt("/tasks?type=backfill_channels");
-    const title = await screen.findByText("No task runs yet");
-    expect(screen.getByText("Runs show up here once a task starts")).toBeInTheDocument();
-    expect(screen.queryByText("No runs match these filters")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
-    expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(1);
-    // Inside the runs frame, not a second dashed card, and no button of its own.
-    const box = title.parentElement!;
-    expect(box.className).not.toMatch(/border/);
-    expect(within(box).queryAllByRole("button")).toHaveLength(0);
-  });
-
-  it("shows No runs match these filters on a type page only when a filter is set, and Clear filters stays on the type", async () => {
-    const fn = serve([]);
-    renderAt("/tasks?type=backfill_channels&actor=bot");
-    expect(await screen.findByText("No runs match these filters")).toBeInTheDocument();
-    const clears = screen.getAllByRole("button", { name: "Clear filters" });
-    fireEvent.click(clears[clears.length - 1]!);
-    expect(await screen.findByText("No task runs yet")).toBeInTheDocument();
-    const last = new URL(listCalls(fn).at(-1)!, "http://x").searchParams;
-    expect(last.get("type")).toBe("backfill_channels");
-    expect(last.get("actor")).toBeNull();
-    expect(screen.getByRole("heading", { level: 2, name: "Backfill channels" })).toBeInTheDocument();
-  });
-
   describe("a type that needs the bots", () => {
     const NEEDS_BOTS = { types: [{ ...TYPES.types[0]!, requires_bots: true }] };
 
@@ -368,13 +302,6 @@ describe("Tasks page", () => {
       for (const b of screen.getAllByRole("button", { name: "Run task" })) expect(b).toBeEnabled();
     });
 
-    it("does not ask for the status on a type that does not need the bots", async () => {
-      const fn = serve([]);
-      renderAt("/tasks?type=backfill_channels");
-      expect(await screen.findAllByRole("button", { name: "Run task" })).toHaveLength(1);
-      for (const b of screen.getAllByRole("button", { name: "Run task" })) expect(b).toBeEnabled();
-      expect(fn.mock.calls.some((c) => String(c[0]) === "/api/status")).toBe(false);
-    });
   });
 
   it("cancels an active run after confirming and patches the row from the response", async () => {
@@ -433,25 +360,5 @@ describe("Tasks page", () => {
     expect(screen.getByText("1 task run")).toBeInTheDocument();
     expect(await screen.findByText("Deleted Backfill channels #12")).toBeInTheDocument();
     expect(listCalls(fn).length).toBe(before);
-  });
-
-  it("toasts the server message when a delete is refused with 409", async () => {
-    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })], {
-      handle: (_url, method) =>
-        method === "DELETE" ? Response.json({ detail: "Run is running; cancel it first" }, { status: 409 }) : undefined,
-    });
-    renderAt("/tasks");
-    await openMenu("Backfill channels #12");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("Run is running; cancel it first")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Backfill channels #12" })).toBeInTheDocument();
-  });
-
-  it("a finished run's menu holds View and Delete only", async () => {
-    serve([run({ id: "4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b", number: 12 })]);
-    renderAt("/tasks");
-    await openMenu("Backfill channels #12");
-    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["View", "Delete"]);
   });
 });

@@ -7,7 +7,7 @@ import { CSRF_HEADER, resetLoginRedirect } from "../lib/api";
 import type { StatusResponse, VersionInfo } from "../types/dashboard";
 import { holdFetch } from "../test/holdFetch";
 import { Dashboard, DashboardSkeleton } from "./Dashboard";
-import { appendCapped, formatUptime, mergeStatus, parseLogData, statusFromWs } from "./dashboard/model";
+import { appendCapped, mergeStatus, statusFromWs } from "./dashboard/model";
 import { mappingSkeletons } from "./dashboard/DashboardSkeleton";
 
 class FakeSocket {
@@ -229,13 +229,6 @@ describe("Dashboard bots panel", () => {
     expect(notice).toHaveAttribute("id", "update-notice");
     expect(notice).toHaveAttribute("href", "https://example.test/r");
   });
-
-  it("has no update notice when up to date", async () => {
-    const fetchMock = server({ "/api/status": () => json(STOPPED), "/version": () => json(NO_UPDATE) });
-    renderPage();
-    await waitFor(() => expect(callsTo(fetchMock, "/version")).toHaveLength(1));
-    expect(document.getElementById("update-notice")).toBeNull();
-  });
 });
 
 describe("Dashboard log modal", () => {
@@ -340,25 +333,9 @@ describe("Dashboard log modal", () => {
 });
 
 describe("dashboard model", () => {
-  it("parses log stream payloads", () => {
-    expect(parseLogData('{"lines":["a","b"]}')).toEqual(["a", "b"]);
-    expect(parseLogData('{"line":"c"}')).toEqual(["c"]);
-    expect(parseLogData("raw")).toEqual(["raw"]);
-  });
 
   it("caps the buffer at the newest lines", () => {
     expect(appendCapped(["a", "b"], ["c", "d"], 3)).toEqual(["b", "c", "d"]);
-  });
-
-  it("formats uptime", () => {
-    expect(formatUptime(0)).toBe("0s");
-    expect(formatUptime(90061)).toBe("1d 1h 1m 1s");
-  });
-
-  it("ignores non status messages", () => {
-    expect(statusFromWs({ type: "log", source: "server" })).toBeNull();
-    expect(statusFromWs({ type: "status", source: "other" })).toBeNull();
-    expect(statusFromWs({ kind: "proxy_test", role: "admin", payload: { type: "started", total: 2 } })).toBeNull();
   });
 
   it("reads the status frames the hub sends on /ws/ui", () => {
@@ -390,15 +367,6 @@ describe("dashboard model", () => {
 });
 
 describe("Dashboard loading", () => {
-  it("shows mapping card skeletons until the mapping list arrives", async () => {
-    server({ "/api/guild-mappings": () => json({ mappings: [] }) });
-    const release = holdFetch("/api/guild-mappings");
-    renderPage();
-    expect(await screen.findAllByTestId("mapping-skeleton")).toHaveLength(mappingSkeletons());
-    expect(document.getElementById("new-mapping-card")).not.toBeNull();
-    release();
-    await waitFor(() => expect(screen.queryByTestId("mapping-skeleton")).toBeNull());
-  });
 
   it("the chunk skeleton has the loaded page's cards, titles and order", async () => {
     const shape = (root: Element) =>

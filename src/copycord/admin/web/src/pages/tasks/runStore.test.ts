@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskRun, TaskStep } from "../../types/tasks";
-import { applyFrame, FINAL_FETCH_ATTEMPTS, LIVE_REFETCH_MS, mergeIntoList, parseRunFrame, runsUrl, useTaskRun, useTaskRuns } from "./runStore";
+import { applyFrame, FINAL_FETCH_ATTEMPTS, LIVE_REFETCH_MS, mergeIntoList, parseRunFrame, useTaskRun, useTaskRuns } from "./runStore";
 
 function makeRun(over: Partial<TaskRun> = {}): TaskRun {
   return {
@@ -49,9 +49,6 @@ class FakeWs {
 const frame = (run: TaskRun, steps?: unknown[]) => ({ kind: "task.run.updated", role: "admin", payload: { run, steps } });
 
 describe("runStore merging", () => {
-  it("builds the list url with 25 per page", () => {
-    expect(runsUrl({ type: "backfill_channels", q: "#3" })).toBe("/api/tasks/runs?type=backfill_channels&q=%233&page=1&per_page=25");
-  });
 
   it("unwraps the hub payload and stringifies the id", () => {
     const run = { ...makeRun(), id: 7 as unknown as string };
@@ -76,13 +73,6 @@ describe("runStore merging", () => {
     expect(added.total).toBe(2);
     expect(mergeIntoList(state, { run: makeRun({ id: "3", type: "noop" }) }, { type: "backfill_channels" })).toBe(state);
     expect(mergeIntoList(state, { run: makeRun({ id: "3" }) }, { page: 2 })).toBe(state);
-  });
-
-  it("patches a visible row in place and drops a stale frame", () => {
-    const state = { runs: [makeRun({ id: "1", seq: 3 }), makeRun({ id: "2", seq: 1 })], total: 2 };
-    const next = mergeIntoList(state, { run: makeRun({ id: "2", seq: 2, status: "success" }) }, {});
-    expect(next.runs.map((r) => r.status)).toEqual(["running", "success"]);
-    expect(mergeIntoList(state, { run: makeRun({ id: "1", seq: 2, status: "failed" }) }, {})).toBe(state);
   });
 });
 

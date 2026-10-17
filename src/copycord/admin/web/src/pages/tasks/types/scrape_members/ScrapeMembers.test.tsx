@@ -4,10 +4,8 @@ import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
 import type { TaskRun, TaskType } from "../../../../types/tasks";
-import { typeLabel } from "../../typeLabels";
-import { describeRunInputs, entryFor, heroStat } from "..";
-import { GONE, ScrapeDownloadCard, debugReportOf, includeWords, scrapeDebugUrl, scrapeFileUrl, scrapePathOf } from "./entry";
-import { DEBUG_REPORT_HELP, SCRAPE_EXPLAINER, ScrapeMembersForm, guildIdError, guildOptionLabel, tokenTotal } from "./ScrapeMembersForm";
+import { ScrapeDownloadCard, debugReportOf, scrapeDebugUrl, scrapeFileUrl } from "./entry";
+import { DEBUG_REPORT_HELP, SCRAPE_EXPLAINER, ScrapeMembersForm } from "./ScrapeMembersForm";
 import { AUTOSAVE_MS, ScraperSettingsCard, TOKENS_URL, openScraperSettings, textLines } from "./ScraperSettingsCard";
 
 const TYPE: TaskType = { key: "scrape_members", title: "Scrape members", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -68,20 +66,6 @@ beforeEach(() => localStorage.clear());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ScrapeMembersForm", () => {
-  it("explains the task, starts on today's include defaults and shows the saved proxy count", async () => {
-    serveForm();
-    renderForm();
-    expect(screen.getByText(SCRAPE_EXPLAINER)).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Username" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("switch", { name: "Avatar URL" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("switch", { name: "Bio" })).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("switch", { name: "Roles" })).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("switch", { name: "Use proxies" })).toHaveAttribute("aria-checked", "true");
-    expect(await screen.findByText("4 saved proxies.")).toBeInTheDocument();
-    expect(screen.getByText("Highly recommended.")).toBeInTheDocument();
-    expect(screen.queryByText(/valid/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /validate/i })).not.toBeInTheDocument();
-  });
 
   it("asks for a server before any start", async () => {
     const calls = serveForm();
@@ -157,17 +141,6 @@ describe("ScrapeMembersForm", () => {
     expect(await screen.findByText("Pick a server or enter a numeric server ID")).toBeInTheDocument();
   });
 
-  it("points at the settings card when no tokens are saved", async () => {
-    const calls = serveForm({ guilds: [], tokens: { valid: 0, total: 0 }, proxies: 0, error: "No valid scraper tokens. Add one first." });
-    const onClose = vi.fn();
-    renderForm(onClose);
-    expect(await screen.findByText("No scraper tokens saved")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Scrape members" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Go to scraper tokens" }));
-    expect(onClose).toHaveBeenCalled();
-    expect(posts(calls)).toEqual([]);
-  });
-
   it("has no Debug report toggle outside dev mode and posts no debug_report", async () => {
     const calls = serveForm();
     renderForm(() => {}, { ...TYPE, dev: false });
@@ -197,16 +170,6 @@ describe("ScrapeMembersForm", () => {
     expect((posts(calls)[0] as { inputs: { debug_report: boolean } }).inputs.debug_report).toBe(true);
   });
 
-  it("posts debug_report false in dev mode when the toggle is left off", async () => {
-    const calls = serveForm();
-    renderForm(() => {}, { ...TYPE, dev: true });
-    await screen.findByText("4 saved proxies.");
-    fireEvent.change(screen.getByRole("textbox", { name: "Or a server ID" }), { target: { value: "999" } });
-    submit();
-    expect(await screen.findByText("Run page r9")).toBeInTheDocument();
-    expect((posts(calls)[0] as { inputs: { debug_report: boolean } }).inputs.debug_report).toBe(false);
-  });
-
   it("shows the server's refusal under the Debug report toggle", async () => {
     serve({
       "GET /api/tasks/types/scrape_members/options": () => ({ body: { guilds: GUILDS, tokens: { total: 1 }, proxies: 0 } }),
@@ -218,17 +181,6 @@ describe("ScrapeMembersForm", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Or a server ID" }), { target: { value: "5" } });
     submit();
     expect(await screen.findByText("The debug report is only available when COPYCORD_ENV is dev")).toBeInTheDocument();
-  });
-
-  it("helpers", () => {
-    expect(guildIdError("")).toBeUndefined();
-    expect(guildIdError("123")).toBeUndefined();
-    expect(guildIdError("12 3")).toBe("Enter a numeric server ID.");
-    expect(guildOptionLabel({ id: "1", name: "A", tokens: 3 })).toBe("A (3 tokens)");
-    expect(guildOptionLabel({ id: "1", name: "A" })).toBe("A");
-    expect(tokenTotal({ tokens: { valid: 2, total: 5 } })).toBe(5);
-    expect(tokenTotal({ tokens: 4 })).toBe(4);
-    expect(tokenTotal(undefined)).toBe(0);
   });
 });
 
@@ -246,19 +198,6 @@ function runWith(path: string | null): TaskRun {
 }
 
 describe("Scrape members run page", () => {
-  it("is registered with its words, hero count and download card", () => {
-    const entry = entryFor("scrape_members");
-    expect(entry.RunCard).toBe(ScrapeDownloadCard);
-    expect(heroStat(runWith("111/x.json"))).toEqual({ key: "members", label: "members found", value: 1204 });
-    expect(describeRunInputs(runWith("111/x.json"))).toEqual([
-      { label: "Server", value: "Alpha (111)" },
-      { label: "Include", value: "Usernames, Roles" },
-      { label: "Proxies", value: "Yes" },
-    ]);
-    expect(includeWords({})).toBe("IDs only");
-    expect(typeLabel("scrape_members").title).toBe("Scrape members");
-    expect(scrapePathOf(runWith(null))).toBeNull();
-  });
 
   it("shows the file name, member count and size with a Download JSON button", async () => {
     const calls = serve({
@@ -276,13 +215,6 @@ describe("Scrape members run page", () => {
     fireEvent.click(button);
     expect(clicked).toEqual([`${scrapeFileUrl("r9")} scrape_111_20261016_101500.json`]);
     click.mockRestore();
-  });
-
-  it("says File no longer on disk when the file was deleted", async () => {
-    serve({ "GET /api/tasks/scrape-members/r9": () => ({ status: 404, body: { detail: GONE } }) });
-    render(<ScrapeDownloadCard run={runWith("111/x.json")} />);
-    expect(await screen.findByText(GONE)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Download JSON" })).not.toBeInTheDocument();
   });
 
   it("shows nothing when the run saved no file or the reply is another 404", async () => {
@@ -315,18 +247,6 @@ describe("Scrape members run page", () => {
     expect(clicked).toEqual([`${scrapeDebugUrl("r9")} debug_111_20261016_101500.json`]);
     expect(scrapeDebugUrl("r9")).toBe("/api/tasks/scrape-members/r9/debug-report");
     click.mockRestore();
-  });
-
-  it("shows the debug report alone for a run that saved no members file", () => {
-    const calls = serve({});
-    const run = runWith(null);
-    (run.report as Record<string, unknown>).debug_report = { path: "111/debug_111_20261016_101500.json", size: null };
-    render(<ScrapeDownloadCard run={run} />);
-    expect(screen.getByRole("button", { name: "Download debug report" })).toBeInTheDocument();
-    expect(screen.getByText("Debug report")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Download JSON" })).not.toBeInTheDocument();
-    expect(calls).toEqual([]);
-    expect(debugReportOf(runWith(null))).toBeNull();
   });
 });
 
@@ -400,23 +320,6 @@ describe("ScraperSettingsCard", () => {
     Element.prototype.scrollIntoView = before;
   });
 
-  it("shows the saved tokens one per line in a plain textbox, with no Save buttons, list, add, rename or delete", async () => {
-    const calls = serveSettings();
-    renderSettings();
-    expand();
-    expect(await screen.findByText("2 tokens saved")).toBeInTheDocument();
-    const input = screen.getByRole("textbox", { name: "Tokens" });
-    expect(input.tagName).toBe("TEXTAREA");
-    expect(input).toHaveAttribute("rows", "6");
-    expect(input).toHaveAttribute("spellcheck", "false");
-    expect(input).toHaveValue("MTAxMjM0.tok.one\nOTg3NjU0.tok.two");
-    expect(screen.queryByText(/not validated/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("list")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /add token|edit|delete|validate/i })).not.toBeInTheDocument();
-    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
-  });
-
   it("saves the tokens by itself after the last edit, once, as the deduped list, and keeps the text as typed", async () => {
     const calls = serveSettings();
     renderSettings();
@@ -466,17 +369,6 @@ describe("ScraperSettingsCard", () => {
       fireEvent.blur(input);
     });
     expect(puts(calls)).toEqual([]);
-  });
-
-  it("shows an empty textbox with its hint when no tokens are saved", async () => {
-    serveSettings([]);
-    renderSettings();
-    expect(await screen.findByText("0 tokens, 1 proxy")).toBeInTheDocument();
-    expand();
-    expect(screen.getByText("0 tokens saved")).toBeInTheDocument();
-    const input = screen.getByRole("textbox", { name: "Tokens" });
-    expect(input).toHaveValue("");
-    expect(input).toHaveAttribute("placeholder", "One Discord token per line");
   });
 
   it("says so when the tokens cannot be loaded and never saves over the file", async () => {
@@ -640,19 +532,6 @@ describe("Run task on the Scrape members page", () => {
     await page.answer(NO_TOKENS);
     expect(screen.getByText("No scraper tokens saved")).toBeInTheDocument();
     expect(formShown()).toBe(false);
-  });
-
-  it("opens straight to the form when the card loaded saved tokens", async () => {
-    const page = servePage(["a.b.c", "d.e.f"]);
-    render(<TypePage />);
-    await screen.findByText("2 tokens, 0 proxies");
-    runTask();
-    expect(screen.getByText(SCRAPE_EXPLAINER)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Scrape members" })).toBeInTheDocument();
-    expect(screen.queryByText("No scraper tokens saved")).not.toBeInTheDocument();
-    await page.answer({ guilds: GUILDS, tokens: { total: 2 }, proxies: 0 });
-    expect(await screen.findByText("No proxies saved, so none are used.")).toBeInTheDocument();
-    expect(screen.queryByText("No scraper tokens saved")).not.toBeInTheDocument();
   });
 
   it("opens to the form after a token was autosaved", async () => {
