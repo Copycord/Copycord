@@ -258,7 +258,8 @@ class EmojiManager:
                 await hooks.item(row["cloned_emoji_name"], "unchanged")
             else:
                 try:
-                    await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
+                    await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id, stop=hooks.stop_event)
+                    hooks.check()
                     await cloned.delete()
                     deleted += 1
                     await hooks.item(row["cloned_emoji_name"], "deleted")
@@ -312,7 +313,8 @@ class EmojiManager:
 
             if mapping and cloned and cloned.name != name:
                 try:
-                    await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
+                    await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id, stop=hooks.stop_event)
+                    hooks.check()
                     await cloned.edit(name=name)
                     renamed += 1
                     outcome, why = "updated", None
@@ -350,7 +352,8 @@ class EmojiManager:
 
             if mapping and cloned and mapping["original_emoji_name"] != name:
                 try:
-                    await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
+                    await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id, stop=hooks.stop_event)
+                    hooks.check()
                     await cloned.edit(name=name)
                     renamed += 1
                     outcome, why = "updated", None
@@ -413,6 +416,7 @@ class EmojiManager:
                 )
                 await hooks.item(name, "failed", f"Could not download it: {e}")
                 continue
+            hooks.check()
 
             try:
                 if is_animated:
@@ -428,7 +432,8 @@ class EmojiManager:
                 )
 
             try:
-                await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
+                await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id, stop=hooks.stop_event)
+                hooks.check()
                 created_emo = await guild.create_custom_emoji(name=name, image=raw)
                 created += 1
                 self._log(

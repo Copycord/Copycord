@@ -15,6 +15,7 @@ for a stop between items."""
 
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
 # What happened to one asset.
@@ -22,6 +23,9 @@ OUTCOMES = ("created", "updated", "deleted", "unchanged", "skipped", "failed")
 
 
 class ItemHooks:
+    # Set when the caller wants a stop; rate limit waits wake on it.
+    stop_event: Optional[asyncio.Event] = None
+
     async def begin(self, total: int) -> None:
         """The number of items this pass will report."""
 
@@ -32,3 +36,10 @@ class ItemHooks:
     def stop(self) -> bool:
         """True once the caller wants the pass to end before the next item."""
         return False
+
+    def check(self) -> None:
+        """Right before a Discord change and after a download or rate limit wait: once a stop
+        was asked, raise CancelledError so the item ends cancelled with nothing changed (it
+        passes the passes' except Exception blocks)."""
+        if self.stop():
+            raise asyncio.CancelledError()

@@ -20,7 +20,9 @@ host's order with one edit_role_positions call. It streams frames on the admin b
   sync_assets_log      {job_id, level, msg, step}
   sync_assets_end      {job_id, ok, error, cancelled, result, totals}
 
-sync_assets_cancel {job_id} stops the job before its next asset."""
+sync_assets_cancel {job_id} stops the job at once: the asset in flight (its download, rate limit
+wait or Discord call) is cancelled with the job's task and never reported done, and the end
+goes out with cancelled=true."""
 
 from __future__ import annotations
 
@@ -65,6 +67,9 @@ class _Job:
     def __init__(self, job_id: str):
         self.job_id = job_id
         self.cancelled = False
+        # Set with cancelled: rate limit waits wake on it.
+        self.stop = asyncio.Event()
+        self.started = False
         self.task: Optional[asyncio.Task] = None
         self.last_progress: dict[str, float] = {}
 
@@ -77,6 +82,7 @@ class _StepHooks(ItemHooks):
         self.counts, self.totals = counts, totals
         self.total = 0
         self.done = 0
+        self.stop_event = job.stop
 
     async def begin(self, total: int) -> None:
         self.total = int(total)
@@ -135,6 +141,12 @@ class AssetSync:
         if job is None:
             return {"ok": True, "job_id": job_id, "state": "unknown"}
         job.cancelled = True
+        job.stop.set()
+        # The asset in flight stops too (its download, rate limit wait or Discord call), not
+        # only the next one; _run still sends the end, cancelled.
+        # A task not yet started would never enter _run's try: it sees cancelled at its top.
+        if job.started and job.task is not None and not job.task.done():
+            job.task.cancel()
         logger.info("[sync assets] Cancelling job %s", job_id)
         return {"ok": True, "job_id": job_id, "state": "cancelling"}
 
@@ -170,7 +182,10 @@ class AssetSync:
         totals = {k: 0 for k in OUTCOMES}
         totals["reordered"] = 0
         error = None
+        job.started = True
         try:
+            if job.cancelled:
+                raise asyncio.CancelledError()
             snap = await self._snapshot(host_id, guild.id)
             for kind in kinds:
                 if job.cancelled:
@@ -179,7 +194,11 @@ class AssetSync:
                 if kind == "roles" and not job.cancelled:
                     await self._run_role_order(job, guild, host_id, snap, result, totals)
         except asyncio.CancelledError:
-            raise
+            # A cancel from the admin ends here and still sends the end; the admin marks the
+            # steps not yet ended cancelled. The asset in flight was never reported done.
+            if not job.cancelled:
+                self._jobs.pop(job.job_id, None)
+                raise
         except Exception as exc:
             error = str(exc) or type(exc).__name__
             logger.warning("[sync assets] Job %s failed: %s", job.job_id, error)
@@ -269,6 +288,8 @@ class AssetSync:
                 await self._progress(job, ROLE_ORDER, 0, total, "Checking the order", force=True)
                 if plan["changed"]:
                     await self._progress(job, ROLE_ORDER, 0, total, f"Moving {plan['moved']} roles", force=True)
+                    if job.cancelled:
+                        raise asyncio.CancelledError()
                     await guild.edit_role_positions(
                         positions={discord.Object(id=rid): pos for rid, pos in plan["positions"].items()},
                         reason="Copycord Sync assets: role order",
