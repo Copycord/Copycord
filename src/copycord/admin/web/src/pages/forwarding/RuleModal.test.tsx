@@ -193,7 +193,7 @@ describe("rule modal", () => {
     const guild = within(dialog).getByRole("combobox", { name: "Guild scope" });
     expect(guild).toHaveAttribute("id", "fwd_guild_id");
     expect(guild).toHaveAttribute("aria-describedby", "fwd_guild_id-help");
-    expect(guild).toHaveTextContent("All guilds");
+    expect(guild).toHaveDisplayValue(/All guilds/);
     expect(document.querySelector("select")).toBeNull();
     await user.click(guild);
     // The open list floats in the body, outside the dialog box, so the dialog never scrolls for it.
@@ -201,7 +201,7 @@ describe("rule modal", () => {
     expect(dialog).not.toContainElement(screen.getByRole("listbox"));
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["All guilds", "Alpha (111)", "Beta (222)"]);
     await user.click(screen.getByRole("option", { name: "Alpha (111)" }));
-    expect(guild).toHaveTextContent("Alpha (111)");
+    expect(guild).toHaveDisplayValue(/Alpha \(111\)/);
     expect(dialog).toBeInTheDocument();
 
     await user.type(input("fwd_label"), "Support <b>pings</b>");
@@ -311,7 +311,7 @@ describe("rule modal", () => {
 
     expect(input("fwd_id").value).toBe("r1");
     expect(input("fwd_label").value).toBe("Phone alerts");
-    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "Guild scope" })).toHaveTextContent("Beta (222)"));
+    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "Guild scope" })).toHaveDisplayValue(/Beta \(222\)/));
     expect(input("fwd_provider").value).toBe("pushover");
     // The old modal shows provider secrets in plain text inputs, unmasked.
     expect(input("pushover_app_token")).toHaveAttribute("type", "text");

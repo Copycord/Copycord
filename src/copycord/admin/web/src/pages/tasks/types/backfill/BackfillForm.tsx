@@ -132,6 +132,7 @@ export function BackfillForm({ type, open, onClose }: TaskFormProps) {
       <form id="backfill-form" noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <Field label="Mapping" error={errors.mapping} id="bf-mapping">
           <FieldSelect
+            searchable
             value={mappingId}
             onChange={onMapping}
             disabled={list.length === 0}

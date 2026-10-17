@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
@@ -70,7 +70,7 @@ describe("PurgeAssetsForm", () => {
     const { gets } = serve();
     renderForm();
     expect(screen.getByText(PURGE_ASSETS_EXPLAINER)).toBeInTheDocument();
-    expect(await screen.findByRole("combobox", { name: "Mapping" })).toHaveTextContent("Main mapping");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveDisplayValue(/Main mapping/));
     expect(await screen.findByText("12")).toBeInTheDocument();
     expect(screen.getByTestId("count-roles")).toHaveTextContent("3");
     expect(gets[0]).toContain("mapping_id=m1");

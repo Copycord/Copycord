@@ -40,7 +40,7 @@ function serve() {
 
 // The pending bar says "Main mapping", so the first mapping's own name shows the list has loaded.
 async function loaded() {
-  await waitFor(() => expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveTextContent("Alpha"));
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveDisplayValue(/Alpha/));
 }
 
 function RunPage() {

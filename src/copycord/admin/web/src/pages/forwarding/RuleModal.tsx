@@ -251,6 +251,7 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
                     className={GROUP}
                   >
                     <FieldSelect
+                      searchable
                       value={form.guild_id}
                       onChange={(guild_id) => patch({ guild_id })}
                       toggleClassName={GUILD_TOGGLE}

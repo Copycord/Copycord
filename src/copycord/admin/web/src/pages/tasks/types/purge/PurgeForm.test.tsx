@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
@@ -79,7 +79,7 @@ describe("PurgeForm", () => {
     expect(PURGE_EXPLAINER).toContain("Messages on Discord are not touched");
     expect(screen.getByRole("spinbutton", { name: "Older than" })).toHaveValue(30);
     expect(screen.getByRole("combobox", { name: "Unit" })).toHaveTextContent("days");
-    expect(await screen.findByRole("combobox", { name: "Mapping" })).toHaveTextContent("All mappings");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveDisplayValue(/All mappings/));
     expect(screen.getByRole("button", { name: "Delete records" })).toBeInTheDocument();
   });
 

@@ -185,6 +185,7 @@ export function PurgeForm({ type, open, onClose }: TaskFormProps) {
 
         <Field label="Mapping" error={errors.mapping_id} id="purge-mapping">
           <FieldSelect
+            searchable
             value={mappingId}
             onChange={(v) => changed(() => setMappingId(v))}
             pending={mappingsPending}

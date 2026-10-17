@@ -99,13 +99,13 @@ describe("BackfillForm", () => {
     const { fn } = serve();
     renderForm();
     expect(await screen.findByRole("checkbox", { name: "#news" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveTextContent("Main mapping");
+    expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveDisplayValue(/Main mapping/);
     expect(screen.queryByRole("checkbox", { name: "#gone" })).toBeNull();
     expect(fn.mock.calls.some((c) => String(c[0]).includes("options?mapping_id=m1"))).toBe(true);
 
     fireEvent.click(screen.getByRole("combobox", { name: "Mapping" }));
     fireEvent.click(within(screen.getByRole("listbox", { name: "Mapping" })).getByRole("option", { name: "Second" }));
-    expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveTextContent("Second");
+    expect(screen.getByRole("combobox", { name: "Mapping" })).toHaveDisplayValue(/Second/);
     expect(await screen.findByText("No channels in this mapping")).toBeInTheDocument();
   });
 
@@ -129,7 +129,7 @@ describe("BackfillForm", () => {
     fireEvent.keyDown(mapping, { key: "ArrowDown" });
     expect(mapping).toHaveAttribute("aria-activedescendant", "bf-mapping-listbox-1");
     fireEvent.keyDown(mapping, { key: "Enter" });
-    expect(mapping).toHaveTextContent("Second");
+    expect(mapping).toHaveDisplayValue(/Second/);
     expect(await screen.findByText("No channels in this mapping")).toBeInTheDocument();
   });
 

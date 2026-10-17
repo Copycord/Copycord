@@ -89,6 +89,7 @@ export function SyncAssetsForm({ type, open, onClose }: TaskFormProps) {
 
         <Field label="Mapping" error={errors.mapping_id} id="sync-assets-mapping">
           <FieldSelect
+            searchable
             value={mappingId}
             onChange={(v) => changed(() => setPicked(v))}
             pending={mappingsPending}
