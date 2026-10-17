@@ -196,9 +196,11 @@ describe("rule modal", () => {
     expect(guild).toHaveTextContent("All guilds");
     expect(document.querySelector("select")).toBeNull();
     await user.click(guild);
-    await waitFor(() => expect(within(dialog).getByRole("option", { name: "Beta (222)" })).toBeInTheDocument());
-    expect(within(dialog).getAllByRole("option").map((o) => o.textContent)).toEqual(["All guilds", "Alpha (111)", "Beta (222)"]);
-    await user.click(within(dialog).getByRole("option", { name: "Alpha (111)" }));
+    // The open list floats in the body, outside the dialog box, so the dialog never scrolls for it.
+    await waitFor(() => expect(screen.getByRole("option", { name: "Beta (222)" })).toBeInTheDocument());
+    expect(dialog).not.toContainElement(screen.getByRole("listbox"));
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["All guilds", "Alpha (111)", "Beta (222)"]);
+    await user.click(screen.getByRole("option", { name: "Alpha (111)" }));
     expect(guild).toHaveTextContent("Alpha (111)");
     expect(dialog).toBeInTheDocument();
 
