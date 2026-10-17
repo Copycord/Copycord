@@ -17,7 +17,6 @@ export const SIDEBAR_ITEMS: MenuItem[] = [
   { key: "guilds", label: "Guilds", to: "/guilds" },
   { key: "tasks", label: "Tasks", to: "/tasks" },
   { key: "forwarding", label: "Forwarding", to: "/forwarding" },
-  { key: "scraper", label: "Scraper", to: "/scraper" },
   { key: "system", label: "System", to: "/system" },
   { key: "logs", label: "Logs", to: "/logs" },
 ];

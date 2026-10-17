@@ -1,5 +1,5 @@
-// Stand ins for WebSocket and EventSource in the Scraper tests, so messages
-// on /ws/out and /logs/stream/scraper can be injected by hand.
+// Stand ins for WebSocket and EventSource in tests, so messages on /ws/out and
+// the log streams can be injected by hand.
 
 import { act } from "@testing-library/react";
 
@@ -55,9 +55,4 @@ export class FakeSource {
       }
     });
   }
-}
-
-/** A scraper event as /ws/out carries it. */
-export function scraperMsg(payload: Record<string, unknown>) {
-  return { kind: "scraper", payload };
 }

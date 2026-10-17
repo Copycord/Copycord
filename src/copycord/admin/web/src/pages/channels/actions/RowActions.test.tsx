@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../components/Toast";
 import { ConfirmProvider } from "../../../components/ui";
 import { Channels } from "../../Channels";
-import { FakeWs } from "../../scraper/testFakes";
+import { FakeWs } from "../../../test/fakeSockets";
 
 const ROWS = [
   {

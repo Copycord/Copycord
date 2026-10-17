@@ -15,6 +15,7 @@ import { RunDetail } from "./tasks/RunDetail";
 import { RunFilterSelects, RunSearch, useRunFilters } from "./tasks/RunFilters";
 import { RunList, RunMenu, runConfirm, type RunAction } from "./tasks/RunList";
 import { PER_PAGE, runUrl, useTaskRuns } from "./tasks/runStore";
+import { ScraperSettingsCard } from "./tasks/types/scrape_members/ScraperSettingsCard";
 import {
   ALL_TASKS_DESCRIPTION,
   MAIN,
@@ -104,6 +105,7 @@ export function Tasks() {
                 description={label ? label.description : ALL_TASKS_DESCRIPTION}
                 action={runAction}
               />
+              {typeKey === "scrape_members" ? <ScraperSettingsCard /> : null}
               <RunsView
                 types={types}
                 typeTitle={typeTitle}

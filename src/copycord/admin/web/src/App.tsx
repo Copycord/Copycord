@@ -9,7 +9,6 @@ import { ForwardingSkeleton } from "./pages/forwarding/ForwardingSkeleton";
 import { GuildsSkeleton } from "./pages/guilds/GuildsSkeleton";
 import { LogsSkeleton } from "./pages/logs/LogsSkeleton";
 import { MessagesSkeleton } from "./pages/messages/MessagesSkeleton";
-import { ScraperSkeleton } from "./pages/scraper/ScraperSkeleton";
 import { SystemSkeleton } from "./pages/system/SystemSkeleton";
 import { TasksSkeleton } from "./pages/tasks/TasksSkeleton";
 import { Login } from "./pages/Login";
@@ -58,7 +57,6 @@ const Channels = lazyPage(() => import("./pages/Channels").then((m) => m.Channel
 const Tasks = lazyPage(() => import("./pages/Tasks").then((m) => m.Tasks), TasksSkeleton);
 const Guilds = lazyPage(() => import("./pages/Guilds").then((m) => m.Guilds), GuildsSkeleton);
 const Forwarding = lazyPage(() => import("./pages/Forwarding").then((m) => m.Forwarding), ForwardingSkeleton);
-const Scraper = lazyPage(() => import("./pages/Scraper").then((m) => m.Scraper), ScraperSkeleton);
 const System = lazyPage(() => import("./pages/System").then((m) => m.System), SystemSkeleton);
 const Messages = lazyPage(() => import("./pages/Messages").then((m) => m.Messages), MessagesSkeleton);
 const Logs = lazyPage(() => import("./pages/Logs").then((m) => m.Logs), LogsSkeleton);
@@ -72,7 +70,6 @@ export const PAGES = [
   { path: "/guilds", title: "Guilds" },
   { path: "/tasks", title: "Tasks" },
   { path: "/forwarding", title: "Forwarding" },
-  { path: "/scraper", title: "Scraper" },
   { path: "/system", title: "System" },
   { path: "/logs", title: "Logs" },
 ] as const;
@@ -97,7 +94,6 @@ const PAGE_ELEMENTS: Record<(typeof PAGES)[number]["path"], ReactNode> = {
   "/guilds": <Guilds />,
   "/tasks": <Tasks />,
   "/forwarding": <Forwarding />,
-  "/scraper": <Scraper />,
   "/system": <System />,
   "/logs": <Logs />,
 };

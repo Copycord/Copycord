@@ -39,7 +39,6 @@ describe("App shell", () => {
       "Guilds",
       "Tasks",
       "Forwarding",
-      "Scraper",
       "System",
       "Logs",
       "Log out",
