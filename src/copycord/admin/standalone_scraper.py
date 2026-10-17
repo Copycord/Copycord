@@ -36,6 +36,13 @@ except ImportError:
 
 logger = logging.getLogger("standalone_scraper")
 
+# Tries for a profile whose fetch fails (network, proxy, timeout, a 5xx or another status)
+# before the member is saved without a bio. A 429 is not a failure: it waits out retry_after
+# and tries again, however often Discord asks.
+BIO_ATTEMPTS = 3
+# Profiles Discord refuses outright: no retry, the member is saved without a bio.
+BIO_REFUSED = (401, 403, 404)
+
 
 @dataclass
 class ScraperConfig:
@@ -52,6 +59,8 @@ class ScraperConfig:
     max_parallel_per_session: int = 5
     progress_callback: Optional[Callable] = None
     log_callback: Optional[Callable] = None
+    # bio_progress_callback(done, total, message): bios fetched or skipped of bios queued.
+    bio_progress_callback: Optional[Callable] = None
 
 
 @dataclass
@@ -546,6 +555,10 @@ class StandaloneScraper:
         self._members_lock = asyncio.Lock()
         self._stop_event = asyncio.Event()
         self._running = False
+        self._clock: Callable[[], float] = time.monotonic
+        self._bios = {"queued": 0, "fetched": 0, "skipped": 0}
+        # Set while scrape() waits on the bios; the worker reports each bio then.
+        self._bio_phase = False
 
         self._proxy_list = [
             self._normalize_proxy(p) for p in (config.proxies or []) if p
@@ -626,6 +639,17 @@ class StandaloneScraper:
         if self.config.progress_callback:
             try:
                 self.config.progress_callback(current, total, message)
+            except Exception:
+                pass
+
+    def _bio_progress(self):
+        b = self._bios
+        done = b["fetched"] + b["skipped"]
+        if self.config.bio_progress_callback:
+            try:
+                self.config.bio_progress_callback(
+                    done, b["queued"], f"Fetched {done:,} of {b['queued']:,} bios"
+                )
             except Exception:
                 pass
 
@@ -744,9 +768,12 @@ class StandaloneScraper:
         bio_queue: asyncio.Queue,
         stop: asyncio.Event,
     ):
-        """Fetch /users/{id}/profile bios with rate-limit handling."""
+        """Fetch /users/{id}/profile bios until stop is set and the queue is empty, or the
+        scrape is stopped. Every id taken off the queue is marked done exactly once (the
+        finally below): fetched, skipped (BIO_REFUSED at once, any other failure after
+        BIO_ATTEMPTS tries) or put back first, for a 429 or a failure with tries left."""
         next_allowed = 0.0
-        processed = 0
+        failures: Dict[str, int] = {}
 
         while not stop.is_set() or not bio_queue.empty():
             if self._stop_event.is_set():
@@ -763,48 +790,119 @@ class StandaloneScraper:
             except asyncio.TimeoutError:
                 continue
 
-            now = time.time()
-            if now < next_allowed:
-                await asyncio.sleep(next_allowed - now + 0.05)
-
-            url = f"{self.DISCORD_API}/users/{uid}/profile"
-            proxy = self._next_proxy()
             try:
-                async with session.get(
-                    url,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                    **self._proxy_kwarg(proxy),
-                ) as resp:
-                    if resp.status == 429:
-                        retry_after = 1.0
-                        try:
-                            body = await resp.json()
-                            retry_after = float(body.get("retry_after", 1.0))
-                        except Exception:
-                            hdr = resp.headers.get("Retry-After")
-                            if hdr:
-                                try:
-                                    retry_after = float(hdr)
-                                except Exception:
-                                    pass
-                        next_allowed = time.time() + retry_after + 0.25
-                        await bio_queue.put(uid)
-                        bio_queue.task_done()
+                wait = next_allowed - self._clock()
+                if wait > 0 and await self._pause(wait + 0.05):
+                    continue
+
+                outcome, retry_after = await self._fetch_bio(session, uid)
+                if outcome == "rate_limited":
+                    next_allowed = self._clock() + retry_after + 0.25
+                    bio_queue.put_nowait(uid)
+                    continue
+
+                next_allowed = self._clock() + 1.25 + random.uniform(0.1, 0.4)
+                if outcome == "failed":
+                    failures[uid] = failures.get(uid, 0) + 1
+                    if failures[uid] < BIO_ATTEMPTS:
+                        bio_queue.put_nowait(uid)
                         continue
+                    self._debug(
+                        f"Bio skipped uid={uid} after {BIO_ATTEMPTS} attempts", "warn"
+                    )
+                failures.pop(uid, None)
+                self._bios["fetched" if outcome == "ok" else "skipped"] += 1
+                if self._bio_phase:
+                    self._bio_progress()
+            finally:
+                bio_queue.task_done()
 
-                    if resp.status == 200:
-                        data = await resp.json()
-                        bio_val = (data.get("user") or {}).get("bio") or data.get("bio")
-                        async with self._members_lock:
-                            if uid in self._members and bio_val is not None:
-                                self._members[uid]["bio"] = bio_val
-                        processed += 1
+    async def _fetch_bio(
+        self, session: aiohttp.ClientSession, uid: str
+    ) -> tuple[str, float]:
+        """One GET /users/{uid}/profile: ("ok", 0), ("rate_limited", retry_after),
+        ("refused", 0) for BIO_REFUSED, or ("failed", 0) for any other status, a network,
+        proxy or timeout error, or a body that does not parse."""
+        url = f"{self.DISCORD_API}/users/{uid}/profile"
+        proxy = self._next_proxy()
+        try:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=10),
+                **self._proxy_kwarg(proxy),
+            ) as resp:
+                if resp.status == 429:
+                    retry_after = 1.0
+                    try:
+                        body = await resp.json()
+                        retry_after = float(body.get("retry_after", 1.0))
+                    except Exception:
+                        hdr = resp.headers.get("Retry-After")
+                        if hdr:
+                            try:
+                                retry_after = float(hdr)
+                            except Exception:
+                                pass
+                    return "rate_limited", max(retry_after, 0.0)
 
-            except Exception as exc:
-                self._debug(f"Bio fetch error uid={uid}: {exc}")
+                if resp.status in BIO_REFUSED:
+                    self._debug(f"Bio refused uid={uid}: HTTP {resp.status}")
+                    return "refused", 0.0
 
-            next_allowed = time.time() + 1.25 + random.uniform(0.1, 0.4)
-            bio_queue.task_done()
+                if resp.status != 200:
+                    self._debug(f"Bio fetch failed uid={uid}: HTTP {resp.status}")
+                    return "failed", 0.0
+
+                data = await resp.json()
+                bio_val = (data.get("user") or {}).get("bio") or data.get("bio")
+        except Exception as exc:
+            self._debug(f"Bio fetch error uid={uid}: {exc}")
+            return "failed", 0.0
+
+        async with self._members_lock:
+            if uid in self._members and bio_val is not None:
+                self._members[uid]["bio"] = bio_val
+        return "ok", 0.0
+
+    async def _pause(self, seconds: float) -> bool:
+        """Sleep that a stop cuts short: True when the scrape was stopped."""
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            return False
+        return True
+
+    def _queue_bio(self, bio_queue: asyncio.Queue, uid: str):
+        self._bios["queued"] += 1
+        bio_queue.put_nowait(uid)
+
+    async def _finish_bios(self, bio_queue: asyncio.Queue, bio_task: asyncio.Task):
+        """Wait until every queued bio is fetched or skipped, or the scrape is stopped; no
+        time cap. Reports bios done of queued now, then the worker reports each one it
+        finishes. A worker that ended without draining the queue (it should not) ends the
+        wait too, so the scrape still saves."""
+        b = self._bios
+        left = b["queued"] - b["fetched"] - b["skipped"]
+        if left > 0:
+            self._log(f"📝 Fetching bios — {left:,} to go", "info")
+        self._bio_phase = True
+        self._bio_progress()
+        join = asyncio.ensure_future(bio_queue.join())
+        stopped = asyncio.ensure_future(self._stop_event.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {join, stopped, bio_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if done == {bio_task}:
+                self._debug("Bio worker ended before the queue drained", "warn")
+        finally:
+            join.cancel()
+            stopped.cancel()
+            self._bio_phase = False
+        if b["skipped"]:
+            self._log(
+                f"⚠️ {b['skipped']:,} bio(s) skipped: the profile did not load", "warn"
+            )
 
     async def _run_gateway_session(
         self,
@@ -1076,7 +1174,7 @@ class StandaloneScraper:
                                                 if self.config.include_bio:
                                                     rec["bio"] = None
                                                     if bio_queue is not None:
-                                                        await bio_queue.put(uid)
+                                                        self._queue_bio(bio_queue, uid)
                                                 self._members[uid] = rec
                                                 added += 1
                                         stall_start = time.time()
@@ -1310,6 +1408,10 @@ class StandaloneScraper:
         self._running = True
         self._stop_event.clear()
         self._members.clear()
+        self._bios = {"queued": 0, "fetched": 0, "skipped": 0}
+        self._bio_phase = False
+        bio_task: Optional[asyncio.Task] = None
+        bio_session: Optional[aiohttp.ClientSession] = None
 
         guild_id = self.config.guild_id
         guild_name = None
@@ -1404,9 +1506,7 @@ class StandaloneScraper:
                 await planner.seed_two_gram_roots_once(roots)
 
             bio_queue: Optional[asyncio.Queue] = None
-            bio_task: Optional[asyncio.Task] = None
             bio_stop = asyncio.Event()
-            bio_session: Optional[aiohttp.ClientSession] = None
             if self.config.include_bio:
                 bio_queue = asyncio.Queue()
                 bio_headers = _build_headers(valid_tokens[0])
@@ -1510,23 +1610,16 @@ class StandaloneScraper:
             progress_stop.set()
             await progress_task
 
-            if bio_queue is not None:
-                try:
-                    await asyncio.wait_for(bio_queue.join(), timeout=60)
-                except asyncio.TimeoutError:
-                    self._debug("Bio queue timed out after 60s", "warn")
+            if (
+                bio_queue is not None
+                and bio_task is not None
+                and not self._stop_event.is_set()
+            ):
+                self._progress(len(self._members), member_count)
+                await self._finish_bios(bio_queue, bio_task)
             bio_stop.set()
-            if bio_task:
-                bio_task.cancel()
-                try:
-                    await bio_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-            if bio_session is not None:
-                try:
-                    await bio_session.close()
-                except Exception:
-                    pass
+            await self._close_bios(bio_task, bio_session)
+            bio_task = bio_session = None
 
             elapsed = time.perf_counter() - t0
             members_list = list(self._members.values())
@@ -1554,6 +1647,7 @@ class StandaloneScraper:
                     "member_count_hint": member_count,
                     "guild_name": guild_name,
                     "cancelled": was_cancelled,
+                    **({"bios": dict(self._bios)} if self.config.include_bio else {}),
                 },
             )
 
@@ -1570,7 +1664,10 @@ class StandaloneScraper:
                 members=list(self._members.values()),
                 total_count=len(self._members),
                 elapsed_seconds=elapsed,
-                metadata={"guild_name": guild_name or ""},
+                metadata={
+                    "guild_name": guild_name or "",
+                    **({"bios": dict(self._bios)} if self.config.include_bio else {}),
+                },
             )
         except Exception as e:
             elapsed = time.perf_counter() - t0
@@ -1581,7 +1678,28 @@ class StandaloneScraper:
                 elapsed_seconds=elapsed,
             )
         finally:
+            # A cancel or an error before the bio phase ended leaves the worker running.
+            await self._close_bios(bio_task, bio_session)
             self._running = False
+
+    async def _close_bios(
+        self,
+        bio_task: Optional[asyncio.Task],
+        bio_session: Optional[aiohttp.ClientSession],
+    ):
+        if bio_task is not None:
+            bio_task.cancel()
+            try:
+                await asyncio.wait({bio_task}, timeout=0.5)
+            except BaseException:
+                pass
+            if bio_task.done() and not bio_task.cancelled():
+                bio_task.exception()
+        if bio_session is not None:
+            try:
+                await bio_session.close()
+            except Exception:
+                pass
 
     def stop(self):
         """Stop the scraping operation."""
