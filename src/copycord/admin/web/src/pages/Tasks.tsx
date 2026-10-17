@@ -96,7 +96,7 @@ export function Tasks() {
         <TypeRail types={types} selected={id ? "" : typeKey} loading={!data && typesLoading} />
         <div className={MAIN}>
           {id ? (
-            <RunDetail id={id} typeOf={typeOf} />
+            <RunDetail id={id} typeOf={typeOf} onStatusChange={reloadTypes} />
           ) : (
             <>
               <TasksHeader

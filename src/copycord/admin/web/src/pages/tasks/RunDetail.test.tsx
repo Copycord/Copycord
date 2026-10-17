@@ -842,4 +842,39 @@ describe("RunDetail live", () => {
     expect(screen.getByText("Last 500 messages")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading run" })).not.toBeInTheDocument();
   });
+
+  it("calls onStatusChange when the open run finishes, not on its first load or a progress frame", async () => {
+    const first = makeRun({ status: "running", finished_at: null, summary: null, seq: 1 });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ run: first })));
+    const onStatusChange = vi.fn();
+    render(
+      <MemoryRouter initialEntries={["/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]}>
+        <RunDetail
+          id="4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"
+          typeOf={(k) => (k === BACKFILL.key ? BACKFILL : undefined)}
+          onStatusChange={onStatusChange}
+        />
+      </MemoryRouter>,
+    );
+    await screen.findByText("1,234 / 5,000");
+    expect(onStatusChange).not.toHaveBeenCalled();
+    const ws = FakeWs.all[0]!;
+    act(() => ws.open());
+    const { inputs: _inputs, steps: _steps, ...bare } = first;
+    act(() =>
+      ws.emit({ kind: "task.run.updated", role: "admin", payload: { run: { ...bare, seq: 2 }, steps: [{ key: "c1", title: "#general", state: "running", done: 4000, total: 5000 }] } }),
+    );
+    expect(onStatusChange).not.toHaveBeenCalled();
+    act(() =>
+      ws.emit({
+        kind: "task.run.updated",
+        role: "admin",
+        payload: {
+          run: { ...bare, seq: 3, status: "success", finished_at: "2026-10-14T18:00:49Z", summary: { success: 1, failed: 0, delivered: 36 } },
+          steps: [{ key: "c1", title: "#general", state: "success", done: 36, total: 5000 }],
+        },
+      }),
+    );
+    expect(onStatusChange).toHaveBeenCalledTimes(1);
+  });
 });

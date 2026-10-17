@@ -5,7 +5,7 @@
 // the counts in one muted line, then its Inputs collapsed), the Steps card and the collapsed "Report (JSON)"
 // panel. Everything type specific comes from the registry in ./types.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -301,12 +301,29 @@ export function RunView({ run, type, refreshing = false }: { run: TaskRun; type?
   );
 }
 
-export function RunDetail({ id, typeOf }: { id: string; typeOf: (key: string) => TaskType | undefined }) {
+export function RunDetail({
+  id,
+  typeOf,
+  onStatusChange,
+}: {
+  id: string;
+  typeOf: (key: string) => TaskType | undefined;
+  /** Called when the open run moves to another status, so the rail's running badge follows. */
+  onStatusChange?: () => void;
+}) {
   // Live over task.run.updated; a refetch keeps the held run on screen (no shimmer after the first load).
   const { run, loading, refreshing, error } = useTaskRun(id);
   useEffect(() => {
     if (run) rememberRunTypes([run]);
   }, [run]);
+  const status = run?.status;
+  const seenStatus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!status) return;
+    const before = seenStatus.current;
+    seenStatus.current = status;
+    if (before !== undefined && before !== status) onStatusChange?.();
+  }, [status, onStatusChange]);
   if (!run) {
     if (loading) return <RunDetailSkeleton runType={runTypeOf(id)} />;
     // A 404 says so in words, not the server's text; other errors keep theirs.
