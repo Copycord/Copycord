@@ -90,6 +90,7 @@ import copycord.admin.tasks  # noqa: F401  task types register at import
 from copycord.admin import scraper_tokens
 from copycord.admin.tasks import backfill as task_backfill
 from copycord.admin.tasks import export_dms as task_export_dms
+from copycord.admin.tasks import export_messages as task_export_messages
 from copycord.admin.tasks import sync_assets as task_sync_assets
 from copycord.admin.tasks import purge as task_purge
 from copycord.admin.tasks import purge_assets as task_purge_assets
@@ -784,6 +785,8 @@ async def _backfill_job_listener():
             await task_backfill.dispatch(p)
         elif p.get("type") in task_export_dms.FRAMES:
             await task_export_dms.dispatch(p)
+        elif p.get("type") in task_export_messages.FRAMES:
+            await task_export_messages.dispatch(p)
         elif p.get("type") in task_sync_assets.FRAMES:
             await task_sync_assets.dispatch(p)
 
@@ -1957,6 +1960,8 @@ async def _startup_tasks():
     task_routes.set_service(service)
     task_backfill.configure(db=db, send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame))
     task_export_dms.configure(send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=5.0), data_dir=DATA_DIR)
+    task_export_messages.configure(send=lambda frame: _ws_cmd(CLIENT_AGENT_URL, frame, timeout=5.0),
+                                   data_dir=DATA_DIR, db=db)
     task_sync_assets.configure(db=db, send=lambda frame: _ws_cmd(SERVER_AGENT_URL, frame, timeout=5.0))
     task_purge.configure(db=db)
     task_purge_assets.configure(db=db, send=lambda frame, timeout: _ws_cmd(SERVER_AGENT_URL, frame, timeout=timeout))

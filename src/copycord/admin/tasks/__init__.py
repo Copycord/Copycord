@@ -24,6 +24,7 @@ from . import backfill  # noqa: F401,E402  registers backfill_channels
 from . import purge  # noqa: F401,E402  registers purge_messages
 from . import purge_assets  # noqa: F401,E402  registers purge_assets
 from . import export_dms  # noqa: F401,E402  registers export_dms
+from . import export_messages  # noqa: F401,E402  registers export_messages
 from . import avatars  # noqa: F401,E402  registers download_avatars
 from . import sync_assets  # noqa: F401,E402  registers sync_assets
 from . import scrape  # noqa: F401,E402  registers scrape_members
