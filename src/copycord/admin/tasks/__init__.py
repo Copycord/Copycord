@@ -22,6 +22,7 @@ from .service import (
 )
 from . import backfill  # noqa: F401,E402  registers backfill_channels
 from . import purge  # noqa: F401,E402  registers purge_messages
+from . import avatars  # noqa: F401,E402  registers download_avatars
 
 __all__ = (
     "MemoryRunRepo", "RunContext", "RunFinished", "RunRepo",
