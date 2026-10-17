@@ -1,4 +1,4 @@
-// Inventory items 33 to 36: the clone action, the orphan scan, the backfill modal and live backfill progress.
+// The clone action, the orphan scan, the backfill modal and live backfill progress.
 // Endpoints and the /ws/out and /ws/in sockets are stubbed, nothing reaches the real client.
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";

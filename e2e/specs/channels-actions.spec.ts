@@ -1,4 +1,4 @@
-// Inventory items 31 and 32: channel and category row actions and Delete all orphans.
+// Channel and category row actions and Delete all orphans.
 // The save routes are stubbed so the seeded database stays untouched.
 import { expect, test, type Page } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";

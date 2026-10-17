@@ -1,6 +1,6 @@
-// Inventory item 18: Cloning Configuration mapping cards.
-// The seeded mapping drives list and search;
-// toggle and delete use a stubbed list so the seeded mapping stays intact for the other specs.
+// Cloning Configuration mapping cards.
+// The seeded mapping drives list and search; toggle and delete use a stubbed list so the seeded
+// mapping stays intact for the other specs.
 import { expect, test, type Page, type Request } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";
 import { SEED } from "../lib/seed.ts";

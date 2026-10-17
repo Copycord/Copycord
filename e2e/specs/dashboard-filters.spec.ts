@@ -1,8 +1,7 @@
-// Inventory item 22: mapping Filters modal (#filters-modal / #form-filters) with its category/channel
-// picker (#filterObjectsModal) and role picker (#roleBlocksModal).
-// Filters, channels and roles are stubbed so the
-// seeded mapping keeps its real (empty) filters for the other specs. Chip lists are read from the hidden
-// inputs both UIs keep in sync.
+// The mapping Filters modal (#filters-modal / #form-filters) with its category/channel picker
+// (#filterObjectsModal) and role picker (#roleBlocksModal).
+// Filters, channels and roles are stubbed so the seeded mapping keeps its real (empty) filters for
+// the other specs. Chip lists are read from the hidden inputs both UIs keep in sync.
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";
 import { MAPPING_FILTERS_BTN, settle } from "../lib/ui.ts";

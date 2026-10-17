@@ -1,4 +1,4 @@
-// Parity smoke for inventory items reachable without Discord (numbers refer to copycord-frontend-inventory.md).
+// Parity smoke for everything reachable without Discord. The number leading a test name is its frontend inventory item.
 import { expect, test, type Page } from "@playwright/test";
 import { CSRF_HEADERS, LOGIN_PATH, NOT_FOUND_PATH, PAGES, PASSWORD, pageUrl, type PageName } from "../lib/env.ts";
 import { SEED, stubClientGuilds } from "../lib/seed.ts";
@@ -234,7 +234,7 @@ test.describe("channels", () => {
     }
   });
 
-  // Row actions, orphans and the verify and backfill modals are lanes 23 and 24; their tests land with them.
+  // Row actions, orphans and the verify and backfill modals are tested in channels-actions.spec.ts and channels-verify.spec.ts.
   test.describe("with channels", () => {
     const seen: string[] = [];
     test.beforeEach(async ({ page }) => {

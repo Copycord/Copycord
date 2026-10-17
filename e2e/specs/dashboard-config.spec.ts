@@ -1,5 +1,4 @@
-// Parity for the Global Configuration card, token validation, backup tokens and the link cards
-// (inventory items 15, 16, 17).
+// Parity for the Global Configuration card, token validation, backup tokens and the link cards.
 // The save and backup token endpoints are stubbed so the seeded install is never changed.
 import { expect, test, type Page } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";
