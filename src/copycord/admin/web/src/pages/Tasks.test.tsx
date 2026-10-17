@@ -511,7 +511,7 @@ describe("Tasks page preselect", () => {
     });
     renderAt("/tasks?type=export_messages&guild=200");
     const dialog = await screen.findByRole("dialog", { name: "Run Export messages" });
-    expect(await within(dialog).findByRole("combobox", { name: "Server" })).toHaveTextContent("Beta");
+    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "Server" })).toHaveDisplayValue("Beta"));
   });
 
   it("does not open a form without a preselect param", async () => {

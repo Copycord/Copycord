@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
@@ -172,7 +172,7 @@ describe("ExportMessagesForm", () => {
   it("starts with the server the page preselected", async () => {
     const posts = serve();
     renderForm({ guild: "111" });
-    expect(await screen.findByRole("combobox", { name: "Server" })).toHaveTextContent("Alpha");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Server" })).toHaveDisplayValue("Alpha"));
     submit();
     await screen.findByText("Run page r7");
     expect((posts[0]!.inputs as { guild_id: string }).guild_id).toBe("111");
