@@ -11,6 +11,8 @@
 // A searchable field draws the toggle as a text input with the same look: closed it shows the
 // chosen label, focused it empties and opens the list, and typing keeps the options whose label or
 // value holds the text. Escape closes and keeps the old value, Tab and a click outside close.
+// While the options load the same input stands there read only, its label shimmering, so the box
+// a user clicked or focused stays the one they get once the list lands.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
@@ -101,7 +103,7 @@ export function ToolbarSelect({
   ...aria
 }: ToolbarSelectProps) {
   const field = variant === "field";
-  const search = field && Boolean(searchable) && !pending;
+  const search = field && Boolean(searchable);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [focus, setFocus] = useState(0);
@@ -284,7 +286,12 @@ export function ToolbarSelect({
   );
 
   return (
-    <span ref={wrap} data-disabled={disabled || undefined} className={cx("relative", field ? "block w-full" : "inline-block", className)}>
+    <span
+      ref={wrap}
+      data-disabled={disabled || undefined}
+      aria-busy={(search && pending) || undefined}
+      className={cx("relative", field ? "block w-full" : "inline-block", className)}
+    >
       {field ? null : (
         <select
           id={id}
@@ -320,14 +327,20 @@ export function ToolbarSelect({
             aria-activedescendant={open && focus >= 0 && shown.includes(focus) ? `${listId}-${focus}` : undefined}
             {...aria}
             disabled={disabled}
-            value={open ? query : placeholderShown ? "" : (current?.label ?? "")}
-            placeholder={open ? (placeholderShown ? "Type to search" : current?.label) : current?.label}
+            readOnly={pending}
+            value={open && !pending ? query : pending || placeholderShown ? "" : (current?.label ?? "")}
+            placeholder={pending ? undefined : open ? (placeholderShown ? "Type to search" : current?.label) : current?.label}
             onFocus={() => !open && show()}
             onClick={() => !open && show()}
             onChange={(e) => onType(e.target.value)}
             onKeyDown={onKey}
             className={cx("relative block w-full truncate text-left", toggleClassName ?? TOOLBAR_TOGGLE, "pr-[42px]")}
           />
+          {pending ? (
+            <span className="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-sm">
+              <Skeleton.Text>{pendingLabel}</Skeleton.Text>
+            </span>
+          ) : null}
           <span
             aria-hidden
             className={cx("pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-sm leading-none text-accent", open && "rotate-180")}

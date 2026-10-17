@@ -91,7 +91,8 @@ describe("AvatarsForm", () => {
     renderForm();
     expect(screen.queryByRole("searchbox", { name: "Find a server" })).toBeNull();
     const box = await screen.findByRole("combobox", { name: "Server" });
-    await waitFor(() => expect(box.tagName).toBe("INPUT"));
+    expect(box.tagName).toBe("INPUT");
+    await waitFor(() => expect(box).not.toHaveAttribute("readonly"));
     fireEvent.focus(box);
     fireEvent.change(box, { target: { value: "111" } });
     expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Server 11"]);

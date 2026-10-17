@@ -268,7 +268,7 @@ describe("BackfillForm", () => {
     const loading = shape();
     const list = () => screen.getByRole("group", { name: "Channels" });
     expect(screen.queryByText(/Loading channels/)).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Mapping" }).querySelector("[data-skeleton]")).not.toBeNull();
+    expect(screen.getByRole("combobox", { name: "Mapping" }).parentElement!.querySelector("[data-skeleton]")).not.toBeNull();
     expect(screen.getByRole("searchbox", { name: "Search channels" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Select listed" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Clear" })).toBeDisabled();
@@ -286,7 +286,7 @@ describe("BackfillForm", () => {
     expect(loading.count).toBe("0 selected");
     expect(list()).not.toHaveAttribute("aria-busy");
     expect(list().querySelector("[data-skeleton]")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Mapping" }).querySelector("[data-skeleton]")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Mapping" }).parentElement!.querySelector("[data-skeleton]")).toBeNull();
     expect(list().firstElementChild).toHaveClass(REVEAL);
   });
 

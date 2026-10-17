@@ -12,12 +12,18 @@ const OPTIONS: SelectOption[] = [
   { value: "333", label: "Alphabet soup" },
 ];
 
-function Picker({ initial = "" }: { initial?: string }) {
+function Picker({ initial = "", pending = false }: { initial?: string; pending?: boolean }) {
   const [value, setValue] = useState(initial);
   return (
     <>
       <Field label="Server">
-        <FieldSelect searchable value={value} options={OPTIONS} onChange={setValue} />
+        <FieldSelect
+          searchable
+          pending={pending}
+          value={value}
+          options={pending ? OPTIONS.slice(0, 1) : OPTIONS}
+          onChange={setValue}
+        />
       </Field>
       <output>{value || "none"}</output>
     </>
@@ -85,5 +91,28 @@ describe("FieldSelect searchable", () => {
     expect(combo()).not.toHaveAttribute("aria-activedescendant");
     await user.keyboard("{Enter}");
     expect(screen.getByRole("status")).toHaveTextContent("none");
+  });
+
+  it("loads as the same read only box with its label shimmering, and a box opened while loading fills in", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Picker pending />);
+    const box = combo();
+    expect(box.tagName).toBe("INPUT");
+    expect(box).toHaveAttribute("readonly");
+    expect(box).not.toHaveAttribute("placeholder");
+    expect(box.parentElement).toHaveAttribute("aria-busy", "true");
+    expect(box.parentElement!.querySelector("[data-skeleton]")).not.toBeNull();
+    const shape = box.className;
+    await user.click(box);
+    expect(rows()).toEqual([]);
+    rerender(<Picker />);
+    expect(combo()).toBe(box);
+    expect(box.className).toBe(shape);
+    expect(box).not.toHaveAttribute("readonly");
+    expect(box.parentElement).not.toHaveAttribute("aria-busy");
+    expect(box.parentElement!.querySelector("[data-skeleton]")).toBeNull();
+    expect(rows()).toEqual(["Alpha", "Beta", "Alphabet soup"]);
+    await user.type(box, "bet");
+    expect(rows()).toEqual(["Beta"]);
   });
 });
