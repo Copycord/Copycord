@@ -45,7 +45,6 @@ class SitemapService:
         self._dirty_lock = asyncio.Lock()
         self._send_lock = asyncio.Lock()
 
-        # queue
         self._queue: deque[int] = deque()    # guild IDs in order
         self._queue_set: Set[int] = set()    # dedup lookup
         self._queue_lock = asyncio.Lock()
@@ -287,7 +286,6 @@ class SitemapService:
                         g.name, clone_id, e,
                     )
 
-            # delay between guilds
             if self._queue:
                 await asyncio.sleep(self._inter_guild_delay)
 
@@ -996,7 +994,7 @@ class SitemapService:
         return sm
 
     async def build(self) -> Dict:
-        """(Legacy) Build for a single guild using _pick_guild()."""
+        """Build the sitemap for the guild _pick_guild() returns."""
         guild = self._pick_guild()
         if not guild:
             self.logger.warning("[⛔] No accessible guild found to build a sitemap.")

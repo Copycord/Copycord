@@ -220,19 +220,16 @@ class ProxyRotator:
         exclude = exclude or set()
         now = time.monotonic()
 
-        # is the current proxy still usable
         if (
             self._current_proxy
             and self._current_proxy not in exclude
             and not self._is_suspended(self._current_proxy, now)
         ):
-            # with timed rotation, check whether the interval expired
             if self._rotation_interval > 0:
                 if (now - self._current_proxy_since) < self._rotation_interval:
                     return self._current_proxy
                 # expired, assign a new one
             else:
-                # no rotation, stay on this proxy
                 return self._current_proxy
 
         # retry/fallback: temporary alternative, sticky proxy unchanged
@@ -281,7 +278,7 @@ class ProxyRotator:
         return proxy
 
     async def run_rotation_loop(self) -> None:
-        """Background task that handles timed proxy rotation."""
+        """Rotate the proxy whenever the timed rotation interval has elapsed; runs forever."""
         while True:
             if not self._enabled or self._rotation_interval <= 0:
                 await asyncio.sleep(5)
