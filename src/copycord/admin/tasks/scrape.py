@@ -25,7 +25,9 @@ reaches the run. Members found before the cancel are still saved, as the old pag
 The result is the same file the old page wrote and lists under past scrapes:
 <data dir>/scrapes/<guild id>/scrape_<guild id>_<stamp>.json (save_scrape_file).
 GET /api/tasks/scrape-members/<run id> tells the run page whether it is still there,
-and .../file serves it.
+and .../file serves it. With Debug report on (dev mode only, COPYCORD_ENV=dev) the run
+also writes debug_<guild id>_<stamp>.json beside it, at the end of the run whatever the
+outcome, with what each token sent (scrape_debug.py); .../debug-report serves it.
 
 configure(db=..., data_dir=..., in_guild=..., user_guilds=..., log_path=...,
 make_scraper=...) wires the DB (scraper tokens), the data dir (scrapes/, proxies.txt),
@@ -47,6 +49,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from copycord.admin import scraper_tokens
 from copycord.admin.standalone_scraper import ScraperConfig, StandaloneScraper
+from copycord.common.env import is_dev
 
 from .context import STEP_FINAL
 from .registry import TaskType, register
@@ -64,6 +67,8 @@ PROGRESS_MARK = "⛏"
 LEVELS = {"warn": "warning", "warning": "warning", "error": "error"}
 # The scraper's messages use this dash; run log lines get ": " or "-" instead.
 DASH = chr(0x2014)
+DEBUG_REFUSED = "The debug report is only available when COPYCORD_ENV is dev"
+DEBUG_PREFIX = "debug_"
 
 
 # wiring
@@ -109,6 +114,8 @@ class ScrapeInputs(BaseModel):
     include_roles: bool = Field(False, title="Roles")
     use_proxies: bool = Field(True, title="Use the saved proxies")
     sessions_per_token: int = Field(1, ge=1, le=5, title="Sessions per token")
+    # Dev mode only (COPYCORD_ENV=dev): a JSON file of what each token sent.
+    debug_report: bool = Field(False, title="Debug report")
 
     @field_validator("guild_id", mode="before")
     @classmethod
@@ -117,6 +124,13 @@ class ScrapeInputs(BaseModel):
         if not s.isdigit():
             raise ValueError("Pick a server or enter a numeric server ID")
         return s
+
+    @field_validator("debug_report")
+    @classmethod
+    def _debug_report(cls, value: bool) -> bool:
+        if value and not is_dev():
+            raise ValueError(DEBUG_REFUSED)
+        return value
 
 
 # Server names seen by options(), for run titles.
@@ -239,6 +253,23 @@ def save_scrape_file(data_dir: Path, guild_id: Any, members: list, metadata: Opt
         return f"{guild_id}/{fname}"
     except Exception as save_err:
         log.exception("Failed to save scrape results: %s", save_err)
+        return None
+
+
+def save_debug_report(data_dir: Path, guild_id: Any, data: dict) -> Optional[str]:
+    """Write the debug report next to the members file:
+    <data dir>/scrapes/<guild id>/debug_<guild id>_<stamp>.json; returns "<guild id>/<file
+    name>", or None when the write failed. Not a scrape_* file, so past scrapes skip it."""
+    try:
+        guild_dir = Path(data_dir) / DIRNAME / str(guild_id)
+        guild_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"{DEBUG_PREFIX}{guild_id}_{ts}.json"
+        (guild_dir / fname).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        log.info("Scrape debug report saved to %s/%s", guild_id, fname)
+        return f"{guild_id}/{fname}"
+    except Exception as save_err:
+        log.exception("Failed to save the scrape debug report: %s", save_err)
         return None
 
 
@@ -514,6 +545,7 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
         progress_callback=job.on_progress,
         log_callback=job.on_log,
         bio_progress_callback=job.on_bios,
+        debug_report=inputs.debug_report,
     )
     if ctx.cancelled.is_set():
         await end()
@@ -522,7 +554,14 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
     await scrape_step.state("Starting")
     log.info("scrape_members run %s: guild=%s tokens=%d proxies=%d", ctx.run.id, gid, len(usable), len(proxies))
     scraper = _wiring.make_scraper(config)
-    result, error, cancelled = await _scrape(ctx, scrape_step, job, scraper, bios_step)
+    try:
+        result, error, cancelled = await _scrape(ctx, scrape_step, job, scraper, bios_step)
+    except BaseException as exc:
+        # The runner itself was cancelled or broke: keep what the report captured so far.
+        if inputs.debug_report:
+            _save_debug(ctx, gid, scraper, report, "cancelled" if isinstance(exc, asyncio.CancelledError)
+                        else "failed", str(exc) or type(exc).__name__)
+        raise
 
     members = list(getattr(result, "members", None) or [])
     if cancelled and not members:
@@ -599,6 +638,11 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
             await save_step.finish("failed", "File not written")
             error = error or "File not written"
 
+    if inputs.debug_report:
+        status = "failed" if error else "cancelled" if cancelled else "success"
+        saved = _save_debug(ctx, gid, scraper, report, status, error)
+        if saved and ctx.cancel_note is None:
+            await ctx.log(f"Saved the debug report to {saved}", step="save")
     await end(error)
     if error:
         ctx.fail(error)
@@ -622,31 +666,61 @@ def _save(gid: str, members: list, metadata: dict, elapsed: float, report: dict)
     return saved
 
 
+def _save_debug(ctx: Any, gid: str, scraper: Any, report: dict, status: str,
+                error: Optional[str]) -> Optional[str]:
+    """Write the scraper's debug report, as captured so far, and note it in the run report
+    under debug_report: {path, size}."""
+    if _wiring.data_dir is None:
+        return None
+    snapshot = getattr(scraper, "debug_report", None)
+    try:
+        data = snapshot(status=status, error=error, run_id=ctx.run.id) if callable(snapshot) else None
+    except Exception:
+        log.exception("scrape_members run %s: the debug report could not be built", ctx.run.id)
+        data = None
+    if data is None:
+        return None
+    saved = save_debug_report(_wiring.data_dir, gid, data)
+    if saved:
+        path = _wiring.data_dir / DIRNAME / saved
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = None
+        report["debug_report"] = {"path": saved, "size": size}
+    return saved
+
+
 # the result file (behind the /api session guard like every /api path)
 
 NO_FILE = "No scrape file"
 GONE = "File no longer on disk"
 
 
-def _scrape_file(run_id: str) -> tuple[Optional[Path], Optional[dict], Optional[JSONResponse]]:
-    """The run's scrape file and what the run page shows about it, or the 404 to answer.
-    Only a file under <data dir>/scrapes/ is served, whatever the report says."""
+NO_DEBUG = "No debug report"
+
+
+def _scrape_file(run_id: str, key: str = "output",
+                 missing: str = NO_FILE) -> tuple[Optional[Path], Optional[dict], Optional[JSONResponse]]:
+    """The run's scrape file (or with key="debug_report" its debug report) and what the run
+    page shows about it, or the 404 to answer. Only a file under <data dir>/scrapes/ is
+    served, whatever the report says."""
     svc = get_service()
     rid = _run_id(run_id)
     run = svc.get(rid) if svc is not None and rid is not None else None
     if run is None or run.type != TYPE_KEY:
         return None, None, JSONResponse({"detail": "Unknown run"}, status_code=404)
     report = run.report or {}
-    raw = (report.get("output") or {}).get("path")
+    raw = (report.get(key) or {}).get("path")
     if not raw or _wiring.data_dir is None:
-        return None, None, JSONResponse({"detail": NO_FILE}, status_code=404)
+        return None, None, JSONResponse({"detail": missing}, status_code=404)
     root = (_wiring.data_dir / DIRNAME).resolve()
     try:
         path = (root / str(raw)).resolve()
     except (OSError, ValueError):
-        return None, None, JSONResponse({"detail": NO_FILE}, status_code=404)
+        return None, None, JSONResponse({"detail": missing}, status_code=404)
     if not path.is_relative_to(root) or path == root:
-        return None, None, JSONResponse({"detail": NO_FILE}, status_code=404)
+        return None, None, JSONResponse({"detail": missing}, status_code=404)
     if not path.is_file():
         return None, None, JSONResponse({"detail": GONE}, status_code=404)
     try:
@@ -667,6 +741,14 @@ async def scrape_file_info(run_id: str):
 @router.get("/scrape-members/{run_id}/file")
 async def scrape_file(run_id: str):
     path, info, error = _scrape_file(run_id)
+    if error is not None:
+        return error
+    return FileResponse(path, media_type="application/json", filename=info["filename"])
+
+
+@router.get("/scrape-members/{run_id}/debug-report")
+async def scrape_debug_report(run_id: str):
+    path, info, error = _scrape_file(run_id, "debug_report", NO_DEBUG)
     if error is not None:
         return error
     return FileResponse(path, media_type="application/json", filename=info["filename"])

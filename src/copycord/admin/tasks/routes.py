@@ -14,6 +14,8 @@ from typing import Any, Awaitable, Callable, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from copycord.common.env import is_dev
+
 from . import registry
 from .service import ACTIVE, RunFinished, TaskService, _ids_to_str
 
@@ -131,6 +133,8 @@ async def list_types():
             "description": t.description,
             "inputs_schema": t.inputs_schema(),
             "requires_bots": t.requires_bots,
+            # Dev mode (COPYCORD_ENV=dev): forms show their developer options.
+            "dev": is_dev(),
             "active": len(svc.active_runs(t.key)),
             "total": total,
         })

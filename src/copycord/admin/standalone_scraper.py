@@ -26,6 +26,13 @@ from enum import IntEnum
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlsplit
 
+from copycord.admin.scrape_debug import (
+    BIO,
+    GUILD_INFO,
+    GUILD_LIST,
+    TOKEN_CHECK,
+    DebugRecorder,
+)
 from copycord.common.selfbot_headers import (
     TLS_IMPERSONATE,
     _mask_proxy_for_log,
@@ -70,6 +77,8 @@ class ScraperConfig:
     log_callback: Optional[Callable] = None
     # bio_progress_callback(done, total, message): bios fetched or skipped of bios queued.
     bio_progress_callback: Optional[Callable] = None
+    # Record what each token sends for the debug report (scrape_debug.py); dev mode only.
+    debug_report: bool = False
 
 
 @dataclass
@@ -547,6 +556,25 @@ class SharedPlanner:
             self.p.set_session_slots(n)
 
 
+class _SendTap:
+    """The gateway socket as the identity sees it: every frame it sends is handed to
+    ``on_send`` first, exactly as sent. Anything else goes to the socket."""
+
+    def __init__(self, ws: Any, on_send: Callable[[Any], None]):
+        self._tapped = ws
+        self._on_send = on_send
+
+    async def send(self, data: Any) -> None:
+        try:
+            self._on_send(data)
+        except Exception:
+            pass
+        await self._tapped.send(data)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._tapped, name)
+
+
 class StandaloneScraper:
     """Member scraper that uses multiple tokens over the Discord gateway."""
 
@@ -574,6 +602,22 @@ class StandaloneScraper:
         self._slot_proxies: Dict[tuple, Optional[str]] = {}
         self._http_sessions: Dict[tuple, Any] = {}
         self._bio_failures: Dict[str, int] = {}
+        self._recorder: Optional[DebugRecorder] = (
+            DebugRecorder(
+                config.tokens,
+                self._proxy_list,
+                guild_id=config.guild_id,
+                impersonate=TLS_IMPERSONATE,
+            )
+            if config.debug_report
+            else None
+        )
+
+    def debug_report(self, **kwargs) -> Optional[dict]:
+        """The debug report as captured so far, masked, or None when it is off."""
+        if self._recorder is None:
+            return None
+        return self._recorder.snapshot(**kwargs)
 
     @staticmethod
     def _normalize_proxy(raw: str) -> str:
@@ -710,17 +754,31 @@ class StandaloneScraper:
             return f"{m}m {s}s"
         return f"{s}s"
 
-    async def _get(self, token: str, url: str, timeout: float):
-        """GET as this token: its own curl_cffi session and its own client headers."""
-        return await self._http(token).get(
-            url, headers=build_headers(token), timeout=timeout
-        )
+    async def _get(self, token: str, url: str, timeout: float, kind: str = "other"):
+        """GET as this token: its own curl_cffi session and its own client headers. With the
+        debug report on, the headers are recorded here, as they go out."""
+        headers = build_headers(token)
+        if self._recorder is not None:
+            self._recorder.rest(
+                token, kind, "GET", url, headers, slot=0, proxy=self._proxy_for(token, 0)
+            )
+        return await self._http(token).get(url, headers=headers, timeout=timeout)
 
     async def _validate_token(
         self, token: str
     ) -> tuple[bool, Optional[str], Optional[str]]:
+        ok, uname, uid = await self._check_token(token)
+        if self._recorder is not None:
+            self._recorder.note_token(token, ok, uname)
+        return ok, uname, uid
+
+    async def _check_token(
+        self, token: str
+    ) -> tuple[bool, Optional[str], Optional[str]]:
         try:
-            resp = await self._get(token, f"{self.DISCORD_API}/users/@me", 5)
+            resp = await self._get(
+                token, f"{self.DISCORD_API}/users/@me", 5, TOKEN_CHECK
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 return True, data.get("username"), str(data.get("id"))
@@ -737,7 +795,7 @@ class StandaloneScraper:
         try:
             while True:
                 url = f"{self.DISCORD_API}/users/@me/guilds?limit=200&after={after}"
-                resp = await self._get(token, url, 8)
+                resp = await self._get(token, url, 8, GUILD_LIST)
                 if resp.status_code == 429:
                     try:
                         retry_after = float(resp.json().get("retry_after", 2))
@@ -770,7 +828,10 @@ class StandaloneScraper:
         """Fetch approximate member count and guild name via REST."""
         try:
             resp = await self._get(
-                token, f"{self.DISCORD_API}/guilds/{guild_id}?with_counts=true", 8
+                token,
+                f"{self.DISCORD_API}/guilds/{guild_id}?with_counts=true",
+                8,
+                GUILD_INFO,
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -851,7 +912,7 @@ class StandaloneScraper:
         status, a network, proxy or timeout error, or a body that does not parse."""
         url = f"{self.DISCORD_API}/users/{uid}/profile"
         try:
-            resp = await self._get(token, url, 10)
+            resp = await self._get(token, url, 10, BIO)
             status = resp.status_code
             if status == 429:
                 retry_after = 1.0
@@ -930,14 +991,38 @@ class StandaloneScraper:
             )
 
     @contextlib.asynccontextmanager
-    async def _gateway_socket(self, identity: GatewayClient, proxy: Optional[str]):
+    async def _gateway_socket(
+        self,
+        identity: GatewayClient,
+        proxy: Optional[str],
+        session_index: int = 0,
+        session_slot: int = 0,
+    ):
         """A gateway socket opened the way the client opens one: the zlib-stream URL, the
         client's upgrade headers for this token, and the proxy's tunnel. ``identity``
-        sends on it while it is open."""
-        ws = await open_websocket(
-            gateway_url(zlib_stream=True), identity._ws_headers(), proxy
+        sends on it while it is open. With the debug report on, the upgrade headers are
+        recorded as the socket is opened and the identity's frames as they are sent."""
+        url = gateway_url(zlib_stream=True)
+        headers = identity._ws_headers()
+        rec = self._recorder
+        if rec is not None:
+            rec.gateway_connect(
+                identity.token,
+                session_index,
+                url,
+                headers,
+                slot=session_slot,
+                proxy=proxy,
+            )
+        ws = await open_websocket(url, headers, proxy)
+        identity._ws = (
+            ws
+            if rec is None
+            else _SendTap(
+                ws,
+                lambda text: rec.gateway_sent(identity.token, session_index, text),
+            )
         )
-        identity._ws = ws
         try:
             yield ws
         finally:
@@ -958,6 +1043,7 @@ class StandaloneScraper:
         member_count_hint: Optional[int],
         proxy_url: Optional[str] = None,
         num_tokens: int = 1,
+        session_slot: int = 0,
     ):
         """Run one gateway session: identify, send op-8 queries, collect GUILD_MEMBERS_CHUNK responses."""
 
@@ -1000,7 +1086,9 @@ class StandaloneScraper:
             connection_productive = False
             hb_task: Optional[asyncio.Task] = None
             try:
-                async with self._gateway_socket(identity, proxy_url) as ws:
+                async with self._gateway_socket(
+                    identity, proxy_url, session_index, session_slot
+                ) as ws:
                     inflater = ZlibStreamInflater()
 
                     async def next_frame(timeout: Optional[float]) -> Optional[dict]:
@@ -1557,6 +1645,7 @@ class StandaloneScraper:
                                 member_count_hint=member_count,
                                 proxy_url=session_proxy,
                                 num_tokens=total_sessions,
+                                session_slot=s,
                             )
                         )
                         session_idx += 1
