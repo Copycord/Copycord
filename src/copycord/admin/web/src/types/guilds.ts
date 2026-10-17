@@ -1,5 +1,5 @@
-// Shapes of the guild and export routes in admin/app.py (guilds_api,
-// guild_details, api_export_messages).
+// Shapes of the guild routes in admin/app.py (guilds_api, guild_details) and of
+// the Export messages task's inputs.
 
 /** One row of GET /api/guilds. */
 export interface GuildSummary {
@@ -57,7 +57,7 @@ export interface ExportFilters {
   download_media: MediaTypes;
 }
 
-/** Body of POST /api/export/messages. */
+/** The Export messages task's inputs. */
 export interface ExportMessagesRequest {
   guild_id: string;
   channel_id: string | null;
@@ -67,10 +67,4 @@ export interface ExportMessagesRequest {
   after_iso: string | null;
   before_iso: string | null;
   filters: ExportFilters;
-}
-
-export interface ExportMessagesResponse {
-  ok: boolean;
-  accepted?: boolean;
-  error?: string;
 }

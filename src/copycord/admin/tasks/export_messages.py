@@ -8,8 +8,8 @@
 # =============================================================================
 
 """Export messages: a guild's messages, filtered as the Guilds page export dialog
-does, to a JSON file and, optionally, a webhook. Replaces the dialog's direct
-POST /api/export/messages (still served until the button moves here).
+does, to a JSON file and, optionally, a webhook. Replaces the dialog's old
+direct POST /api/export/messages, which is gone.
 
 The run sends export_messages with job_id = run id to the client, whose
 ExportMessagesRunner scans the guild and sends export_messages_progress frames
@@ -487,7 +487,7 @@ def _cancelled_note(job: _Job, step: Any) -> str:
 
 
 def _command(inputs: ExportMessagesInputs, job_id: str) -> dict:
-    """The export_messages data, as POST /api/export/messages sends it, plus the job_id."""
+    """The export_messages command data the client agent reads, plus the job_id."""
     return {
         "guild_id": inputs.guild_id,
         "channel_id": inputs.channel_id,
