@@ -4,10 +4,14 @@
 // The wrappers are spans so the toolbar header stays the nearest block around the select.
 // The field variant (FieldSelect in components/ui/Field.tsx) is the same dropdown as a
 // full width form control: the toggle is the combobox and carries the id, so a Field label
-// names it, and there is no native select.
+// names it, and there is no native select. Its open list is portalled to the body and fixed
+// under the toggle (or above it when there is no room below), so a Modal body never grows a
+// scrollbar or clips it; a page scroll closes it. A disabled option with an empty value is the
+// placeholder: the toggle shows it muted and the list leaves it out.
 
-import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { cx } from "../../components/ui/cx";
 import { Skeleton } from "../../components/ui/Skeleton";
 
@@ -48,6 +52,32 @@ const TOOLBAR_TOGGLE =
   "font-sans text-[13px] text-text outline-none transition-[border,box-shadow,background] duration-200 " +
   "focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-60";
 
+/** Tallest the floating field list gets; less when the window has no room for it. */
+const FIELD_LIST_MAX = 260;
+/** Below this much room under the toggle the field list opens upward if there is more room above. */
+const FIELD_LIST_FLIP = 160;
+const FIELD_LIST_GAP = 4;
+const VIEWPORT_MARGIN = 8;
+
+const isPlaceholder = (o: ToolbarOption) => Boolean(o.disabled) && o.value === "";
+
+/** Fixed box for the field list: the toggle's left and width, under it or flipped above it. */
+function placeList(toggle: HTMLElement): CSSProperties {
+  const r = toggle.getBoundingClientRect();
+  const vh = window.innerHeight;
+  const below = vh - r.bottom - FIELD_LIST_GAP - VIEWPORT_MARGIN;
+  const above = r.top - FIELD_LIST_GAP - VIEWPORT_MARGIN;
+  const up = below < FIELD_LIST_FLIP && above > below;
+  const maxHeight = Math.max(80, Math.min(FIELD_LIST_MAX, up ? above : below));
+  return {
+    position: "fixed",
+    left: r.left,
+    width: r.width,
+    maxHeight,
+    ...(up ? { bottom: vh - r.top + FIELD_LIST_GAP } : { top: r.bottom + FIELD_LIST_GAP }),
+  };
+}
+
 export function ToolbarSelect({
   id,
   label,
@@ -67,29 +97,59 @@ export function ToolbarSelect({
   const field = variant === "field";
   const [open, setOpen] = useState(false);
   const [focus, setFocus] = useState(0);
+  const [place, setPlace] = useState<CSSProperties | null>(null);
   const wrap = useRef<HTMLSpanElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLSpanElement>(null);
   const listId = `${id}-listbox`;
   const selected = Math.max(
     0,
     options.findIndex((o) => o.value === value),
   );
+  // Indexes into options of the rows the list shows, and of the ones the keys and clicks can pick.
+  const shown = options.flatMap((o, i) => (field && isPlaceholder(o) ? [] : [i]));
+  const pickable = shown.filter((i) => !options[i]!.disabled);
+  const current = options[selected];
+  const placeholderShown = field && current !== undefined && isPlaceholder(current);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!wrap.current?.contains(t) && !list.current?.contains(t)) setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  // The floating field list is placed from the toggle before paint; a scroll anywhere but in the
+  // list itself, or a resize, would leave it hanging away from the toggle, so it closes.
+  useLayoutEffect(() => {
+    if (!open || !field || !toggle.current) {
+      setPlace(null);
+      return;
+    }
+    setPlace(placeList(toggle.current));
+    const onScroll = (e: Event) => {
+      if (e.target instanceof Node && list.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open, field]);
+
   useEffect(() => {
-    if (open) wrap.current?.querySelector(`[data-idx="${focus}"]`)?.scrollIntoView?.({ block: "nearest" });
-  }, [open, focus]);
+    if (open) list.current?.querySelector(`[data-idx="${focus}"]`)?.scrollIntoView?.({ block: "nearest" });
+  }, [open, focus, place]);
 
   const show = () => {
     if (disabled) return;
-    setFocus(selected);
+    setFocus(pickable.includes(selected) ? selected : (pickable[0] ?? -1));
     setOpen(true);
   };
   const choose = (i: number) => {
@@ -100,7 +160,13 @@ export function ToolbarSelect({
     // the field variant acts like a native select and stays quiet.
     if (!field || o.value !== value) onChange(o.value);
   };
-  const move = (i: number) => setFocus(Math.min(options.length - 1, Math.max(0, i)));
+  // Steps over disabled rows: the focus only lands on what Enter can pick.
+  const step = (by: number) => {
+    if (pickable.length === 0) return;
+    const at = pickable.indexOf(focus);
+    const next = at < 0 ? (by > 0 ? 0 : pickable.length - 1) : Math.min(pickable.length - 1, Math.max(0, at + by));
+    setFocus(pickable[next]!);
+  };
 
   const onKey = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (disabled) return;
@@ -109,13 +175,13 @@ export function ToolbarSelect({
       case "ArrowUp":
         e.preventDefault();
         if (!open) show();
-        else move(focus + (e.key === "ArrowDown" ? 1 : -1));
+        else step(e.key === "ArrowDown" ? 1 : -1);
         break;
       case "Home":
       case "End":
         e.preventDefault();
         if (!open) show();
-        move(e.key === "Home" ? 0 : options.length - 1);
+        if (pickable.length) setFocus(pickable[e.key === "Home" ? 0 : pickable.length - 1]!);
         break;
       case "Enter":
       case " ":
@@ -133,6 +199,58 @@ export function ToolbarSelect({
         break;
     }
   };
+
+  const listbox = (
+    <span
+      ref={list}
+      id={listId}
+      role="listbox"
+      aria-label={label}
+      aria-labelledby={label ? undefined : id}
+      style={field ? (place ?? undefined) : undefined}
+      className={cx(
+        field
+          ? "z-[70] block overflow-x-hidden overflow-y-auto overscroll-contain"
+          : "absolute inset-x-0 top-[calc(100%+4px)] z-[55] block max-h-[180px] overflow-x-hidden overflow-y-auto",
+        "rounded-control border border-border bg-surface-deep p-1 shadow-popover",
+      )}
+    >
+      {shown.length === 0 ? (
+        <span className="block px-2.5 py-2 text-[13px] leading-[1.3] text-muted">
+          {options.find(isPlaceholder)?.label || "Nothing to pick"}
+        </span>
+      ) : null}
+      {shown.map((i) => {
+        const o = options[i]!;
+        return (
+          <span
+            key={o.value}
+            id={`${listId}-${i}`}
+            role="option"
+            data-idx={i}
+            aria-selected={i === selected && !o.disabled}
+            aria-disabled={o.disabled || undefined}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => choose(i)}
+            onMouseEnter={() => !o.disabled && setFocus(i)}
+            className={cx(
+              "block rounded-lg px-2.5 py-2 text-[13px] leading-[1.3] break-words select-none [overflow-wrap:anywhere]",
+              "transition-colors duration-150",
+              o.disabled
+                ? "cursor-default text-muted opacity-70"
+                : i === selected
+                  ? "cursor-pointer bg-linear-to-b from-primary to-primary-700 text-white"
+                  : i === focus
+                    ? "cursor-pointer bg-accent-a12 text-text"
+                    : "cursor-pointer text-text",
+            )}
+          >
+            {o.label}
+          </span>
+        );
+      })}
+    </span>
+  );
 
   return (
     <span ref={wrap} data-disabled={disabled || undefined} className={cx("relative", field ? "block w-full" : "inline-block", className)}>
@@ -156,13 +274,14 @@ export function ToolbarSelect({
         </select>
       )}
       <button
+        ref={toggle}
         type="button"
         id={field ? id : undefined}
         role={field ? "combobox" : undefined}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
-        aria-activedescendant={field && open ? `${listId}-${focus}` : undefined}
+        aria-activedescendant={field && open && focus >= 0 ? `${listId}-${focus}` : undefined}
         {...aria}
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : show())}
@@ -176,7 +295,7 @@ export function ToolbarSelect({
         {pending ? (
           <Skeleton.Text className="align-middle">{pendingLabel}</Skeleton.Text>
         ) : (
-          <span className={cx(field && "block truncate")}>
+          <span className={cx(field && "block truncate", placeholderShown && "text-muted")}>
             {prefix && options[selected] ? `${prefix}: ${options[selected].label}` : options[selected]?.label || (field ? "\u00a0" : "")}
           </span>
         )}
@@ -191,43 +310,8 @@ export function ToolbarSelect({
           ▾
         </span>
       </button>
-      {open ? (
-        <span
-          id={listId}
-          role="listbox"
-          aria-label={label}
-          aria-labelledby={label ? undefined : id}
-          className={cx(
-            "absolute inset-x-0 top-[calc(100%+4px)] z-[55] block max-h-[180px] overflow-x-hidden overflow-y-auto",
-            "rounded-control border border-border bg-surface-deep p-1 shadow-popover",
-          )}
-        >
-          {options.map((o, i) => (
-            <span
-              key={o.value}
-              id={`${listId}-${i}`}
-              role="option"
-              data-idx={i}
-              aria-selected={i === selected}
-              aria-disabled={o.disabled || undefined}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => choose(i)}
-              onMouseEnter={() => setFocus(i)}
-              className={cx(
-                "block cursor-pointer rounded-lg px-2.5 py-2 text-[13px] leading-[1.3] break-words select-none [overflow-wrap:anywhere]",
-                "transition-colors duration-150",
-                i === selected
-                  ? "bg-linear-to-b from-primary to-primary-700 text-white"
-                  : i === focus
-                    ? "bg-accent-a12 text-text"
-                    : "text-text",
-              )}
-            >
-              {o.label}
-            </span>
-          ))}
-        </span>
-      ) : null}
+      {open && !field ? listbox : null}
+      {open && field && place ? createPortal(listbox, document.body) : null}
     </span>
   );
 }
