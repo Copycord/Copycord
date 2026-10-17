@@ -22,10 +22,13 @@ class _Resp:
 
 
 class _Get:
-    def __init__(self, item):
+    def __init__(self, item, gate=None):
         self.item = item
+        self.gate = gate
 
     async def __aenter__(self):
+        if self.gate is not None:
+            await self.gate.wait()
         if isinstance(self.item, BaseException):
             raise self.item
         return self.item
@@ -44,10 +47,11 @@ def limited(after):
 
 class FakeDiscord:
     """GET /users/{id}/profile answers per user id, served in turn with the last one
-    repeated; records (user id, loop time) per GET."""
+    repeated; records (user id, loop time) per GET. With a gate, answers wait for it."""
 
-    def __init__(self, profiles):
+    def __init__(self, profiles, gate=None):
         self.profiles = {uid: list(items) for uid, items in profiles.items()}
+        self.gate = gate
         self.calls = []
         self.closed = False
 
@@ -55,7 +59,7 @@ class FakeDiscord:
         uid = url.rstrip("/").split("/")[-2]
         self.calls.append((uid, asyncio.get_running_loop().time()))
         items = self.profiles[uid]
-        return _Get(items.pop(0) if len(items) > 1 else items[0])
+        return _Get(items.pop(0) if len(items) > 1 else items[0], self.gate)
 
     def count(self, uid):
         return sum(1 for u, _ in self.calls if u == uid)
@@ -146,9 +150,18 @@ async def test_bio_wait_has_no_time_cap():
 
 @pytest.mark.asyncio
 async def test_progress_reports_bios_done_of_queued():
-    discord = FakeDiscord({uid: [limited(5), ok("x")] for uid in ("1", "2", "3")})
+    # Discord answers once the bio phase has begun (the worker runs from the start of the
+    # scrape), so the first report is none of the three.
+    gate = asyncio.Event()
+    discord = FakeDiscord({uid: [limited(5), ok("x")] for uid in ("1", "2", "3")}, gate)
     reports = []
     s = _scraper(discord, reports)
+
+    def report(done, total, msg=""):
+        reports.append((done, total))
+        gate.set()
+
+    s.config.bio_progress_callback = report
     _skipped, undo = _fake_time(s)
     try:
         await s.scrape()
