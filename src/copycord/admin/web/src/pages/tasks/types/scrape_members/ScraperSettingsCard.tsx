@@ -112,7 +112,7 @@ function LineList({ field, url, title, one, many, help, placeholder, rows, class
       <div className="flex items-center justify-between gap-3">
         <h3 className={SECTION_TITLE}>{title}</h3>
         {loading ? (
-          <Skeleton.Text className="text-xs">{plural(0, one, many)}</Skeleton.Text>
+          <Skeleton.Text className="text-xs">{plural(12, one, many)}</Skeleton.Text>
         ) : loadError ? (
           <span className="text-xs text-danger">{loadError}</span>
         ) : (
