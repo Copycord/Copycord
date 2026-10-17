@@ -157,7 +157,7 @@ describe("guild details dialog", () => {
     expect(within(dialog).getByText("<img src=x onerror=alert(1)> A test guild")).toBeInTheDocument();
     expect(dialog.querySelectorAll("img")).toHaveLength(1);
 
-    // The X in the header and the Close button in the footer, as on the old page.
+    // The X in the header and the Close button in the footer.
     const [x] = within(dialog).getAllByRole("button", { name: "Close" });
     await user.click(x!);
     expect(screen.queryByRole("dialog")).toBeNull();
