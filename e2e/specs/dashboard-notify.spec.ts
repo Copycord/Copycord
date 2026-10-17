@@ -1,4 +1,4 @@
-// Parity for inventory items 23 (Notifications) and 24 (Sync Settings) on the Configuration page.
+// Parity for the Notifications and Sync Settings cards on the Configuration page.
 // The test endpoint is always stubbed, so no webhook is ever called.
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { pageUrl } from "../lib/env.ts";

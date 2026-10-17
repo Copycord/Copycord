@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UI parity lane on Titan WSL: the old Jinja UI (f4211c1) running next to the SPA (this branch), element dumps
+# UI parity run on Titan WSL: the old Jinja UI (f4211c1) running next to the SPA (this branch), element dumps
 # and screenshots from both, element diff and screenshot compare, all packed into /root/uicmp-out.tgz.
 # WSL stops when the ssh session ends, so every step fits in one call and starts its own server:
 #   bash uicmp-titan.sh setup                          clone and build both sides (rerun until it prints SETUP_OK)

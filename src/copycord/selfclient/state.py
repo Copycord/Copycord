@@ -93,9 +93,7 @@ class ConnectionState:
             "guild_members_chunk": self._apply_members_chunk,
         }
 
-    # ------------------------------------------------------------------
     # lookups
-    # ------------------------------------------------------------------
 
     @property
     def guilds(self) -> List[Guild]:
@@ -150,9 +148,7 @@ class ConnectionState:
                     return channel
         return None
 
-    # ------------------------------------------------------------------
     # writes
-    # ------------------------------------------------------------------
 
     def clear(self) -> None:
         """Forget everything."""
@@ -246,9 +242,7 @@ class ConnectionState:
             self._users[_int(author["id"]) or 0] = User(author, self)
         return message
 
-    # ------------------------------------------------------------------
     # appliers
-    # ------------------------------------------------------------------
 
     def _apply_ready(self, d: Dispatch) -> None:
         ready = d.payload

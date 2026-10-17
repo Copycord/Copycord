@@ -1,4 +1,4 @@
-// Stubs for the Configuration page bots panel and log modal (inventory items 8, 13, 14),
+// Stubs for the Configuration page bots panel and log modal,
 // shared by parity.spec.ts and baseline.spec.ts. Both UIs read the same endpoints.
 import type { Page } from "@playwright/test";
 

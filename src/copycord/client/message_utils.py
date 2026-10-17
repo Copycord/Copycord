@@ -303,7 +303,7 @@ class MessageUtils:
 
 
 class Snapshot:
-    """All snapshot-related helpers, shims, and the REST fallback."""
+    """Message-like shims for forwarded-message snapshots, and their REST fallback."""
 
     @staticmethod
     def _is_http_url(u: str | None) -> bool:

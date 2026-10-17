@@ -197,7 +197,7 @@ class ClientUiController:
             await asyncio.sleep(0.5)
 
     def _pick_guild(self) -> Optional[Guild]:
-        """Return the configured guild if available, otherwise the first guild (fallback)."""
+        """Return the configured guild if available, otherwise the first guild."""
         g = None
         if self.guild_id:
             g = self.bot.get_guild(self.guild_id)

@@ -403,9 +403,7 @@ class GatewayClient:
         self._handlers: Dict[str, List[EventHandler]] = {}
         self._dispatch_handlers: List[DispatchHandler] = []
 
-    # ------------------------------------------------------------------
     # Public API
-    # ------------------------------------------------------------------
 
     def on(self, event: str, handler: EventHandler) -> None:
         """Call ``handler(d)`` for every dispatch named ``event``."""
@@ -537,9 +535,7 @@ class GatewayClient:
             self.activity = activity or None
         await self._send_presence_update()
 
-    # ------------------------------------------------------------------
     # Connection lifecycle
-    # ------------------------------------------------------------------
 
     def _ws_headers(self) -> Dict[str, str]:
         """Upgrade-request headers: the browser's UA and Origin."""
@@ -711,9 +707,7 @@ class GatewayClient:
             return True
         return False
 
-    # ------------------------------------------------------------------
     # HELLO / Heartbeat
-    # ------------------------------------------------------------------
 
     async def _handle_hello(self, d: Dict[str, Any]) -> None:
         self.heartbeat_interval = float(d.get("heartbeat_interval", 41250)) / 1000.0
@@ -744,9 +738,7 @@ class GatewayClient:
         log.debug("heartbeat sent (seq=%s)", self.sequence)
         await self._send_bypass({"op": GatewayOp.HEARTBEAT, "d": self.sequence})
 
-    # ------------------------------------------------------------------
     # IDENTIFY / RESUME
-    # ------------------------------------------------------------------
 
     def _gateway_properties(self) -> Dict[str, Any]:
         return dict(fingerprint.gateway_properties(self.token))
@@ -800,9 +792,7 @@ class GatewayClient:
             }
         )
 
-    # ------------------------------------------------------------------
     # OP 41: UPDATE_TIME_SPENT_SESSION_ID
-    # ------------------------------------------------------------------
 
     async def _time_spent_loop(self) -> None:
         await self._send_time_spent()
@@ -823,9 +813,7 @@ class GatewayClient:
             }
         )
 
-    # ------------------------------------------------------------------
     # Dispatch
-    # ------------------------------------------------------------------
 
     def _remember_guild(self, gid: Any) -> None:
         gid = str(gid)
@@ -900,9 +888,7 @@ class GatewayClient:
             except Exception:
                 log.exception("error in dispatch handler for %s", event)
 
-    # ------------------------------------------------------------------
     # Presence update (op 3)
-    # ------------------------------------------------------------------
 
     async def _send_presence_update(self) -> None:
         activities: List[Dict[str, Any]] = []
@@ -929,9 +915,7 @@ class GatewayClient:
             }
         )
 
-    # ------------------------------------------------------------------
     # Helpers
-    # ------------------------------------------------------------------
 
     async def _cancel_task(self, attr: str) -> None:
         task: Optional[asyncio.Task] = getattr(self, attr)

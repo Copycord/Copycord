@@ -50,7 +50,7 @@ const GUILD_SHOTS: Array<{ name: string; fullPage: boolean; open: (page: Page) =
   } },
 ];
 
-// The bots panel with stubbed running bots and the log modal with a stubbed stream (items 13, 14).
+// The bots panel with stubbed running bots and the log modal with a stubbed stream.
 const DASHBOARD_SHOTS: Array<{ name: string; stub: (page: Page) => Promise<void>; open: (page: Page) => Promise<void> }> = [
   { name: "dashboard-bots-running", stub: stubRunning, open: async () => undefined },
   { name: "dashboard-log-modal", stub: stubLogStream, open: async (p) => {

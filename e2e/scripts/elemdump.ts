@@ -1,4 +1,4 @@
-// Element dump for the UI parity review: logs in to one running dashboard (old Jinja UI or the SPA),
+// Element dump for UI parity: logs in to one running dashboard (old Jinja UI or the SPA),
 // visits every screen baseline.spec.ts covers at both viewports, and for the probes in lib/elements.ts
 // writes each matched element's text, box and computed styles to <out>/<screen>-<viewport>.json.
 // With E2E_SHOTS_DIR set it also saves <screen>-<viewport>.png there, the names baseline.spec.ts uses.
@@ -45,7 +45,7 @@ function pathOf(name: PageName): string {
   return UI === "old" && name === "event-logs" ? "/event-logs" : PAGES[name];
 }
 
-// ---- waiting helpers (no expect: this runs outside the test runner) ----
+// waiting helpers (no expect: this runs outside the test runner)
 
 async function until(what: string, fn: () => Promise<boolean>, timeoutMs = 10_000): Promise<void> {
   const end = Date.now() + timeoutMs;
@@ -81,7 +81,7 @@ async function openServerLog(page: Page): Promise<void> {
   await until("log lines", async () => (await page.locator("#log-body").innerText()).includes(LOG_LINES[2]));
 }
 
-// ---- screens: the same names and states as baseline.spec.ts ----
+// screens: the same names and states as baseline.spec.ts
 
 interface Screen {
   name: string;
@@ -228,7 +228,7 @@ const SCREENS: Screen[] = [
   })),
 ];
 
-// ---- in-page measuring ----
+// in-page measuring
 
 /** Mark the content column and the open dialog box so probes can be scoped the same way on both sides. */
 async function mark(page: Page): Promise<void> {
@@ -331,7 +331,7 @@ async function measure(page: Page, probe: Probe): Promise<Measured[]> {
   return rows.map((r) => ({ probe: probe.key, selector, ...r, key: r.key ? `${probe.key} [${r.key}]` : probe.key }));
 }
 
-// ---- run ----
+// run
 
 async function login(browser: Browser): Promise<Awaited<ReturnType<BrowserContext["storageState"]>>> {
   const ctx = await browser.newContext({ baseURL: BASE_URL });

@@ -1,4 +1,4 @@
-// Parity for the Configuration page proxy card (inventory items 25, 26, 27).
+// Parity for the Configuration page proxy card.
 // Every proxy endpoint is stubbed: no real proxy is ever contacted. The bus websocket is stubbed too,
 // so the test pushes the proxy_test messages itself.
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
