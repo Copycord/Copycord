@@ -48,7 +48,6 @@ describe("Field", () => {
     expect(input).toHaveAccessibleDescription("Required From the developer portal");
     expect(screen.getByRole("alert")).toHaveTextContent("Required");
   });
-
 });
 
 describe("Toggle", () => {

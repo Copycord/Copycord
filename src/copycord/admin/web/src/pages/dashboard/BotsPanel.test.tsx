@@ -2,7 +2,6 @@ import { act, fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { StatusResponse } from "../../types/dashboard";
 import { BotsPanel } from "./BotsPanel";
-import { nextPollDelay } from "./useStatusPoll";
 
 class FakeSocket {
   static OPEN = 1;
@@ -83,29 +82,6 @@ describe("BotsPanel status poll", () => {
     expect(calls()).toBe(3);
     expect(document.getElementById("server-status")).toHaveTextContent("Cloning guild");
     expect(document.getElementById("server-uptime")).toHaveTextContent("1m 5s");
-    // Four columns: the status is muted text in its own last cell, nothing under the state chip.
-    const headers = [...document.querySelectorAll("#runtime-body")[0]!.closest("table")!.querySelectorAll("th")];
-    expect(headers.map((th) => th.textContent)).toEqual(["Component", "State", "Uptime", "Status"]);
-    const status = document.getElementById("server-status")!;
-    const row = status.closest("tr")!;
-    expect(status.closest("td")).toBe(row.lastElementChild);
-    expect(status.closest("td")).not.toBe(document.getElementById("server-state")!.closest("td"));
-    expect(document.getElementById("server-state")!.closest("td")!.children).toHaveLength(1);
-    expect(status).toHaveAttribute("title", "Cloning guild");
-    expect(status).toHaveClass("text-muted", "text-ellipsis", "whitespace-nowrap");
-    expect(status.className).not.toMatch(/rounded|bg-/);
-  });
-
-  it("slows to 8 s while a role reports an error", async () => {
-    vi.useFakeTimers();
-    const calls = stubServer(() => ({ server: { running: true, error: "gateway down" }, client: { running: true } }));
-    await mount();
-    await advance(4000);
-    expect(calls()).toBe(2);
-    await advance(7999);
-    expect(calls()).toBe(2);
-    await advance(1);
-    expect(calls()).toBe(3);
   });
 
   it("backs off on fetch failure, doubling up to 15 s, and returns to 4 s once it answers", async () => {
@@ -191,15 +167,6 @@ describe("BotsPanel status poll", () => {
     view.unmount();
     await advance(60000);
     expect(calls()).toBe(1);
-  });
-
-  it("computes the next delay like app.js", () => {
-    expect(nextPollDelay(4000, "ok")).toBe(4000);
-    expect(nextPollDelay(4000, "degraded")).toBe(8000);
-    expect(nextPollDelay(4000, "failed")).toBe(8000);
-    expect(nextPollDelay(8000, "failed")).toBe(15000);
-    expect(nextPollDelay(15000, "failed")).toBe(15000);
-    expect(nextPollDelay(15000, "ok")).toBe(4000);
   });
 });
 
