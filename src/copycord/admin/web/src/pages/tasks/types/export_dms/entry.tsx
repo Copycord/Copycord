@@ -1,7 +1,93 @@
-// Export DMs in the task type registry: its form, inputs rows, summary words and hero count.
+// Export DMs in the task type registry: its form, inputs rows, summary words, hero count and the
+// run page's download card (the saved JSON file, "File no longer on disk" once it was deleted).
 
+import { useEffect, useState } from "react";
 import type { InputRow, TaskTypeEntry } from "..";
+import { Button } from "../../../../components/ui/Button";
+import { ApiError, api } from "../../../../lib/api";
+import type { TaskRun } from "../../../../types/tasks";
+import { formatCount } from "../../StepList";
+import { RUN_CARD } from "../../TasksSkeleton";
+import { sizeWords } from "../download_avatars/entry";
 import { ExportDmsForm } from "./ExportDmsForm";
+
+export const GONE = "File no longer on disk";
+
+export interface ExportFile {
+  filename: string;
+  size: number | null;
+  messages: number | null;
+}
+
+/** The saved file's path from the run report, or null when the run saved none. */
+export function savedPathOf(run: Pick<TaskRun, "report">): string | null {
+  const report = run.report && typeof run.report === "object" ? (run.report as { output?: unknown }) : null;
+  const output = report?.output && typeof report.output === "object" ? (report.output as { json_path?: unknown }) : null;
+  return typeof output?.json_path === "string" && output.json_path ? output.json_path : null;
+}
+
+export function fileUrl(runId: string): string {
+  return `/api/tasks/export-dms/${encodeURIComponent(runId)}/file`;
+}
+
+type FileState = { kind: "loading" } | { kind: "ok"; file: ExportFile } | { kind: "gone" } | { kind: "none" };
+
+export function ExportDmsDownloadCard({ run }: { run: TaskRun }) {
+  const path = savedPathOf(run);
+  const [state, setState] = useState<FileState>({ kind: "loading" });
+  useEffect(() => {
+    if (!path) return;
+    let live = true;
+    setState({ kind: "loading" });
+    api
+      .get<{ file: ExportFile }>(`/api/tasks/export-dms/${encodeURIComponent(run.id)}`)
+      .then((res) => live && setState(res?.file ? { kind: "ok", file: res.file } : { kind: "none" }))
+      .catch((e: unknown) => {
+        if (!live) return;
+        setState(e instanceof ApiError && e.status === 404 && e.message === GONE ? { kind: "gone" } : { kind: "none" });
+      });
+    return () => {
+      live = false;
+    };
+  }, [run.id, path]);
+  if (!path || state.kind === "loading" || state.kind === "none") return null;
+  if (state.kind === "gone") {
+    return (
+      <section aria-label="Download" className={RUN_CARD}>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <span className="text-sm text-text">JSON file</span>
+          <p className="m-0 text-sm text-muted">{GONE}</p>
+        </div>
+      </section>
+    );
+  }
+  const { file } = state;
+  const save = () => {
+    const a = document.createElement("a");
+    a.href = fileUrl(run.id);
+    a.download = file.filename;
+    document.body.append(a);
+    a.click();
+    a.remove();
+  };
+  const facts = [
+    file.messages != null ? `${formatCount(file.messages)} ${file.messages === 1 ? "message" : "messages"}` : null,
+    file.size != null ? sizeWords(file.size) : null,
+  ].filter(Boolean);
+  return (
+    <section aria-label="Download" className={RUN_CARD}>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-sm text-text">{file.filename}</span>
+          {facts.length ? <span className="text-xs text-muted">{facts.join(", ")}</span> : null}
+        </div>
+        <Button variant="primary" onClick={save}>
+          Download JSON
+        </Button>
+      </div>
+    </section>
+  );
+}
 
 /** The webhook without its token: "https://discord.com/api/webhooks/123/...". */
 export function maskWebhook(url: unknown): string {
@@ -32,4 +118,5 @@ export const EXPORT_DMS_ENTRY: TaskTypeEntry = {
   describeInputs: describeExportDms,
   summaryLabels: { exported: "Messages exported", forwarded: "Messages forwarded", failed: "Messages failed" },
   hero: { key: "exported", label: "messages exported" },
+  RunCard: ExportDmsDownloadCard,
 };

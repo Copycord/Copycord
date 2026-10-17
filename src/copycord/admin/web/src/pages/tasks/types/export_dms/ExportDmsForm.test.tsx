@@ -1,11 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
-import type { TaskType } from "../../../../types/tasks";
+import type { TaskRun, TaskType } from "../../../../types/tasks";
 import { typeLabel } from "../../typeLabels";
 import { describeRunInputs, entryFor, heroStat, summaryStats } from "..";
-import { maskWebhook } from "./entry";
+import { ExportDmsDownloadCard, GONE, fileUrl, maskWebhook, savedPathOf } from "./entry";
 import { EXPORT_DMS_EXPLAINER, ExportDmsForm, destinationError, userIdError, webhookError } from "./ExportDmsForm";
 
 const TYPE: TaskType = { key: "export_dms", title: "Export DMs", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -148,5 +148,83 @@ describe("export_dms registration", () => {
 
   it("is titled Export DMs before the type list loads", () => {
     expect(typeLabel("export_dms").title).toBe("Export DMs");
+  });
+});
+
+function runWith(jsonPath: string | null): TaskRun {
+  return {
+    id: "r9",
+    type: "export_dms",
+    status: "success",
+    inputs: { user_id: UID, json_file: jsonPath !== null },
+    context: { label: UID },
+    summary: { exported: 62, failed: 0 },
+    report: { output: { json_path: jsonPath, webhook: null } },
+  } as unknown as TaskRun;
+}
+
+const PATH = `/data/exports/dm/${UID}/20261017-022246/messages.json`;
+
+function serveFile(reply: { status: number; body: unknown }) {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      urls.push(url);
+      return Response.json(reply.body, { status: reply.status });
+    }),
+  );
+  return urls;
+}
+
+describe("Export DMs run page download card", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("shows the saved file with a Download JSON button and never the path", async () => {
+    const urls = serveFile({ status: 200, body: { file: { filename: `dms-${UID}-20261017-022246.json`, size: 2048, messages: 62 } } });
+    const { container } = render(<ExportDmsDownloadCard run={runWith(PATH)} />);
+    const button = await screen.findByRole("button", { name: "Download JSON" });
+    expect(urls).toEqual(["/api/tasks/export-dms/r9"]);
+    expect(screen.getByText(`dms-${UID}-20261017-022246.json`)).toBeInTheDocument();
+    expect(screen.getByText("62 messages, 2.0 KB")).toBeInTheDocument();
+    expect(container.textContent).not.toContain("/data/exports");
+    const clicked: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(`${this.getAttribute("href")} ${this.download}`);
+    });
+    fireEvent.click(button);
+    expect(clicked).toEqual([`${fileUrl("r9")} dms-${UID}-20261017-022246.json`]);
+    click.mockRestore();
+  });
+
+  it("leaves the size out when it is not known", async () => {
+    serveFile({ status: 200, body: { file: { filename: "dms-1-4.json", size: null, messages: 1 } } });
+    render(<ExportDmsDownloadCard run={runWith(PATH)} />);
+    expect(await screen.findByText("1 message")).toBeInTheDocument();
+  });
+
+  it("says File no longer on disk when the file was deleted", async () => {
+    serveFile({ status: 404, body: { detail: GONE } });
+    render(<ExportDmsDownloadCard run={runWith(PATH)} />);
+    expect(await screen.findByText("File no longer on disk")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download JSON" })).toBeNull();
+  });
+
+  it("shows no card when JSON was off or the route has no file", async () => {
+    const urls = serveFile({ status: 404, body: { detail: "No export file" } });
+    const off = render(<ExportDmsDownloadCard run={runWith(null)} />);
+    expect(off.container).toBeEmptyDOMElement();
+    expect(urls).toEqual([]);
+    off.unmount();
+    const none = render(<ExportDmsDownloadCard run={runWith(PATH)} />);
+    await waitFor(() => expect(urls).toEqual(["/api/tasks/export-dms/r9"]));
+    await act(async () => {});
+    expect(none.container).toBeEmptyDOMElement();
+    expect(savedPathOf(runWith(PATH))).toBe(PATH);
+    expect(savedPathOf({ report: null })).toBeNull();
+  });
+
+  it("registers the card", () => {
+    expect(entryFor("export_dms").RunCard).toBe(ExportDmsDownloadCard);
   });
 });
