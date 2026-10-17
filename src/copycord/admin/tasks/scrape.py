@@ -11,7 +11,8 @@
 StandaloneScraper (standalone_scraper.py), which uses the scraper's own user
 tokens and talks to Discord itself, so the server and client bots are not needed.
 
-Steps: Check tokens (the valid scraper tokens that can see the server), Scrape
+Steps: Check tokens (the saved scraper tokens that can see the server; there is no
+token validation, a token that fails or is not in the server is skipped), Scrape
 members (members found of the server's approximate count, as the scraper reports
 them), Save file. One run at a time, as the old queue ran them; later runs wait
 in the framework.
@@ -21,13 +22,13 @@ most CANCEL_WAIT for it to unwind and nothing the scraper reports after the canc
 reaches the run. Members found before the cancel are still saved, as the old page did.
 
 The result is the same file the old page wrote and lists under past scrapes:
-<data dir>/scrapes/<guild id>/scrape_<guild id>_<stamp>.json (save_scrape_file, which
-app.py's _run_single_scrape uses too). GET /api/tasks/scrape-members/<run id> tells
-the run page whether it is still there, and .../file serves it.
+<data dir>/scrapes/<guild id>/scrape_<guild id>_<stamp>.json (save_scrape_file).
+GET /api/tasks/scrape-members/<run id> tells the run page whether it is still there,
+and .../file serves it.
 
-configure(db=..., data_dir=..., token_access=..., user_guilds=..., log_path=...,
+configure(db=..., data_dir=..., in_guild=..., user_guilds=..., log_path=...,
 make_scraper=...) wires the DB (scraper tokens), the data dir (scrapes/, proxies.txt),
-the token access check shared with /api/scraper/validate-setup, the cached account
+the per token membership check (app.py's _selfbot_in_guild), the cached account
 guild list, scraper.out and the scraper class; tests hand in fakes."""
 
 from __future__ import annotations
@@ -69,7 +70,7 @@ DASH = chr(0x2014)
 class _Wiring:
     db: Any = None
     data_dir: Optional[Path] = None
-    token_access: Optional[Callable[[int], Awaitable[tuple]]] = None
+    in_guild: Optional[Callable[[str, int], Awaitable[bool]]] = None
     user_guilds: Optional[Callable[[str], Awaitable[list]]] = None
     log_path: Optional[Path] = None
     make_scraper: Callable[[Any], Any] = StandaloneScraper
@@ -79,15 +80,15 @@ _wiring = _Wiring()
 
 
 def configure(db: Any = None, data_dir: Any = None,
-              token_access: Optional[Callable[[int], Awaitable[tuple]]] = None,
+              in_guild: Optional[Callable[[str, int], Awaitable[bool]]] = None,
               user_guilds: Optional[Callable[[str], Awaitable[list]]] = None,
               log_path: Any = None, make_scraper: Optional[Callable[[Any], Any]] = None) -> None:
     if db is not None:
         _wiring.db = db
     if data_dir is not None:
         _wiring.data_dir = Path(data_dir)
-    if token_access is not None:
-        _wiring.token_access = token_access
+    if in_guild is not None:
+        _wiring.in_guild = in_guild
     if user_guilds is not None:
         _wiring.user_guilds = user_guilds
     if log_path is not None:
@@ -130,16 +131,18 @@ def describe(inputs: ScrapeInputs, lookups: Any = None) -> tuple[str, dict]:
 
 # settings: tokens and proxies
 
-def _tokens() -> tuple[list[dict], int]:
-    """(valid scraper tokens, how many tokens are saved)."""
+def _tokens() -> list[dict]:
+    """Every saved scraper token, least used first. Tokens are not validated: one that
+    fails or cannot see the server is skipped when it is used."""
     db = _wiring.db
     if db is None:
-        return [], 0
+        return []
     try:
-        return list(db.get_valid_scraper_tokens() or []), len(db.list_scraper_tokens() or [])
+        tokens = [t for t in (db.list_scraper_tokens() or []) if t.get("token_value")]
     except Exception:
         log.exception("scraper tokens unreadable")
-        return [], 0
+        return []
+    return sorted(tokens, key=lambda t: int(t.get("use_count") or 0))
 
 
 def saved_proxies() -> list[str]:
@@ -153,12 +156,21 @@ def saved_proxies() -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-async def _access(guild_id: int) -> tuple[list[dict], list[dict]]:
-    """(tokens that can see the server, one result per valid token)."""
-    if _wiring.token_access is None:
-        return [], []
-    access, results = await _wiring.token_access(guild_id)
-    return list(access or []), list(results or [])
+async def _access(tokens: list[dict], guild_id: int) -> list[dict]:
+    """The tokens that can see the server. A token whose check fails (bad token, Discord
+    error) counts as not in the server."""
+    if _wiring.in_guild is None:
+        return []
+    usable: list[dict] = []
+    for token in tokens:
+        try:
+            ok = await _wiring.in_guild(token["token_value"], guild_id)
+        except Exception as exc:
+            log.info("scraper token %s skipped: %s", token.get("token_id"), exc)
+            ok = False
+        if ok:
+            usable.append(token)
+    return usable
 
 
 def _guilds_error(exc: Exception) -> str:
@@ -171,30 +183,24 @@ def _guilds_error(exc: Exception) -> str:
 
 
 async def options(params: dict) -> dict:
-    """What the form needs: {guilds: [{id, name, tokens}], tokens: {valid, total}, proxies, error?};
-    with ?guild_id=, also setup: which tokens can see that server (the validate-setup check)."""
-    valid, total = _tokens()
-    out: dict = {"guilds": [], "tokens": {"valid": len(valid), "total": total},
+    """What the form needs: {guilds: [{id, name, tokens}], tokens: {total, skipped}, proxies, error?}.
+    The guild list is the union of the saved tokens' servers; a token whose list does not load
+    is skipped (counted in tokens.skipped), never an error unless none loads."""
+    tokens = _tokens()
+    out: dict = {"guilds": [], "tokens": {"total": len(tokens), "skipped": 0},
                  "proxies": len(saved_proxies())}
-    if not valid:
-        out["error"] = "No valid scraper tokens. Add one first." if not total else "No valid scraper tokens."
+    if not tokens:
+        out["error"] = "No scraper tokens. Add one first."
         return out
-    gid = str(params.get("guild_id") or "").strip()
-    if gid:
-        if not gid.isdigit():
-            out["setup"] = {"ok": False, "error": "Enter a numeric server ID"}
-        else:
-            access, results = await _access(int(gid))
-            out["setup"] = {"ok": bool(access), "tokens_in_guild": len(access),
-                            "tokens_missing": len(results) - len(access), "results": results}
     if _wiring.user_guilds is not None:
         seen: dict[str, dict] = {}
         errors: list[str] = []
-        for token in valid:
+        for token in tokens:
             try:
                 raw = await _wiring.user_guilds(token["token_value"])
             except Exception as exc:
                 errors.append(_guilds_error(exc))
+                out["tokens"]["skipped"] += 1
                 continue
             for g in raw or []:
                 g_id = str(g.get("id") or "").strip()
@@ -409,7 +415,7 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
     scrape_step = ctx.step("scrape", "Scrape members")
     save_step = ctx.step("save", "Save file")
     proxies = saved_proxies() if inputs.use_proxies else []
-    counts = {"members": 0, "tokens": 0, "tokens_missing": 0}
+    counts = {"members": 0, "tokens": 0, "tokens_skipped": 0}
     report: dict = {
         "inputs": {**inputs.model_dump(mode="json"), "proxies": len(proxies)},
         "guild": {"id": gid, "name": name if name != gid else None},
@@ -426,25 +432,27 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
 
     # Check tokens
     await tokens_step.start()
-    valid, _total = _tokens()
-    if not valid:
-        await tokens_step.finish("failed", "No valid scraper tokens")
+    tokens = _tokens()
+    if not tokens:
+        note = "No scraper tokens saved"
+        await tokens_step.finish("failed", note)
         await scrape_step.finish("skipped", "Not reached")
         await save_step.finish("skipped", "Not reached")
-        await end("No valid scraper tokens")
-        ctx.fail("No valid scraper tokens")
+        await end(note)
+        ctx.fail(note)
         return
-    await tokens_step.state(f"Checking {len(valid)} token{'s' if len(valid) != 1 else ''}")
-    cancelled, access = await _race(ctx, _access(int(gid)))
+    await tokens_step.state(f"Checking {len(tokens)} token{'s' if len(tokens) != 1 else ''}")
+    cancelled, usable = await _race(ctx, _access(tokens, int(gid)))
     if cancelled:
         await end()
         await ctx.log("Run cancelled", level="warning")
         return
-    usable, results = access
+    skipped = len(tokens) - len(usable)
     counts["tokens"] = len(usable)
-    counts["tokens_missing"] = max(0, len(results) - len(usable))
+    counts["tokens_skipped"] = skipped
     if not usable:
-        note = "None of the scraper tokens can see this server"
+        note = (f"None of the {len(tokens)} scraper tokens work in this server" if len(tokens) != 1
+                else "The scraper token does not work in this server")
         await tokens_step.finish("failed", note)
         await scrape_step.finish("skipped", "Not reached")
         await save_step.finish("skipped", "Not reached")
@@ -457,9 +465,14 @@ async def run(ctx: Any, inputs: ScrapeInputs) -> None:
             _wiring.db.increment_scraper_token_usage(token["token_id"])
         except Exception:
             pass
-    note = f"{len(usable)} of {len(results) or len(usable)} tokens can see this server"
+    note = f"{len(usable)} of {len(tokens)} token{'s' if len(tokens) != 1 else ''} used"
+    if skipped:
+        note += f", {skipped} skipped"
     await tokens_step.finish("success", note)
     await ctx.log(note, step="tokens")
+    if skipped:
+        await ctx.log(f"{skipped} token{'s' if skipped != 1 else ''} skipped: failed or not in this server",
+                      level="warning", step="tokens")
 
     # Scrape members
     job = _Job(gid)
