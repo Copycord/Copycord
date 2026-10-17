@@ -55,9 +55,6 @@ export const INCLUDE_FIELDS = [
 
 type IncludeKey = (typeof INCLUDE_FIELDS)[number]["key"];
 
-/** Concurrent sessions per token the run may open, 1 to 5. */
-export const SESSION_CHOICES = ["1", "2", "3", "4", "5"].map((v) => ({ value: v, label: v }));
-
 /** "Enter a numeric server ID." unless the text is all digits (blank is fine: the picker is used). */
 export function guildIdError(text: string): string | undefined {
   const t = text.trim();
@@ -89,7 +86,6 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
     () => Object.fromEntries(INCLUDE_FIELDS.map((f) => [f.key, f.initial])) as Record<IncludeKey, boolean>,
   );
   const [useProxies, setUseProxies] = useState(true);
-  const [sessions, setSessions] = useState("1");
   const dev = type.dev === true;
   const [debugReport, setDebugReport] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -117,7 +113,7 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
       guild_id: typed || guildId,
       ...include,
       use_proxies: useProxies,
-      sessions_per_token: Number(sessions),
+      sessions_per_token: 1,
       ...(dev ? { debug_report: debugReport } : {}),
     });
     if (res && Object.keys(res).length) setErrors(Object.fromEntries(Object.entries(res).map(([k, v]) => [k, serverText(v)])));
@@ -220,12 +216,6 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
             checked={useProxies}
             onChange={(v) => changed(() => setUseProxies(v))}
           />
-
-          <Field label="Sessions per token" help="More is faster but riskier." error={errors.sessions_per_token}>
-            <div className="w-28">
-              <FieldSelect value={sessions} onChange={(v) => changed(() => setSessions(v))} options={SESSION_CHOICES} />
-            </div>
-          </Field>
 
           {dev ? (
             <div className="flex flex-col gap-1">
