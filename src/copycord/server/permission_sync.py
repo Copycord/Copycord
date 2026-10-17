@@ -32,9 +32,7 @@ def _channel_name_blacklisted(name: str, patterns: list[str]) -> bool:
 
 
 class ChannelPermissionSync:
-    """
-    Permission applier for category & channel role overwrites using cloned roles.
-    """
+    """Applies category and channel role overwrites using cloned roles."""
 
     def __init__(
         self,
@@ -65,9 +63,7 @@ class ChannelPermissionSync:
         self._emit_event_log = emit_event_log
 
     def _log(self, level: str, msg: str, *args) -> None:
-        """
-        Permission-sync logger that prefixes with the current sync context.
-        """
+        """Permission-sync logger that prefixes with the current sync context."""
         prefix = logctx.format_prefix()
         base = self.log
         if base is None:

@@ -146,7 +146,7 @@ class WebsocketManager:
         path: str,
         handler: Callable[[dict], Awaitable[dict | None]],
     ):
-        """Resilient serve loop: graceful on peer close, no traceback when the peer closes before our send, never blocks shutdown."""
+        """Serve loop: graceful on peer close, no traceback when the peer closes before our send, never blocks shutdown."""
         peer = getattr(ws, "remote_address", None)
         # no open/close logging: senders dial a fresh connection per message, so it would fire per message; abnormal closes still log
         try:

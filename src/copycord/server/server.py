@@ -153,9 +153,7 @@ def _channel_name_blacklisted(name: str, patterns: list[str]) -> bool:
 
 
 class _GuildPrefixFilter(logging.Filter):
-    """
-    Prepend mapping name to every server log line.
-    """
+    """Prepend the mapping name to every server log line."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
@@ -864,7 +862,6 @@ class ServerReceiver:
         self.verify.start()
 
     async def on_ready(self):
-        """Called when the bot is ready."""
         self._start_verify()
         await self._load_blocked_keywords_cache()
         await self._load_channel_name_blacklist_cache()
@@ -1442,7 +1439,7 @@ class ServerReceiver:
                 )
 
     async def _bf_finish_channel(self, orig: int) -> int | None:
-        """Existing end of stream flow: drain, temp webhook cleanup, buffer flush. Returns messages written."""
+        """End of stream cleanup for a channel: drain, temp webhook cleanup, buffer flush. Returns messages written."""
         tid = (self.backfill._progress.get(orig) or {}).get("task_id")
 
         written = await self.backfill.on_done(
@@ -5163,9 +5160,7 @@ class ServerReceiver:
         target_chans: set[int] | None = None,
         target_thread_parents: set[int] | None = None,
     ) -> None:
-        """
-        If targets provided: drain only those; otherwise drain all buffers.
-        """
+        """Drain the buffers for the given targets, or every buffer when none are given."""
 
         if target_chans:
             for cid in list(target_chans):
@@ -7177,9 +7172,7 @@ class ServerReceiver:
         original_guild_id: int | None,
         cloned_guild_id: int | None,
     ) -> tuple[str | None, list[discord.Embed] | None]:
-        """
-        Apply per-mapping word/phrase rewrites to the message text and embed text.
-        """
+        """Apply per-mapping word/phrase rewrites to the message text and embed text."""
         if (text is None) and not embeds:
             return text, embeds
 
@@ -7377,9 +7370,7 @@ class ServerReceiver:
         *,
         cloned_guild_id: int | None = None,
     ) -> str:
-        """
-        Rewrite <@&role_id> mentions to the appropriate cloned role id.
-        """
+        """Rewrite <@&role_id> mentions to the cloned role id."""
 
         def repl(m: re.Match) -> str:
             full = m.group(0)
@@ -13425,9 +13416,7 @@ class ServerReceiver:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> tuple[bool, str | None]:
-        """
-        Check if a user should be blocked for a specific mapping.
-        """
+        """(blocked, reason) for a user on a mapping; a whitelist, when set, blocks everyone not on it."""
         if not user_id:
             return False, None
 

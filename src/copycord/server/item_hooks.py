@@ -40,6 +40,6 @@ class ItemHooks:
     def check(self) -> None:
         """Right before a Discord change and after a download or rate limit wait: once a stop
         was asked, raise CancelledError so the item ends cancelled with nothing changed (it
-        passes the passes' except Exception blocks)."""
+        is not caught by the passes' except Exception blocks)."""
         if self.stop():
             raise asyncio.CancelledError()

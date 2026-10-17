@@ -307,7 +307,7 @@ class TokenIdentityManager:
         """Put this author's picture on the account sending as them.
 
         Only called when the hash actually moved, so a stable author costs
-        nothing. Failure is not retried here -- the hash stays unrecorded, so
+        nothing. Failure is not retried here: the hash stays unrecorded, so
         the next message tries again.
         """
         token_id = str(token_row.get("token_id") or "")
@@ -333,7 +333,7 @@ class TokenIdentityManager:
             ok = False
 
         if not ok and token_id:
-            # Whatever the reason -- captcha, rate limit, a refused gateway --
+            # Whatever the reason (captcha, rate limit, a refused gateway),
             # it will not resolve by trying again on the next message, and the
             # hash is never recorded so we would retry forever.
             self._avatar_skip.add(token_id)
