@@ -127,6 +127,7 @@ async def list_types():
     types = []
     for t in registry.all():
         _, total = svc.list({"type": t.key}, 1, 1)
+        active = svc.active_runs(t.key)
         types.append({
             "key": t.key,
             "title": t.title,
@@ -135,7 +136,8 @@ async def list_types():
             "requires_bots": t.requires_bots,
             # Dev mode (COPYCORD_ENV=dev): forms show their developer options.
             "dev": is_dev(),
-            "active": len(svc.active_runs(t.key)),
+            "active": len(active),
+            "queued": sum(1 for r in active if r.status == "queued"),
             "total": total,
         })
     return {"types": types}

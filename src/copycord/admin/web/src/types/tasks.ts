@@ -15,6 +15,8 @@ export interface TaskType {
   dev?: boolean;
   /** Queued plus running runs of this type. */
   active: number;
+  /** Of those, the runs still queued. */
+  queued?: number;
   total: number;
 }
 
@@ -35,15 +37,6 @@ export interface TaskStep {
   started_at?: string | null;
   finished_at?: string | null;
   note?: string | null;
-}
-
-/** One friendly log line in the run detail's log_lines; seq numbers the line, step names a step key. */
-export interface TaskLogLine {
-  seq: number;
-  ts: string;
-  level: "info" | "warn" | "error" | string;
-  step?: string | null;
-  msg: string;
 }
 
 export interface TaskRun {
@@ -69,6 +62,10 @@ export interface TaskRun {
   report?: unknown;
   /** Monotonic per run; a frame with a lower seq than the one held is stale. */
   seq: number;
+  /** Queued behind a concurrency slot: the run of the type holding it. Null when not waiting. */
+  waiting_for?: { id: string; number: number; type: string; title: string } | null;
+  /** This run's place in line when more than one run of its type waits. */
+  queue_position?: number | null;
 }
 
 export interface TaskTypesResponse {
@@ -138,9 +135,4 @@ export interface PurgePreviewResponse {
   mappings: { mapping_id: string | null; name: string; matched: number }[];
   errors?: Record<string, string>;
   error?: string;
-}
-
-/** A 422 from POST /api/tasks/runs: one message per input field. */
-export interface TaskInputErrors {
-  errors: Record<string, string>;
 }

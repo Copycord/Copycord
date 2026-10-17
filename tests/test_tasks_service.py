@@ -294,6 +294,43 @@ async def test_concurrency_one_queues_the_second_run(svc):
     assert (await _settled(svc, second.id)).status == "success"
 
 
+
+@pytest.mark.asyncio
+async def test_queued_run_says_what_it_waits_for(svc, events):
+    GATES[1], GATES[2], GATES[3] = Gate(), Gate(), Gate()
+    first = await svc.start("t_gated", {})
+    second = await svc.start("t_gated", {})
+    third = await svc.start("t_gated", {})
+    await asyncio.wait_for(GATES[1].started.wait(), 1)
+    await asyncio.sleep(0.05)
+    blocker = {"id": str(first.id), "number": 1, "type": "t_gated", "title": svc.get(first.id).title}
+    wire = svc.get(second.id).to_wire()
+    assert wire["waiting_for"] == blocker and wire["queue_position"] == 1
+    assert svc.get(third.id).to_wire()["queue_position"] == 2
+    assert svc.get(first.id).to_wire()["waiting_for"] is None
+    # The list rows and the published frames carry it too.
+    rows, _ = svc.list({"type": "t_gated"})
+    assert {r.number: r.to_wire(include_steps=False)["waiting_for"] for r in rows}[2] == blocker
+    assert any(e["run"]["id"] == str(second.id) and e["run"]["waiting_for"] == blocker for e in events)
+    # Cancelled while queued: it ends without waiting, the one behind it moves up alone.
+    await svc.cancel(second.id)
+    ended = await _settled(svc, second.id)
+    assert ended.status == "cancelled" and ended.waiting_for is None and ended.queue_position is None
+    assert svc.get(third.id).waiting_for == blocker and svc.get(third.id).queue_position is None
+    # The blocker ends: the next run starts with the field cleared, and that went out live.
+    events.clear()
+    GATES[1].release.set()
+    await asyncio.wait_for(GATES[3].started.wait(), 1)
+    started = svc.get(third.id)
+    assert started.status == "running" and started.waiting_for is None
+    frames = [e["run"] for e in events if e["run"]["id"] == str(third.id)]
+    assert frames and frames[-1]["status"] == "running" and frames[-1]["waiting_for"] is None
+    # It never read "queued, waiting for nothing" between the blocker ending and it starting.
+    assert all(f["waiting_for"] == blocker for f in frames if f["status"] == "queued")
+    GATES[3].release.set()
+    assert (await _settled(svc, third.id)).status == "success"
+
+
 def _row(repo, type_key, status, number):
     run = TaskRun(type=type_key, number=number, status=status, title=f"{type_key} {number}",
                   trigger="manual", actor="admin", inputs={},

@@ -26,7 +26,6 @@
   --color-primary-700: #6d28d9;
   --color-accent: #a78bfa;
   --color-brand-ghost: rgba(139, 92, 246, 0.14);
-  --color-brand-ghost-2: rgba(139, 92, 246, 0.28);
   --color-danger: #f0506e;
   --color-good: #3ecf8e;
   /* Active work (a running or queued task run); the only blue in the theme. */
@@ -189,12 +188,10 @@
   --color-native-select: #efefef;
   --color-wash-4-5: rgba(255, 255, 255, 0.045);
   --color-good-a12: rgba(62, 207, 142, 0.12);
-  --color-good-a35: rgba(62, 207, 142, 0.35);
 
   /* Guilds */
   --color-dialog-text: #ededf4;
   --color-dialog-small: #181822;
-  --color-accent-a6: rgba(167, 139, 250, 0.06);
   --color-accent-a22: rgba(167, 139, 250, 0.22);
   --color-good-a18: rgba(62, 207, 142, 0.18);
 
@@ -203,39 +200,17 @@
   --color-info-soft: #4f9cf7;
   --color-muted-a40: rgba(163, 163, 184, 0.4);
   --color-surface-deep-a95: rgba(24, 24, 34, 0.95);
-  --color-good-a40: rgba(62, 207, 142, 0.4);
   --color-danger-a12: rgba(240, 80, 110, 0.12);
   --color-primary-a12: rgba(139, 92, 246, 0.12);
   --color-primary-a30: rgba(139, 92, 246, 0.3);
-  --color-primary-a35: rgba(139, 92, 246, 0.35);
   --color-info-a12: rgba(79, 156, 247, 0.12);
-  --color-info-a35: rgba(79, 156, 247, 0.35);
   --color-slate-a10: rgba(139, 139, 158, 0.1);
-  --color-slate-a30: rgba(139, 139, 158, 0.3);
 
   /* Scraper */
   --color-good-soft: #3ecf8e;
   --color-caution: #f5a524;
-  --color-control-a35: rgba(26, 26, 30, 0.35);
-  --color-control-a40: rgba(26, 26, 30, 0.4);
-  --color-control-a50: rgba(26, 26, 30, 0.5);
-  --color-control-a60: rgba(26, 26, 30, 0.6);
-  --color-control-a70: rgba(26, 26, 30, 0.7);
-  --color-control-a80: rgba(26, 26, 30, 0.8);
-  --color-good-soft-a10: rgba(62, 207, 142, 0.1);
-  --color-good-soft-a25: rgba(62, 207, 142, 0.25);
-  --color-good-a8: rgba(62, 207, 142, 0.08);
-  --color-good-a10: rgba(62, 207, 142, 0.1);
   --color-good-a15: rgba(62, 207, 142, 0.15);
-  --color-good-a30: rgba(62, 207, 142, 0.3);
-  --color-good-a50: rgba(62, 207, 142, 0.5);
   --color-danger-a15: rgba(240, 80, 110, 0.15);
-  --color-danger-a30: rgba(240, 80, 110, 0.3);
-  --color-danger-a40: rgba(240, 80, 110, 0.4);
-  --color-primary-a8: rgba(139, 92, 246, 0.08);
-  --color-primary-a25: rgba(139, 92, 246, 0.25);
-  --color-primary-a40: rgba(139, 92, 246, 0.4);
-  --color-info-a15: rgba(79, 156, 247, 0.15);
 
   /* Logs */
   --color-danger-light: #f7a1b2;
@@ -258,30 +233,17 @@
   --color-primary-a20: rgba(139, 92, 246, 0.2);
   --color-primary-a50: rgba(139, 92, 246, 0.5);
   --color-accent-a15: rgba(167, 139, 250, 0.15);
-  --color-accent-a25: rgba(167, 139, 250, 0.25);
   --color-danger-a20: rgba(240, 80, 110, 0.2);
-  --color-danger-a25: rgba(240, 80, 110, 0.25);
-  --color-good-a25: rgba(62, 207, 142, 0.25);
   --color-caution-a15: rgba(245, 165, 36, 0.15);
-  --color-caution-a25: rgba(245, 165, 36, 0.25);
   --color-info-soft-a15: rgba(79, 156, 247, 0.15);
-  --color-info-soft-a25: rgba(79, 156, 247, 0.25);
   --color-slate-a15: rgba(139, 139, 158, 0.15);
-  --color-slate-a25: rgba(139, 139, 158, 0.25);
   --color-kind-thread-a15: rgba(244, 114, 182, 0.15);
-  --color-kind-thread-a25: rgba(244, 114, 182, 0.25);
   --color-kind-role-a15: rgba(251, 146, 60, 0.15);
-  --color-kind-role-a25: rgba(251, 146, 60, 0.25);
   --color-kind-emoji-a15: rgba(34, 211, 238, 0.15);
-  --color-kind-emoji-a25: rgba(34, 211, 238, 0.25);
   --color-kind-sticker-a15: rgba(232, 121, 249, 0.15);
-  --color-kind-sticker-a25: rgba(232, 121, 249, 0.25);
   --color-kind-guild-a15: rgba(192, 132, 252, 0.15);
-  --color-kind-guild-a25: rgba(192, 132, 252, 0.25);
   --color-kind-permissions-a15: rgba(253, 186, 116, 0.15);
-  --color-kind-permissions-a25: rgba(253, 186, 116, 0.25);
   --color-kind-metadata-a15: rgba(56, 189, 248, 0.15);
-  --color-kind-metadata-a25: rgba(56, 189, 248, 0.25);
 }
 
 :root {

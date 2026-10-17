@@ -644,76 +644,6 @@ class ClientListener:
 
         return None
 
-    async def _resolve_accessible_host_channel(self, orig_channel_id: int):
-        """Map a cloned channel id to its host channel id; returns an accessible channel object with the resolved channel_id and guild."""
-        logger = logging.getLogger("client")
-
-        channel_id = int(orig_channel_id)
-        if hasattr(self, "chan_map"):
-
-            def _row_get(row, key, default=None):
-                try:
-                    if isinstance(row, dict):
-                        return row.get(key, default)
-                    return row[key] if key in row.keys() else default
-                except Exception:
-                    return default
-
-            for src_id, row in getattr(self, "chan_map", {}).items():
-                if int(_row_get(row, "cloned_channel_id", 0) or 0) == channel_id:
-                    logger.debug(
-                        f"[map] Mapped cloned channel {channel_id} -> host channel {src_id}"
-                    )
-                    channel_id = int(src_id)
-                    break
-
-        channel = self.bot.get_channel(channel_id)
-        if not channel:
-            try:
-                channel = await self.bot.fetch_channel(channel_id)
-            except Forbidden:
-                channel = None
-
-        guild = getattr(channel, "guild", None)
-        if guild is None:
-            host_guild = next(
-                (
-                    self.bot.get_guild(gid)
-                    for gid in sorted(self._mapped_original_ids)
-                    if self.bot.get_guild(gid)
-                ),
-                None,
-            )
-            if host_guild is None and self.bot.guilds:
-                host_guild = self.bot.guilds[0]
-            guild = host_guild
-
-        if channel is None:
-            me = guild.me or guild.get_member(
-                getattr(getattr(self.bot, "user", None), "id", 0)
-            )
-
-            def can_read(ch) -> bool:
-                try:
-                    if me is None:
-                        return False
-                    perms = ch.permissions_for(me)
-                    return bool(perms.view_channel and perms.read_message_history)
-                except Exception:
-                    return False
-
-            readable = next((ch for ch in guild.text_channels if can_read(ch)), None)
-            if not readable:
-                raise Forbidden(
-                    403,
-                    {"message": "No accessible text channel found in the host guild."},
-                )
-
-            channel = readable
-            channel_id = readable.id
-
-        return channel, channel_id, guild
-
     async def _startup_sync(self):
         """One-time sitemap sync on startup. Events handle changes after this."""
         await self.bot.wait_until_ready()
@@ -849,40 +779,6 @@ class ClientListener:
                 )
 
         asyncio.create_task(self._snapshot_all_guilds_once())
-
-    def _rebuild_blocklist(self, kw_map: dict | None = None) -> None:
-        if kw_map is None:
-            kw_map = self.db.get_blocked_keywords_by_origin()
-
-        normalized_map: dict[int, list[str]] = {}
-        patterns_map: dict[int, list[tuple[re.Pattern, str]]] = {}
-
-        for gid_key, words in (kw_map or {}).items():
-            try:
-                gid_int = int(gid_key)
-            except (TypeError, ValueError):
-                continue
-
-            cleaned_words = [
-                (w or "").strip().lower() for w in (words or []) if w and str(w).strip()
-            ]
-
-            normalized_map[gid_int] = cleaned_words
-
-            pat_list: list[tuple[re.Pattern, str]] = []
-            for w in cleaned_words:
-                regex = re.compile(
-                    rf"(?<!\w){re.escape(w)}(?!\w)",
-                    re.IGNORECASE,
-                )
-                pat_list.append((regex, w))
-
-            patterns_map[gid_int] = pat_list
-
-        self.blocked_keywords_map = normalized_map
-        self._blocked_patterns_map = patterns_map
-
-        logger.debug("[⚙️] Block list now: %s", self.blocked_keywords_map)
 
     def should_ignore(self, message: Message) -> bool:
         """Whether a Discord message should be ignored."""

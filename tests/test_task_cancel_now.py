@@ -228,7 +228,6 @@ async def test_sync_assets_cancel_during_a_create_that_never_answers(svc, db, wi
     make, holder = wired
     guild = _CloneGuild(block_on="benny_wizard")
     server = make(guild, _host_stickers("benny_wizard", "after"))
-    server.stickers.ratelimit.set_proxy_bypass(True)
     end_frames = []
     real_dispatch = sync_assets.dispatch
 

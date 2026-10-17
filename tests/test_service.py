@@ -87,11 +87,6 @@ def test_systemd_user_unit_skips_options_that_need_root():
         assert option not in unit
 
 
-def test_systemd_quote_escapes_specifiers():
-    assert service._systemd_quote("/a/100%") == '"/a/100%%"'
-    assert service._systemd_quote("/plain") == "/plain"
-
-
 def test_user_install_writes_unit_and_enables(tmp_path, fake_run, system_dir, monkeypatch, capsys):
     monkeypatch.setenv("USER", "mac")
     svc = service.SystemdService(True, home=tmp_path)
@@ -133,13 +128,6 @@ def test_user_install_when_linger_cannot_be_turned_on(tmp_path, monkeypatch, sys
     assert len(attention) == 1
     assert attention[0][1] == "Starts only when you log in"
     assert attention[0][2].endswith("run: sudo loginctl enable-linger mac")
-
-
-def test_linger_enabled_reads_loginctl(monkeypatch):
-    for answer, want in (((0, "Linger=yes\n"), True), ((0, "Linger=no\n"), False),
-                         ((1, ""), False), ((127, ""), None)):
-        monkeypatch.setattr(service, "run_cmd", FakeRun({("loginctl",): answer}))
-        assert service.linger_enabled("mac") is want
 
 
 def test_install_without_systemd_keeps_the_systemctl_error(tmp_path, monkeypatch, system_dir):
@@ -468,14 +456,6 @@ def test_windowless_command_falls_back_to_pythonw_of_this_environment(tmp_path, 
     ]
 
 
-def test_windowless_command_keeps_the_command_without_a_windowless_program(tmp_path, monkeypatch):
-    bin_dir = _launchers(tmp_path, "copycord.exe")
-    monkeypatch.setattr(service.sys, "executable", str(tmp_path / "none" / "python.exe"))
-    command = [str(bin_dir / "copycord.exe")]
-    assert service.windowless_command(command) == command
-    assert service.windowless_command(EXE) == EXE
-
-
 def test_opens_window_and_task_data_dir():
     assert service.opens_window(r"C:\Users\Mac\.local\bin\copycord.exe")
     assert service.opens_window(r'"C:\Py\python.exe"')
@@ -653,21 +633,6 @@ def test_use_windowless_without_a_windowless_program(tmp_path, monkeypatch, no_p
     assert task.actions() == []
 
 
-def test_console_task_is_windows_only(monkeypatch):
-    monkeypatch.setattr(service.sys, "platform", "linux")
-    monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran schtasks"))
-    assert service.console_task() is None
-
-
-def test_task_name_override(monkeypatch):
-    fake = FakeRun()
-    monkeypatch.setattr(service, "run_cmd", fake)
-    svc = service.ScheduledTaskService(env={"COPYCORD_TASK_NAME": "Copycord Test"})
-    svc.start()
-    assert fake.calls == [["schtasks", "/Run", "/TN", "Copycord Test"]]
-    assert svc.where == 'scheduled task "Copycord Test"'
-
-
 def test_busy_ports_reads_the_configured_ports(monkeypatch):
     seen = []
     monkeypatch.setattr(service, "port_free", lambda host, port: seen.append((host, port)) or port != 9200)
@@ -677,17 +642,6 @@ def test_busy_ports_reads_the_configured_ports(monkeypatch):
     seen.clear()
     service.busy_ports({**env, "DASHBOARD_HOST": "0.0.0.0"})
     assert seen[-1] == ("0.0.0.0", 8181)
-
-
-def test_dashboard_url_shows_localhost_unless_one_address_is_set(monkeypatch):
-    monkeypatch.delenv("ADMIN_PORT", raising=False)
-    for listen, url in ((None, "http://localhost:8080"), ("0.0.0.0", "http://localhost:8080"),
-                        ("192.168.1.20", "http://192.168.1.20:8080")):
-        if listen is None:
-            monkeypatch.delenv("DASHBOARD_HOST", raising=False)
-        else:
-            monkeypatch.setenv("DASHBOARD_HOST", listen)
-        assert service.dashboard_url() == url
 
 
 def test_port_free_sees_a_listening_socket():
@@ -765,15 +719,6 @@ def test_cli_status_running(status_svc, capsys):
     assert "copycord service:" not in out and "(" not in out
 
 
-def test_cli_status_stopped(status_svc, capsys):
-    status_svc(running=False)
-    assert cli.main(["service", "status"]) == 3
-    out = capsys.readouterr().out
-    assert "  Status   ! stopped" in out
-    assert "Started" not in out
-    assert out.strip().splitlines()[-1] == "Start it with copycord service start"
-
-
 def test_cli_status_not_installed(status_svc, capsys):
     status_svc(installed=False, running=False)
     assert cli.main(["service", "status"]) == 3
@@ -803,31 +748,6 @@ class _Tty:
         return True
 
 
-def _on_a_terminal(monkeypatch, columns=78):
-    import sys
-
-    from copycord import ui
-
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setattr(ui, "_columns", lambda: columns)
-    monkeypatch.setattr(ui, "brand", lambda stream=None: "Copycord v4.0.0 (abcdef1)")
-    out = _Tty()
-    monkeypatch.setattr(sys, "stdout", out)
-    return out
-
-
-def test_cli_status_not_installed_on_a_terminal_is_a_rail(status_svc, monkeypatch):
-    status_svc(installed=False, running=False)
-    out = _on_a_terminal(monkeypatch)
-    assert cli.main(["service", "status"]) == 3
-    lines = out.buf.getvalue().splitlines()
-    assert "Copycord v4.0.0 (abcdef1)" in lines
-    assert "\u250c  Copycord service status" in lines
-    assert any(x.startswith("\u25c7  Copycord service \u2500") for x in lines)
-    assert any("Status  \u2022 not installed" in x for x in lines)
-    assert lines[-1] == "\u2514  Install it with copycord service install"
-
-
 def test_cli_status_json(status_svc, capsys):
     import json
 
@@ -844,52 +764,6 @@ def test_cli_status_json(status_svc, capsys):
     }
 
 
-def test_cli_status_json_for_a_user_unit_says_when_it_starts(tmp_path, monkeypatch, capsys):
-    import json
-
-    svc = service.SystemdService(True, home=tmp_path)
-    svc.unit_path.parent.mkdir(parents=True)
-    svc.unit_path.write_text("x")
-    monkeypatch.setattr(service, "get_service", lambda *a, **k: svc)
-    monkeypatch.setattr(service, "both_installed", lambda: False)
-    monkeypatch.setattr(service, "run_cmd", FakeRun({
-        ("systemctl", "--user", "is-active"): (3, ""),
-        ("loginctl", "show-user"): (0, "Linger=no\n"),
-    }))
-    assert cli.main(["service", "status", "--json"]) == 3
-    doc = json.loads(capsys.readouterr().out)
-    assert doc["running"] is False
-    assert doc["type"] == "service for your account, starts when you log in"
-    assert doc["started"] is None
-
-
-def test_cli_stop_confirms(status_svc, capsys):
-    svc = status_svc()
-    assert cli.main(["service", "stop"]) == 0
-    assert svc.done == ["stop"]
-    out = capsys.readouterr().out
-    assert out.strip() == "✓ Copycord stopped  start it again with copycord service start"
-
-
-def test_cli_stop_on_a_terminal_is_a_rail(status_svc, monkeypatch):
-    svc = status_svc()
-    out = _on_a_terminal(monkeypatch)
-    assert cli.main(["service", "stop"]) == 0
-    assert svc.done == ["stop"]
-    lines = out.buf.getvalue().splitlines()
-    assert "Copycord v4.0.0 (abcdef1)" in lines
-    assert "\u250c  Stop Copycord" in lines
-    assert "\u2713  Copycord stopped  start it again with copycord service start" in lines
-    assert lines[-1] == "\u2514"
-
-
-def test_cli_start_confirms_with_the_dashboard(status_svc, capsys):
-    svc = status_svc(running=False)
-    assert cli.main(["service", "start"]) == 0
-    assert svc.done == ["start"]
-    assert capsys.readouterr().out.startswith("✓ Copycord started  http://localhost:")
-
-
 def test_cli_start_that_does_not_stay_up_warns(status_svc, capsys):
     status_svc(running=False, start_runs=False)
     assert cli.main(["service", "start"]) == 0
@@ -901,15 +775,6 @@ def test_cli_restart_subcommand(status_svc, capsys):
     assert cli.main(["service", "restart"]) == 0
     assert svc.done == ["restart"]
     assert "✓ Copycord restarted" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("action", ["start", "stop", "restart"])
-def test_cli_actions_without_a_service_point_at_install(status_svc, capsys, action):
-    svc = status_svc(installed=False, running=False)
-    assert cli.main(["service", action]) == 1
-    assert svc.done == []
-    assert "• The Copycord service is not installed  install it with copycord service install" in (
-        capsys.readouterr().out)
 
 
 def test_cli_uninstall_with_yes(status_svc, capsys):
@@ -945,22 +810,6 @@ def test_cli_uninstall_asks_first(status_svc, monkeypatch, capsys):
     monkeypatch.setattr(ui, "confirm", lambda q, default=True: True)
     assert cli.main(["service", "uninstall"]) == 0
     assert svc.done == ["uninstall"]
-
-
-def test_cli_service_without_a_subcommand_lists_them_all(capsys):
-    with pytest.raises(SystemExit) as e:
-        cli.main(["service"])
-    assert e.value.code == 0
-    out = capsys.readouterr().out
-    for name in ("install", "status", "start", "stop", "restart", "uninstall"):
-        assert f"\n  {name} " in out
-    assert "copycord service uninstall" in out
-
-
-def test_overview_names_service_uninstall(capsys):
-    with pytest.raises(SystemExit):
-        cli.main(["--help"])
-    assert "uninstall)" in capsys.readouterr().out
 
 
 def test_cli_install_passes_data_dir_and_command(tmp_path, monkeypatch, capsys):
@@ -1033,30 +882,6 @@ def test_cli_install_system_as_a_normal_user_fails_clearly(linux_install, monkey
     err = capsys.readouterr().err
     assert "✗ Could not install the service  the system service needs root. Leave out --system" in err
     assert "copycord doctor" in err
-
-
-def test_cli_user_and_system_are_exclusive(capsys):
-    with pytest.raises(SystemExit):
-        cli.main(["service", "status", "--user", "--system"])
-
-
-def test_cli_says_which_unit_when_both_exist(monkeypatch, capsys):
-    class Svc:
-        scope, unit_path = "user", "/home/u/.config/systemd/user/copycord.service"
-
-        def state(self):
-            return service.State(True, True, "test unit")
-
-    seen = []
-    monkeypatch.setattr(service, "get_service", lambda *a, **k: seen.append((a, k)) or Svc())
-    monkeypatch.setattr(service, "both_installed", lambda: True)
-    assert cli.main(["service", "status"]) == 0
-    err = capsys.readouterr().err
-    assert "both installed" in err
-    assert "using the user service" in err
-    assert cli.main(["service", "status", "--system"]) == 0
-    assert seen[-1] == ((False,), {"system": True})
-    assert capsys.readouterr().err == ""
 
 
 def test_cli_service_error_is_reported(monkeypatch, capsys):

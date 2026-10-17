@@ -119,85 +119,6 @@ class ExportMessagesRunner:
         async with self._active_lock:
             self._active_guilds.discard(guild_id)
 
-    async def _collect_threads_for_channel(
-        self,
-        ch: Any,
-        me: Optional[Any],
-        *,
-        include_forum_threads: bool,
-        include_private_threads: bool,
-    ) -> list[Any]:
-        """Return active and archived threads under channel `ch` (text or forum), honouring permissions when `me` is given."""
-        threads: list[Any] = []
-
-        try:
-            ch_name = getattr(ch, "name", "") or "unknown"
-            ch_id = getattr(ch, "id", None)
-        except Exception:
-            ch_name, ch_id = "unknown", None
-
-        is_forum = (
-            getattr(ch, "__class__", type(ch)).__name__.lower().find("forum") != -1
-        )
-        if is_forum and not include_forum_threads:
-            return threads
-
-        try:
-            active = list(getattr(ch, "threads", []) or [])
-            for th in active:
-                try:
-                    if (
-                        me is None
-                        or getattr(th, "permissions_for")(me).read_message_history
-                    ):
-                        threads.append(th)
-                except Exception:
-
-                    threads.append(th)
-        except Exception:
-            pass
-
-        try:
-            if _has_archived_threads(ch):
-                async for th in _archived_threads(
-                    self.bot, ch, limit=None, private=False
-                ):
-                    try:
-                        if (
-                            me is None
-                            or getattr(th, "permissions_for")(me).read_message_history
-                        ):
-                            threads.append(th)
-                    except Exception:
-                        threads.append(th)
-        except Exception:
-
-            pass
-
-        if include_private_threads:
-            try:
-                if _has_archived_threads(ch):
-                    async for th in _archived_threads(
-                        self.bot, ch, limit=None, private=True
-                    ):
-                        try:
-                            if (
-                                me is None
-                                or getattr(th, "permissions_for")(
-                                    me
-                                ).read_message_history
-                            ):
-                                threads.append(th)
-                        except Exception:
-                            threads.append(th)
-            except Exception:
-                pass
-
-        self.log.debug(
-            f"[export] Collected {len(threads)} threads from #{ch_name} ({ch_id})"
-        )
-        return threads
-
     async def run(self, d: DictLike, guild: Any, acquired: bool = False) -> None:
         """Run the export for `data` and `guild`, logging progress and emitting a final 'export_messages_done' ws event."""
         gid_log = getattr(guild, "id", None)
@@ -1043,27 +964,6 @@ class ExportMessagesRunner:
                 return False
 
         return True
-
-    def _iter_attachment_links(
-        self, msg_obj: DictLike
-    ) -> Iterable[Tuple[str, str, str]]:
-        """Yield (kind, url, filename) from the attachments of a serialized message dict."""
-        atts = msg_obj.get("attachments") or []
-        for a in atts:
-            url = a.get("url") or a.get("proxy_url")
-            if (
-                not url
-                or not isinstance(url, str)
-                or not url.lower().startswith(("http://", "https://"))
-            ):
-                continue
-            kind = self._att_kind(a)
-            filename = (
-                a.get("filename")
-                or os.path.basename(url.split("?", 1)[0])
-                or f"{kind}-{uuid.uuid4().hex}"
-            )
-            yield (kind, url, filename)
 
     async def _download_one(
         self,

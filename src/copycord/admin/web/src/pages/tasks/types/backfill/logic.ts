@@ -83,15 +83,6 @@ export function rangeInputs(f: RangeForm): RangeInputs {
   return { mode: "all" };
 }
 
-export interface BackfillInputs {
-  mapping_id: string;
-  channel_ids: string[];
-  category_ids: string[];
-  range: RangeInputs;
-  ignore_cloned: boolean;
-  mode: RunMode;
-}
-
 /** Where a 422 error key lands on the form. */
 export type FormSlot = "mapping" | "channels" | "range" | "general";
 

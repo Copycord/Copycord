@@ -311,7 +311,7 @@ export function StepsHead({ filter, onFilter, id }: StepsHeadProps) {
 
 /** A collapsed disclosure's row (Inputs, Report (JSON)): 48 px like a card head, the chevron and the title. */
 export const DISCLOSURE_SUMMARY =
-  "flex min-h-12 cursor-pointer list-none items-center gap-x-3 px-4 py-1.5 text-sm marker:hidden [&::-webkit-details-marker]:hidden";
+  "flex min-h-12 cursor-pointer list-none items-center gap-x-3 px-4 py-1.5 text-sm transition-colors hover:bg-white/5 marker:hidden [&::-webkit-details-marker]:hidden";
 /** What an opened disclosure shows, under a hairline. */
 export const DISCLOSURE_BODY = "border-t border-border px-4 py-3";
 
@@ -322,7 +322,7 @@ export const DISCLOSURE_BODY = "border-t border-border px-4 py-3";
 export function DisclosureTitle({ title, open }: { title: string; open?: boolean }) {
   return (
     <>
-      <span aria-hidden="true" className={cx("inline-block w-2 text-muted transition-transform group-open:rotate-90", open && "rotate-90")}>
+      <span aria-hidden="true" className={cx("inline-flex w-3 justify-center text-lg leading-none text-text-2 transition-transform group-open:rotate-90", open && "rotate-90")}>
         ›
       </span>
       <span className={CARD_TITLE}>{title}</span>
@@ -491,16 +491,32 @@ export const RAIL_COUNTS = "ml-auto inline-flex shrink-0 items-center gap-2";
 export const RAIL_COUNT = "text-xs text-muted tabular-nums";
 export const RAIL_RUNNING = "inline-flex items-center gap-1 text-xs font-medium text-accent tabular-nums";
 export const RAIL_RUNNING_DOT = "size-1.5 rounded-full bg-accent animate-pulse";
+/** The same badge when every active run of the type is still queued: the queued state's blue, the dot still. */
+export const RAIL_QUEUED = "inline-flex items-center gap-1 text-xs font-medium text-info tabular-nums";
+export const RAIL_QUEUED_DOT = "size-1.5 rounded-full bg-info";
+
+/** "1 running, 2 queued": the active runs in words, for the rail entry's title. */
+export function activeText(active: number, queued = 0): string {
+  const running = Math.max(0, active - queued);
+  return [running > 0 ? `${running} running` : "", queued > 0 ? `${queued} queued` : ""].filter(Boolean).join(", ");
+}
+
+/** The rail badge, kept short: the running runs only ("1 running"), or "2 queued" when none runs yet. */
+export function badgeText(active: number, queued = 0): string {
+  const running = Math.max(0, active - queued);
+  return running > 0 ? `${running} running` : `${queued} queued`;
+}
 // The active count says "running" in words too (rule a): the pulsing accent dot alone was a colour-only signal.
 
-export function RailCounts({ total, active = 0 }: { total: number | null; active?: number }) {
+export function RailCounts({ total, active = 0, queued = 0 }: { total: number | null; active?: number; queued?: number }) {
+  const onlyQueued = active > 0 && queued >= active;
   return (
     // Hidden from the link's name, which stays the type's title; the link's title says the counts.
     <span aria-hidden="true" className={RAIL_COUNTS}>
       {active > 0 ? (
-        <span className={RAIL_RUNNING}>
-          <span aria-hidden="true" className={RAIL_RUNNING_DOT} />
-          {active} running
+        <span className={onlyQueued ? RAIL_QUEUED : RAIL_RUNNING}>
+          <span aria-hidden="true" className={onlyQueued ? RAIL_QUEUED_DOT : RAIL_RUNNING_DOT} />
+          {badgeText(active, queued)}
         </span>
       ) : null}
       {total == null ? (

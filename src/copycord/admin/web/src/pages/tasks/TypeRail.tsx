@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { cx } from "../../components/ui/cx";
 import { useReveal } from "../../components/ui/Skeleton";
 import type { TaskType } from "../../types/tasks";
-import { FADE_IN, RAIL, RAIL_ACTIVE, RAIL_HEADING, RAIL_ITEM, RAIL_LIST, RailCounts, RailEntryLoading } from "./TasksSkeleton";
+import { FADE_IN, RAIL, RAIL_ACTIVE, RAIL_HEADING, RAIL_ITEM, RAIL_LIST, RailCounts, RailEntryLoading, activeText } from "./TasksSkeleton";
 
 export interface TypeRailProps {
   types: TaskType[];
@@ -17,10 +17,10 @@ export interface TypeRailProps {
 
 const item = (active: boolean) => cx(RAIL_ITEM, active ? RAIL_ACTIVE : "hover:bg-rail-hover");
 
-/** "2 runs, 1 running": the counts in words, for the entry's title. */
-export function railTitle(total: number, active: number): string {
+/** "2 runs, 1 running": the counts in words, for the entry's title; queued runs are named as queued. */
+export function railTitle(total: number, active: number, queued = 0): string {
   const runs = `${total} ${total === 1 ? "run" : "runs"}`;
-  return active > 0 ? `${runs}, ${active} running` : runs;
+  return active > 0 ? `${runs}, ${activeText(active, queued)}` : runs;
 }
 
 export function TypeRail({ types, selected, loading = false }: TypeRailProps) {
@@ -28,16 +28,17 @@ export function TypeRail({ types, selected, loading = false }: TypeRailProps) {
   const reveal = useReveal(!placeholder);
   const total = types.reduce((n, t) => n + (t.total ?? 0), 0);
   const active = types.reduce((n, t) => n + (t.active ?? 0), 0);
+  const queued = types.reduce((n, t) => n + (t.queued ?? 0), 0);
   return (
     <nav aria-label="Task types" className={RAIL}>
       <Link
         to="/tasks"
         className={item(selected === "")}
         aria-current={selected === "" ? "page" : undefined}
-        title={placeholder ? undefined : railTitle(total, active)}
+        title={placeholder ? undefined : railTitle(total, active, queued)}
       >
         All tasks
-        <RailCounts total={placeholder ? null : total} active={active} />
+        <RailCounts total={placeholder ? null : total} active={active} queued={queued} />
       </Link>
       <div className={RAIL_HEADING}>Task types</div>
       <ul className={cx(RAIL_LIST, reveal)}>
@@ -48,10 +49,10 @@ export function TypeRail({ types, selected, loading = false }: TypeRailProps) {
               to={`/tasks?type=${encodeURIComponent(t.key)}`}
               className={item(selected === t.key)}
               aria-current={selected === t.key ? "page" : undefined}
-              title={railTitle(t.total ?? 0, t.active)}
+              title={railTitle(t.total ?? 0, t.active, t.queued)}
             >
               <span title={t.title} className="min-w-0 truncate">{t.title}</span>
-              <RailCounts total={t.total ?? 0} active={t.active} />
+              <RailCounts total={t.total ?? 0} active={t.active} queued={t.queued} />
             </Link>
           </li>
         ))}

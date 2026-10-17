@@ -877,4 +877,42 @@ describe("RunDetail live", () => {
     );
     expect(onStatusChange).toHaveBeenCalledTimes(1);
   });
+
+  it("a queued run says Queued and what it waits for, linked, then turns into the running view live in the same card", async () => {
+    const blocker = { id: "b11", number: 11, type: "backfill_channels", title: "Backfill #news" };
+    const queued = makeRun({ status: "queued", started_at: null, finished_at: null, summary: null, steps: [], seq: 1, waiting_for: blocker, queue_position: 2 });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ run: queued })));
+    render(
+      <MemoryRouter initialEntries={["/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b"]}>
+        <RunDetail id="4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b" typeOf={(k) => (k === BACKFILL.key ? BACKFILL : undefined)} />
+      </MemoryRouter>,
+    );
+    const line = await screen.findByTestId("run-waiting");
+    expect(text(line)).toBe("Waiting for Backfill channels #11 to finish · 2nd in line");
+    expect(within(line).getByRole("link", { name: "Backfill channels #11" }).getAttribute("href")).toBe("/tasks/runs/b11");
+    expect(text(screen.getByTestId("run-duration"))).toBe("Queued");
+    expect(screen.getByTestId("run-status").getAttribute("aria-label")).toBe("Queued");
+    expect(screen.getByRole("button", { name: "Cancel run" })).toBeTruthy();
+    expect(document.querySelector("[aria-busy]")).toBeNull();
+    const counts = screen.getByTestId("run-counts");
+    const ws = FakeWs.all[0]!;
+    act(() => ws.open());
+    const { inputs: _inputs, steps: _steps, ...bare } = queued;
+    act(() =>
+      ws.emit({
+        kind: "task.run.updated",
+        role: "admin",
+        payload: {
+          run: { ...bare, seq: 2, status: "running", started_at: "2026-10-14T18:00:01Z", waiting_for: null, queue_position: null },
+          steps: [{ key: "c1", title: "#general", state: "running", done: 1, total: 5000 }],
+        },
+      }),
+    );
+    expect(screen.queryByTestId("run-waiting")).toBeNull();
+    expect(screen.getByTestId("run-status").getAttribute("aria-label")).toBe("Running");
+    expect(text(screen.getByTestId("run-duration"))).not.toBe("Queued");
+    // The same counts line, now the step counts: the card keeps its height.
+    expect(screen.getByTestId("run-counts")).toBe(counts);
+    expect(text(counts)).toBe("1 running");
+  });
 });
