@@ -281,7 +281,7 @@ async def _held_scan(fake, job_id):
 async def test_cancel_stops_the_client_runner(svc, client):
     client.script = _held_scan
     run = await svc.start("export_messages", {"guild_id": GID, "webhook_url": HOOK})
-    await _until(lambda: _steps(svc, run.id)["scan"].get("done") == 0 and svc.get(run.id).summary)
+    await _until(lambda: (svc.get(run.id).summary or {}).get("scanned") == 300)
     await svc.cancel(run.id)
     done = await _settled(svc, run.id)
     assert client.of("export_messages_cancel") == [{"guild_id": int(GID), "job_id": str(run.id)}]
