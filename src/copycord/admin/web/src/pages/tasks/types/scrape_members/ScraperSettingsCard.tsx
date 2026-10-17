@@ -2,7 +2,7 @@
 // the saved tokens and the proxy list, each a plain textbox with one entry per line, saved as a whole
 // list (JSON PUT, a text file on the server) by itself shortly after the last edit. Collapsed by default.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cx, Skeleton, Textarea, useReveal } from "../../../../components/ui";
 import { api, errorText } from "../../../../lib/api";
 import { useNotify } from "../../../system/providers";
@@ -21,6 +21,29 @@ export const AUTOSAVE_MS = 800;
 export function openScraperSettings() {
   window.dispatchEvent(new Event(OPEN_EVENT));
   document.getElementById(SETTINGS_ID)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// The saved token count while the card is mounted, so the start form opens straight to the right
+// layout: set on load and after each save, null while unknown (loading, failed, or no card on the page).
+let tokenCount: number | null = null;
+const tokenListeners = new Set<() => void>();
+
+function setTokenCount(n: number | null) {
+  if (n === tokenCount) return;
+  tokenCount = n;
+  for (const fn of tokenListeners) fn();
+}
+
+function subscribeTokenCount(fn: () => void) {
+  tokenListeners.add(fn);
+  return () => tokenListeners.delete(fn);
+}
+
+const getTokenCount = () => tokenCount;
+
+/** How many scraper tokens the settings card holds, or null when it does not know. */
+export function useSavedTokenCount(): number | null {
+  return useSyncExternalStore(subscribeTokenCount, getTokenCount, getTokenCount);
 }
 
 interface Ok {
@@ -218,7 +241,12 @@ function CountsSummary({ counts }: { counts: Counts }) {
 export function ScraperSettingsCard() {
   const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState<Counts>({});
-  const onCount = useCallback((field: Field, n: number | null) => setCounts((c) => ({ ...c, [field]: n })), []);
+  const onCount = useCallback((field: Field, n: number | null) => {
+    setCounts((c) => ({ ...c, [field]: n }));
+    if (field === "tokens") setTokenCount(n);
+  }, []);
+
+  useEffect(() => () => setTokenCount(null), []);
 
   useEffect(() => {
     const show = () => setOpen(true);

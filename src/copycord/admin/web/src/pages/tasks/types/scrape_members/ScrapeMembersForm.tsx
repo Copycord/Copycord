@@ -1,7 +1,9 @@
 // Start form of Scrape members: one of the servers the scraper tokens are in (from the type's options,
 // with a filter box once the list is long) or a server ID typed in, what to include for each member,
 // and whether to use the saved proxies. Tokens are not checked here: one that fails or is not in the
-// server is skipped when the run starts. With no tokens saved the form points at the settings card.
+// server is skipped when the run starts. With no tokens saved the form points at the settings card,
+// decided from the card's saved count when it has one so the modal opens at its final layout, and from
+// the options reply otherwise (the reply wins when the two disagree).
 
 import { useState } from "react";
 import type { FormEvent } from "react";
@@ -14,7 +16,7 @@ import { useApi } from "../../../../hooks/useApi";
 import { formatCount } from "../../StepList";
 import { FILTER_FROM, filterGuilds } from "../download_avatars/AvatarsForm";
 import { useStartRun, type TaskFormProps } from "../start";
-import { openScraperSettings } from "./ScraperSettingsCard";
+import { openScraperSettings, useSavedTokenCount } from "./ScraperSettingsCard";
 
 export const SCRAPE_EXPLAINER =
   "Lists the members of a server with the saved scraper tokens and saves them to a JSON file. " +
@@ -50,6 +52,9 @@ export const INCLUDE_FIELDS = [
 
 type IncludeKey = (typeof INCLUDE_FIELDS)[number]["key"];
 
+/** Concurrent sessions per token the run may open, 1 to 5. */
+export const SESSION_CHOICES = ["1", "2", "3", "4", "5"].map((v) => ({ value: v, label: v }));
+
 /** "Enter a numeric server ID." unless the text is all digits (blank is fine: the picker is used). */
 export function guildIdError(text: string): string | undefined {
   const t = text.trim();
@@ -70,7 +75,8 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
   const opts = useApi<ScrapeOptions>(open ? `/api/tasks/types/${type.key}/options` : null);
   const guilds = opts.data?.guilds ?? [];
   const pending = open && !opts.data && !opts.error;
-  const noTokens = Boolean(opts.data) && tokenTotal(opts.data) === 0;
+  const savedTokens = useSavedTokenCount();
+  const noTokens = opts.data ? tokenTotal(opts.data) === 0 : savedTokens === 0;
   const proxies = opts.data?.proxies ?? 0;
   const loadError = opts.data?.error || (opts.error ? "Could not load the servers" : undefined);
   const [guildId, setGuildId] = useState("");
@@ -80,6 +86,7 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
     () => Object.fromEntries(INCLUDE_FIELDS.map((f) => [f.key, f.initial])) as Record<IncludeKey, boolean>,
   );
   const [useProxies, setUseProxies] = useState(true);
+  const [sessions, setSessions] = useState("1");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const { start, busy } = useStartRun(type);
 
@@ -101,7 +108,7 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
     else if (!typed && !guildId) found.guild_id = "Pick a server or enter a server ID.";
     setErrors(found);
     if (Object.keys(found).length) return;
-    const res = await start({ guild_id: typed || guildId, ...include, use_proxies: useProxies });
+    const res = await start({ guild_id: typed || guildId, ...include, use_proxies: useProxies, sessions_per_token: Number(sessions) });
     if (res && Object.keys(res).length) setErrors(Object.fromEntries(Object.entries(res).map(([k, v]) => [k, serverText(v)])));
     else if (!res) onClose();
   };
@@ -202,6 +209,12 @@ export function ScrapeMembersForm({ type, open, onClose }: TaskFormProps) {
             checked={useProxies}
             onChange={(v) => changed(() => setUseProxies(v))}
           />
+
+          <Field label="Sessions per token" help="More is faster but riskier." error={errors.sessions_per_token}>
+            <div className="w-28">
+              <FieldSelect value={sessions} onChange={(v) => changed(() => setSessions(v))} options={SESSION_CHOICES} />
+            </div>
+          </Field>
 
           {errors.inputs || errors.general ? (
             <p role="alert" className="m-0 text-xs text-danger">
