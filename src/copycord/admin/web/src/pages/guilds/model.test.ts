@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "../../lib/api";
 import type { GuildSummary } from "../../types/guilds";
 import {
   DEFAULT_EXPORT_FORM,
   attachmentSummary,
   buildExportPayload,
-  exportError,
   formatMembers,
   localToIso,
   parseCount,
@@ -162,16 +160,6 @@ describe("helpers", () => {
     const none = { ...DEFAULT_EXPORT_FORM, attTypes: { images: false, videos: false, audio: false, other: false } };
     expect(attachmentSummary(none)).toBe("No types selected");
     expect(attachmentSummary({ ...some, attachments: false })).toBe("");
-  });
-
-  it("exportError explains the client agent errors in plain words", () => {
-    expect(exportError(new ApiError(502, "/api/export/messages", {}, "client-agent-unreachable"))).toBe(
-      "The client is not running, so the export could not start.",
-    );
-    expect(exportError(new Error("client-agent-timeout"))).toBe("The client did not answer in time. Try again in a moment.");
-    expect(exportError(new TypeError("Failed to fetch"))).toBe("The server could not be reached.");
-    expect(exportError(new Error("invalid-json"))).toBe("Export failed: invalid-json");
-    expect(exportError(new Error(""))).toBe("Export failed.");
   });
 });
 

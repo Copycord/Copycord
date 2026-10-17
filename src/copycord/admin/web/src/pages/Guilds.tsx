@@ -1,9 +1,11 @@
 // Guilds page, ported from templates/guilds.html and frontend/src/js/guilds.js:
 // the grid of guilds the bot has seen (GET /api/guilds) with search and sort
-// direction, a menu per card with "View details" and "Export messages".
+// direction, a menu per card with "View details" and "Export messages", which opens the Export
+// messages task's Run form with the guild picked.
 // Like the old page it waits until both Server and Client are connected.
 
 import { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import { PageFrame, cx, useReveal } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useLastCount } from "../components/ui/lastCount";
@@ -11,7 +13,6 @@ import { useApi } from "../hooks/useApi";
 import { useStatusGate } from "../hooks/useStatusGate";
 import type { GuildListResponse, GuildSummary } from "../types/guilds";
 import { ActionMenu } from "./guilds/ActionMenu";
-import { ExportDialog } from "./guilds/ExportDialog";
 import { GuildCard } from "./guilds/GuildCard";
 import { GuildDetailsDialog } from "./guilds/GuildDetailsDialog";
 import { sortLabel, visibleGuilds } from "./guilds/model";
@@ -44,7 +45,8 @@ export function Guilds() {
   const [dir, setDir] = useState<SortDir>("asc");
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [details, setDetails] = useState<GuildSummary | null>(null);
-  const [exporting, setExporting] = useState<GuildSummary | null>(null);
+  const navigate = useNavigate();
+  const exportMessages = (g: GuildSummary) => navigate(`/tasks?type=export_messages&guild=${encodeURIComponent(g.id)}`);
 
   const guilds = useMemo(() => visibleGuilds(data?.items ?? [], query, dir), [data, query, dir]);
 
@@ -134,13 +136,12 @@ export function Guilds() {
           onClose={() => setMenu(null)}
           items={[
             { key: "view", label: "View details", onSelect: pick(setDetails) },
-            { key: "export", label: "Export messages", onSelect: pick(setExporting) },
+            { key: "export", label: "Export messages", onSelect: pick(exportMessages) },
           ]}
         />
       ) : null}
 
       {details ? <GuildDetailsDialog guild={details} onClose={() => setDetails(null)} /> : null}
-      {exporting ? <ExportDialog key={exporting.id} guild={exporting} onClose={() => setExporting(null)} /> : null}
     </>
   );
 }

@@ -152,15 +152,6 @@ export function attachmentSummary(f: ExportForm): string {
   return on.length ? on.join(", ") : "No types selected";
 }
 
-/** Toast text for a failed export; the two client agent errors get plain words. */
-export function exportError(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e ?? "");
-  if (msg === "client-agent-unreachable") return "The client is not running, so the export could not start.";
-  if (msg === "client-agent-timeout") return "The client did not answer in time. Try again in a moment.";
-  if (e instanceof TypeError) return "The server could not be reached.";
-  return msg ? `Export failed: ${msg}` : "Export failed.";
-}
-
 export interface Point {
   x: number;
   y: number;

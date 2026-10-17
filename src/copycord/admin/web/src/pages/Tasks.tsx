@@ -63,11 +63,17 @@ interface OpenForm {
   type: TaskType;
   /** Remounts the form so each open starts from a clean state. */
   nonce: number;
+  /** Values the URL preselected in the form. */
+  initial?: Record<string, string>;
 }
+
+// URL keys a type page hands its Run form: /tasks?type=export_messages&guild=<id> opens the form with
+// that server picked. The keys leave the URL once read, so closing the form does not reopen it.
+const PRESELECT_KEYS = ["guild"];
 
 export function Tasks() {
   const { id } = useParams<{ id: string }>();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const typeKey = params.get("type") ?? "";
   const { data, loading: typesLoading, reload: reloadTypes } = useApi<TaskTypesResponse>("/api/tasks/types");
   const types = useMemo(() => data?.types ?? [], [data]);
@@ -84,6 +90,25 @@ export function Tasks() {
   const openForm = useCallback((type: TaskType) => {
     setForm((f) => ({ type, nonce: (f?.nonce ?? 0) + 1 }));
   }, []);
+
+  useEffect(() => {
+    if (id || !selected) return;
+    const initial: Record<string, string> = {};
+    for (const k of PRESELECT_KEYS) {
+      const v = params.get(k);
+      if (v) initial[k] = v;
+    }
+    if (!Object.keys(initial).length) return;
+    setForm((f) => ({ type: selected, nonce: (f?.nonce ?? 0) + 1, initial }));
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const k of PRESELECT_KEYS) next.delete(k);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [id, selected, params, setParams]);
 
   const botsUp = useBotsRunning(Boolean(selected?.requires_bots));
   const runAction = selected ? <RunTaskButton type={selected} botsUp={botsUp} onRun={(t) => openForm(t)} /> : null;
@@ -113,7 +138,7 @@ export function Tasks() {
           )}
         </div>
       </div>
-      {form ? <TaskTypeForm key={form.nonce} type={form.type} open onClose={() => setForm(null)} /> : null}
+      {form ? <TaskTypeForm key={form.nonce} type={form.type} initial={form.initial} open onClose={() => setForm(null)} /> : null}
     </section>
   );
 }

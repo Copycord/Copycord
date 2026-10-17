@@ -497,3 +497,28 @@ describe("Tasks page", () => {
     expect(listCalls(fn).length).toBe(before);
   });
 });
+
+describe("Tasks page preselect", () => {
+  it("opens the type's Run form from ?type= with ?guild= picked, and drops guild from the URL", async () => {
+    const EXPORT = { key: "export_messages", title: "Export messages", description: "", inputs_schema: {}, active: 0, total: 0 };
+    serve([], {
+      handle: (url) => {
+        if (url === "/api/tasks/types") return Response.json({ types: [...TYPES.types, EXPORT] });
+        if (url === "/api/tasks/types/export_messages/options")
+          return Response.json({ guilds: [{ id: "100", name: "Alpha", icon_url: null }, { id: "200", name: "Beta", icon_url: null }] });
+        return undefined;
+      },
+    });
+    renderAt("/tasks?type=export_messages&guild=200");
+    const dialog = await screen.findByRole("dialog", { name: "Run Export messages" });
+    await waitFor(() => expect(within(dialog).getByRole("combobox", { name: "Server" })).toHaveDisplayValue("Beta"));
+  });
+
+  it("does not open a form without a preselect param", async () => {
+    serve([]);
+    renderAt("/tasks?type=backfill_channels");
+    const rail = await screen.findByRole("navigation", { name: "Task types" });
+    await within(rail).findByRole("link", { name: /Backfill channels/ });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
