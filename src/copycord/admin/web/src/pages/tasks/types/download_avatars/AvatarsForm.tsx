@@ -1,5 +1,5 @@
 // Start form of Download avatars: one of the client account's servers (from the type's options,
-// typed into the server box to filter by name or ID) and how long the link lives. Nothing is deleted, so the
+// typed into the server box to filter by name or ID), how long the link lives and how many avatars download at once. Nothing is deleted, so the
 // run starts without a confirm.
 
 import { useState } from "react";
@@ -30,6 +30,17 @@ export function hoursError(text: string): string | undefined {
   return /^\s*\d+\s*$/.test(text) && n >= 1 && n <= 168 ? undefined : "Enter a whole number of hours from 1 to 168.";
 }
 
+export const CONCURRENCY_DEFAULT = 8;
+export const CONCURRENCY_MAX = 32;
+
+/** "Enter a whole number of parallel downloads from 1 to 32." unless the text is one. */
+export function concurrencyError(text: string): string | undefined {
+  const n = Number(text);
+  return /^\s*\d+\s*$/.test(text) && n >= 1 && n <= CONCURRENCY_MAX
+    ? undefined
+    : `Enter a whole number of parallel downloads from 1 to ${CONCURRENCY_MAX}.`;
+}
+
 /** The server's "Value error, Pick ..." in the form's words. */
 function serverText(msg: string): string {
   return msg.replace(/^Value error, /, "");
@@ -42,6 +53,7 @@ export function AvatarsForm({ type, open, onClose }: TaskFormProps) {
   const loadError = opts.data?.error || (opts.error ? "Could not load the servers" : undefined);
   const [guildId, setGuildId] = useState("");
   const [hours, setHours] = useState("24");
+  const [parallel, setParallel] = useState(String(CONCURRENCY_DEFAULT));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const { start, busy } = useStartRun(type);
 
@@ -58,9 +70,16 @@ export function AvatarsForm({ type, open, onClose }: TaskFormProps) {
     if (!guildId) found.guild_id = "Pick a server.";
     const badHours = hoursError(hours);
     if (badHours) found.expires_hours = badHours;
+    const badParallel = concurrencyError(parallel);
+    if (badParallel) found.concurrency = badParallel;
     setErrors(found);
     if (Object.keys(found).length) return;
-    const res = await start({ guild_id: guildId, guild_name: chosen?.name ?? null, expires_hours: Number(hours) });
+    const res = await start({
+      guild_id: guildId,
+      guild_name: chosen?.name ?? null,
+      expires_hours: Number(hours),
+      concurrency: Number(parallel),
+    });
     if (res && Object.keys(res).length) setErrors(Object.fromEntries(Object.entries(res).map(([k, v]) => [k, serverText(v)])));
     else if (!res) onClose();
   };
@@ -98,6 +117,19 @@ export function AvatarsForm({ type, open, onClose }: TaskFormProps) {
         <Field label="Link expires after (hours)" help="From 1 hour to 7 days (168 hours)." error={errors.expires_hours}>
           <div className="w-28">
             <Input type="number" min={1} max={168} step={1} value={hours} onChange={(e) => changed(() => setHours(e.target.value))} />
+          </div>
+        </Field>
+
+        <Field label="Parallel downloads" help="Higher is faster; lower it if Discord rate limits the run." error={errors.concurrency}>
+          <div className="w-28">
+            <Input
+              type="number"
+              min={1}
+              max={CONCURRENCY_MAX}
+              step={1}
+              value={parallel}
+              onChange={(e) => changed(() => setParallel(e.target.value))}
+            />
           </div>
         </Field>
 

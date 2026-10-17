@@ -5,7 +5,7 @@ import { ToastProvider } from "../../../../components/Toast";
 import type { TaskRun, TaskType } from "../../../../types/tasks";
 import { typeLabel } from "../../typeLabels";
 import { describeRunInputs, entryFor, heroStat } from "..";
-import { AVATARS_EXPLAINER, AvatarsForm, hoursError } from "./AvatarsForm";
+import { AVATARS_EXPLAINER, AvatarsForm, concurrencyError, hoursError } from "./AvatarsForm";
 import { AvatarsDownloadCard, downloadOf, sizeWords } from "./entry";
 
 const TYPE: TaskType = { key: "download_avatars", title: "Download avatars", description: "", inputs_schema: {}, active: 0, total: 0 };
@@ -74,7 +74,36 @@ describe("AvatarsForm", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Beta" }));
     submit();
     expect(await screen.findByText("Run page r9")).toBeInTheDocument();
-    expect(posts).toEqual([{ type: "download_avatars", inputs: { guild_id: "222", guild_name: "Beta", expires_hours: 24 } }]);
+    expect(posts).toEqual([
+      { type: "download_avatars", inputs: { guild_id: "222", guild_name: "Beta", expires_hours: 24, concurrency: 8 } },
+    ]);
+  });
+
+  it("posts the parallel downloads, 8 unless changed", async () => {
+    const posts = serve();
+    renderForm();
+    const box = screen.getByRole("spinbutton", { name: "Parallel downloads" });
+    expect(box).toHaveValue(8);
+    expect(screen.getByText("Higher is faster; lower it if Discord rate limits the run.")).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: "16" } });
+    fireEvent.click(await screen.findByRole("combobox", { name: "Server" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Alpha" }));
+    submit();
+    expect(await screen.findByText("Run page r9")).toBeInTheDocument();
+    expect(posts).toEqual([
+      { type: "download_avatars", inputs: { guild_id: "111", guild_name: "Alpha", expires_hours: 24, concurrency: 16 } },
+    ]);
+  });
+
+  it("checks the parallel downloads", async () => {
+    const posts = serve();
+    renderForm();
+    fireEvent.click(await screen.findByRole("combobox", { name: "Server" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Beta" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Parallel downloads" }), { target: { value: "33" } });
+    submit();
+    expect(await screen.findByText("Enter a whole number of parallel downloads from 1 to 32.")).toBeInTheDocument();
+    expect(posts).toEqual([]);
   });
 
   it("checks the hours", async () => {
@@ -102,6 +131,9 @@ describe("AvatarsForm", () => {
     expect(hoursError("1")).toBeUndefined();
     expect(hoursError("168")).toBeUndefined();
     for (const bad of ["0", "169", "1.5", ""]) expect(hoursError(bad)).toBeDefined();
+    expect(concurrencyError("1")).toBeUndefined();
+    expect(concurrencyError("32")).toBeUndefined();
+    for (const bad of ["0", "33", "2.5", "", "x"]) expect(concurrencyError(bad)).toBeDefined();
   });
 });
 

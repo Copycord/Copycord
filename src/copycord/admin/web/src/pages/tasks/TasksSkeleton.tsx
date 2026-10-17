@@ -264,7 +264,9 @@ export const STEP_LIST = "m-0 max-h-[432px] list-none overflow-y-auto p-0";
 /** One step row, 36 px: the glyph (its state, labelled), the title, the thin bar while running, then the note. */
 export const STEP_ROW = "flex h-9 items-center gap-2.5 border-b border-border px-4 text-sm last:border-b-0";
 export const STEP_TITLE = "min-w-0 flex-1 truncate font-medium text-text";
-export const STEP_NOTE = "max-w-[50%] truncate text-right text-xs";
+/** The title's flex-1 already pushes the note right; no text-right, which in some browsers clips a long
+ * note from its start instead of ending it in an ellipsis. */
+export const STEP_NOTE = "min-w-0 max-w-[50%] truncate text-xs";
 /** No steps, or none in the filter: one muted line centred in the rows' place, as tall as they stood. */
 export const STEP_EMPTY = "m-0 flex min-h-9 items-center justify-center px-4 text-[13px] text-muted";
 /** The steps the run page showed last time (lastCount.ts), so the loading card stands as tall. */
