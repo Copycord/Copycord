@@ -4,17 +4,27 @@ title: Guilds
 
 # Guilds
 
-The **Guilds** page lists the Discord servers your self-bot (client) is a member of. Both the **server** and **client** bots must be running for this page to load; the page waits until both are connected.
+The **Guilds** page lists the Discord servers your user account (the client) is in. Use it to look up a server's details or to export its messages.
 
-## Server list
+The page loads once both the server bot and the client are running.
 
-The page displays a card for each guild, showing the server name and icon. Use **Search guilds** to filter by name and the sort button to toggle the sort direction.
+## Find a server
 
-Each card has a menu with two options:
+Each server has a card with its name and icon.
 
-- **View details**: opens **Guild details** with the server's information, such as its member count, owner ID, creation date and description
-- **Export messages**: opens the [Export messages](/docs/dashboard/exports#export-messages) form on the **Tasks** page with that server already picked
+- To filter the cards by name, type in **Search guilds**.
+- To reverse the order, click the sort button.
 
-## Export messages
+## View a server's details
 
-Message exports run as tasks. **Export messages** on a guild card takes you to the Tasks page and opens the form; the export then runs in the background, and its run page shows progress and the download link for the JSON file. See [Exports and Downloads](/docs/dashboard/exports#export-messages) for the options and filters.
+1. Open the menu on the server's card.
+2. Click **View details**.
+
+**Guild details** opens with the server's information, such as its member count, owner ID, creation date and description.
+
+## Export a server's messages
+
+1. Open the menu on the server's card.
+2. Click **Export messages**.
+
+The **Tasks** page opens with the [Export messages](/docs/dashboard/exports#export-messages) form and the server already picked. Fill in the form and start the export; its run page shows the progress and a download link for the JSON file.
