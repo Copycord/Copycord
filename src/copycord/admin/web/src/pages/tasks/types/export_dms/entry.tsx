@@ -16,7 +16,7 @@ export const GONE = "File no longer on disk";
 export interface ExportFile {
   filename: string;
   size: number | null;
-  messages: number | null;
+  messages?: number | null;
 }
 
 /** The saved file's path from the run report, or null when the run saved none. */
@@ -34,9 +34,37 @@ export function fileUrl(runId: string, base = DMS_BASE): string {
 
 type FileState = { kind: "loading" } | { kind: "ok"; file: ExportFile } | { kind: "gone" } | { kind: "none" };
 
-/** The saved JSON file's card on the run page, read from the type's file route under base. */
-export function ExportFileCard({ run, base }: { run: TaskRun; base: string }) {
-  const path = savedPathOf(run);
+/** "62 messages, 2.0 KB": the file's message count and size, each left out when not known. */
+function messageFacts(file: ExportFile): string[] {
+  return [
+    file.messages != null ? `${formatCount(file.messages)} ${file.messages === 1 ? "message" : "messages"}` : null,
+    file.size != null ? sizeWords(file.size) : null,
+  ].filter((f): f is string => Boolean(f));
+}
+
+export interface ExportFileCardProps {
+  run: TaskRun;
+  base: string;
+  /** The saved file's path in the run report; the JSON path unless the type saves something else. */
+  pathOf?: (run: Pick<TaskRun, "report">) => string | null;
+  /** What the card calls the file once it is gone ("JSON file"). */
+  noun?: string;
+  /** The download button's words ("Download JSON"). */
+  button?: string;
+  /** The words under the file name; the message count and size unless the type counts something else. */
+  facts?: (file: ExportFile) => string[];
+}
+
+/** The saved file's card on the run page, read from the type's file route under base. */
+export function ExportFileCard({
+  run,
+  base,
+  pathOf = savedPathOf,
+  noun = "JSON file",
+  button = "Download JSON",
+  facts: factsOf = messageFacts,
+}: ExportFileCardProps) {
+  const path = pathOf(run);
   const [state, setState] = useState<FileState>({ kind: "loading" });
   useEffect(() => {
     if (!path) return;
@@ -58,7 +86,7 @@ export function ExportFileCard({ run, base }: { run: TaskRun; base: string }) {
     return (
       <section aria-label="Download" className={RUN_CARD}>
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <span className="text-sm text-text">JSON file</span>
+          <span className="text-sm text-text">{noun}</span>
           <p className="m-0 text-sm text-muted">{GONE}</p>
         </div>
       </section>
@@ -73,10 +101,7 @@ export function ExportFileCard({ run, base }: { run: TaskRun; base: string }) {
     a.click();
     a.remove();
   };
-  const facts = [
-    file.messages != null ? `${formatCount(file.messages)} ${file.messages === 1 ? "message" : "messages"}` : null,
-    file.size != null ? sizeWords(file.size) : null,
-  ].filter(Boolean);
+  const facts = factsOf(file);
   return (
     <section aria-label="Download" className={RUN_CARD}>
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
@@ -85,7 +110,7 @@ export function ExportFileCard({ run, base }: { run: TaskRun; base: string }) {
           {facts.length ? <span className="text-xs text-muted">{facts.join(", ")}</span> : null}
         </div>
         <Button variant="primary" onClick={save}>
-          Download JSON
+          {button}
         </Button>
       </div>
     </section>
