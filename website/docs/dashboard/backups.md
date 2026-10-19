@@ -115,7 +115,6 @@ Copycord also saves plain `.db` copies of the database at these times:
 - Message records, used to mirror edits and deletes
 - Filters and blocked keywords
 - Forwarding rules
-- Announcement triggers and subscriptions
 - All configuration settings
 - Event logs
 - Task runs from the [Tasks](/docs/dashboard/tasks) page

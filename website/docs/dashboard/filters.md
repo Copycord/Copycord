@@ -44,8 +44,6 @@ To block a channel from the **Channels** page instead, use **Add channel to blac
 1. Under **Blocked roles**, click **Fetch roles from Discord** to load the host server's roles.
 2. Tick the roles that should not be cloned.
 
-You can also block roles with [`/role_block`](/docs/commands/roles#role_block).
-
 ## Block messages
 
 | List | Effect |

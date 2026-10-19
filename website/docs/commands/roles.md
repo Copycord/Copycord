@@ -5,7 +5,7 @@ title: Roles
 
 # Role commands
 
-These commands give roles to new members of the clone server, alert you when someone joins a server, and block roles from cloning. The commands that mention roles on cloned messages are on the [Webhooks](/docs/commands/webhooks#role-mentions) page.
+These commands give roles to new members of the clone server and alert you when someone joins a server. The commands that mention roles on cloned messages are on the [Webhooks](/docs/commands/webhooks#role-mentions) page. To stop a role from being cloned, use **Blocked roles** in the mapping's [filters](/docs/dashboard/filters#block-roles).
 
 ## `/onjoin_role`
 
@@ -77,34 +77,3 @@ Turns DM alerts on or off for one server. While on, you get a DM with the detail
 ```
 
 Alerts work only for servers with 1,000 members or fewer, and your user account (the client) must be a member of the server.
-
-## `/role_block`
-
-Blocks a role in this clone server from being cloned or updated.
-
-```
-/role_block role:<role>
-/role_block role_id:<id>
-```
-
-| Option | Required | Description |
-|--------|----------|-------------|
-| `role` | One of the two | The cloned role to block |
-| `role_id` | One of the two | The ID of the cloned role to block, 17 to 20 digits |
-
-```
-/role_block role:@SomeRole
-/role_block role_id:12345678987654321
-```
-
-Blocked roles are also listed under **Blocked roles** in the mapping's [filters](/docs/dashboard/filters).
-
-## `/role_block_clear`
-
-Removes every role block of this clone server.
-
-```
-/role_block_clear
-```
-
-This command has no options.

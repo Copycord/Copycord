@@ -28,17 +28,10 @@ Message and DM exports, history imports, purges and asset syncs are not slash co
 | `/token_debug` | Shows how each user token appears to Discord | [Monitoring](/docs/commands/monitoring) |
 | `/block_add` | Blocks or unblocks a keyword | [Filtering](/docs/commands/filtering) |
 | `/block_list` | Lists the blocked keywords | [Filtering](/docs/commands/filtering) |
-| `/announcement_trigger_add` | Adds an announcement trigger | [Announcements](/docs/commands/announcements) |
-| `/announce_trigger_list` | Lists or deletes triggers | [Announcements](/docs/commands/announcements) |
-| `/announce_subscription_toggle` | Subscribes or unsubscribes a user | [Announcements](/docs/commands/announcements) |
-| `/announce_subscription_list` | Lists or deletes subscriptions | [Announcements](/docs/commands/announcements) |
-| `/announce_help` | Shows help for the announcement commands | [Announcements](/docs/commands/announcements) |
 | `/onjoin_role` | Adds or removes an on-join role | [Roles](/docs/commands/roles) |
 | `/onjoin_roles` | Lists or clears the on-join roles | [Roles](/docs/commands/roles) |
 | `/onjoin_sync` | Gives the on-join roles to current members | [Roles](/docs/commands/roles) |
 | `/onjoin_dm` | Turns join DM alerts for a server on or off | [Roles](/docs/commands/roles) |
-| `/role_block` | Blocks a role from cloning | [Roles](/docs/commands/roles) |
-| `/role_block_clear` | Clears all role blocks | [Roles](/docs/commands/roles) |
 | `/pull_assets` | Saves a server's emojis and stickers to an archive | [Assets](/docs/commands/assets) |
 | `/channel_webhook set`, `view`, `clear`, `list` | Manages one channel's webhook name and avatar | [Webhooks](/docs/commands/webhooks) |
 | `/channel_webhook set_all`, `clear_all` | Manages the webhook name and avatar of every channel | [Webhooks](/docs/commands/webhooks) |

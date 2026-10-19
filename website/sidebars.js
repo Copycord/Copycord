@@ -60,7 +60,6 @@ const sidebars = {
         'commands/overview',
         'commands/monitoring',
         'commands/filtering',
-        'commands/announcements',
         'commands/roles',
         'commands/assets',
         'commands/webhooks',

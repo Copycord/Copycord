@@ -31,12 +31,11 @@ Source server ──► Client (user account) ──► Server (bot) ──► C
 - **Real-time messages**: new messages, edits and deletions appear in the clone within seconds.
 - **Structure sync**: new, renamed and deleted channels and roles are applied to the clone.
 - **Tasks**: copy channel history, purge messages or assets, export messages and DMs, download avatars and list server members, with progress and a history of every run.
-- **Forwarding**: send messages to Telegram, Pushover or a Discord webhook.
+- **Forwarding**: send messages to Telegram, Pushover or a Discord webhook, for example as keyword alerts.
 - **Filters**: include or exclude channels, block keywords and rewrite text.
 - **Custom names**: rename channels and set webhook names and avatars.
 - **Sending as users**: post cloned messages from user accounts instead of webhooks.
 - **Proxies**: route the client through HTTP or SOCKS5 proxies, with rotation and failover.
-- **Announcements**: keyword alerts that users can subscribe to.
 - **Backups**: a daily database backup, plus `copycord backup` and `copycord restore`.
 - **Command line**: install, update, run in the background and check your setup with the [`copycord` command](/docs/cli).
 
