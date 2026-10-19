@@ -18,7 +18,7 @@ from copycord.common import ports
 from copycord.common.paths import db_path
 
 logger = logging.getLogger("common.config")
-CURRENT_VERSION = "v3.28.0"
+CURRENT_VERSION = "v4.0.0b1"
 
 
 def _peer_host(_compose_name: str) -> str:
