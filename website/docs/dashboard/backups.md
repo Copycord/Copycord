@@ -37,8 +37,8 @@ Before an archive is saved, Copycord checks the copy of the database with SQLite
 
 From the dashboard:
 
-1. Go to the **System** page
-2. Click **Backup Now**
+1. Go to the **System** page and open the **Database** card
+2. Click **Backup now**
 3. The backup is created and added to the list
 
 From the command line, `copycord backup` makes the same archive and prints its path. It works while Copycord is running. See [copycord backup](/docs/cli#copycord-backup).
@@ -51,7 +51,7 @@ You can also download any archive from the **System** page, see below.
 
 ## Viewing and downloading backups
 
-The **System** page shows all available backups with their file name, creation date and size. Click **Download** next to a backup to save the `.tar.gz` archive, for storage elsewhere or to move Copycord to another machine.
+The **Database** card on the **System** page lists all available backups with their name, time and size. **Download latest** saves the newest one. Click **Download** next to a backup to save the `.tar.gz` archive, for storage elsewhere or to move Copycord to another machine.
 
 ## Restoring from a backup
 
@@ -80,9 +80,11 @@ See [copycord restore](/docs/cli#copycord-restore) for every step and option.
 
 ### From the dashboard
 
-1. Go to the **System** page
-2. Click **Restore** next to the backup you want to restore
+1. Go to the **System** page and open the **Database** card
+2. Click **Restore** next to the backup you want to restore, or click **Restore** at the top of the card to upload a `.tar.gz` archive
 3. Confirm the action
+
+**Delete** next to a backup removes that archive, after a confirmation.
 
 The dashboard restores only the database, not `secret.key`, and does not check the backup first; use `copycord restore` when you can.
 
@@ -98,3 +100,4 @@ The database holds:
 - Announcement triggers and subscriptions
 - All configuration settings
 - Event logs
+- Task runs from the [Tasks](/docs/dashboard/tasks) page

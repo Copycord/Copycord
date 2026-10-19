@@ -5,31 +5,44 @@ title: Channels
 
 # Channels
 
-The **Channels** page lets you view the channel structure of your cloned servers and customize how channels appear.
+The **Channels** page lets you view the channel structure of your cloned servers and customize how channels appear. Both the server and client bots must be running for the page to load.
+
+To import message history into cloned channels, use the [Backfill channels](/docs/dashboard/backfill) task on the **Tasks** page.
 
 ## Viewing channels
 
-For each guild mapping, you can see:
+Pick a mapping in **Guild mapping**. The page shows the host server's **categories** and their channels as a tree, with each channel's state: cloned, **Not cloned yet**, customized, or **Orphan**.
 
-- All **categories** and their child channels
-- **Text channels**, **voice channels**, **stage channels**, and **forum channels**
-- The mapping between source channel IDs and clone channel IDs
-- Whether a webhook is active for each channel
+- **Search channels** filters by name or ID
+- **Filter**: **All channels**, **Orphans only** or **Non-orphans only**
+- **Sort**: by **Name**, **Category** or **Type**
+
+## Row menu
+
+Each channel and category row has a menu:
+
+- **Customize**: set a custom name (see below)
+- **Copy original channel ID** / **Copy clone channel ID** (and the category equivalents)
+- **Add to blacklist**: add the channel or category to the mapping's [filters](/docs/dashboard/filters) so it is no longer cloned
+- **Delete orphan**: on an orphan, delete it from the clone server
 
 ## Customizing channel names
 
 You can rename cloned channels to anything you want without affecting the source server:
 
-1. Navigate to the **Channels** page
-2. Find the channel you want to rename
-3. Enter the new name
-4. Click **Save**
+1. Open the row menu of the channel and click **Customize**
+2. Enter the **Custom channel name**. Leave it empty to use the original name
+3. Save
 
-The custom name persists even if the source channel is renamed — Copycord will keep your custom name instead of syncing the rename.
+The custom name persists even if the source channel is renamed: Copycord keeps your custom name instead of syncing the rename.
 
 :::tip Category names
 You can also customize category names the same way. This lets you completely rebrand the clone server's layout.
 :::
+
+## Orphans
+
+An orphan is a channel or category that exists in the clone but is no longer in the host server. Click **Fetch orphans** to scan the clone against the last sitemap. The scan reports what it found; delete orphans one at a time from the row menu or all at once with **Delete all**, which asks for confirmation.
 
 ## Channel types
 
@@ -48,11 +61,11 @@ Copycord supports cloning all Discord channel types:
 
 Depending on your [cloning options](/docs/configuration/cloning-options), Copycord can sync these channel properties:
 
-- **Name** — Channel name (enabled by default)
-- **Position** — Channel ordering (enabled by default)
-- **Topic** — Channel description/topic
-- **NSFW flag** — Age-restricted setting
-- **Slowmode** — Message cooldown timer
-- **Permissions** — Channel-level permission overwrites
-- **Voice properties** — Bitrate and user limit
-- **Forum properties** — Layout, tags, and posting guidelines
+- **Name**: channel name (**Rename Channels**)
+- **Position**: channel ordering (**Reposition Channels**)
+- **Topic**: channel description (**Sync Channel Topic**)
+- **NSFW flag**: age-restricted setting (**Sync NSFW Flag**)
+- **Slowmode**: message cooldown timer (**Sync Slowmode**)
+- **Permissions**: channel-level permission overwrites (**Mirror Channel Permissions**)
+- **Voice and stage properties**: bitrate and user limit (**Sync Voice Properties**, **Sync Stage Properties**)
+- **Forum properties**: layout, tags, and posting guidelines (**Sync Forum Properties**)

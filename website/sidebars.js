@@ -25,6 +25,7 @@ const sidebars = {
         'dashboard/guild-mappings',
         'dashboard/guilds',
         'dashboard/channels',
+        'dashboard/messages',
         'dashboard/filters',
         {
           type: 'category',
@@ -40,6 +41,7 @@ const sidebars = {
         'dashboard/forwarding',
         'dashboard/backups',
         'dashboard/system',
+        'dashboard/logs',
       ],
     },
     {
