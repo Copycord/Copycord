@@ -29,6 +29,23 @@ jobs:
         id: vars
         run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      # Pre-release tags (v4.0.0b1, v4.0.0rc1) never move :latest, so Docker users
+      # on :latest stay on the stable release. Same suffixes as update.py accepts.
+      - name: Image tags
+        id: tags
+        env:
+          IMAGE: ghcr.io/${{ steps.vars.outputs.owner }}/copycord
+          REF: ${{ github.ref_name }}
+        run: |
+          {
+            echo "list<<EOF"
+            echo "$IMAGE:$REF"
+            if ! echo "$REF" | grep -Eiq '[0-9](a|alpha|b|beta|c|rc|pre|preview)[-_.]?[0-9]*$|[0-9][-_.](a|alpha|b|beta|c|rc|pre|preview)[-_.]?[0-9]*$'; then
+              echo "$IMAGE:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build & push multi-arch image
         uses: docker/build-push-action@v5
         with:
@@ -36,9 +53,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/${{ steps.vars.outputs.owner }}/copycord:${{ github.ref_name }}
-            ghcr.io/${{ steps.vars.outputs.owner }}/copycord:latest
+          tags: ${{ steps.tags.outputs.list }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
