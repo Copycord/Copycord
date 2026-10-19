@@ -73,8 +73,8 @@ Remove a rewrite rule by its numeric ID (shown in `/rewrite list`).
 ```
 
 :::tip Use cases
-- **Branding** — Replace server names, URLs, or brand terms
-- **Censoring** — Replace inappropriate words with alternatives
-- **Localization** — Translate common phrases
-- **De-linking** — Replace invite links or external URLs
+- **Branding**: replace server names, URLs, or brand terms
+- **Censoring**: replace inappropriate words with alternatives
+- **Localization**: translate common phrases
+- **De-linking**: replace invite links or external URLs
 :::

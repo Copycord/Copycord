@@ -9,9 +9,9 @@ The announcement system lets you set up keyword-triggered notifications. When a 
 
 ## How it works
 
-1. **Create a trigger** — Define a keyword to watch for, optionally scoped to a specific guild, user, or channel
-2. **Subscribe users** — Users subscribe to receive DM notifications when triggers fire
-3. **Get notified** — When a matching message appears, subscribers get a DM with the message details
+1. **Create a trigger**: define a keyword to watch for in a server, optionally limited to one user or channel
+2. **Subscribe users**: users subscribe to receive DM notifications when triggers fire
+3. **Get notified**: when a matching message appears, subscribers get a DM with the message details
 
 ---
 
@@ -23,14 +23,14 @@ Registers a new announcement trigger.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `guild_id` | Yes | Server ID to watch (`0` = all servers) |
+| `guild_id` | Yes | Server ID to watch (a 17 to 20 digit ID) |
 | `keyword` | Yes | Word to match in messages |
 | `user_id` | Yes | Only match messages from this user (`0` = any user) |
 | `channel_id` | No | Only match in this channel (`0` or omit = any channel) |
 
 **Examples:**
 ```
-/announcement_trigger_add guild_id:0 keyword:lol user_id:0
+/announcement_trigger_add guild_id:123456789012345678 keyword:lol user_id:0
 /announcement_trigger_add guild_id:123456789012345678 keyword:trade user_id:111111111111111111
 /announcement_trigger_add guild_id:123456789012345678 keyword:raid user_id:0 channel_id:987654321098765432
 ```

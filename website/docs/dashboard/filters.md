@@ -5,51 +5,55 @@ title: Filters
 
 # Filters
 
-Filters give you fine-grained control over which channels and categories Copycord clones. Instead of mirroring everything, you can pick exactly what you want.
+Filters give you fine-grained control over what Copycord clones for each mapping: which categories and channels, which roles, and which messages.
 
-## Filter modes
+## Opening the filters
 
-Each mapping supports two filter modes:
+1. Stop the bots, then open the **Configuration** page
+2. In **Cloning Configuration**, click **Filters** on the mapping card
+3. Edit the lists and save
 
-### Whitelist mode
+Each list takes IDs or words as chips. Type a value and press Enter, or paste several IDs at once. The browse buttons next to the category and channel lists open a picker of the host server's categories and channels, searchable by name or ID.
 
-Only the channels and categories you explicitly select will be cloned. Everything else is ignored.
+## Whitelist (Allow-list)
 
-**Best for**: When you only want a few specific channels from a large server.
+Only what you list here is cloned. Leave a list empty to allow everything.
 
-### Exclude mode
+- **Allowed Category IDs**: only these categories (and their channels) are cloned
+- **Allowed Channel / Thread IDs**: only these channels are cloned. Thread and forum-post IDs work here too
 
-Everything is cloned **except** the channels and categories you select.
+**Best for**: when you only want a few specific channels from a large server.
 
-**Best for**: When you want most of the server but need to skip a few channels.
+## Exclude (Deny-list)
 
-## Setting up filters
+Everything is cloned **except** what you list here.
 
-1. Go to the **Filters** page in the dashboard (or navigate from a guild mapping)
-2. Select the mapping you want to filter
-3. Choose your filter mode (whitelist or exclude)
-4. Select the channels and/or categories to include or exclude
-5. Click **Save**
+- **Blocked Category IDs**: channels inside these categories are not cloned
+- **Blocked Channel / Thread IDs**: never sync these specific channels or threads
 
-## Category filters
+**Best for**: when you want most of the server but need to skip a few channels.
 
-When you filter a **category**, all channels within that category are affected. This is a quick way to include or exclude entire sections of a server.
+You can combine the two, for example allow a category but block one channel inside it.
 
-## Channel filters
+## Channel Name Blacklist
 
-You can also filter individual **channels** within a category. This gives you more granular control — for example, you could whitelist a category but exclude one specific channel within it.
+**Blocked Channel Name Patterns**: channels whose names match these patterns are not cloned. Patterns can use wildcards, for example `ticket-*`.
 
-## Keyword blocking
+## Role Blocks
 
-In addition to channel filters, you can block messages containing specific keywords:
+**Blocked roles** lists roles that are not cloned for this mapping. Click **Fetch roles from Discord** to load the host server's roles and tick the ones to block. You can also block roles with the `/role_block` [slash command](/docs/commands/roles).
 
-- Messages matching blocked keywords are silently dropped — they won't appear in the clone
-- Keywords are case-insensitive
-- You can manage blocked keywords via the dashboard or the `/block_add` and `/block_list` [slash commands](/docs/commands/filtering)
+## Word Filters
+
+**Blocked Words / Phrases**: any message that contains one of these words or phrases is not cloned for this mapping. You can also manage blocked keywords with the `/block_add` and `/block_list` [slash commands](/docs/commands/filtering).
+
+## User Filters
+
+- **Whitelisted User IDs**: only messages from these users are cloned
+- **Blacklisted User IDs**: messages from these users are not cloned
 
 ## How filters interact with syncing
 
 - **Filtered-out channels** are not created in the clone server
 - If a channel is filtered out after it was already cloned, the existing clone channel remains (it won't be deleted automatically)
 - New channels created in filtered categories follow the filter rules
-- Filters apply to **messages only** — structure changes (renames, deletes) for filtered channels are still tracked internally

@@ -5,7 +5,7 @@ title: Message Cloning
 
 # Message Cloning
 
-Copycord's core feature is real-time message cloning — every message sent in a source server appears in your clone server within seconds.
+Copycord's core feature is real-time message cloning: every message sent in a source server appears in your clone server within seconds.
 
 ## How messages are cloned
 
@@ -27,7 +27,9 @@ Source Server        Client (self-bot)        Server (bot)           Clone Serve
 4. The message is sent to the **server** bot via WebSocket
 5. The server posts the message to the matching clone channel using a **webhook**
 
-The webhook preserves the original author's username and avatar, making messages look natural in the clone.
+The webhook preserves the original author's username and avatar, making messages look natural in the clone. A mapping can instead send messages from user accounts; see [Token message cloning](/docs/dashboard/guild-mappings#token-message-cloning).
+
+Messages sent before you set up Copycord are imported with the [Backfill channels](/docs/dashboard/backfill) task. Every cloned message is listed on the [Messages](/docs/dashboard/messages) page.
 
 ## What gets cloned
 

@@ -80,7 +80,7 @@ The client self-bot receives Discord gateway events for every change in the sour
 
 ### 2. Startup sync
 
-When the client starts, it builds and sends a full sitemap for each server. Servers are processed one at a time with a configurable delay between each (default 3 seconds) to avoid rate limits. After startup, all changes are handled by real-time events — no periodic re-syncing is needed.
+When the client starts, it builds and sends a full sitemap for each server. Servers are processed one at a time with a configurable delay between each (default 3 seconds) to avoid rate limits. After startup, all changes are handled by real-time events; no periodic re-syncing is needed. To realign a clone's roles, emojis and stickers on demand, run a [Sync assets](/docs/dashboard/purge-and-sync#sync-assets) task.
 
 ## Sync architecture
 
@@ -88,10 +88,10 @@ Structure sync is designed to be as fast as possible while respecting Discord's 
 
 ### Two-phase channel sync
 
-Channel and category creation runs first without any artificial delays — Discord's built-in rate limit handling (via `Retry-After` headers) is used automatically. Webhook creation is handled separately:
+Channel and category creation runs first without any artificial delays; Discord's built-in rate limit handling (via `Retry-After` headers) is used automatically. Webhook creation is handled separately:
 
-- **`ON_DEMAND_WEBHOOKS: true` (default)** — Webhooks are not created during sync at all. Instead, they are created lazily when the first message arrives for a channel. This makes initial server cloning near-instant for the structure phase.
-- **`ON_DEMAND_WEBHOOKS: false`** — Webhooks are batch-created in the background after structure sync completes, with a small delay between each to avoid hitting rate limits.
+- **`ON_DEMAND_WEBHOOKS: true` (default)**: Webhooks are not created during sync at all. Instead, they are created lazily when the first message arrives for a channel. This makes initial server cloning near-instant for the structure phase.
+- **`ON_DEMAND_WEBHOOKS: false`**: Webhooks are batch-created in the background after structure sync completes, with a small delay between each to avoid hitting rate limits.
 
 ### Parallel background tasks
 
@@ -99,7 +99,7 @@ Roles, emojis, and stickers sync in parallel as background tasks while structure
 
 ### Cancel and restart
 
-If a new sitemap arrives while a sync is already running for the same clone guild, the running sync is canceled and a new one starts with the latest data. Background tasks (roles, emojis, stickers, webhooks) from the canceled sync continue running independently — they are not interrupted.
+If a new sitemap arrives while a sync is already running for the same clone guild, the running sync is canceled and a new one starts with the latest data. Background tasks (roles, emojis, stickers, webhooks) from the canceled sync continue running independently; they are not interrupted.
 
 ### Message buffering
 
