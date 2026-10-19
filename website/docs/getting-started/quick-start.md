@@ -46,6 +46,18 @@ The install script above is the recommended way. Docker is for advanced users wh
 
 Then run `copycord run`, open **http://localhost:8080** and log in with the password the installer shows at the end. The steps below explain each part.
 
+:::note Installing the v4 pre-release
+Until v4.0.0 is released, `main` has no install script. Install the newest pre-release from its tag instead; `--beta` (`-Beta` on Windows) also keeps `copycord update` on the beta channel:
+
+```bash title="Linux / macOS"
+curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4.0.0b1/install.sh | sh -s -- --beta
+```
+
+```powershell title="Windows PowerShell"
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/v4.0.0b1/install.ps1))) -Beta
+```
+:::
+
 ## Steps
 
 ### 1. Install Copycord
@@ -55,11 +67,11 @@ Run the command for your system from above. The installer runs numbered steps:
 ![The Copycord installer in a terminal: the banner, four steps with check marks and the success box](/img/install-script.svg)
 
 1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) if it is missing. uv provides Python 3.14.
-2. **Finding the release:** the newest stable [GitHub release](https://github.com/Copycord/Copycord/releases).
-3. **Installing Copycord:** installs the release wheel as a per-user uv tool.
+2. **Finding the release:** the newest stable [GitHub release](https://github.com/Copycord/Copycord/releases) (with `--beta`, pre-releases too).
+3. **Installing Copycord:** downloads the release wheel, checks it against the checksum GitHub lists for it, and installs it as a per-user uv tool.
 4. **Finishing up:** puts `copycord` on your `PATH` and writes the [settings file](/docs/getting-started/configuration) `.env` in the Copycord home.
 
-The Copycord home holds everything Copycord stores: `data.db`, the logs, the daily backups and `.env`.
+The Copycord home holds everything Copycord stores: `.env`, the `data` folder (`data.db`, `secret.key` and the daily backups) and the `logs` folder.
 
 <Tabs groupId="os" queryString>
 <TabItem value="unix" label="Linux / macOS" default>
@@ -153,7 +165,7 @@ Check it with `copycord service status`. See [`copycord service`](/docs/cli#copy
 
 ## What happens next
 
-- **Updates.** Once a day, `copycord run` prints a one-line hint when a new release is out. Run `copycord update` to install it; a running service is restarted for you. `copycord update --channel beta` (or `stable`, `dev`) switches channels, and `copycord config set AUTO_UPDATE true` lets the service update itself on the stable channel, going back to the previous version if the new one does not start. See [`copycord update`](/docs/cli#copycord-update).
+- **Updates.** When a new release is out, `copycord run` prints a one-line hint at start (it asks GitHub at most once a day). Run `copycord update` to install it; a running service is restarted for you. `copycord update --channel beta` (or `stable`, `dev`) switches channels, and `copycord config set AUTO_UPDATE true` lets the service update itself on the stable channel, going back to the previous version if the new one does not start. See [`copycord update`](/docs/cli#copycord-update).
 - **Settings.** Edit `.env` or run `copycord config set KEY VALUE`, then `copycord restart`. See [Configuration file (.env)](/docs/getting-started/configuration).
 - **Your first clone.** Continue with [First Run](/docs/getting-started/first-run), then [backfill history](/docs/dashboard/backfill) and [filters](/docs/dashboard/filters).
 
@@ -163,7 +175,7 @@ Check it with `copycord service status`. See [`copycord service`](/docs/cli#copy
 copycord doctor
 ```
 
-`copycord doctor` checks this machine without touching the network: Python, the Copycord home and database, the dashboard port and the dashboard files. Each line starts with `PASS`, `WARN` or `FAIL`. `copycord doctor --fix` repairs what it can and asks only before moving the dashboard to a free port; it never changes your password. See [`copycord doctor`](/docs/cli#copycord-doctor).
+`copycord doctor` checks the install (Python, the dashboard files, the packages), your settings, the Copycord home, database and backups, the dashboard port, the service and whether an update is out. Each line starts with `✓` (fine), `!` (warning), `✗` (problem) or `•` (info). `copycord doctor --fix` repairs what it can and asks only before moving the dashboard to a free port; it never changes your password. See [`copycord doctor`](/docs/cli#copycord-doctor).
 
 - `copycord` not found: open a new terminal.
 - Port 8080 is taken: set `ADMIN_PORT` in [`.env`](/docs/getting-started/configuration) and restart.
