@@ -3,102 +3,93 @@ sidebar_position: 4
 title: Announcements
 ---
 
-# Announcement Commands
+# Announcement commands
 
-The announcement system lets you set up keyword-triggered notifications. When a message in a source server matches a trigger, all subscribed users get a DM notification.
+Announcements send a DM to subscribed users when a message in a source server contains a keyword. A trigger defines the keyword to watch for; a subscription says who gets the DM.
 
-## How it works
-
-1. **Create a trigger**: define a keyword to watch for in a server, optionally limited to one user or channel
-2. **Subscribe users**: users subscribe to receive DM notifications when triggers fire
-3. **Get notified**: when a matching message appears, subscribers get a DM with the message details
-
----
+When a message matches a trigger, each user subscribed to that keyword, or to all keywords, gets a DM with the message details.
 
 ## `/announcement_trigger_add`
 
-Registers a new announcement trigger.
+Adds a trigger: a keyword to watch for in one server, optionally limited to one user or one channel.
 
-**Parameters:**
+```
+/announcement_trigger_add guild_id:<id> keyword:<word> user_id:<id> [channel_id:<id>]
+```
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `guild_id` | Yes | Server ID to watch (a 17 to 20 digit ID) |
-| `keyword` | Yes | Word to match in messages |
-| `user_id` | Yes | Only match messages from this user (`0` = any user) |
-| `channel_id` | No | Only match in this channel (`0` or omit = any channel) |
+| Option | Required | Description |
+|--------|----------|-------------|
+| `guild_id` | Yes | The ID of the server to watch, 17 to 20 digits |
+| `keyword` | Yes | The word to match in messages |
+| `user_id` | Yes | Match only messages from this user. `0` matches any user |
+| `channel_id` | No | Match only messages in this channel. `0`, or leaving it out, matches any channel |
 
-**Examples:**
 ```
 /announcement_trigger_add guild_id:123456789012345678 keyword:lol user_id:0
 /announcement_trigger_add guild_id:123456789012345678 keyword:trade user_id:111111111111111111
 /announcement_trigger_add guild_id:123456789012345678 keyword:raid user_id:0 channel_id:987654321098765432
 ```
 
----
-
 ## `/announce_trigger_list`
 
-Lists all announcement triggers, or deletes one by index.
+Lists every announcement trigger, or deletes one by its number in the list.
 
-**Parameters:**
+```
+/announce_trigger_list [delete:<number>]
+```
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `delete` | No | 1-based index of the trigger to remove |
+| Option | Required | Description |
+|--------|----------|-------------|
+| `delete` | No | The number of the trigger to delete, starting at 1 |
 
-**Examples:**
 ```
 /announce_trigger_list
 /announce_trigger_list delete:2
 ```
 
----
-
 ## `/announce_subscription_toggle`
 
-Subscribes or unsubscribes a user to announcement triggers for a keyword.
+Subscribes a user to a keyword's announcements, or unsubscribes them when they are already subscribed.
 
-**Parameters:**
+```
+/announce_subscription_toggle guild_id:<id> [user:<user>] [keyword:<word>]
+```
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `guild_id` | Yes | Server ID scope (`0` = all servers) |
-| `user` | No | Discord user to toggle (defaults to yourself) |
-| `keyword` | No | Keyword to subscribe to (`*` = all keywords) |
+| Option | Required | Description |
+|--------|----------|-------------|
+| `guild_id` | Yes | The server the subscription applies to. `0` means all servers |
+| `user` | No | The user to subscribe. Default: you |
+| `keyword` | No | The keyword to subscribe to. Leave it out to subscribe to all keywords, shown as `*` |
 
-**Examples:**
 ```
 /announce_subscription_toggle guild_id:0 keyword:lol
 /announce_subscription_toggle guild_id:123456789012345678
 /announce_subscription_toggle guild_id:123456789012345678 keyword:trade user:@Mac
 ```
 
----
-
 ## `/announce_subscription_list`
 
-Lists all subscriptions, or deletes one by index.
+Lists every subscription, or deletes one by its number in the list.
 
-**Parameters:**
+```
+/announce_subscription_list [delete:<number>]
+```
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `delete` | No | 1-based index of the subscription to remove |
+| Option | Required | Description |
+|--------|----------|-------------|
+| `delete` | No | The number of the subscription to delete, starting at 1 |
 
-**Examples:**
 ```
 /announce_subscription_list
 /announce_subscription_list delete:7
 ```
 
----
-
 ## `/announce_help`
 
-Displays a formatted help embed explaining how to use all announcement commands.
+Shows a help message that explains the announcement commands.
 
-**Usage:**
 ```
 /announce_help
 ```
+
+This command has no options.

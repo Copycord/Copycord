@@ -3,129 +3,108 @@ sidebar_position: 5
 title: Roles
 ---
 
-# Role Commands
+# Role commands
 
-Commands for managing roles in your clone server: auto-assignment, blocking, and mention pings.
+These commands give roles to new members of the clone server, alert you when someone joins a server, and block roles from cloning. The commands that mention roles on cloned messages are on the [Webhooks](/docs/commands/webhooks#role-mentions) page.
 
-## On-Join Roles
+## `/onjoin_role`
 
-### `/onjoin_role`
+Adds a role that new members of this server get when they join, or removes it when it is already an on-join role.
 
-Toggle an on-join role. When enabled, this role is automatically assigned to new members joining the clone server.
-
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `role` | Yes | The role to assign on join |
-
-**Usage:**
 ```
-/onjoin_role @Member
+/onjoin_role role:<role>
 ```
 
-Run the command again with the same role to **remove** it.
+| Option | Required | Description |
+|--------|----------|-------------|
+| `role` | Yes | The role to give on join |
 
-:::note
-- Multiple on-join roles are supported (run the command once per role)
-- Managed roles or roles above the bot's top role cannot be assigned
-- The bot must have **Manage Roles** permission
-:::
+```
+/onjoin_role role:@Member
+```
 
----
+To add several on-join roles, run the command once per role. The bot needs the **Manage Roles** permission, and it cannot give roles managed by an integration or roles above its own highest role.
 
-### `/onjoin_roles`
+## `/onjoin_roles`
 
-List all configured on-join roles, or clear them all.
+Lists this server's on-join roles, or removes all of them.
 
-**Parameters:**
+```
+/onjoin_roles [clear:true]
+```
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `clear` | No | Set to `true` to remove all on-join roles |
+| Option | Required | Description |
+|--------|----------|-------------|
+| `clear` | No | `true` removes every on-join role. Default: `false` |
 
-**Usage:**
 ```
 /onjoin_roles
 /onjoin_roles clear:true
 ```
 
----
+## `/onjoin_sync`
 
-### `/onjoin_sync`
+Goes through the server's current members and gives each one the on-join roles they are missing.
 
-Scan all current server members and add any missing on-join roles.
+```
+/onjoin_sync [include_bots:true] [dry_run:true]
+```
 
-**Parameters:**
+| Option | Required | Description |
+|--------|----------|-------------|
+| `include_bots` | No | `true` also gives the roles to bots. Default: `false` |
+| `dry_run` | No | `true` shows what would change without changing any roles. Default: `false` |
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `include_bots` | No | Include bots in the sync (default: false) |
-| `dry_run` | No | Show what would change without modifying roles (default: false) |
-
-**Usage:**
 ```
 /onjoin_sync
 /onjoin_sync include_bots:true dry_run:true
 ```
 
----
+## `/onjoin_dm`
 
-### `/onjoin_dm`
+Turns DM alerts on or off for one server. While on, you get a DM with the details of each new member who joins it.
 
-Toggle DM notifications when someone joins a specific server. When enabled, you'll receive a DM with the new member's details.
-
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `server_id` | Yes | The Discord server ID to watch |
-
-**Usage:**
 ```
-/onjoin_dm 123456789012345678
+/onjoin_dm server_id:<id>
 ```
 
-:::note
-Only works for servers with 1,000 or fewer members. Your account connected to Copycord must be a member of the target server.
-:::
+| Option | Required | Description |
+|--------|----------|-------------|
+| `server_id` | Yes | The ID of the server to watch |
 
----
-
-## Role Blocking
-
-### `/role_block`
-
-Block a specific role from being cloned or updated. Use this to prevent certain roles from appearing in your clone.
-
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `role` | No* | The cloned role to block |
-| `role_id` | No* | The cloned role ID to block |
-
-*One of `role` or `role_id` is required.
-
-**Usage:**
 ```
-/role_block @SomeRole
+/onjoin_dm server_id:123456789012345678
+```
+
+Alerts work only for servers with 1,000 members or fewer, and your user account (the client) must be a member of the server.
+
+## `/role_block`
+
+Blocks a role in this clone server from being cloned or updated.
+
+```
+/role_block role:<role>
+/role_block role_id:<id>
+```
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `role` | One of the two | The cloned role to block |
+| `role_id` | One of the two | The ID of the cloned role to block, 17 to 20 digits |
+
+```
+/role_block role:@SomeRole
 /role_block role_id:12345678987654321
 ```
 
----
+Blocked roles are also listed under **Blocked roles** in the mapping's [filters](/docs/dashboard/filters).
 
-### `/role_block_clear`
+## `/role_block_clear`
 
-Clear all role blocks for the current clone server.
+Removes every role block of this clone server.
 
-**Usage:**
 ```
 /role_block_clear
 ```
 
----
-
-## Role Mentions
-
-Auto-mention roles at the top of cloned messages. See [Webhooks → Role Mentions](/docs/commands/webhooks#role-mentions) for the full `/role_mention` command reference.
+This command has no options.
