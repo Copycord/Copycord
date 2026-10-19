@@ -5,30 +5,33 @@ title: Contributing
 
 # Contributing
 
-We welcome contributions to Copycord! Whether it's bug fixes, new features, or documentation improvements, here's how to get started.
+Set up a development copy of Copycord, run the tests and send a pull request with a bug fix, a feature or a docs change.
 
-## Getting started
+## Get the code
 
-1. **Fork** the [repository](https://github.com/Copycord/Copycord)
-2. **Clone** your fork:
+1. Fork the [repository](https://github.com/Copycord/Copycord).
+2. Clone your fork:
+
    ```bash
    git clone https://github.com/YOUR_USERNAME/Copycord.git
    cd Copycord
    ```
-3. Create a new **branch** from `main`:
+
+3. Create a branch from `main`:
+
    ```bash
    git checkout -b my-feature
    ```
 
 ## Development setup
 
-### Prerequisites
+### Requirements
 
-- Docker & Docker Compose (to run Copycord from your checkout)
-- Python 3.12 to 3.14 (to run the tests)
-- Node.js 22 + npm (only if you build the dashboard frontend outside Docker)
+- Docker and Docker Compose, to run Copycord from your checkout
+- Python 3.12 to 3.14, to run the tests
+- Node.js 22 and npm, to build the dashboard outside Docker
 
-### Running locally with Docker
+### Run Copycord with Docker
 
 Copycord runs as one container (dashboard, server and client together). To build it from your local source, use the development compose file `docker-compose.dev.yml` at the repository root. It contains:
 
@@ -56,13 +59,9 @@ docker compose -f docker-compose.dev.yml up --build
 
 This builds the image from the root `Dockerfile`: it builds the dashboard frontend with Node, installs Copycord from `pyproject.toml` on Python 3.14 and runs `copycord run`. Rebuild with the same command after every change. The dashboard is at **http://localhost:8080** and your test data stays in `./data`.
 
-The container output shows the dashboard's log plus warnings and errors from the server and client. For the full server and client logs, open the dashboard's Logs page or read `./data/server.out` and `./data/client.out` (see [Where logs go](/docs/dashboard/system#where-logs-go)).
+The container output shows the dashboard's log plus warnings and errors from the server and client. For the full server and client logs, open the dashboard's Logs page or read `./data/server.out` and `./data/client.out` (see [Where logs go](/docs/dashboard/system#where-logs-go)). Copycord does not start while the `ROLE` variable is set.
 
-:::note No more ROLE
-v4 has no `ROLE` variable and no separate `admin`, `server` and `client` services. Copycord refuses to start while `ROLE` is set.
-:::
-
-### Building the frontend
+### Build the dashboard
 
 The dashboard is a React and TypeScript app built with Vite, in `src/copycord/admin/web`. The Docker build compiles it for you. To check frontend changes on their own:
 
@@ -75,7 +74,7 @@ npm test            # the Vitest suite
 
 `npm run dev` starts the Vite dev server.
 
-## Running tests
+## Run the tests
 
 Install the test dependencies (in a virtual environment of your choice) and run the suite from the repository root, as CI does:
 
@@ -164,21 +163,13 @@ copycord/
 └── website/             # Docusaurus documentation
 ```
 
-## Submitting changes
+## Submit changes
 
-1. **Commit** your changes with clear, descriptive messages
-2. **Push** to your fork
-3. Open a [Pull Request](https://github.com/Copycord/Copycord/pulls) against the `main` branch
-4. Describe your changes: what they do and why
+1. Commit your changes with clear messages.
+2. Push the branch to your fork.
+3. Open a [pull request](https://github.com/Copycord/Copycord/pulls) against `main`.
+4. In the description, say what the change does and why.
 
-## Reporting issues
+## Report issues
 
-Found a bug or have a feature request? [Open an issue](https://github.com/Copycord/Copycord/issues) on GitHub.
-
-## Community
-
-Join our [Discord server](https://discord.gg/ArFdqrJHBj) to chat with other contributors and users.
-
-## Support the project
-
-If you enjoy Copycord, consider [buying us a coffee](https://ko-fi.com/A0A41KPDX4)!
+To report a bug or request a feature, [open an issue](https://github.com/Copycord/Copycord/issues). To talk with other contributors and users, join the [Discord server](https://discord.gg/ArFdqrJHBj). To support the project, [donate on Ko-fi](https://ko-fi.com/A0A41KPDX4).
