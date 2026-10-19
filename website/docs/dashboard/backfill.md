@@ -1,84 +1,62 @@
 ---
-title: History Import (Backfill)
+title: History import (backfill)
 ---
 
-# History Import (Backfill)
+# History import (backfill)
 
-The **Backfill channels** task imports the message history of source channels into their clones, not just the messages sent after setup. One run can cover one channel, several channels or whole categories.
+The **Backfill channels** task copies the message history of source channels into their clones, so the clone also has the messages sent before you set up Copycord. One run can cover one channel, several channels or whole categories.
 
-Both the server and the client bots must be running to start a backfill.
+Both the server bot and the client must be running to start a backfill.
 
-## Starting a backfill
+## Import channel history
 
-1. Open the **Tasks** page and pick **Backfill channels** in **Task types**
-2. Click **Run task**
-3. Pick the **Mapping**
-4. Under **Channels**, tick the channels or categories to import. Ticking a category picks every channel in it; the search box filters the list by name
-5. Choose **How far back?** and the settings below
-6. Click **Start**
+1. Open the **Tasks** page and pick **Backfill channels** in **Task types**.
+2. Click **Run task**.
+3. In **Mapping**, pick the mapping.
+4. Under **Channels**, tick the channels to import. Ticking a category picks every channel in it. To find a channel, type its name in the search box.
+5. Under **How far back?**, pick a range. See [Range options](#range-options).
+6. Optional: turn on **Ignore cloned messages** to skip messages that are already in the clone.
+7. If the form shows **Some picked channels have an unfinished backfill**, pick **Resume previous** or **Start new**. See [Resume an unfinished backfill](#resuming-an-unfinished-backfill).
+8. Click **Start**.
 
-The run page opens and shows one step per channel with its progress.
+The run page opens with one step per channel. Each step shows how many messages were pulled and delivered; channels waiting their turn show their place in the queue. Messages are posted oldest first.
+
+When the run ends, its summary counts the messages delivered and the channel steps done, failed, skipped and cancelled.
 
 ## Range options
 
-| Option | Description |
-|--------|-------------|
-| **All history** | Import the entire message history of the channel from the very beginning |
-| **Since date/time** | Import messages sent after a specific date and time |
-| **Between dates** | Import messages within a specific date and time range (**From** and **To**) |
-| **Last N messages** | Import only the most recent N messages |
+| Option | What is imported |
+|--------|------------------|
+| **All history** | Every message, from the start of the channel |
+| **Since date/time** | Messages sent after a date and time |
+| **Between dates** | Messages between a **From** and a **To** date and time |
+| **Last N messages** | The most recent N messages |
 
-The **Since** and **Between** options take a date and an optional time. A date without a time starts at midnight. If you select a specific time, the backfill uses the exact timestamp.
+**Since date/time** and **Between dates** take a date and an optional time. A date without a time means midnight at the start of that day, except for the **To** date of **Between dates**, which includes the whole day. With a time, the exact time is used.
 
-:::tip Date range for Between mode
-When using **Between dates** with date-only values, the **To** date is inclusive: the range extends through the end of that day. When a specific time is selected, the exact timestamp is used as the cutoff.
-:::
+## Avoid duplicate messages
 
-## Settings
+**Ignore cloned messages** skips every message that already has a clone, so you can run a backfill again, or fill the gaps after a partial one, without posting duplicates. Copycord decides this from its stored message records before the run starts.
 
-### Ignore cloned messages
-
-When enabled, the backfill skips messages that have already been cloned to the target server. Before starting the backfill, Copycord checks its local database for existing cloned message records and filters out any original message IDs that already have a clone. The server only receives the remaining uncloned messages.
-
-This is useful when:
-- You need to re-run a backfill but don't want to duplicate messages that were already cloned
-- A previous backfill was partially completed and you want to fill in the gaps without duplicates
-
-:::caution Message records
-This feature relies on cloned message records stored in the database. Messages whose records were deleted, for example by a [Purge messages](/docs/dashboard/purge-and-sync#purge-messages) run, are no longer detected as cloned.
-:::
-
-### Mode
-
-When some of the picked channels have an unfinished backfill, the form shows **Some picked channels have an unfinished backfill** and a mode choice:
-
-| Mode | Description |
-|------|-------------|
-| **Resume previous** | Continue each unfinished backfill from its last checkpoint. A channel without one starts fresh |
-| **Start new** | Discard the unfinished backfills and start fresh for all picked channels |
-
-## How it works
-
-When you start a backfill:
-
-1. The **client** fetches message history from the source channel page by page
-2. Messages are sent to the **server** via WebSocket
-3. The **server** posts them to the clone channel using webhooks
-4. Progress is shown on the run page: each channel step reads how many messages were delivered and pulled
-
-Messages are imported in chronological order (oldest first), preserving the conversation flow. Channels waiting their turn show as queued with their place in the queue.
-
-The run's summary counts the messages delivered and the channel steps done, failed, skipped and cancelled.
+Messages whose records were deleted, for example by a [Purge messages](/docs/dashboard/purge-and-sync#purge-messages) run, count as not cloned and are copied again.
 
 ## Resuming an unfinished backfill
 
-If a backfill is interrupted (for example by a restart or **Cancel run**), its channels keep a checkpoint. Start a new **Backfill channels** run for the same channels and pick **Resume previous** to continue from where each one stopped.
+When a backfill is interrupted, for example by a restart or **Cancel run**, each of its channels keeps a checkpoint. To continue:
 
-If the bots stop during a backfill, the run ends as cancelled with **Bots stopped**.
+1. Start a new **Backfill channels** run for the same channels.
+2. When the form shows **Some picked channels have an unfinished backfill**, pick **Resume previous**.
+3. Click **Start**.
 
-## Limits and considerations
+| Mode | Effect |
+|------|--------|
+| **Resume previous** | Each unfinished channel continues from its checkpoint. A channel without one starts from the beginning |
+| **Start new** | The checkpoints are discarded and every picked channel starts from the beginning |
 
-- **Rate limits**: Discord imposes rate limits on message fetching. Copycord handles these with built-in delays
-- **Large channels**: Channels with tens of thousands of messages may take a while
-- **Attachments**: Media files are re-uploaded to the clone, which adds processing time
-- **Order**: Messages appear in chronological order, but Discord may display them slightly differently since they're posted via webhook
+If the bots stop during a backfill, the run is cancelled with **Bots stopped**.
+
+## How long a backfill takes
+
+- Discord limits how fast messages can be read and posted. Copycord waits as Discord asks, so channels with tens of thousands of messages can take a long time.
+- Attachments are downloaded and uploaded again, which adds time.
+- Messages are posted in their original order, but each shows the time it was posted to the clone.
