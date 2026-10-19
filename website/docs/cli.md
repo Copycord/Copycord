@@ -33,114 +33,13 @@ copycord --no-color <command>
 copycord --verbose <command>
 ```
 
-`copycord` on its own (or `copycord --help`) lists the commands by group with a few examples:
-
-```
-$ copycord
-Copycord v4.0.0
-  Home: /home/you/.copycord
-
-Usage: copycord <command> [options]
-
-Get started:
-  run        Run Copycord
-  restart    Restart Copycord
-  doctor     Check this machine can run Copycord
-
-Settings:
-  config     Read or write settings (get, set, unset, export, import, init)
-
-Service:
-  service    Run Copycord in the background (install, status, start, stop, restart, uninstall)
-
-Backups:
-  backup     Back up the database now
-  restore    Restore the database from a backup
-
-Updates:
-  update     Update Copycord to the latest version
-
-Remove:
-  uninstall  Remove Copycord; asks whether to delete your data
-
-Examples:
-  copycord run                             start Copycord in this terminal
-  copycord service install                 run it in the background
-  copycord update                          update to the latest version
-  copycord doctor                          check your setup
-  copycord config set PASSWORD 'new-pass'  change the dashboard password
-
-Options:
-  -h, --help     Show this help
-  -V, --version  Print the version
-  --no-color     Turn off color, same as NO_COLOR=1
-  --json         Print the result as JSON, for scripts
-  --verbose      Show more detail, and the full error if something fails
-
-Run copycord <command> --help for the options of one command.
-More: copycord help advanced
-Docs: https://copycord.github.io/Copycord/docs/cli
-```
-
-Every command has `--help`, for example `copycord service install --help`. Each command's help has the same layout: a heading, the usage line, its commands or options, and examples. Options most people never need come last, under their own heading. A command group on its own (`copycord config`, `copycord service`) prints its help. A mistake such as an unknown option prints one line and points at the help. An unknown command suggests the closest one and exits with status 2:
-
-```
-$ copycord updte
-✗ unknown command 'updte'. Did you mean 'update'?
-  Run copycord --help to see all commands.
-```
-
-```
-$ copycord update --help
-copycord update
-Update Copycord to the latest version and restart a running service. The
-database is backed up first.
-
-Usage: copycord update [status] [options]
-
-Arguments:
-  status  Print the installed version, the channel and the latest on it
-
-Options:
-  --data-dir PATH  Data directory (sets DATA_DIR)
-  --json           Print one JSON document on stdout and nothing else
-  --tag VERSION    Install this exact version once; the saved channel does not
-                   change
-  ...
-  -h, --help       Show this help
-
-Examples:
-  copycord update              update to the latest version
-  ...
-
-Advanced (channels and git installs):
-  --channel stable|beta|dev  Switch to this channel and save it (beta adds
-                             pre-releases, dev installs a git ref)
-  ...
-
-  copycord update --channel beta                switch to pre-releases
-  ...
-```
-
-Colors follow the same rules as the rest of the output: no color when it is not a terminal, `NO_COLOR` is set or `--no-color` is given.
+`copycord` on its own, or `copycord --help`, lists the commands by group with examples. Every command has `--help`, for example `copycord service install --help`; a command group on its own, such as `copycord config`, prints its help. An unknown command suggests the closest one and exits with status 2.
 
 ## Output and colors {#output}
 
-Every status line starts with one symbol: `✓` success, `!` warning, `✗` failure, `•` info, and `?` for a question. The installers use the same set. Commands inside a message are shown in the command color. The Copycord banner appears only on the bare `copycord` overview and in the installers. In a terminal the CLI also shows a spinner while it waits for GitHub or installs an update, and boxed notices for things you need to act on. A step that takes longer than a few seconds shows the time spent next to the spinner, for example `Installing Copycord  12s`; the installers do the same. In Windows Terminal the tab and the taskbar button also show that Copycord is busy until the step ends.
+Every status line starts with one symbol: `✓` success, `!` warning, `✗` failure, `•` info and `?` question. Where the terminal cannot print them, they are replaced with `+ ! x -`.
 
-Colors are turned off when the output is not a terminal (a pipe, a file, a service log), when `NO_COLOR` is set, with `--no-color` (before or after the command, for example `copycord --no-color doctor`), or when `TERM=dumb`. `FORCE_COLOR=1` turns them on anyway. Without colors the lines and symbols stay the same:
-
-```
-✓ home writable
-! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
-✗ database schema 5 is newer than this Copycord supports (4)  ...
-```
-
-Where the terminal cannot print these symbols (for example a Windows console on code page 437 or 1252), they fall back to `+ ! x -`.
-
-Web addresses in the output (the dashboard address, the docs link) can be clicked in Windows Terminal, VS Code, iTerm2, kitty, WezTerm, Ghostty and GNOME Terminal and other VTE-based terminals. The full address is always printed, so you can still copy it anywhere else. Links are off when colors are off, and inside tmux or screen.
-
-Folders and files in the Copycord home can be clicked the same way to open them: the `Home:` line of the overview, the paths `copycord doctor` prints (such as the `.env` in "change PASSWORD in ...") and the "Your data is in" lines of `copycord uninstall`. The path is printed as before. These links are also off over SSH and inside Docker, where the folder is not on the computer in front of you, and with `--json`.
+Colors are off when the output is not a terminal (a pipe, a file or a service log), when `NO_COLOR` is set, when `TERM=dumb` or with `--no-color` before or after the command. `FORCE_COLOR=1` turns them on. In terminals that support it, web addresses and the folders Copycord prints can be clicked; links are off without colors, inside tmux or screen, over SSH, inside Docker and with `--json`.
 
 ### JSON output {#json}
 
@@ -177,7 +76,7 @@ $ copycord doctor --json
 
 ### Unexpected errors {#crash}
 
-If a command hits an error Copycord does not expect, it prints three plain lines on stderr instead of a Python traceback and exits with status 1:
+When a command hits an unexpected error, it prints three lines on stderr and exits with status 1:
 
 ```
 Copycord hit an unexpected error: OSError: [Errno 28] No space left on device
@@ -185,7 +84,7 @@ The details were saved to /home/you/.copycord/logs/copycord-crash-20261013-14150
 Report it at https://github.com/Copycord/Copycord/issues
 ```
 
-The log file holds the full traceback, the Copycord and Python versions and the command (without its values, which can be secrets). It goes in the `logs` folder of the Copycord home, or in the temp folder when that is not writable. Add `--verbose` to any command to also print the traceback. Ctrl+C stops a command as before, without a report.
+The log file holds the full error, the Copycord and Python versions and the command without its values, which can be secrets. It goes in the `logs` folder of the Copycord home, or in the temp folder when that is not writable. To also print the full error, add `--verbose`.
 
 ## The data directory {#data-dir}
 
@@ -197,11 +96,14 @@ Copycord keeps its database (`data.db`), `secret.key`, backups, exports and the 
 | Windows | `%USERPROFILE%\.copycord\data` |
 | Docker | `/data` (your `./data` volume) |
 
-`~/.copycord` is the Copycord home. It holds `.env`, the `data` folder and a `logs` folder with all logs (`server.out`, `client.out`, `scraper.out`, `update.log`). A git install keeps its checkout in `src/` and its per-user Node in `node/` inside it; on Windows, `copycord update` leaves `.copycord-old` there. Set `COPYCORD_HOME` to use another home; `--data-dir` and `DATA_DIR` still win over the data directory. In Docker, and with any other `DATA_DIR`, everything stays in that one folder as before (`.env`, `*.out` and `logs/update.log` included).
+The data directory is the `data` folder in the [Copycord home](/docs/getting-started/manual-install#home). The home also holds `.env` and a `logs` folder with `server.out`, `client.out`, `scraper.out` and `update.log`. In Docker, and with any other `DATA_DIR`, all of these stay in that one folder.
 
-Older installs kept everything loose in the home. When Copycord starts and finds `data.db` or `secret.key` directly in the home and no `data/data.db`, it first backs up the database to `backups/data-pre-update-layout-<timestamp>.db`, then moves the data files into `data` and the `*.out` files into `logs`, and logs one line: `Moved Copycord data into <home>/data and logs into <home>/logs`. It never overwrites a file that is already in the new place and never deletes anything. If a move fails, it puts everything back and keeps using the old layout. `copycord doctor` shows `data files loose in the home` until then, and `copycord doctor --fix` does the same move when Copycord is stopped. Docker data is never moved. If `~/.copycord` does not exist but an older install left a `data.db` in `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows), Copycord keeps using that folder and prints a notice. It never moves data by itself; to move, stop Copycord and move the folder to `~/.copycord`.
+`--data-dir PATH` uses another data directory for one command, the same as setting `DATA_DIR`. It wins over `COPYCORD_HOME`. `run`, `doctor`, every `config` command, `service install`, `backup`, `restore`, `update` and `uninstall` accept it.
 
-`--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `doctor`, every `config` command, `service install`, `backup`, `restore`, `update` and `uninstall`.
+| Older layout | What Copycord does |
+|--------------|--------------------|
+| `data.db` or `secret.key` directly in the home, no `data/data.db` | On start, backs up the database to `backups/data-pre-update-layout-<timestamp>.db`, then moves the data files into `data` and the `*.out` files into `logs`. It never overwrites or deletes a file; if a move fails, it puts everything back. `copycord doctor` shows `data files loose in the home` until then, and `copycord doctor --fix` does the move while Copycord is stopped. Docker data is never moved. |
+| No `~/.copycord`, but a `data.db` in `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows) | Keeps using that folder and prints a notice. To move it, stop Copycord and move the folder to `~/.copycord`. |
 
 ## copycord run {#copycord-run}
 
@@ -212,9 +114,9 @@ copycord run
 copycord run --data-dir ~/copycord-data
 ```
 
-The dashboard is at **http://localhost:8080**. Open it to finish the setup: the server bot token, the client token and everything else is configured there (see [Discord Setup](/docs/getting-started/discord-setup) for the tokens). Press **Ctrl+C** to stop. If one part crashes, Copycord restarts that part on its own.
+The dashboard is at `http://localhost:8080`. **Ctrl+C** stops Copycord. If one part crashes, Copycord restarts that part.
 
-Useful environment variables (on a native install, set them in [`<home>/.env`](#env-file)):
+Environment variables (with the installer, set them in [`<home>/.env`](#env-file)):
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
@@ -224,17 +126,21 @@ Useful environment variables (on a native install, set them in [`<home>/.env`](#
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; also an app config key, which wins once it is saved |
 | `DATA_DIR` | see above | Same as `--data-dir` |
 
-`copycord run` refuses to start while the old v3 `ROLE` variable is set. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
+`copycord run` does not start while the v3 `ROLE` variable is set. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
 
-The terminal shows the dashboard's log and warnings or errors from the server and client. The full server and client logs go to files in the data directory; see [Logs](/docs/dashboard/system#where-logs-go).
+The terminal shows the dashboard's log and the warnings and errors from the server and client. See [Where logs go](/docs/dashboard/system#where-logs-go).
 
-When the dashboard port or one of the internal ports (`9101` and `9102`) is in use at start, Copycord waits up to 15 seconds for it, since a Copycord that just stopped can hold its ports for a moment. If the port is still in use, it prints `✗ Port 9101 is in use, so Copycord cannot start` with what to do (stop the other Copycord with `copycord service stop`, or run `copycord doctor` to check the port) and exits with 1.
+When the dashboard port or one of the ports `9101` and `9102` is in use at start, Copycord waits up to 15 seconds for it. If it is still in use, Copycord prints `✗ Port 9101 is in use, so Copycord cannot start` with what to do and exits with status 1.
 
 ### Dashboard address {#dashboard-address}
 
-The dashboard listens on `127.0.0.1`, so only this computer can open it, at `http://localhost:8080`. To open it from other devices, set `DASHBOARD_HOST=0.0.0.0` (every network) or one IP address of this computer in [`<home>/.env`](#env-file), then run `copycord restart`. The Docker image sets `0.0.0.0` already.
+| `DASHBOARD_HOST` | Who can open the dashboard |
+|------------------|----------------------------|
+| `127.0.0.1` (default) | Only this computer, at `http://localhost:8080` |
+| `0.0.0.0` (Docker default) | Every network |
+| An IP address of this computer | Devices that can reach that address |
 
-With any address other than `127.0.0.1`, `copycord run` refuses to start while `PASSWORD` is still `copycord`, and `copycord doctor` shows it as a failure. Fix it by setting your own `PASSWORD`, or by setting `DASHBOARD_HOST=127.0.0.1` so the dashboard stays on this computer. If something else already protects the dashboard (a reverse proxy with its own login, for example), `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips the check.
+With any address other than `127.0.0.1`, `copycord run` does not start while `PASSWORD` is `copycord`, and `copycord doctor` reports a failure. `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check, for when something else, such as a reverse proxy with its own login, protects the dashboard. See [Security defaults](/docs/configuration/security).
 
 ## copycord --version {#copycord-version}
 
@@ -307,38 +213,11 @@ Needs your attention
 ! 1 warning, 0 problems
 ```
 
-In a terminal the same report hangs off a line down the left, one box per group, with the version at the top and the summary on the last line:
+In a terminal the same report is drawn in one box per group.
 
-```
-Copycord v4.0.0 (1a2b3c4) · Ultimate Discord server mirroring and utility toolkit
+The report ends with a **Needs your attention** section that lists each warning and problem once with what to do, then `✓ All good` or the number of warnings and problems. A warning that `--fix` can repair says so there. The command exits with status 1 when any check fails and 0 otherwise, warnings included.
 
-┌  Copycord doctor
-│
-◇  Install ───────────────────────────────────────╮
-│                                                 │
-│  ✓ Copycord v4.0.0 (1a2b3c4) · stable channel   │
-│  ✓ Python 3.12.3                                │
-│  ✓ web UI included                              │
-│  ✓ dependencies OK                              │
-│                                                 │
-├─────────────────────────────────────────────────╯
-│
-◇  Updates ───────────────────────────────────────╮
-│                                                 │
-│  ✓ up to date                                   │
-│                                                 │
-├─────────────────────────────────────────────────╯
-│
-└  ! 1 warning, 0 problems
-```
-
-Every box of one command is as wide as the terminal, up to 100 columns, and long lines wrap inside it. `copycord doctor --brief` and `--json` keep their plain output.
-
-Each line starts with `✓`, `!`, `✗` or `•`; in a terminal they are green, yellow, red and blue. The report ends with a **Needs your attention** section that lists each warning and problem once with what to do, then a last line: `✓ All good`, or the number of warnings and problems. A warning that `--fix` can repair says so there, for example `! .env not found  run copycord doctor --fix to create it with the default settings`, while its line in the group shows the path. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts. When `copycord doctor --fix` can repair some of the warnings and problems, a last line says how many.
-
-:::tip Port in use
-`! port 8080 in use` means another program has the port: set `ADMIN_PORT` to a free one, or let `copycord doctor --fix` pick the next free port. When Copycord itself is listening (as a service, or `copycord run` in another terminal) the line says `port 8080 in use by Copycord` instead.
-:::
+`! port 8080 in use` means another program has the port: set `ADMIN_PORT` to a free one, or let `copycord doctor --fix` pick the next free port. When Copycord itself is listening, the line says `port 8080 in use by Copycord` instead.
 
 ### Fixing problems {#doctor-fix}
 
@@ -441,65 +320,7 @@ Some settings are read from the environment only, before the database is open. I
 
 With `COPYCORD_HOME` or `--data-dir` it is `.env` in that folder. `copycord` reads the file on every start, for `copycord run` and the service alike, so a restart applies your changes. Variables already set in the real environment win over the file.
 
-The installer makes sure the file exists: on first install it runs `copycord config init`, which writes the file with every key set to its default, a random password and a one-line description above each key, and prints its path. It never overwrites an existing file, and on Linux and macOS only your user can read it. `BACKUP_DIR` is the default folder, `backups` in the [data directory](#data-dir). On Linux, for a user named `alice`:
-
-```ini
-# Copycord settings. Everything else is in the dashboard.
-# After a change, run: copycord restart
-
-# Dashboard password
-PASSWORD=k7Qe2Vd9sLmP0aZr4TwXbg
-
-# Dashboard port
-ADMIN_PORT=8080
-
-# Who can open the dashboard: 127.0.0.1 = this computer, 0.0.0.0 = your network
-DASHBOARD_HOST=127.0.0.1
-
-# Time zone for backups and exports
-TZ=UTC
-
-# Log detail: INFO or DEBUG
-LOG_LEVEL=INFO
-
-# Log style: HUMAN or JSON
-LOG_FORMAT=HUMAN
-
-# Backup folder
-BACKUP_DIR=/home/alice/.copycord/data/backups
-
-# Daily backup time (HH:MM)
-BACKUP_AT=03:17
-
-# Backups to keep
-BACKUP_RETAIN=14
-
-# Skip the update check: 1 = yes, 0 = no
-COPYCORD_NO_UPDATE_CHECK=0
-```
-
-An empty value, such as `TZ=`, means the default. The dashboard always asks for the password. If `PASSWORD` is empty or missing, `copycord run` makes a random one, saves it in this file and shows it once. In Docker, Copycord does not start until you set `PASSWORD`.
-
-:::note The dashboard password
-`copycord config init`, which the installers run, writes a random `PASSWORD` into a new file, and the installer shows it once. `copycord config get PASSWORD --show-secrets` prints it again. `copycord doctor --fix` also writes a random one when it recreates a missing file. A file from an older install can still have the old default `copycord`; change it.
-:::
-
-To change a setting, edit the file, then restart Copycord:
-
-```bash
-nano ~/.copycord/.env                # Linux/macOS
-notepad "$HOME\.copycord\.env"       # Windows (PowerShell)
-copycord restart
-```
-
-Or let `copycord config set` edit the file for you:
-
-```bash
-copycord config set PASSWORD 'new-pass'
-copycord restart
-```
-
-[`copycord restart`](#copycord-restart) restarts the service. If you run Copycord in a terminal instead, stop it with **Ctrl+C** and run `copycord run` again.
+`copycord config init`, which the installer runs on the first install, writes the file with every key at its default and a random password, and never overwrites an existing file. On Linux and macOS only your user can read it. An empty value, such as `TZ=`, means the default. For the default file and how to change a setting, see [Configuration File (.env)](/docs/getting-started/configuration).
 
 | Key | Default | What it does |
 |-----|---------|--------------|
@@ -588,25 +409,7 @@ $ copycord service uninstall
 | `restart` | Restarts the service, the same as [`copycord restart`](#copycord-restart) |
 | `uninstall [--yes]` | Asks, then stops and removes the service. Your data is kept. Without a terminal it needs `--yes`. To remove Copycord itself too, use [`copycord uninstall`](#copycord-uninstall). |
 
-In a terminal `status` is a box under the version line, with the next step on the last line; `install`, `start`, `stop`, `restart` and `uninstall` show their steps on the same line down the left. Without a service:
-
-```
-$ copycord service status
-
-Copycord v4.0.0 (1a2b3c4) · Ultimate Discord server mirroring and utility toolkit
-
-┌  Copycord service status
-│
-◇  Copycord service ──────────────────────────────╮
-│                                                 │
-│    Status  • not installed                      │
-│                                                 │
-├─────────────────────────────────────────────────╯
-│
-└  Install it with copycord service install
-```
-
-In a pipe, `start`, `stop`, `restart` and `uninstall` print `• The Copycord service is not installed` with the install command when there is no service; `start`, `stop` and `restart` then exit with 1. When the service manager reports an error, the command prints `✗ Could not stop Copycord` (or start, restart, install, remove) with the reason and exits with 1.
+Without a service, `start`, `stop`, `restart` and `uninstall` print `• The Copycord service is not installed` with the install command when there is no service; `start`, `stop` and `restart` then exit with 1. When the service manager reports an error, the command prints `✗ Could not stop Copycord` (or start, restart, install, remove) with the reason and exits with 1.
 
 The data directory is fixed when you install the service: the one given with `--data-dir` (or `DATA_DIR`), else the default for your user. To change it, run `copycord service install` again with the new `--data-dir`.
 
@@ -669,21 +472,8 @@ The service does not see variables you set in your terminal. The simplest way to
 Backs up the database now, the same archive the [daily backup](/docs/dashboard/backups) makes, and prints its path:
 
 ```
-$ copycord backup | cat
-✓ Database backed up  /home/you/.copycord/data/backups/2026-10-13_15-31-24.tar.gz
-```
-
-In a terminal the same step hangs off the line down the left, under the version line:
-
-```
 $ copycord backup
-
-Copycord v4.0.0 (1a2b3c4) · Ultimate Discord server mirroring and utility toolkit
-
-┌  Back up the database
-│
-✓  Database backed up  /home/you/.copycord/data/backups/2026-10-13_15-31-24.tar.gz
-└
+✓ Database backed up  /home/you/.copycord/data/backups/2026-10-13_15-31-24.tar.gz
 ```
 
 The archive holds `data.db`, `secret.key` (when there is one) and `manifest.json`, and goes into the backups folder (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)). The copy of the database is checked with SQLite's integrity check before it is saved; when the check fails, nothing is kept, the command says why and exits with status 1, and `copycord doctor` shows `last backup failed its check`. It works while Copycord is running. With `--json` it prints `{"ok": true, "file": ..., "size": ..., "includes_key": true}`.
@@ -784,28 +574,9 @@ Removes the Copycord program and its background service. It asks one question, a
 │    ↑/↓ to move, Enter to select
 ```
 
-Move with the arrow keys (or `j` and `k`) and press Enter; Enter right away keeps your data, and Esc or Ctrl-C cancels. After you pick, the question is marked `◇` with your answer under it, and the steps follow on the same line down the left:
+Choose with the arrow keys (or `j` and `k`) and press **Enter**. **Enter** right away keeps your data; **Esc** or **Ctrl+C** cancels. It ends with `Copycord uninstalled` and, when the data is kept, the folder it is in.
 
-```
-┌  Uninstall Copycord
-│  Removes the Copycord program and its background service.
-│
-◇  Your data is in /home/you/.copycord
-│  Keep my data
-│
-✓  removed the copycord program  uv tool uninstall copycord
-│
-✓  Copycord uninstalled
-└  Your data is still in /home/you/.copycord/data
-```
-
-Yes or no questions work the same way, for example `◆  Update Copycord now?` with `❯ Yes / No` under it: Left/Right switch, `y` or `n` answer at once, Enter takes the highlighted one. A question asked on its own, such as the port question of `copycord doctor --fix`, takes one line, `? <question>  ❯ Yes / No`, and folds into `✓ <question> Yes` once answered.
-
-Where single keys cannot be read (input piped in, `TERM=dumb`, Git Bash without a real console, or `COPYCORD_PLAIN_PROMPTS=1`), the prompts are typed instead: a numbered list with `Enter 1, 2 or 3 [1]`, and `(y/N)` for yes or no.
-
-Where the terminal cannot show the line characters, they are replaced with `+`, `|`, `*` and `o`. In a script or a pipe, the same lines are printed without the line down the left.
-
-Press Enter to keep your data. It ends with `Copycord uninstalled`, and when the data is kept, the folder it is still in.
+In all of Copycord's questions, **Left** and **Right** switch between Yes and No, and `y` or `n` answer at once. Where single keys cannot be read (piped input, `TERM=dumb`, Git Bash without a console, or `COPYCORD_PLAIN_PROMPTS=1`), you type the answer instead: a number from a list, or `y` or `n`.
 
 ```bash
 copycord uninstall --dry-run          # show what would be removed, change nothing
@@ -833,12 +604,6 @@ It runs these steps in order:
 
 Without a terminal (in a script or a pipe) it never asks: it exits with status 1 unless you add `--yes`. With `--yes` and neither `--purge` nor `--keep-data`, the data is kept. It also exits with status 1 when a step fails.
 
-To install Copycord again:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh
-```
-
 ## copycord update {#copycord-update}
 
 Updates a Copycord installed with the install script (or with `pipx`) to the latest version.
@@ -863,31 +628,9 @@ After a successful update, a running [service](#copycord-service) is restarted s
 
 When the install is already the newest on the saved channel (the same release version on `stable` or `beta`, the same commit as the branch head on `dev`), `copycord update` prints `Copycord is up to date (<version>)`, with the commit on `dev` (`Copycord is up to date (3.28.0, dd7c8b2)`), and exits with status 0 without a backup or an install. If GitHub cannot be reached for that check, it warns and installs as before. A channel switch, `--tag`, `--force` and `copycord doctor --fix` always install.
 
-On Windows, a running program's files cannot be deleted, but they can be renamed. So right before the install, `copycord update` stops the service if it is running and moves the running `python.exe`, the `copycord.exe` launcher and the other executable files of the install into `.copycord-old` in the Copycord home. Then it installs in the same window and returns when the update is done, like on Linux and macOS. The next update deletes `.copycord-old`. If the install fails before replacing the old files, they are put back. If Copycord is running in another window (for example `copycord run`), `copycord update` stops with `Copycord is running in another window (process N); stop it first, then run this again` and changes nothing. `copycord doctor --fix` reinstalls the same way.
+On Windows, `copycord update` stops a running service and moves the program files in use into `.copycord-old` in the Copycord home before it installs; the next update deletes that folder. If Copycord runs in another window, for example with `copycord run`, the update stops with `Copycord is running in another window (process N); stop it first, then run this again` and changes nothing.
 
-`status` also shows when Copycord last checked for an update and whether auto-update is on. In a terminal the rows are a box under the version line:
-
-```
-$ copycord update status
-
-Copycord v4.0.0 (1a2b3c4) · Ultimate Discord server mirroring and utility toolkit
-
-┌  Copycord update status
-│
-◇  Copycord ──────────────────────────────────────╮
-│                                                 │
-│    current  4.0.0                               │
-│    channel  stable channel                      │
-│    method   uv tool                             │
-│    checked  2026-10-13 13:07:05                 │
-│    auto     off (AUTO_UPDATE=true turns it on)  │
-│    latest   4.0.0 (v4.0.0)                      │
-│                                                 │
-├─────────────────────────────────────────────────╯
-│
-✓  Copycord is up to date
-└
-```
+`status` also shows when Copycord last checked for an update and whether auto-update is on.
 
 ### Confirming the update {#update-confirm}
 
@@ -902,8 +645,6 @@ When there is something to install, `copycord update` shows what will change bef
 ◆  Update Copycord now?
 │  ❯ Yes / No
 ```
-
-Where single keys cannot be read, the question is typed: `Update Copycord now? (Y/n)`. The backup, the install and the restart then follow on the same line down the left, which ends with `└` when the update is done or stops.
 
 For a release it shows the installed and the new version (`3.28.0 -> 4.0.0`). A channel switch (`--channel`, `--ref`, `--repo`) shows the same line and asks too. Enter or `y` updates; `n` prints `Update cancelled, nothing was changed` and exits with status 0. Reinstalling the installed version (`--force`, or `--tag` with the installed version) asks `Reinstall Copycord <version>? (Y/n)` instead. A downgrade asks only its own question (see below).
 
@@ -926,7 +667,7 @@ and exits with status 1, naming the newest pre-update backup when there is one. 
 
 ### Update check on start {#update-check}
 
-When `copycord run` starts, and when `copycord --version` runs in a terminal, Copycord checks the saved [channel](#update-channels) in a background thread: the newest release for `stable` and `beta`, the branch head against the installed commit for `dev`. If there is something newer it prints one line and nothing else happens:
+When `copycord run` starts, and when `copycord --version` runs in a terminal, Copycord checks the saved [channel](#update-channels): the newest release for `stable` and `beta`, the branch head against the installed commit for `dev`. If there is something newer it prints one line and nothing else happens:
 
 ```
 Update available: v4.0.1 (you have v4.0.0). Run copycord update
@@ -987,7 +728,7 @@ The channel is saved in `update.json` in the [data directory](#data-dir). Instal
 {"channel": "dev", "branch": "v4-dev", "repo": "you/Copycord"}
 ```
 
-`branch` holds the ref. `repo` is written only when it is not `Copycord/Copycord`, so older Copycord versions still read the file; a file without `repo` means `Copycord/Copycord`.
+`branch` holds the ref. A file without `repo` means `Copycord/Copycord`.
 
 ### Other installs
 
