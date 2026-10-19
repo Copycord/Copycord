@@ -37,14 +37,7 @@ Lists the rewrite rules of this clone server's mapping, each with a number.
 
 This command has no options.
 
-The reply looks like this:
-
-```
-[1] `hello` → `yo`
-[2] `team rocket` → `team valor`
-```
-
-Use the number with `/rewrite remove`.
+Use a rule's number with `/rewrite remove`.
 
 ## `/rewrite remove`
 

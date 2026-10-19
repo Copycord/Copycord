@@ -181,51 +181,13 @@ copycord doctor --data-dir ~/copycord/data
 | Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running, and on Linux whether the user service starts at boot |
 | Updates | The update check, cached for 24 hours. A network error is only reported, never a failure |
 
-Piped or redirected to a file it prints plain sections, like this on a new install whose `.env` still has the default password:
-
-```
-Install
-✓ Copycord v4.0.0 (1a2b3c4) · stable channel
-✓ Python 3.12.3
-✓ web UI included
-✓ dependencies OK
-
-Settings
-✓ .env found
-! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
-
-Data
-✓ home writable
-✓ data folder layout
-• database created on first run
-• no backups yet
-
-Running
-✓ admin port 8080 free
-• service not installed  copycord service install runs Copycord in the background
-
-Updates
-✓ up to date
-
-Needs your attention
-! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
-
-! 1 warning, 0 problems
-```
-
-In a terminal the same report is drawn in one box per group.
-
-The report ends with a **Needs your attention** section that lists each warning and problem once with what to do, then `✓ All good` or the number of warnings and problems. A warning that `--fix` can repair says so there. The command exits with status 1 when any check fails and 0 otherwise, warnings included.
+The report ends with a **Needs your attention** section that lists each warning and problem with what to do. A warning that `--fix` can repair says so. The command exits with status 1 when any check fails and 0 otherwise, warnings included.
 
 `! port 8080 in use` means another program has the port: set `ADMIN_PORT` to a free one, or let `copycord doctor --fix` pick the next free port. When Copycord itself is listening, the line says `port 8080 in use by Copycord` instead.
 
 ### Fixing problems {#doctor-fix}
 
-`copycord doctor --fix` applies the fixes first, then prints the report once, as things are after the fixes. Every automatic fix runs directly, without asking. The guided fix needs your input, so it asks before the report, and only when there is a terminal; without one (in a script or a pipe) it is skipped, and its entry in Needs your attention says to run `copycord doctor --fix` in a terminal.
-
-A check that was fixed shows on its own line as fixed, for example `✓ .env created with the default settings  /home/you/.copycord/.env (fixed)`. A fix that did not work shows on the check's line as a failure with the reason. **Needs your attention** lists what is left, and the report ends with `Fixed 1 issue` (when something was fixed), then `1 thing needs your attention` or `Everything looks good`.
-
-`--brief` prints only the result: a line for each fix applied, a line for each failed check, and `All checks passed` or the number of warnings and problems. The installers use it.
+`copycord doctor --fix` applies the fixes, then shows the report as things are afterwards. Automatic fixes run without asking. The guided fix asks first, and only in a terminal; in a script it is skipped and listed under **Needs your attention**. `--brief` shows only the fixes applied and anything still failing.
 
 | Check | Fix | Kind |
 |-------|-----|------|
@@ -247,37 +209,7 @@ Some things are never changed for you; they stay in Needs your attention with wh
 
 The installers run `copycord doctor --fix --brief` at the end of an upgrade or a reinstall (not on a first install), so the automatic repairs happen by themselves.
 
-With the `.env` deleted on a new install it prints:
-
-```
-Install
-✓ Copycord v4.0.0 (1a2b3c4) · stable channel
-✓ Python 3.12.3
-✓ web UI included
-✓ dependencies OK
-
-Settings
-✓ .env created with the default settings  /home/you/.copycord/.env (fixed)
-✓ dashboard password set
-
-Data
-✓ home writable
-✓ data folder layout
-• database created on first run
-• no backups yet
-
-Running
-✓ admin port 8080 free
-• service not installed  copycord service install runs Copycord in the background
-
-Updates
-✓ up to date
-
-✓ Fixed 1 issue
-✓ Everything looks good  start it with copycord run
-```
-
-The recreated `.env` gets a new random `PASSWORD`, like the one the installer writes. `copycord config get PASSWORD --show-secrets` prints it.
+A recreated `.env` gets a new random `PASSWORD`. To see it, run `copycord config get PASSWORD --show-secrets`.
 
 
 ## copycord config {#copycord-config}
@@ -372,44 +304,16 @@ copycord service uninstall    # stop and remove; your data is kept
 
 `copycord service` on its own lists these commands.
 
-```text
-$ copycord service install
-✓ Created the service for your account  /home/mac/.config/systemd/user/copycord.service
-✓ Enabled it, so it starts at boot
-✓ Started Copycord
-• Data  /home/mac/.copycord
-
-Dashboard: http://localhost:8080
-Manage it with copycord service status | stop | start | restart | uninstall
-
-$ copycord service status
-
-Copycord service
-  Status   ✓ running
-  Type     service for your account, starts at boot
-  File     /home/mac/.config/systemd/user/copycord.service
-  Started  Tue 2026-10-13 09:12:03 BST
-  Logs     journalctl --user -u copycord -f
-
-Stop it with copycord service stop, or open the dashboard at http://localhost:8080
-
-$ copycord service stop
-✓ Copycord stopped  start it again with copycord service start
-
-$ copycord service uninstall
-? Stop and remove the Copycord service? Your data is kept.  Yes / › No
-```
-
 | Command | What it does |
 |---------|--------------|
 | `install [--user \| --system] [--data-dir PATH]` | Registers `copycord run --data-dir <data dir>` with the service manager, enables it and starts it |
 | `status [--json]` | Shows whether the service is installed and running, what kind of service it is, its file, when it started (Linux) and where its output goes. Exits with 0 when running, 3 when not. |
-| `start` | Starts the service and confirms it with `✓ Copycord started` and the dashboard address |
-| `stop` | Stops the service and confirms it with `✓ Copycord stopped` |
+| `start` | Starts the service |
+| `stop` | Stops the service |
 | `restart` | Restarts the service, the same as [`copycord restart`](#copycord-restart) |
 | `uninstall [--yes]` | Asks, then stops and removes the service. Your data is kept. Without a terminal it needs `--yes`. To remove Copycord itself too, use [`copycord uninstall`](#copycord-uninstall). |
 
-Without a service, `start`, `stop`, `restart` and `uninstall` print `• The Copycord service is not installed` with the install command when there is no service; `start`, `stop` and `restart` then exit with 1. When the service manager reports an error, the command prints `✗ Could not stop Copycord` (or start, restart, install, remove) with the reason and exits with 1.
+When no service is installed, `start`, `stop` and `restart` say so and exit with status 1. When the service manager reports an error, the command shows the reason and exits with status 1.
 
 The data directory is fixed when you install the service: the one given with `--data-dir` (or `DATA_DIR`), else the default for your user. To change it, run `copycord service install` again with the new `--data-dir`.
 
@@ -422,19 +326,13 @@ The data directory is fixed when you install the service: the one given with `--
 | macOS | launchd agent `~/Library/LaunchAgents/com.copycord.plist` | When you log in | After a crash |
 | Windows | Scheduled Task `Copycord` | When you log in | Every minute after a failure |
 
-**Linux service for your account (default).** `copycord service install` needs no sudo. It installs a systemd user unit that runs as you, with your Copycord home. A user unit normally runs only while you are logged in, so the install also turns on lingering for your account, which starts Copycord at boot and keeps it running after you log out. Most systems allow this without sudo, and the install prints:
-
-```text
-✓ Enabled it, so it starts at boot
-```
-
-If your system does not allow it, the install prints `Enabled it, so it starts when you log in` and `! Starts only when you log in` with the command to run once:
+**Linux service for your account (default).** `copycord service install` needs no sudo. It installs a systemd user unit that runs as you, with your Copycord home. A user unit normally runs only while you are logged in, so the install also turns on lingering for your account, which starts Copycord at boot and keeps it running after you log out. Most systems allow this without sudo. If yours does not, the install says so; run this once:
 
 ```bash
 sudo loginctl enable-linger "$USER"
 ```
 
-`copycord doctor` shows `service starts only when you log in` while lingering is off, and `copycord doctor --fix` tries to turn it on.
+`copycord doctor --fix` also tries to turn lingering on.
 
 **Linux system service.** `copycord service install --system` installs `/etc/systemd/system/copycord.service` instead. It needs root, and so do `start`, `stop`, `restart` and `uninstall` for it. Because the install script puts `copycord` in your user's tool directory, call it by its full path:
 
@@ -446,11 +344,11 @@ When installed with `sudo`, the system service runs as your user (not root) and 
 
 `start`, `stop`, `status` and `uninstall` use whichever service is installed. If both a user service and a system service are installed, they use the one for your account (the system service when run as root) and say which; add `--user` or `--system` to choose. On a system without systemd (for example WSL without systemd, or a container), `copycord service install` stops with the error from `systemctl`; run `copycord run` instead.
 
-**Linux sandboxing.** The unit sets `NoNewPrivileges`, `RestrictSUIDSGID` and `LockPersonality`. The `--system` unit also sets `PrivateTmp`, `ProtectSystem=strict` and `ReadWritePaths` (the Copycord home, the data directory, `~/.local` and `~/.cache`), so Copycord can only write there; put `BACKUP_DIR` inside the home, or add a `ReadWritePaths=` line with `systemctl edit copycord`. The user unit leaves those three out, because they need root.
+**Linux system service and backups.** The `--system` service can only write to the Copycord home, the data directory, `~/.local` and `~/.cache`. Keep `BACKUP_DIR` inside the home, or add a `ReadWritePaths=` line with `systemctl edit copycord`.
 
-**macOS.** The agent's console output goes to `/dev/null`: the same lines are already in the rotating log files in the [logs folder](#data-dir), and launchd never trims its own files. `--user` has no effect.
+**macOS.** Logs are in the [logs folder](#data-dir). `--user` has no effect.
 
-**Windows.** The task runs as the current user at logon, without a window: it starts `copycordw.exe`, which is installed next to `copycord.exe` (or `pythonw.exe` of the same install when `copycordw.exe` is missing). What a terminal would show goes to `copycord.out` in the [logs folder](#data-dir). A task created by an older version runs `copycord.exe` in a console window, and closing that window stops Copycord; `copycord doctor` shows `service runs in a console window`, and `copycord doctor --fix` writes the task again so it runs without a window, keeping its data directory (`copycord service install` does the same with the data directory you give it). `--user` has no effect.
+**Windows.** The task runs as you when you log in, without a window. Its output goes to `copycord.out` in the [logs folder](#data-dir). If Copycord runs in a console window instead, run `copycord doctor --fix` to recreate the task. `--user` has no effect.
 
 ### Environment variables for the service
 
@@ -469,14 +367,13 @@ The service does not see variables you set in your terminal. The simplest way to
 
 ## copycord backup {#copycord-backup}
 
-Backs up the database now, the same archive the [daily backup](/docs/dashboard/backups) makes, and prints its path:
+Backs up the database now, the same archive the [daily backup](/docs/dashboard/backups) makes, and shows where it saved it:
 
-```
-$ copycord backup
-✓ Database backed up  /home/you/.copycord/data/backups/2026-10-13_15-31-24.tar.gz
+```bash
+copycord backup
 ```
 
-The archive holds `data.db`, `secret.key` (when there is one) and `manifest.json`, and goes into the backups folder (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)). The copy of the database is checked with SQLite's integrity check before it is saved; when the check fails, nothing is kept, the command says why and exits with status 1, and `copycord doctor` shows `last backup failed its check`. It works while Copycord is running. With `--json` it prints `{"ok": true, "file": ..., "size": ..., "includes_key": true}`.
+The archive holds `data.db`, `secret.key` (when there is one) and `manifest.json`, and goes into the backups folder (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)). Each backup is checked for integrity before it is saved; if the check fails, nothing is kept and the command exits with status 1. It works while Copycord is running. `--json` prints the result as JSON.
 
 In Docker, run it inside the container:
 
@@ -486,19 +383,7 @@ docker compose exec copycord /opt/venvs/copycord/bin/copycord backup
 
 ## copycord restore {#copycord-restore}
 
-Replaces the database with a backup. Copycord must be stopped first: stop the service with `copycord service stop`, or press Ctrl+C where `copycord run` is running. Without a file it lists the 10 newest backups in the backups folder, the daily archives and the copies made before an update or a restore, newest first:
-
-```
-┌  Restore a backup
-│  Replaces the database with a backup. The current database is backed up first.
-│
-◆  Which backup do you want to restore?
-│  ❯ 2026-10-13 03:17  backup, 8.4 MB  (2026-10-13_03-17-00.tar.gz)
-│    2026-10-12 09:15  made before an update, 8.3 MB  (data-pre-update-4.0.0-20261012T091500Z.db)
-│    2026-10-12 03:17  backup, 8.3 MB  (2026-10-12_03-17-00.tar.gz)
-│    Cancel
-│    ↑/↓ to move, Enter to select
-```
+Replaces the database with a backup. Copycord must be stopped first: stop the service with `copycord service stop`, or press Ctrl+C where `copycord run` is running. Without a file it lists the 10 newest backups, including the copies made before an update or a restore, and you pick one.
 
 Give a file to restore that one: `copycord restore ~/.copycord/data/backups/2026-10-13_03-17-00.tar.gz`. It accepts a `.tar.gz` archive (older archives that hold only `data.db` work too) or a `.db` copy, such as the ones `copycord update` makes.
 
@@ -509,25 +394,7 @@ Before it changes anything, `copycord restore`:
 3. Refuses a backup from a newer Copycord (a higher database schema than this version supports); update Copycord first, then restore it.
 4. Shows when the backup was made and what it includes, and asks `Replace the database in <data dir> with this backup? (y/N)`.
 
-Then it backs up the current database and `secret.key` to `pre-restore-<UTC time>.tar.gz` in the backups folder, so the restore can be undone; these copies are never removed by the daily cleanup. It moves the restored `data.db` into place in one step and, when the backup has a `secret.key` that differs from the current one, restores it and keeps the current key as `secret.key.bak-<UTC time>`. A backup without a key leaves the current key alone. After you pick a backup it looks like this:
-
-```
-✓  backup checked  /home/you/.copycord/data/backups/2026-10-13_03-17-00.tar.gz
-│  Made 2026-10-13 03:17 UTC by Copycord 4.0.0
-│  Includes the database and secret.key
-│
-◇  Replace the database in /home/you/.copycord/data with this backup?
-│  Yes
-│
-✓  backed up the current database  /home/you/.copycord/data/backups/pre-restore-20261013T153124Z.tar.gz
-✓  database restored  /home/you/.copycord/data/data.db
-✓  secret.key restored  /home/you/.copycord/data/secret.key
-•  previous secret.key kept as  /home/you/.copycord/data/secret.key.bak-20261013T153124Z
-│
-✓  Restore complete  from 2026-10-13_03-17-00.tar.gz
-│  To undo it, run copycord restore /home/you/.copycord/data/backups/pre-restore-20261013T153124Z.tar.gz
-└  Start Copycord with copycord service start or copycord run
-```
+Then it backs up the current database and `secret.key` to `pre-restore-<UTC time>.tar.gz` in the backups folder, so the restore can be undone; these copies are never removed by the daily cleanup. It moves the restored `data.db` into place in one step and, when the backup has a `secret.key` that differs from the current one, restores it and keeps the current key as `secret.key.bak-<UTC time>`. A backup without a key leaves the current key alone. When it finishes, it shows the command to undo the restore.
 
 `--yes` (`-y`) skips the question. Without a terminal (a script) it needs `--yes` and the file to restore, and exits with status 1 otherwise.
 
@@ -561,22 +428,9 @@ It lists:
 
 ## copycord uninstall {#copycord-uninstall}
 
-Removes the Copycord program and its background service. It asks one question, about your data in the [Copycord home](#data-dir):
+Removes the Copycord program and its background service. It asks whether to keep or delete your data in the [Copycord home](#data-dir). Pressing **Enter** keeps it; **Esc** or **Ctrl+C** cancels.
 
-```
-┌  Uninstall Copycord
-│  Removes the Copycord program and its background service.
-│
-◆  Your data is in /home/you/.copycord
-│  ❯ Keep my data
-│    Delete everything (database, logs, backups, settings)
-│    Cancel
-│    ↑/↓ to move, Enter to select
-```
-
-Choose with the arrow keys (or `j` and `k`) and press **Enter**. **Enter** right away keeps your data; **Esc** or **Ctrl+C** cancels. It ends with `Copycord uninstalled` and, when the data is kept, the folder it is in.
-
-In all of Copycord's questions, **Left** and **Right** switch between Yes and No, and `y` or `n` answer at once. Where single keys cannot be read (piped input, `TERM=dumb`, Git Bash without a console, or `COPYCORD_PLAIN_PROMPTS=1`), you type the answer instead: a number from a list, or `y` or `n`.
+Where arrow keys do not work (for example Git Bash without a console), Copycord asks you to type a number or `y`/`n` instead. `COPYCORD_PLAIN_PROMPTS=1` forces this.
 
 ```bash
 copycord uninstall --dry-run          # show what would be removed, change nothing
@@ -624,29 +478,17 @@ copycord update --tag 4.0.0            # install exactly this release, once
 
 After a successful update, a running [service](#copycord-service) is restarted so it uses the new version.
 
-`copycord update` shows one progress line while it installs, then `Copycord updated to <version> (<commit>)` and, if the service was running, `restarted the copycord service`. The installer output is saved to `logs/update.log` in the [Copycord home](#data-dir); if the install fails, the last 20 lines and the log path are printed.
+The full install output is saved to `logs/update.log` in the [Copycord home](#data-dir). If the install fails, the end of that log is shown.
 
-When the install is already the newest on the saved channel (the same release version on `stable` or `beta`, the same commit as the branch head on `dev`), `copycord update` prints `Copycord is up to date (<version>)`, with the commit on `dev` (`Copycord is up to date (3.28.0, dd7c8b2)`), and exits with status 0 without a backup or an install. If GitHub cannot be reached for that check, it warns and installs as before. A channel switch, `--tag`, `--force` and `copycord doctor --fix` always install.
+When the install is already the newest on the saved channel (the same release version on `stable` or `beta`, the same commit as the branch head on `dev`), `copycord update` says it is up to date and changes nothing. If GitHub cannot be reached for that check, it warns and installs anyway. A channel switch, `--tag`, `--force` and `copycord doctor --fix` always install.
 
-On Windows, `copycord update` stops a running service and moves the program files in use into `.copycord-old` in the Copycord home before it installs; the next update deletes that folder. If Copycord runs in another window, for example with `copycord run`, the update stops with `Copycord is running in another window (process N); stop it first, then run this again` and changes nothing.
+On Windows, `copycord update` stops a running service and moves the program files in use into `.copycord-old` in the Copycord home before it installs; the next update deletes that folder. If Copycord is running in another window, for example with `copycord run`, stop it first; the update changes nothing until you do.
 
 `status` also shows when Copycord last checked for an update and whether auto-update is on.
 
 ### Confirming the update {#update-confirm}
 
-When there is something to install, `copycord update` shows what will change before it backs up or installs anything, for example:
-
-```
-┌  Updating Copycord · dev channel · v4-dev
-│
-◇  Update available
-│  3.28.0 (00f0f8d) -> v4-dev (abc1234) client: fix reconnect
-│
-◆  Update Copycord now?
-│  ❯ Yes / No
-```
-
-For a release it shows the installed and the new version (`3.28.0 -> 4.0.0`). A channel switch (`--channel`, `--ref`, `--repo`) shows the same line and asks too. Enter or `y` updates; `n` prints `Update cancelled, nothing was changed` and exits with status 0. Reinstalling the installed version (`--force`, or `--tag` with the installed version) asks `Reinstall Copycord <version>? (Y/n)` instead. A downgrade asks only its own question (see below).
+When there is something to install, `copycord update` shows the installed and the new version and asks before it backs up or installs anything. A channel switch (`--channel`, `--ref`, `--repo`) asks too. Answering no changes nothing. A reinstall of the same version and a downgrade (see below) ask their own question.
 
 It does not ask with `--yes` (`-y`), without a terminal (scripts and services), during [auto-update](#auto-update) or when `copycord doctor --fix` reinstalls Copycord.
 
