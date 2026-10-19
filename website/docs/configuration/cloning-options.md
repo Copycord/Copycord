@@ -5,15 +5,15 @@ title: Cloning Options
 
 # Cloning Options
 
-These settings control what Copycord syncs between the source and clone servers. Each mapping has its own: open a mapping card in the **Cloning Configuration** card on the Configuration page (stop the bots first; mappings are locked while they run). **Search settings…** at the top of the window filters the list.
+Choose what Copycord syncs from a source server to its clone. Each guild mapping has its own options. To change them, stop the bots, then open the mapping in the **Cloning Configuration** card on the **Configuration** page. To find an option, type in **Search settings…** at the top of the window.
 
 ## General
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| Enable Cloning | On | Master switch: disables all cloning when off |
-| Clone Messages | On | Clone messages in real time via webhooks. When disabled, webhook creation is also skipped during sync |
-| On-Demand Webhooks | On | Webhooks are only created when a channel receives its first message instead of during sync. Makes server cloning much faster |
+| Enable Cloning | On | Turns all cloning for this mapping on or off |
+| Clone Messages | On | Clone messages in real time through webhooks. When off, no webhooks are created during sync |
+| On-Demand Webhooks | On | Create a channel's webhook when it receives its first message instead of during sync, which makes the first sync faster |
 
 ## Messages
 
@@ -60,7 +60,7 @@ These settings control what Copycord syncs between the source and clone servers.
 | Clone Role Icons | Off | Clone role icons (requires Boost Level 2+) |
 | Clone Role Styles | Off | Clone role color styles (solid, gradient, holographic). Gradient/holographic styles require the clone server to have Boost Level 2+; otherwise the solid primary color is applied |
 
-## Server Identity
+## Server identity
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -71,9 +71,9 @@ These settings control what Copycord syncs between the source and clone servers.
 | Clone Server Tag | Off | Clone the server tag and badge. **Disabled**: Discord does not allow bots to set server tags yet, so the toggle is inactive until they do |
 | Sync Server Description | Off | Sync the server description |
 
-## Message Customization
+## Message customization
 
-These options are configured via the **Optional Message Features** popup in the mapping settings.
+These options are in the **Optional Message Features** window of the mapping.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -84,9 +84,9 @@ These options are configured via the **Optional Message Features** popup in the 
 | Append Timestamp | Off | Append the original message timestamp below the cloned message |
 | Append Author | Off | Append the original author's username below the cloned message |
 
-## Token Message Cloning
+## Sending as users
 
-By default the bot posts cloned messages through webhooks. The **Token Message Cloning** section of a mapping can send them from real Discord user accounts instead. The accounts must be members of the clone server.
+By default the bot posts cloned messages through webhooks. The **Token Message Cloning** section of a mapping sends them from Discord user accounts instead. The accounts must be members of the clone server.
 
 :::danger Accounts can be banned
 This uses user tokens. Discord may rate limit these accounts or ban them permanently at any time. Only use accounts you are willing to lose.
@@ -105,10 +105,8 @@ This uses user tokens. Discord may rate limit these accounts or ban them permane
 | Send through proxies | Off | Give each account its own proxy from the [proxy list](/docs/configuration/advanced#proxy-support) |
 | Send delay | 0 to 0 s | A random pause before each message, between the minimum and maximum, in seconds |
 
-Add accounts with **Add user token** (one at a time or several at once); each token is checked when it is added. The token menu has **Verify tokens** and **Delete all tokens**. Save a new mapping first, then open it again to add tokens.
+To add accounts, click **Add user token**; for a new mapping, save it and open it again first. You can add one token or several at once; each is checked when you add it. The token menu has **Verify tokens** and **Delete all tokens**.
 
----
+## Recommended settings
 
-:::tip Recommended starting configuration
-Start with the defaults: they cover the most common use case (full channel and message cloning with roles and emojis). Enable additional sync options as needed. Options like Mirror Channel Permissions and Mirror Role Permissions add more API calls and may slow syncing on large servers.
-:::
+Start with the defaults: they clone channels, messages, roles and emojis. Turn on more options as you need them. Mirror Channel Permissions and Mirror Role Permissions make more requests to Discord and can slow syncs on large servers.

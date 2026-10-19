@@ -5,38 +5,42 @@ title: Security defaults
 
 # Security defaults
 
-What Copycord does out of the box to keep your dashboard, tokens and backups private, and what to change when you want more.
+Learn how Copycord protects your dashboard, tokens and backups by default, and what to change to open the dashboard to other devices.
 
 ## Password
 
-- The dashboard always asks for a password. There is no way to turn the login off.
-- The installer makes up a random password on a first install and shows it once. `copycord config get PASSWORD --show-secrets` prints it again.
+- The dashboard always asks for a password; the login cannot be turned off.
+- The installer creates a random password on the first install and shows it once. To print it again, run `copycord config get PASSWORD --show-secrets`.
 - In Docker, Copycord does not start until you set `PASSWORD`.
-- Change it with `copycord config set PASSWORD 'your-new-password'`, then `copycord restart`.
-- **Log out** in the dashboard sidebar ends your session.
+- To change the password, run `copycord config set PASSWORD 'your-new-password'`, then `copycord restart`.
+- To end your session, click **Log out** in the dashboard sidebar.
 
-## Only this computer by default
+## Dashboard address
 
-The dashboard listens on `127.0.0.1`, so only the computer Copycord runs on can open it, at `http://localhost:8080`. The Docker image listens on every network, because the container needs it; publish the port only where you want it reachable.
+By default the dashboard listens on `127.0.0.1`, so only the computer Copycord runs on can open it, at `http://localhost:8080`. The Docker image listens on every network, because the container needs it; publish the port only where you want it reachable.
 
-## Opening it to your network
+To open the dashboard to your network:
 
 1. Set your own `PASSWORD`.
-2. Set `DASHBOARD_HOST=0.0.0.0` (every network) or one IP address of this computer, in `.env`: `copycord config set DASHBOARD_HOST 0.0.0.0`.
+2. Set `DASHBOARD_HOST` to `0.0.0.0` (every network) or to one IP address of this computer: `copycord config set DASHBOARD_HOST 0.0.0.0`.
 3. Run `copycord restart`.
 
-Copycord refuses to start on any address other than `127.0.0.1` while the password is still `copycord`, and `copycord doctor` reports it as a failure. `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check when something else, such as a reverse proxy with its own login, already protects the dashboard. Do not put the dashboard on the open internet as it is. Put it behind HTTPS (a reverse proxy, a VPN or a tunnel) first. See [Dashboard address](/docs/cli#dashboard-address).
+On any address other than `127.0.0.1`, Copycord does not start while the password is `copycord`, and `copycord doctor` reports a failure. If something else already protects the dashboard, such as a reverse proxy with its own login, `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check.
 
-## Behind a reverse proxy: TRUSTED_PROXIES
+:::warning
+Do not put the dashboard on the open internet as it is. Put it behind HTTPS first, with a reverse proxy, a VPN or a tunnel.
+:::
 
-A proxy hides the real visitor address behind its own. Set `TRUSTED_PROXIES` to the IP address of your proxy (several addresses are separated by commas) and Copycord uses the visitor address the proxy reports, so the log shows who tried to sign in. Leave it empty, the default, unless a proxy sits in front of Copycord: Copycord then trusts no one's claim about where a request came from.
+## Reverse proxies
 
-## Files that stay private
+A reverse proxy hides the visitor's address behind its own. To log the real address of each sign-in, set `TRUSTED_PROXIES` to the IP address of your proxy; separate several addresses with commas. Leave it empty, the default, when no proxy sits in front of Copycord.
 
-On Linux and macOS these are readable only by your user:
+## Private files
 
-- `secret.key` in the [data directory](/docs/cli#data-dir), which signs the dashboard login cookie.
-- The `.env` file, which holds your password.
-- Backup archives, which contain `secret.key` and your database. Keep copies private too. See [Backups](/docs/dashboard/backups).
+On Linux and macOS, only your user can read these files:
 
-The Docker image runs Copycord as user 1000, not root. The container starts as root only to hand `./data` to that user, then drops to it; where ownership cannot be changed (Windows Docker Desktop bind mounts) it keeps running as root. See [Docker Install](/docs/getting-started/docker-install).
+- `secret.key` in the [data directory](/docs/cli#data-dir), which signs the dashboard login.
+- `.env`, which holds your password.
+- Backup archives, which contain `secret.key` and your database. Keep copies of them private too. See [Backups](/docs/dashboard/backups).
+
+The Docker image runs Copycord as user 1000, not root. See [Docker Install](/docs/getting-started/docker-install#file-ownership).
