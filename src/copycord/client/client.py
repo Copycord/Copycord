@@ -50,6 +50,7 @@ from copycord.common.websockets import WebsocketManager, AdminBus
 from copycord.client.helpers import ClientUiController, dump_message_debug
 from copycord.client.export_runners import (
     _CURRENT_JOB,
+    AssetExportRunner,
     BackfillEngine,
     BackfillJob,
     BackfillJobCancelled,
@@ -585,55 +586,44 @@ class ClientListener:
             job_id = str(d.get("job_id") or "") or None
             return {"ok": await self.runner.cancel(g_id, job_id), "guild_id": g_id}
 
-        elif typ == "pull_assets":
-            import logging
-
+        elif typ == "export_assets":
+            # The Export assets task: progress and the end go to the admin bus keyed by job_id.
+            d = data or {}
+            job_id = str(d.get("job_id") or "")
             try:
-                from export_runners import AssetExportRunner
-            except Exception:
-                from .export_runners import AssetExportRunner
-
-            try:
-                req_gid_val = (data or {}).get("guild_id")
-                req_gid = int(req_gid_val) if req_gid_val is not None else 0
-            except Exception:
-                req_gid = 0
-
-            req_gid_val = (data or {}).get("guild_id")
-            try:
-                gid = int(req_gid_val) if req_gid_val is not None else 0
-            except Exception:
+                gid = int(d.get("guild_id") or 0)
+            except (TypeError, ValueError):
                 gid = 0
+            if not job_id or not gid:
+                return {"ok": False, "error": "job_id and guild_id required"}
 
-            if not gid:
-                gid = (
-                    next(iter(self._mapped_original_ids))
-                    if self._mapped_original_ids
-                    else 0
-                )
-            if not gid:
-                return {"ok": False, "reason": "no-mapped-origin"}
-
-            guild = self.bot.get_guild(int(gid))
+            guild = self.bot.get_guild(gid)
             if guild is None:
-                return {"ok": False, "reason": f"not-in-guild:{gid}"}
+                return {"ok": False, "error": "not-in-guild"}
+            if not await AssetExportRunner._try_begin(gid):
+                return {"ok": False, "error": "asset-export-in-progress"}
 
-            sel = str(((data or {}).get("asset") or "both")).lower()
-            include_emojis = sel in ("emojis", "both")
-            include_stickers = sel in ("stickers", "both")
-
+            sel = str(d.get("asset") or "both").lower()
             runner = AssetExportRunner(
                 self.bot,
                 self.ws,
-                logger=(
-                    getattr(self, "logger", None) or logging.getLogger("asset_export")
-                ),
+                logger=logger.getChild("asset_export"),
+                job_id=job_id,
+                publish=lambda frame: self.bus.publish("client", frame),
             )
-            res = await runner.run(
-                guild, include_emojis=include_emojis, include_stickers=include_stickers
+            runner.task = asyncio.create_task(
+                runner.run(
+                    guild,
+                    include_emojis=sel in ("emojis", "both"),
+                    include_stickers=sel in ("stickers", "both"),
+                    acquired=True,
+                )
             )
+            return {"ok": True, "accepted": True}
 
-            return {"ok": True, **res}
+        elif typ == "export_assets_cancel":
+            job_id = str((data or {}).get("job_id") or "")
+            return {"ok": AssetExportRunner.cancel(job_id), "job_id": job_id}
 
         elif typ == "asset_snapshot":
             # The server's Sync assets job (server/asset_sync.py) asks for the host's roles,
