@@ -815,64 +815,6 @@ class ClientListener:
         if not g or not self._is_mapped_origin(g.id):
             return True
 
-    async def maybe_send_announcement(self, message: Message) -> bool:
-        content = message.content
-        lower = content.lower()
-        author = message.author
-        chan_id = message.channel.id
-        guild_id = message.guild.id if message.guild else 0
-        guild_name = message.guild.name if message.guild else "Unknown"
-
-        triggers = self.db.get_effective_announcement_triggers(guild_id)
-        if not triggers:
-            return False
-
-        for kw, entries in triggers.items():
-            key = kw.lower()
-            matched = False
-
-            if re.match(r"^\w+$", key) and re.search(rf"\b{re.escape(key)}\b", lower):
-                matched = True
-
-            if (
-                not matched
-                and re.match(r"^[A-Za-z0-9_]+$", key)
-                and re.search(rf"<a?:{re.escape(key)}:\d+>", content)
-            ):
-                matched = True
-
-            if not matched and key in lower:
-                matched = True
-
-            if not matched:
-                continue
-
-            for filter_id, allowed_chan in entries:
-                if (filter_id == 0 or author.id == filter_id) and (
-                    allowed_chan == 0 or chan_id == allowed_chan
-                ):
-                    payload = {
-                        "type": "announce",
-                        "data": {
-                            "guild_id": guild_id,
-                            "keyword": kw,
-                            "content": content,
-                            "author": author.name,
-                            "channel_id": chan_id,
-                            "channel_name": getattr(
-                                message.channel, "name", str(chan_id)
-                            ),
-                            "timestamp": str(message.created_at),
-                        },
-                    }
-                    await self.ws.send(payload)
-                    logger.info(
-                        f"[📢] Announcement `{kw}` by {author} in {guild_name} ({guild_id})"
-                    )
-                    return True
-
-        return False
-
     async def on_message(self, message: Message):
         """Process an incoming message for forwarding."""
         asyncio.create_task(
@@ -882,8 +824,6 @@ class ClientListener:
         g = getattr(message, "guild", None)
         if not g or not self._is_mapped_origin(g.id):
             return
-
-        await self.maybe_send_announcement(message)
 
         if self.should_ignore(message):
             return

@@ -796,62 +796,6 @@ class DBManager:
             ],
         )
 
-        self._ensure_table(
-            name="announcement_subscriptions",
-            create_sql_template="""
-                CREATE TABLE {table} (
-                guild_id     INTEGER NOT NULL,
-                keyword      TEXT    NOT NULL,
-                user_id      INTEGER NOT NULL,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (guild_id, keyword, user_id)
-                );
-            """,
-            required_columns={"guild_id", "keyword", "user_id", "last_updated"},
-            copy_map={
-                "guild_id": "0",
-                "keyword": "keyword",
-                "user_id": "user_id",
-                "last_updated": "COALESCE(last_updated, CURRENT_TIMESTAMP)",
-            },
-            post_sql=[
-                "CREATE INDEX IF NOT EXISTS idx_ann_sub_by_user ON announcement_subscriptions(user_id, guild_id);",
-                "CREATE INDEX IF NOT EXISTS idx_ann_sub_by_guild_keyword ON announcement_subscriptions(guild_id, keyword);",
-            ],
-        )
-
-        self._ensure_table(
-            name="announcement_triggers",
-            create_sql_template="""
-                CREATE TABLE {table} (
-                guild_id       INTEGER NOT NULL,
-                keyword        TEXT    NOT NULL,
-                filter_user_id INTEGER NOT NULL,
-                channel_id     INTEGER NOT NULL DEFAULT 0,
-                last_updated   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (guild_id, keyword, filter_user_id, channel_id)
-                );
-            """,
-            required_columns={
-                "guild_id",
-                "keyword",
-                "filter_user_id",
-                "channel_id",
-                "last_updated",
-            },
-            copy_map={
-                "guild_id": "0",
-                "keyword": "keyword",
-                "filter_user_id": "filter_user_id",
-                "channel_id": "channel_id",
-                "last_updated": "COALESCE(last_updated, CURRENT_TIMESTAMP)",
-            },
-            post_sql=[
-                "CREATE INDEX IF NOT EXISTS idx_ann_trig_by_guild_keyword ON announcement_triggers(guild_id, keyword);",
-                "CREATE INDEX IF NOT EXISTS idx_ann_trig_by_guild_user ON announcement_triggers(guild_id, filter_user_id);",
-            ],
-        )
-
         c.execute(
             """
         CREATE TABLE IF NOT EXISTS join_dm_subscriptions (
@@ -2231,117 +2175,6 @@ class DBManager:
         return self.conn.execute(
             "SELECT * FROM emoji_mappings WHERE original_emoji_id = ?", (original_id,)
         ).fetchone()
-
-    @_in_tx
-    def add_announcement_user(self, guild_id: int, keyword: str, user_id: int) -> bool:
-        cur = self.conn.execute(
-            "INSERT OR IGNORE INTO announcement_subscriptions(guild_id, keyword, user_id) VALUES (?, ?, ?)",
-            (guild_id, keyword, user_id),
-        )
-        return cur.rowcount > 0
-
-    @_in_tx
-    def remove_announcement_user(
-        self, guild_id: int, keyword: str, user_id: int
-    ) -> bool:
-        cur = self.conn.execute(
-            "DELETE FROM announcement_subscriptions WHERE guild_id = ? AND keyword = ? AND user_id = ?",
-            (guild_id, keyword, user_id),
-        )
-        return cur.rowcount > 0
-
-    def get_announcement_users(self, guild_id: int, keyword: str) -> list[int]:
-        """Users subscribed to this keyword in this guild, plus '*' subscribers and guild_id=0 global subscriptions."""
-        rows = self.conn.execute(
-            "SELECT user_id FROM announcement_subscriptions "
-            "WHERE (guild_id = ? AND (keyword = ? OR keyword = '*')) "
-            "   OR (guild_id = 0 AND (keyword = ? OR keyword = '*'))",
-            (guild_id, keyword, keyword),
-        ).fetchall()
-        return [r["user_id"] for r in rows]
-
-    @_in_tx
-    def add_announcement_trigger(
-        self, guild_id: int, keyword: str, filter_user_id: int = 0, channel_id: int = 0
-    ) -> bool:
-        cur = self.conn.execute(
-            "INSERT OR IGNORE INTO announcement_triggers(guild_id, keyword, filter_user_id, channel_id) "
-            "VALUES (?, ?, ?, ?)",
-            (guild_id, keyword, filter_user_id, channel_id),
-        )
-        return cur.rowcount > 0
-
-    def get_announcement_keywords(self, guild_id: int) -> list[str]:
-        rows = self.conn.execute(
-            "SELECT DISTINCT keyword FROM announcement_subscriptions WHERE guild_id IN (?, 0)",
-            (guild_id,),
-        ).fetchall()
-        return [r["keyword"] for r in rows]
-
-    @_in_tx
-    def remove_announcement_trigger(
-        self, guild_id: int, keyword: str, filter_user_id: int = 0, channel_id: int = 0
-    ) -> bool:
-        cur = self.conn.execute(
-            "DELETE FROM announcement_triggers "
-            "WHERE guild_id = ? AND keyword = ? AND filter_user_id = ? AND channel_id = ?",
-            (guild_id, keyword, filter_user_id, channel_id),
-        )
-        return cur.rowcount > 0
-
-    def get_announcement_triggers(
-        self, guild_id: int
-    ) -> dict[str, list[tuple[int, int]]]:
-        rows = self.conn.execute(
-            "SELECT keyword, filter_user_id, channel_id FROM announcement_triggers WHERE guild_id = ?",
-            (guild_id,),
-        ).fetchall()
-        d: dict[str, list[tuple[int, int]]] = {}
-        for r in rows:
-            d.setdefault(r["keyword"], []).append(
-                (r["filter_user_id"], r["channel_id"])
-            )
-        return d
-
-    def get_all_announcement_triggers_flat(self) -> list[sqlite3.Row]:
-        """Every row in announcement_triggers, ungrouped."""
-        return self.conn.execute(
-            """
-            SELECT guild_id, keyword, filter_user_id, channel_id, last_updated
-            FROM announcement_triggers
-            ORDER BY guild_id ASC, LOWER(keyword) ASC, filter_user_id ASC, channel_id ASC
-            """
-        ).fetchall()
-
-    def get_all_announcement_subscriptions_flat(self) -> list[sqlite3.Row]:
-        """Every row in announcement_subscriptions, ungrouped."""
-        return self.conn.execute(
-            """
-            SELECT guild_id, keyword, user_id, last_updated
-            FROM announcement_subscriptions
-            ORDER BY guild_id ASC, LOWER(keyword) ASC, user_id ASC
-            """
-        ).fetchall()
-
-    def get_effective_announcement_triggers(
-        self, guild_id: int
-    ) -> dict[str, list[tuple[int, int]]]:
-        """Triggers for guild_id and the global 0 scope, as {keyword: [(filter_user_id, channel_id), ...]} without duplicates."""
-        rows = self.conn.execute(
-            """
-            SELECT keyword, filter_user_id, channel_id
-            FROM announcement_triggers
-            WHERE guild_id IN (?, 0)
-            """,
-            (guild_id,),
-        ).fetchall()
-
-        out: dict[str, set[tuple[int, int]]] = {}
-        for r in rows:
-            out.setdefault(r["keyword"], set()).add(
-                (int(r["filter_user_id"]), int(r["channel_id"]))
-            )
-        return {k: list(v) for k, v in out.items()}
 
     @_in_tx
     def add_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
@@ -4580,12 +4413,6 @@ class DBManager:
         return self.conn.execute(
             "SELECT * FROM role_mappings WHERE original_role_id = ? AND cloned_guild_id = ? LIMIT 1",
             (int(original_id), int(cloned_guild_id)),
-        ).fetchone()
-
-    def get_role_mapping_by_cloned_id(self, cloned_role_id: int):
-        return self.conn.execute(
-            "SELECT * FROM role_mappings WHERE cloned_role_id = ?",
-            (int(cloned_role_id),),
         ).fetchone()
 
     @_in_tx

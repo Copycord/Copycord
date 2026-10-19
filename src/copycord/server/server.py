@@ -1641,9 +1641,6 @@ class ServerReceiver:
             elif typ == "thread_tags_update":
                 asyncio.create_task(self.handle_thread_tags_update(data))
 
-            elif typ == "announce":
-                asyncio.create_task(self.handle_announce(data))
-
             elif typ == "purge_assets_list":
                 return await PurgeAssetHelper(self).list_assets(data or {})
 
@@ -1826,69 +1823,6 @@ class ServerReceiver:
         finally:
             if token is not None:
                 logctx.guild_name.reset(token)
-
-    async def handle_announce(self, data: dict):
-        if self._shutting_down:
-            return
-
-        try:
-            guild_id = int(data["guild_id"])
-            raw_kw = data["keyword"]
-            content = data["content"]
-            author = data["author"]
-            orig_chan_id = data.get("channel_id")
-            timestamp = data["timestamp"]
-
-            channel_mention = f"<#{orig_chan_id}>" if orig_chan_id else "unknown"
-
-            all_sub_keys = self.db.get_announcement_keywords(guild_id)
-            matching_keys = [
-                sub_kw
-                for sub_kw in all_sub_keys
-                if sub_kw == "*"
-                or re.search(rf"\b{re.escape(sub_kw)}\b", content, re.IGNORECASE)
-            ]
-
-            user_ids = set()
-            for mk in matching_keys:
-                user_ids.update(self.db.get_announcement_users(guild_id, mk))
-
-            if not user_ids:
-                return
-
-            def _truncate(text: str, limit: int) -> str:
-                return text if len(text) <= limit else text[: limit - 3] + "..."
-
-            MAX_DESC = 4096
-            MAX_FIELD = 1024
-            desc = _truncate(content, MAX_DESC)
-            kw_value = _truncate(", ".join(matching_keys) or raw_kw, MAX_FIELD)
-
-            embed = discord.Embed(
-                title="📢 Announcement",
-                description=desc,
-                timestamp=datetime.fromisoformat(timestamp),
-            )
-            embed.set_author(name=author)
-            embed.add_field(name="Guild ID", value=f"`{str(guild_id)}`", inline=True)
-            if orig_chan_id:
-                embed.add_field(name="Channel", value=channel_mention, inline=True)
-            embed.add_field(name="Keyword", value=kw_value, inline=True)
-
-            for uid in user_ids:
-                try:
-                    user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
-                    await user.send(embed=embed)
-                    logger.info(
-                        f"[🔔] DM’d {user} for keys={matching_keys} in g={guild_id}"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"[⚠️] Failed DM uid={uid} keys={matching_keys} g={guild_id}: {e}"
-                    )
-
-        except Exception as e:
-            logger.exception("Unexpected error in handle_announce: %s", e)
 
     def _load_mappings(self) -> None:
         """Refresh in-memory caches from DB. Builds flat (legacy) and per-clone caches; prefer the per-clone maps."""
