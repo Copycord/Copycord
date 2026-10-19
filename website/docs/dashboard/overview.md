@@ -1,78 +1,81 @@
 ---
 sidebar_position: 1
-title: Dashboard Overview
+title: Dashboard overview
 ---
 
-# Web Dashboard Overview
+# Web dashboard overview
 
-Copycord's web dashboard is where you manage your whole cloning setup. Access it at **http://localhost:8080** (or your configured port).
+The web dashboard is where you set up and run Copycord: start the bots, map servers, run tasks and read the logs. Open it at `http://localhost:8080`, or at the port you configured.
 
-## Navigation
+## Pages
 
-The dashboard sidebar has these pages:
+| Page | What you do there |
+|------|-------------------|
+| **Configuration** | Start and stop the bots, set tokens and core settings, manage [guild mappings](/docs/dashboard/guild-mappings), notifications, sync settings and proxies |
+| [**Channels**](/docs/dashboard/channels) | View cloned channels, rename them in the clone, delete orphans |
+| [**Messages**](/docs/dashboard/messages) | Search every cloned message |
+| [**Guilds**](/docs/dashboard/guilds) | Browse the servers your user account is in, start a message export |
+| [**Tasks**](/docs/dashboard/tasks) | Run and follow long jobs: backfills, exports, purges, asset syncs, avatar downloads and member scrapes |
+| [**Forwarding**](/docs/dashboard/forwarding) | Forward messages to Discord webhooks, Telegram and Pushover |
+| [**System**](/docs/dashboard/system) | Database backups |
+| [**Logs**](/docs/dashboard/logs) | Event logs of what Copycord changed in your clone servers |
 
-| Page | Purpose |
-|------|---------|
-| **Configuration** | Bots, global config, guild mappings, notifications, sync settings and proxies |
-| **Channels** | View and customize cloned channel names, find and delete orphans |
-| **Messages** | Search every cloned message |
-| **Guilds** | Browse the servers your self-bot is in, start a message export |
-| **Tasks** | Run and follow long jobs: backfills, exports, purges, asset syncs, avatar downloads and member scrapes |
-| **Forwarding** | Set up message forwarding to Telegram, Pushover, etc. |
-| **System** | Database backups |
-| **Logs** | Event logs |
+The dashboard updates live: bot status, logs and task progress change without a page refresh.
 
-See [Tasks](/docs/dashboard/tasks), [Messages](/docs/dashboard/messages) and [Event Logs](/docs/dashboard/logs) for the newer pages.
+## Sign in and out
 
-## Authentication
+The dashboard always asks for a password. You stay signed in until you click **Log out** in the sidebar.
 
-The dashboard always asks for a password. The session stays signed in through a secure cookie. Click **Log out** in the sidebar to end it.
+To change the password, do one of the following:
 
-To change the password:
-- **Docker**: Edit the `PASSWORD` environment variable in `docker-compose.yml`, then `docker compose up -d`
-- **Install script**: Run `copycord config set PASSWORD 'your-new-password'`, then `copycord restart`
+- Docker: edit the `PASSWORD` environment variable in `docker-compose.yml`, then run `docker compose up -d`.
+- Install script: run `copycord config set PASSWORD 'your-new-password'`, then run `copycord restart`.
 
-See [Security defaults](/docs/configuration/security) for who can reach the dashboard.
+To control who can reach the dashboard, see [Security defaults](/docs/configuration/security).
 
 ## The Configuration page
 
-The Configuration page is the dashboard home. Its cards, top to bottom:
+The **Configuration** page is the dashboard home. Its cards, top to bottom:
 
-- **Bots**: status and uptime of the server and client, the **Start** / **Stop** button and the log viewers
-- **Global Configuration**: tokens and core settings
-- **Cloning Configuration**: your [guild mappings](/docs/dashboard/guild-mappings)
-- **Notifications**, **Sync Settings** and **Proxy**: see [Advanced configuration](/docs/configuration/advanced)
+- **Bots**: the status and uptime of the server and client bots, the **Start** or **Stop** button and the log viewers.
+- **Global Configuration**: tokens and core settings.
+- **Cloning Configuration**: your [guild mappings](/docs/dashboard/guild-mappings).
+- **Notifications**, **Sync Settings** and **Proxy**: see [Advanced configuration](/docs/configuration/advanced).
 
-When a newer release exists, **New Update Available** appears at the top and links to the release page.
+When a newer release exists, **New Update Available** appears at the top of the page and links to the release page.
 
-## Starting and stopping bots
+## Start and stop the bots
 
-The **Start** button on the **Bots** card starts the server and client bots; while they run it reads **Stop**. Both must be running for cloning to work. The card shows each bot's status and live uptime.
+Cloning works only while both the server bot and the client are running. The bots need valid tokens to start, and you can add or edit guild mappings only while they are stopped.
 
-Valid tokens are required to start. Guild mappings can only be added or edited while the bots are stopped.
+- To start the bots, click **Start** on the **Bots** card. While they run, the button reads **Stop**, and the card shows each bot's status and uptime.
 
-### Add Bot to Server
+## Add the bot to your server
 
-Once your bot token is validated, an **Add Bot to Server** link appears in Global Configuration. Click it to open Discord's bot authorization page with the correct permissions pre-configured, so you don't have to build an invite URL by hand.
+After your bot token is validated, an **Add Bot to Server** link appears in **Global Configuration**.
+
+1. Click **Add Bot to Server**. Discord's authorization page opens with the permissions Copycord needs already selected.
+2. Pick your clone server and authorize the bot.
 
 ## Global configuration
 
-The **Global Configuration** card lets you set core settings. Click **Save** to apply them.
+To change a core setting, edit it in the **Global Configuration** card, then click **Save**.
 
-- **SERVER_TOKEN** / **CLIENT_TOKEN**: your Discord bot and account tokens. **Manage backup tokens** holds fallback client tokens
-- **Command Users** (`COMMAND_USERS`): user IDs allowed to run slash commands
-- **Log Level** (`LOG_LEVEL`): `INFO` or `DEBUG`
-- **Auto Start** (`COPYCORD_AUTOSTART`): start the bots automatically when Copycord launches (requires valid tokens)
-- **Max Log Size** (`LOG_MAX_SIZE_MB`): maximum log file size before old entries are pruned (default: 10 MB, set to 0 to disable)
+| Setting | What it does |
+|---------|--------------|
+| **SERVER_TOKEN** | Your Discord bot token |
+| **CLIENT_TOKEN** | Your Discord user account token. **Manage backup tokens** holds fallback client tokens |
+| **Command Users** (`COMMAND_USERS`) | User IDs allowed to run slash commands |
+| **Log Level** (`LOG_LEVEL`) | `INFO` or `DEBUG` |
+| **Auto Start** (`COPYCORD_AUTOSTART`) | Start the bots when Copycord launches. Needs valid tokens |
+| **Max Log Size** (`LOG_MAX_SIZE_MB`) | Largest size of a log file before old entries are pruned. Default: 10 MB. `0` turns pruning off |
 
 ## Log viewer
 
-Click **View server logs** or **View client logs** on the **Bots** card to open the log viewer. It shows the full `server.out` / `client.out` logs; the terminal only shows their warnings and errors (see [Where logs go](/docs/dashboard/system#where-logs-go)). Features:
+To read the full bot logs, click **View server logs** or **View client logs** on the **Bots** card. The terminal shows only their warnings and errors; see [Where logs go](/docs/dashboard/system#where-logs-go).
 
-- Real-time log streaming
-- **Search logs** to filter the lines
-- **Clear logs** to wipe the selected log file (with confirmation)
+In the log viewer:
 
-## Real-time updates
-
-The dashboard uses WebSocket connections for real-time updates. You'll see live status changes, log streaming, and task progress without needing to refresh the page.
+- New lines stream in as they are written.
+- **Search logs** filters the lines.
+- **Clear logs** empties the selected log file, after a confirmation.

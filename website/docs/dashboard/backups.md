@@ -3,72 +3,62 @@ sidebar_position: 9
 title: Backups
 ---
 
-# Database Backups
+# Database backups
 
-Copycord backs up your SQLite database every day. You can also make a backup at any time, and restore one from the command line or the dashboard.
+Copycord backs up its database every day. Use this page to make a backup yourself, keep a copy somewhere safe and restore a backup.
 
 ## Automatic backups
 
-By default, Copycord makes a backup every day at **03:17** in the time zone set by `TZ` (UTC unless you set it) while it is running. Set `BACKUP_AT` for another time and `BACKUP_RETAIN` for how many daily backups to keep (14 by default; older ones are removed). Backups are saved as compressed `.tar.gz` archives in the `backups` folder of the data directory, or in `BACKUP_DIR` when you set it. See [Settings that live in .env](/docs/cli#env-file).
+While Copycord runs, it makes a backup every day at 03:17 in the time zone set by `TZ`, or UTC when `TZ` is not set. It keeps the newest 14 daily backups and removes older ones.
 
-:::info Backup before the first v4 start
-When Copycord v4 first opens a database created by v3, it also saves a plain copy as `backups/pre-v4-<timestamp>.db` in the folder that holds `data.db`. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3#automatic-backup-of-your-database).
-:::
+Backups are compressed `.tar.gz` archives in the `backups` folder of the data directory.
 
-`copycord update` also saves a copy of the database before it installs anything, as `data-pre-update-<version>-<time>.db` in the same folder. See [Downgrading and backups](/docs/cli#downgrade).
+| Setting | What it changes |
+|---------|-----------------|
+| `BACKUP_AT` | The time of the daily backup |
+| `BACKUP_RETAIN` | How many daily backups to keep. Default: 14 |
+| `BACKUP_DIR` | The folder for backups |
 
-## What a backup holds
+These settings live in `.env`; see [Settings that live in .env](/docs/cli#env-file).
 
-Each archive holds:
+## Back up now
 
-- `data.db`: the whole database, see [below](#whats-included-in-the-database).
-- `secret.key`: the key that signs dashboard logins, when there is one. With it, a restore on a new machine keeps you signed in and needs no new key.
-- `manifest.json`: the Copycord version, the database schema version, when the backup was made and the files in it.
+To make a backup from the dashboard:
 
-Archives made before these were added hold only `data.db`; they can still be restored.
+1. Open the **System** page and click the **Database** card's header to open it.
+2. Click **Backup now**.
 
-Because an archive holds `secret.key`, it is readable only by your user on Linux and macOS. Treat your backups like a password: keep them private.
+The new backup appears in the list.
 
-## Every backup is checked
-
-Before an archive is saved, Copycord checks the copy of the database with SQLite's integrity check. When the check fails, the archive is not kept, the older backups stay as they are, a warning is written to the log, and `copycord doctor` shows `last backup failed its check` until the next backup passes. A failed check usually means the database file is damaged; restore a recent backup that passed (see below), or run `copycord doctor --fix` to try the backup again.
-
-## Manual backups
-
-From the dashboard:
-
-1. Go to the **System** page and open the **Database** card
-2. Click **Backup now**
-3. The backup is created and added to the list
-
-From the command line, `copycord backup` makes the same archive and prints its path. It works while Copycord is running. See [copycord backup](/docs/cli#copycord-backup).
+To make a backup from the command line, run `copycord backup`. It makes the same archive and prints its path, and it works while Copycord is running. See [copycord backup](/docs/cli#copycord-backup).
 
 ## Keep a copy off this machine
 
-The backups folder is on the same disk as your database, so a failed disk or a lost machine takes both. Copy the backups folder (or at least the newest archive) to another place regularly: an external drive, a NAS or a cloud folder. Keep that copy private, since it holds `secret.key`.
+The backups folder is on the same disk as your database, so a failed disk or a lost machine takes both. Copy the backups folder, or at least the newest archive, to another place regularly, such as an external drive, a NAS or a cloud folder.
 
-You can also download any archive from the **System** page, see below.
+To download a backup from the dashboard:
 
-## Viewing and downloading backups
+1. Open the **System** page and open the **Database** card.
+2. Click **Download** next to the backup, or **Download latest** for the newest one.
 
-The **Database** card on the **System** page lists all available backups with their name, time and size. **Download latest** saves the newest one. Click **Download** next to a backup to save the `.tar.gz` archive, for storage elsewhere or to move Copycord to another machine.
+Each archive holds `secret.key`, so keep every copy private, like a password.
 
-## Restoring from a backup
+## Restore a backup
 
 :::warning
-Restoring a backup replaces your current database. Everything that changed since the backup was made is replaced. `copycord restore` saves the current database first, so you can undo it.
+Restoring a backup replaces your current database. Everything that changed since the backup was made is lost, unless you restore the copy that `copycord restore` saves first.
 :::
 
-### With copycord restore (recommended)
+### With copycord restore
 
-1. Stop Copycord: `copycord service stop`, or Ctrl+C where `copycord run` is running.
-2. Run `copycord restore` and pick a backup from the list, or give the file: `copycord restore <path to the backup>`.
-3. Confirm. Copycord checks the backup, saves the current database as `pre-restore-<time>.tar.gz`, then puts the backup in place, `secret.key` included when the backup has one.
-4. Start Copycord again: `copycord service start` or `copycord run`.
+`copycord restore` checks the backup, saves your current database first and restores `secret.key` too. Use it when you can.
 
-To move Copycord to a new machine, install it there, copy the archive over and run `copycord restore <archive>` before the first start.
+1. Stop Copycord: run `copycord service stop`, or press Ctrl+C where `copycord run` is running.
+2. Run `copycord restore` and pick a backup from the list. To restore a specific file, run `copycord restore <path to the backup>`.
+3. Confirm. Copycord checks the backup, saves the current database as `pre-restore-<time>.tar.gz`, then puts the backup in place, with `secret.key` when the backup has one.
+4. Start Copycord: run `copycord service start` or `copycord run`.
 
-In Docker:
+In Docker, run:
 
 ```bash
 docker compose stop copycord
@@ -76,25 +66,53 @@ docker compose run --rm --entrypoint /opt/venvs/copycord/bin/copycord copycord r
 docker compose up -d
 ```
 
-See [copycord restore](/docs/cli#copycord-restore) for every step and option.
+To move Copycord to a new machine, install it there, copy the archive over and run `copycord restore <archive>` before the first start. Every option is described in [copycord restore](/docs/cli#copycord-restore).
 
 ### From the dashboard
 
-1. Go to the **System** page and open the **Database** card
-2. Click **Restore** next to the backup you want to restore, or click **Restore** at the top of the card to upload a `.tar.gz` archive
-3. Confirm the action
+The dashboard restores only the database, not `secret.key`, and does not check the backup first.
 
-**Delete** next to a backup removes that archive, after a confirmation.
+1. Open the **System** page and open the **Database** card.
+2. Click **Restore** next to the backup. To restore an archive from your computer, click **Restore** at the top of the card and upload the `.tar.gz` file.
+3. Confirm.
 
-The dashboard restores only the database, not `secret.key`, and does not check the backup first; use `copycord restore` when you can.
+## Delete a backup
+
+1. Open the **System** page and open the **Database** card.
+2. Click **Delete** next to the backup and confirm.
+
+## What a backup holds
+
+| File | Contents |
+|------|----------|
+| `data.db` | The whole database; see [What's included in the database](#whats-included-in-the-database) |
+| `secret.key` | The key that signs dashboard logins, when there is one. With it, a restore on a new machine keeps you signed in |
+| `manifest.json` | The Copycord version, the database schema version, when the backup was made and the files in it |
+
+An archive that holds only `data.db` can also be restored. On Linux and macOS, archives are readable only by your user.
+
+## When a backup fails its check
+
+Before Copycord saves an archive, it checks the copy of the database with SQLite's integrity check. When the check fails:
+
+- The archive is not kept, and the older backups stay as they are.
+- A warning is written to the log.
+- `copycord doctor` shows `last backup failed its check` until a backup passes.
+
+A failed check usually means the database file is damaged. Restore a recent backup that passed, or run `copycord doctor --fix` to try the backup again.
+
+## Other database copies
+
+Copycord also saves plain `.db` copies of the database at these times:
+
+- `copycord update` saves `data-pre-update-<version>-<time>.db` in the backups folder before it installs anything; see [Downgrading and backups](/docs/cli#downgrade).
+- The first start on a database from Copycord v3 saves `backups/pre-v4-<timestamp>.db` in the folder that holds `data.db`; see [Upgrading from v3](/docs/getting-started/upgrading-from-v3#automatic-backup-of-your-database).
 
 ## What's included in the database
 
-The database holds:
-
 - All guild mappings and their settings
-- Channel, role, emoji, and sticker mappings
-- Message ID mappings (for edit/delete tracking)
+- Channel, role, emoji and sticker mappings
+- Message records, used to mirror edits and deletes
 - Filters and blocked keywords
 - Forwarding rules
 - Announcement triggers and subscriptions

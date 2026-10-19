@@ -1,114 +1,97 @@
 ---
 sidebar_position: 2
-title: Structure Sync
+title: Structure sync
 ---
 
-# Dynamic Structure Sync
+# Structure sync
 
-Copycord continuously watches source servers for structural changes and mirrors them to your clone server in real time.
+Structure sync keeps the clone server's channels, roles, emojis, stickers and server identity in line with the source server. This page explains what is synced, when, and which mapping setting controls each change.
 
-## What gets synced
+## When the clone is synced
 
-### Channels
+- At startup: when the client starts, it sends the full structure of each source server, and the clone is brought in line. Servers are synced one at a time, 3 seconds apart by default, to stay within Discord's rate limits.
+- As changes happen: after startup, Copycord applies each change in a source server, such as a new channel or a renamed role, as soon as Discord reports it. There is no periodic full sync.
 
-| Event | Action in clone | Configurable |
-|-------|----------------|-------------|
-| Channel created | New channel created in clone | Always on |
-| Channel deleted | Clone channel deleted | Delete Removed Channels |
-| Channel renamed | Clone channel renamed | Rename Channels |
-| Channel repositioned | Clone channel repositioned | Reposition Channels |
-| Topic changed | Clone topic updated | Sync Channel Topic |
-| NSFW toggled | Clone NSFW updated | Sync NSFW Flag |
-| Slowmode changed | Clone slowmode updated | Sync Slowmode |
-| Permissions changed | Clone permissions updated | Mirror Channel Permissions |
+To bring a clone's roles, emojis and stickers back in line at any time, run a [Sync assets](/docs/dashboard/purge-and-sync#sync-assets) task.
 
-### Threads
+Each change below is controlled by a mapping setting, shown in the last column. To change these settings, see [Edit a mapping's settings](/docs/dashboard/guild-mappings#edit-a-mappings-settings).
 
-| Event | Action in clone |
-|-------|----------------|
-| Thread created | Matching thread created |
-| Thread deleted | Clone thread removed (Delete Removed Threads) |
-| Thread renamed | Clone thread renamed |
-| Thread archived/unarchived | Clone thread updated |
+## Channel types
 
-### Roles
+| Type | Structure | Messages |
+|------|-----------|----------|
+| Text channels | Yes | Yes, with edits and deletes |
+| Voice channels | Yes (**Clone Voice Channels**) | No |
+| Stage channels | Yes (**Clone Stage Channels**) | No |
+| Forum channels | Yes | Yes: posts, tags and guidelines |
+| Threads | Created when the source thread exists | Yes |
+| Categories | Yes | Not applicable |
 
-| Event | Action in clone | Configurable |
-|-------|----------------|-------------|
-| Role created | New role created in clone | Clone Roles |
-| Role deleted | Clone role deleted | Delete Removed Roles |
-| Role renamed | Clone role renamed | Update Role Properties |
-| Color changed | Clone role color updated | Update Role Properties |
-| Permissions changed | Clone permissions updated | Mirror Role Permissions |
-| Hoist toggled | Clone hoist updated | Update Role Properties |
-| Position changed | Clone position updated | Rearrange Roles |
-| Icon changed | Clone icon updated | Clone Role Icons |
-| Style changed | Clone role color style updated (solid, gradient, holographic) | Clone Role Styles |
+## Channels
 
-### Emojis and Stickers
+| Change in the source | Change in the clone | Setting |
+|----------------------|---------------------|---------|
+| Channel created | Channel created | No setting |
+| Channel deleted | Channel deleted | **Delete Removed Channels** |
+| Channel renamed | Channel renamed | **Rename Channels** |
+| Channel moved | Channel moved | **Reposition Channels** |
+| Topic changed | Topic updated | **Sync Channel Topic** |
+| NSFW flag changed | NSFW flag updated | **Sync NSFW Flag** |
+| Slowmode changed | Slowmode updated | **Sync Slowmode** |
+| Permissions changed | Permissions updated | **Mirror Channel Permissions** |
+| Voice bitrate or user limit changed | Voice channel updated | **Sync Voice Properties** |
+| Stage bitrate or user limit changed | Stage channel updated | **Sync Stage Properties** |
+| Forum layout, tags or guidelines changed | Forum updated | **Sync Forum Properties** |
 
-| Event | Action in clone | Configurable |
-|-------|----------------|-------------|
-| Emoji added | New emoji cloned | Clone Emoji |
-| Emoji removed | Clone emoji deleted | Clone Emoji |
-| Sticker added | New sticker cloned | Clone Stickers |
-| Sticker removed | Clone sticker deleted | Clone Stickers |
+A channel you renamed on the [Channels](/docs/dashboard/channels) page keeps its custom name.
 
-### Server Identity
+## Threads
 
-| Event | Configurable |
-|-------|-------------|
-| Server icon changed | Clone Server Icon |
-| Server banner changed | Clone Server Banner |
-| Splash screen changed | Clone Invite Splash |
-| Description changed | Sync Server Description |
+| Change in the source | Change in the clone | Setting |
+|----------------------|---------------------|---------|
+| Thread created | Thread created | No setting |
+| Thread deleted | Thread deleted | **Delete Removed Threads** |
+| Thread renamed | Thread renamed | No setting |
+| Thread archived or unarchived | Thread updated | No setting |
 
-## How it works
+## Roles
 
-Copycord uses two methods to keep the clone in sync:
+| Change in the source | Change in the clone | Setting |
+|----------------------|---------------------|---------|
+| Role created | Role created | **Clone Roles** |
+| Role deleted | Role deleted | **Delete Removed Roles** |
+| Name, color or hoist changed | Role updated | **Update Role Properties** |
+| Permissions changed | Permissions updated | **Mirror Role Permissions** |
+| Position changed | Position updated | **Rearrange Roles** |
+| Icon changed | Icon updated | **Clone Role Icons** |
+| Style changed | Color style updated: solid, gradient or holographic | **Clone Role Styles** |
 
-### 1. Real-time gateway events
+## Emojis and stickers
 
-The client self-bot receives Discord gateway events for every change in the source server. These are processed immediately:
+| Change in the source | Change in the clone | Setting |
+|----------------------|---------------------|---------|
+| Emoji added or removed | Emoji added or deleted | **Clone Emoji** |
+| Sticker added or removed | Sticker added or deleted | **Clone Stickers** |
 
-- `GUILD_CHANNEL_CREATE/DELETE/UPDATE`
-- `GUILD_ROLE_CREATE/DELETE/UPDATE`
-- `GUILD_EMOJIS_UPDATE`
-- `GUILD_STICKERS_UPDATE`
-- `GUILD_UPDATE`
-- `THREAD_CREATE/DELETE/UPDATE`
+When the clone server reaches Discord's limit, for example 50 emojis on a server without boosts, Copycord stops adding emojis or stickers. It tries again on the next sync.
 
-### 2. Startup sync
+## Server identity
 
-When the client starts, it builds and sends a full sitemap for each server. Servers are processed one at a time with a configurable delay between each (default 3 seconds) to avoid rate limits. After startup, all changes are handled by real-time events; no periodic re-syncing is needed. To realign a clone's roles, emojis and stickers on demand, run a [Sync assets](/docs/dashboard/purge-and-sync#sync-assets) task.
+| Change in the source | Setting |
+|----------------------|---------|
+| Server icon | **Clone Server Icon** |
+| Server banner | **Clone Server Banner** |
+| Invite splash | **Clone Invite Splash** |
+| Description | **Sync Server Description** |
 
-## Sync architecture
+## Messages during a sync
 
-Structure sync is designed to be as fast as possible while respecting Discord's API limits.
+Messages that arrive for a channel that is not cloned yet wait in a queue. Once the channel and its webhook exist, they are posted in order, so no message is lost during a sync.
 
-### Two-phase channel sync
+If the source structure changes while a sync is running, Copycord starts the sync again with the latest structure.
 
-Channel and category creation runs first without any artificial delays; Discord's built-in rate limit handling (via `Retry-After` headers) is used automatically. Webhook creation is handled separately:
+## Speed and rate limits
 
-- **`ON_DEMAND_WEBHOOKS: true` (default)**: Webhooks are not created during sync at all. Instead, they are created lazily when the first message arrives for a channel. This makes initial server cloning near-instant for the structure phase.
-- **`ON_DEMAND_WEBHOOKS: false`**: Webhooks are batch-created in the background after structure sync completes, with a small delay between each to avoid hitting rate limits.
+Channels and categories are created as fast as Discord allows. When Discord asks Copycord to slow down, it waits the time Discord gives, then continues.
 
-### Parallel background tasks
-
-Roles, emojis, and stickers sync in parallel as background tasks while structure sync runs. The sync is only reported as complete once all background tasks have finished.
-
-### Cancel and restart
-
-If a new sitemap arrives while a sync is already running for the same clone guild, the running sync is canceled and a new one starts with the latest data. Background tasks (roles, emojis, stickers, webhooks) from the canceled sync continue running independently; they are not interrupted.
-
-### Message buffering
-
-Messages that arrive for channels not yet cloned are automatically queued. Once the sync creates the channel and its webhook (on-demand or batch), buffered messages are replayed in order. No messages are dropped during sync.
-
-### Emoji and sticker limits
-
-When cloning emojis or stickers, if the clone guild hits Discord's limit (e.g., 50 emojis for unboosted servers), the sync stops. The limit is re-evaluated on each sync cycle.
-
-### Rate limiting
-
-Copycord uses discord.py's native rate limit handling for all structure sync operations. When Discord returns a `429 Too Many Requests` response, the library automatically waits the required `Retry-After` duration before retrying.
+With **On-Demand Webhooks** on, the default, no webhooks are created during the sync, so the structure is ready sooner; each channel gets its webhook with its first message. With it off, webhooks are created after the sync, a short time apart. Roles, emojis and stickers sync at the same time as the channels, and the sync is reported done when all of them have finished.

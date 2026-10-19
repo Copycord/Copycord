@@ -3,76 +3,60 @@ sidebar_position: 2
 title: Monitoring
 ---
 
-# Monitoring Commands
+# Monitoring commands
 
-These commands let you check the health and status of your Copycord bots.
+These commands check that the server bot and the client are online, and show how your user tokens appear to Discord.
 
 ## `/ping_server`
 
-Shows the server bot's latency, server information, and uptime.
+Shows the server bot's latency, the server's details and the bot's uptime.
 
-**Usage:**
 ```
 /ping_server
 ```
 
-**Response includes:**
-- Bot latency (milliseconds)
-- Server name and member count
-- Bot uptime since last restart
+This command has no options.
 
----
+The reply shows the latency in milliseconds, the server's name and member count, and the time since the bot last started.
 
 ## `/ping_client`
 
-Measures the client bot's latency, round-trip time to the server, and client uptime.
+Shows the client's latency, the round-trip time between the client and the server bot, and the client's uptime.
 
-**Usage:**
 ```
 /ping_client
 ```
 
-**Response includes:**
-- Discord WebSocket latency
-- Round-trip time between server and client
-- Client uptime since last restart
+This command has no options.
 
-:::tip
-Use these commands to quickly verify both bots are online and responsive. If latency is unusually high, check your network connection or server resources.
-:::
-
----
+The reply shows the Discord connection latency, the round-trip time, and the time since the client last started. High values usually point to a slow network or a busy machine.
 
 ## `/token_debug`
 
-Downloads a JSON file describing how each of this mapping's user tokens actually
-appears to Discord. Useful when messages send but something about them looks
-wrong, or after changing proxy settings.
+Downloads a JSON file that shows how each of this mapping's user tokens appears to Discord. Use it when token messages send but look wrong, or after you change proxy settings.
 
-**Usage:**
 ```
-/token_debug [limit]
+/token_debug [limit:<number>]
 ```
 
-**Options:**
-- `limit`: how many tokens to include (default 25, maximum 100). If some are
-  left out the file says how many.
+| Option | Required | Description |
+|--------|----------|-------------|
+| `limit` | No | How many tokens to include. Default: 25. Maximum: 100. When tokens are left out, the file says how many |
 
-**The file contains, per token:**
-- The account's username and a stable short reference for matching it to the logs
-- Its leased proxy, with credentials masked
-- The **egress IP** the outside world actually sees for that account
-- The exact headers sent, captured from a real request rather than read off the
-  configuration, since the two are not the same
-- The decoded device fingerprint the account reports to Discord
-- A comparison against a real Discord desktop client, listing anything missing,
-  mismatched, or sent that a real client would not send
+```
+/token_debug
+/token_debug limit:50
+```
 
-The response is only visible to you. Authorization headers are redacted and
-never leave the server, and proxy passwords are masked, but the file still
-describes your accounts, so keep it private.
+For each token, the file holds:
 
-:::tip
-Run it twice a few minutes apart to check proxy stickiness: the same token
-should report the same `egress_ip` both times.
-:::
+- The account's username, and a short reference that matches it in the logs.
+- Its proxy, with the credentials masked.
+- The IP address that Discord sees for the account.
+- The headers that were actually sent, taken from a real request.
+- The device details the account reports to Discord.
+- A comparison with a real Discord desktop client, listing anything missing, different, or sent that a real client would not send.
+
+Only you can see the reply. Authorization headers and proxy passwords are removed, but the file still describes your accounts, so keep it private.
+
+To check that each account keeps its proxy, run the command twice a few minutes apart. Each token should show the same `egress_ip` both times.

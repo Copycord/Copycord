@@ -5,67 +5,37 @@ title: Channels
 
 # Channels
 
-The **Channels** page lets you view the channel structure of your cloned servers and customize how channels appear. Both the server and client bots must be running for the page to load.
+The **Channels** page shows the channels of each mapping and their clones. Use it to rename channels in the clone, copy channel IDs, block a channel from cloning and delete orphans.
 
-To import message history into cloned channels, use the [Backfill channels](/docs/dashboard/backfill) task on the **Tasks** page.
+The page loads once both the server bot and the client are running. To import the message history of channels, use the [Backfill channels](/docs/dashboard/backfill) task instead.
 
-## Viewing channels
+## View a mapping's channels
 
-Pick a mapping in **Guild mapping**. The page shows the host server's **categories** and their channels as a tree, with each channel's state: cloned, **Not cloned yet**, customized, or **Orphan**.
+1. In **Guild mapping**, pick the mapping.
+2. Optional: narrow the list. Type a name or ID in **Search channels**, pick **All channels**, **Orphans only** or **Non-orphans only** in **Filter**, or pick **Name**, **Category** or **Type** in **Sort**.
 
-- **Search channels** filters by name or ID
-- **Filter**: **All channels**, **Orphans only** or **Non-orphans only**
-- **Sort**: by **Name**, **Category** or **Type**
+The page shows the host server's categories and channels as a tree. Each row shows the channel's state: cloned, **Not cloned yet**, customized or **Orphan**.
 
-## Row menu
+Each channel and category row has a menu with these actions:
 
-Each channel and category row has a menu:
+- **Customize** or **Customize category**: give the clone a custom name. Shown once the channel is cloned.
+- **Copy original channel ID** and **Copy clone channel ID**, or **Copy original category ID** and **Copy clone category ID**.
+- **Add channel to blacklist** or **Add category to blacklist**: add it to the mapping's [filters](/docs/dashboard/filters), so it is no longer cloned.
+- **Delete orphan** or **Delete orphan category**: on an orphan, delete it from the clone server.
 
-- **Customize**: set a custom name (see below)
-- **Copy original channel ID** / **Copy clone channel ID** (and the category equivalents)
-- **Add to blacklist**: add the channel or category to the mapping's [filters](/docs/dashboard/filters) so it is no longer cloned
-- **Delete orphan**: on an orphan, delete it from the clone server
+## Rename a channel in the clone
 
-## Customizing channel names
+1. Open the menu on the channel's row and click **Customize**.
+2. In **Custom channel name**, enter the new name. To go back to the original name, leave it empty.
+3. Click **Save**.
 
-You can rename cloned channels to anything you want without affecting the source server:
+The custom name stays when the source channel is renamed. To rename a category, use **Customize category** and **Custom category name** the same way. The source server is never changed.
 
-1. Open the row menu of the channel and click **Customize**
-2. Enter the **Custom channel name**. Leave it empty to use the original name
-3. Save
+## Delete orphans
 
-The custom name persists even if the source channel is renamed: Copycord keeps your custom name instead of syncing the rename.
+An orphan is a channel or category that exists in the clone but no longer exists in the host server. The page checks for orphans when it loads a mapping and marks them **Orphan**.
 
-:::tip Category names
-You can also customize category names the same way. This lets you completely rebrand the clone server's layout.
-:::
+- To delete one orphan, open the menu on its row, click **Delete orphan** or **Delete orphan category**, and confirm.
+- To delete all of them, click **Delete *n* orphans** in the toolbar, then click **Delete all** to confirm.
 
-## Orphans
-
-An orphan is a channel or category that exists in the clone but is no longer in the host server. Click **Fetch orphans** to scan the clone against the last sitemap. The scan reports what it found; delete orphans one at a time from the row menu or all at once with **Delete all**, which asks for confirmation.
-
-## Channel types
-
-Copycord supports cloning all Discord channel types:
-
-| Type | Cloned? | Messages? | Notes |
-|------|---------|-----------|-------|
-| **Text channels** | Yes | Yes | Full message, edit, and delete sync |
-| **Voice channels** | Yes | No | Structure only (configurable) |
-| **Stage channels** | Yes | No | Structure only (configurable) |
-| **Forum channels** | Yes | Yes | Posts, tags, and guidelines synced |
-| **Threads** | Yes | Yes | Automatically created when source thread exists |
-| **Categories** | Yes | N/A | Organizational structure preserved |
-
-## Channel properties
-
-Depending on your [cloning options](/docs/configuration/cloning-options), Copycord can sync these channel properties:
-
-- **Name**: channel name (**Rename Channels**)
-- **Position**: channel ordering (**Reposition Channels**)
-- **Topic**: channel description (**Sync Channel Topic**)
-- **NSFW flag**: age-restricted setting (**Sync NSFW Flag**)
-- **Slowmode**: message cooldown timer (**Sync Slowmode**)
-- **Permissions**: channel-level permission overwrites (**Mirror Channel Permissions**)
-- **Voice and stage properties**: bitrate and user limit (**Sync Voice Properties**, **Sync Stage Properties**)
-- **Forum properties**: layout, tags, and posting guidelines (**Sync Forum Properties**)
+Which channel types are cloned, and which channel properties are kept in sync, is described in [Structure sync](/docs/features/structure-sync).

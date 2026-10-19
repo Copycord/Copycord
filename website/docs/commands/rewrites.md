@@ -3,78 +3,61 @@ sidebar_position: 9
 title: Rewrites
 ---
 
-# Rewrite Commands
+# Rewrite commands
 
-Configure simple find-and-replace rules that modify cloned messages for a specific mapping. Rewrites are applied after other sanitization and affect both message content and most embed text (title, description, fields, etc.).
+Rewrites replace a word or phrase in the cloned messages of one mapping, for example to replace a brand name, censor a word or remove an invite link. They apply to the message text and to most embed text, such as the title, description and fields, after Copycord's other clean-up.
 
 ## `/rewrite add`
 
-Add or update a word/phrase rewrite for the current clone mapping.
+Adds a rewrite rule for this clone server's mapping. If a rule for the same `source_text` exists, it is updated instead.
 
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `source_text` | Yes | Word or phrase to search for (case-insensitive) |
-| `replacement_text` | Yes | Text to replace it with |
-
-If a rewrite with the same `source_text` already exists, it will be **updated** instead of creating a duplicate.
-
-**Examples:**
 ```
-/rewrite add source_text:"hello" replacement_text:"yo"
-/rewrite add source_text:"team rocket" replacement_text:"team valor"
+/rewrite add source_text:<text> replacement_text:<text>
 ```
 
-With these rules configured, a cloned message like:
+| Option | Required | Description |
+|--------|----------|-------------|
+| `source_text` | Yes | The word or phrase to find. Matching ignores case |
+| `replacement_text` | Yes | The text to put in its place |
+
 ```
-hello from team rocket
-```
-becomes:
-```
-yo from team valor
+/rewrite add source_text:hello replacement_text:yo
+/rewrite add source_text:team rocket replacement_text:team valor
 ```
 
----
+With these two rules, the message `hello from team rocket` is cloned as `yo from team valor`.
 
 ## `/rewrite list`
 
-List all word/phrase rewrites for the current clone mapping.
+Lists the rewrite rules of this clone server's mapping, each with a number.
 
-Each entry shows a numeric **ID** and its mapping:
+```
+/rewrite list
+```
+
+This command has no options.
+
+The reply looks like this:
 
 ```
 [1] `hello` → `yo`
 [2] `team rocket` → `team valor`
 ```
 
-Use the ID with `/rewrite remove` to delete a rule.
-
-**Usage:**
-```
-/rewrite list
-```
-
----
+Use the number with `/rewrite remove`.
 
 ## `/rewrite remove`
 
-Remove a rewrite rule by its numeric ID (shown in `/rewrite list`).
+Deletes a rewrite rule by its number.
 
-**Parameters:**
+```
+/rewrite remove rewrite_id:<number>
+```
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `rewrite_id` | Yes | The ID of the rule to delete |
+| Option | Required | Description |
+|--------|----------|-------------|
+| `rewrite_id` | Yes | The number shown by `/rewrite list` |
 
-**Usage:**
 ```
 /rewrite remove rewrite_id:2
 ```
-
-:::tip Use cases
-- **Branding**: replace server names, URLs, or brand terms
-- **Censoring**: replace inappropriate words with alternatives
-- **Localization**: translate common phrases
-- **De-linking**: replace invite links or external URLs
-:::

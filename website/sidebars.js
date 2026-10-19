@@ -4,7 +4,7 @@ const sidebars = {
     'intro',
     {
       type: 'category',
-      label: 'Getting Started',
+      label: 'Getting started',
       collapsed: false,
       items: [
         'getting-started/quick-start',
@@ -19,7 +19,7 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Web Dashboard',
+      label: 'Web dashboard',
       items: [
         'dashboard/overview',
         'dashboard/guild-mappings',
@@ -55,7 +55,7 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Slash Commands',
+      label: 'Slash commands',
       items: [
         'commands/overview',
         'commands/monitoring',

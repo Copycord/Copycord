@@ -1,63 +1,36 @@
 ---
 sidebar_position: 3
-title: External Forwarding
+title: External forwarding
 ---
 
-# External Message Forwarding
+# External message forwarding
 
-Beyond server cloning, Copycord can forward messages from source servers to external services in real time. This lets you receive notifications, build integrations, or create redundant archives.
+Forwarding sends messages from your source servers to services outside your clone server as they arrive: Discord webhooks, Telegram and Pushover. This page explains what forwarding is for and how messages are delivered. To set up a rule, see [Message forwarding](/docs/dashboard/forwarding).
 
-## Supported services
+## What you can use it for
 
-### Discord Webhooks
+- Alerts: get a Telegram or Pushover notification when someone mentions a keyword.
+- Archives: post every message to a separate Discord server as well.
+- Monitoring: follow certain users or topics across several servers.
+- Your own tools: send messages to your own service through a Discord webhook.
 
-Forward messages to any Discord channel via a webhook URL. Messages arrive with their original content, embeds, and author information.
+## Services
 
-A single rule can forward to **multiple Discord webhook URLs** at once: add as many as you like and the matched message is delivered to every one of them. The rule's username and avatar (if set) are shared across all URLs. Existing single-URL rules keep working unchanged.
+| Service | Where messages go |
+|---------|-------------------|
+| Discord webhook | One or more Discord channels, with the message's content, embeds and author |
+| Telegram | A Telegram chat or channel, through a Telegram bot |
+| Pushover | Push notifications on your phone |
 
-### Telegram
+## How a message is forwarded
 
-Send messages to a Telegram chat or channel via the Telegram Bot API. Useful for mobile notifications.
+1. The client, your user account, receives every message from the source servers.
+2. Copycord checks each message against every enabled rule. A rule matches when the message passes all of its filters; a rule with no filters matches everything from its **Guild scope**. The filters are listed in [Filter options](/docs/dashboard/forwarding#filter-options).
+3. Each match is queued and delivered in order.
+4. A failed delivery is retried, with a longer wait after each attempt.
 
-### Pushover
+Copycord does not send the same message to a rule twice.
 
-Receive push notifications on your phone when matching messages appear. Great for high-priority alerts.
+When a Discord rule has several webhook URLs, the message goes to all of them at the same time, within Discord's rate limits, so more webhooks barely slow the rule down. When one URL fails, only that URL is retried.
 
-## Creating rules
-
-Forwarding rules are created through the [web dashboard](/docs/dashboard/forwarding). Each rule specifies:
-
-- **Provider**: where to send (Discord webhooks, Telegram, Pushover)
-- **Filters**: which messages to forward
-
-## Filter options
-
-| Filter | Description |
-|--------|-------------|
-| **Guild scope** | Only forward from a specific source server |
-| **Words** | Forward messages containing any of the listed words or phrases, or require all of a second list |
-| **Channel IDs** | Only forward from specific channels |
-| **User IDs** | Only forward messages from specific users |
-| **Message kinds** | Messages with attachments, bot messages, system messages |
-
-See [Message Forwarding](/docs/dashboard/forwarding#filter-options) for every option.
-
-All filters are optional and can be combined. Empty filters match everything.
-
-## How it works
-
-1. The **client** self-bot receives every message from source servers
-2. Each message is checked against all active forwarding rules
-3. If a message matches a rule's filters, it's queued for delivery
-4. Worker threads process the queue and send to external services
-5. Failed deliveries are retried with exponential backoff
-
-## Deduplication
-
-Copycord includes built-in deduplication to prevent sending the same message twice.
-
-## Performance
-
-Forwarding uses a worker pool model with concurrent workers for each service type. Messages are processed in order with automatic retry on failure.
-
-When a Discord rule targets multiple webhook URLs, those deliveries run **concurrently** (bounded so they stay within Discord's rate limits), so adding more webhooks barely changes how long the rule takes. If one URL fails, only that URL is retried; the ones that already succeeded are not re-sent.
+Forwarding works without cloning: a mapping with cloning turned off still feeds the rules. See [Forward without cloning](/docs/dashboard/forwarding#forward-without-cloning).

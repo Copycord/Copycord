@@ -3,41 +3,35 @@ sidebar_position: 3
 title: Filtering
 ---
 
-# Filtering Commands
+# Filtering commands
 
-Control which messages get cloned by blocking specific keywords.
+These commands block messages that contain a keyword. The block list belongs to the mapping of the clone server where you run the command. The same list is **Blocked Words / Phrases** in the mapping's [filters](/docs/dashboard/filters).
 
 ## `/block_add`
 
-Toggles a keyword in the block list for the current clone server. Messages containing blocked keywords will be silently dropped and not forwarded to the clone.
+Adds a keyword to the block list, or removes it when it is already there. Messages that contain a blocked keyword are not cloned.
 
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `keyword` | Yes | The keyword to block (or unblock if already blocked) |
-
-**Usage:**
 ```
-/block_add spoiler
-/block_add giveaway
+/block_add keyword:<keyword>
 ```
 
-Running the command again with the same keyword **removes** it from the block list (toggle behavior).
+| Option | Required | Description |
+|--------|----------|-------------|
+| `keyword` | Yes | The keyword to block, or to unblock when it is already blocked |
 
-:::info
-Keyword matching is case-insensitive. Blocking "spoiler" will also catch "SPOILER" and "Spoiler".
-:::
+```
+/block_add keyword:spoiler
+/block_add keyword:giveaway
+```
 
----
+Matching ignores case: blocking `spoiler` also blocks `SPOILER` and `Spoiler`.
 
 ## `/block_list`
 
-Lists all currently blocked keywords for the current clone server.
+Lists the blocked keywords of this clone server's mapping.
 
-**Usage:**
 ```
 /block_list
 ```
 
-Displays all active keyword blocks for the source → clone mapping of the server where you run the command.
+This command has no options.

@@ -1,60 +1,40 @@
 ---
 sidebar_position: 4
-title: Member Scraping
+title: Member scraping
 ---
 
-# Member Scraping
+# Member scraping
 
-Copycord includes a member scraper that lists the members of a Discord server your scraper accounts are in and saves them to a JSON file. It runs as the **Scrape members** task on the [Tasks](/docs/dashboard/scraper) page.
+The member scraper lists the members of a Discord server and saves them to a JSON file. This page explains what it collects and how it works. To run a scrape, see [Scrape members](/docs/dashboard/scraper).
 
 ## What it collects
 
-| Data | Description |
-|------|-------------|
-| **User ID** | Discord snowflake ID, always included |
-| **Username** | Discord username (on by default) |
-| **Avatar URL** | Avatar image URL (on by default) |
-| **Bio** | "About Me" text (off by default; slower) |
-| **Roles** | The member's roles (off by default) |
+| Data | Included |
+|------|----------|
+| User ID | Always |
+| Username | On by default |
+| Avatar URL | On by default |
+| Bio, the "About Me" text | Off by default; makes the scrape slower |
+| Roles | Off by default |
 
-## How to use it
+## How it works
 
-### 1. Add scraper tokens
+The scraper uses its own Discord user tokens, the scraper tokens, instead of the server bot and the client. It talks to Discord directly, so the bots do not need to be running. Each token's account must be a member of the server you scrape.
 
-Open the **Tasks** page, pick **Scrape members** and expand the **Scraper tokens and proxies** card. Add one Discord user token per line under **Tokens**. Each token must belong to an account that is a member of the target server.
+A scrape runs as a task on the **Tasks** page:
 
-The scraper uses its own tokens and talks to Discord directly, so the server and client bots do not need to be running.
+1. It checks which saved tokens can see the server. A token that fails or is not in the server is skipped.
+2. It fetches the member list.
+3. It fetches each member's bio, when **Bio** is on.
+4. It saves the JSON file under `scrapes/<guild_id>/` in the data directory.
 
-### 2. Configure proxies (optional)
+Scrapes run one at a time. You can start several, for several servers, and each waits its turn.
 
-Add proxies under **Proxies** in the same card, one per line. This is the same list as the **Proxy Settings** card on the Configuration page (see [Proxy support](/docs/configuration/advanced#proxy-support)).
+## How long a scrape takes
 
-### 3. Start a scrape
+- Larger servers take longer.
+- **Bio** needs one extra request per member.
+- Discord limits how fast requests can be made. The scraper waits when Discord asks it to.
+- Proxies spread the requests over more addresses, which helps with those limits. The scraper uses the same proxy list as the rest of Copycord; see [Proxy support](/docs/configuration/advanced#proxy-support).
 
-Click **Run task**, pick the server (or enter its ID), choose what to include and start the run. The scraper:
-
-1. Checks which saved tokens can see the server; a token that fails or is not in the server is skipped
-2. Fetches the member list
-3. Fetches bios, if **Bio** is on
-4. Saves the JSON file
-
-### 4. Download results
-
-The run page has a **Download** link for the JSON file. Files are saved under `scrapes/<guild_id>/` in the data directory.
-
-## Queue
-
-Scrape runs go one at a time. Start several and each waits as queued until the one before it ends, so you can scrape several servers without watching each one.
-
-## Performance
-
-Scraping speed depends on:
-
-- **Server size**: larger servers take longer
-- **Bios**: fetching bios needs one extra request per member
-- **Proxies**: spread requests to avoid rate limits
-- **Discord rate limits**: handled automatically
-
-## Managing results
-
-Each scrape is a run on the Tasks page. Delete a run from its **Run actions** menu when you no longer need it.
+Each scrape is kept as a run on the **Tasks** page until you delete it from its **Run actions** menu.

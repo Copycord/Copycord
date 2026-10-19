@@ -1,61 +1,48 @@
 ---
 sidebar_position: 1
-title: Commands Overview
+title: Commands overview
 ---
 
-# Slash Commands Overview
+# Slash commands overview
 
-Copycord provides slash commands for managing your clone servers directly from Discord.
+Copycord's slash commands manage your clone servers from Discord. This page lists every command and what each one needs.
 
-## Before you start
+## Requirements
 
-:::important Prerequisites
-1. Your Discord user ID must be in the `COMMAND_USERS` configuration (set via the dashboard, `copycord config set COMMAND_USERS <id>`, or the `COMMAND_USERS` environment variable)
-2. Commands must be run in the **clone server**, not the source server
-3. Both the server bot and client bot must be running
-:::
+- Your Discord user ID is in `COMMAND_USERS`. Set it in **Command Users** on the dashboard, with `copycord config set COMMAND_USERS <id>`, or as the `COMMAND_USERS` environment variable.
+- You run the command in the clone server, not the source server.
+- The server bot and the client are running.
 
-## Command categories
+## Reading the syntax
 
-| Category | Commands | Purpose |
-|----------|----------|---------|
-| [Monitoring](/docs/commands/monitoring) | `ping_server`, `ping_client`, `token_debug` | Check bot status, latency, and how user tokens appear to Discord |
-| [Filtering](/docs/commands/filtering) | `block_add`, `block_list` | Block messages by keyword |
-| [Announcements](/docs/commands/announcements) | `announcement_trigger_add`, `announce_subscription_toggle`, etc. | Keyword-triggered notifications |
-| [Roles](/docs/commands/roles) | `onjoin_role`, `onjoin_dm`, `role_block`, `role_mention`, etc. | Role management and auto-assignment |
-| [Assets](/docs/commands/assets) | `pull_assets` | Export emojis and stickers (purging is a Tasks page task) |
-| [Webhooks](/docs/commands/webhooks) | `channel_webhook set/view/clear/list` | Custom webhook identities per channel |
-| [Exports and debugging](/docs/commands/exports) | `mapping_debug`, `debug_report` | Debug info and a redacted database dump |
-| [Rewrites](/docs/commands/rewrites) | `rewrite add/list/remove` | Find-and-replace rules for messages |
+Each command is listed with what it does, its syntax, a table of its options and examples. In the syntax, `<value>` is a value you fill in and `[option:<value>]` is optional. In Discord, type the command name, then fill in each option in the field Discord shows for it.
 
 Message and DM exports, history imports, purges and asset syncs are not slash commands. They run as tasks on the dashboard's [Tasks](/docs/dashboard/tasks) page.
 
-## Quick reference
+## All commands
 
-All commands at a glance:
-
-| Command | Purpose |
-|---------|---------|
-| `/ping_server` | Bot latency and server info |
-| `/ping_client` | Client latency and uptime |
-| `/token_debug [limit]` | How each user token appears to Discord |
-| `/block_add <keyword>` | Toggle keyword block |
-| `/block_list` | List blocked keywords |
-| `/announcement_trigger_add` | Create announcement trigger |
-| `/announce_trigger_list` | List or delete triggers |
-| `/announce_subscription_toggle` | Subscribe to announcements |
-| `/announce_subscription_list` | List or delete subscriptions |
-| `/announce_help` | Announcement system help |
-| `/onjoin_dm <server_id>` | Toggle join DM alerts |
-| `/onjoin_role <role>` | Toggle on-join role |
-| `/onjoin_roles` | List or clear on-join roles |
-| `/onjoin_sync` | Sync on-join roles to members |
-| `/pull_assets <asset>` | Export emojis and stickers to an archive |
-| `/role_block <role\|role_id>` | Block role from cloning |
-| `/role_block_clear` | Clear all role blocks |
-| `/role_mention add\|list\|delete` | Auto-mention roles on messages |
-| `/channel_webhook set\|view\|clear\|list` | Custom webhook identity |
-| `/channel_webhook set_all\|clear_all` | Bulk webhook identity |
-| `/mapping_debug` | Debug guild mapping |
-| `/debug_report` | ZIP of redacted database tables for debugging |
-| `/rewrite add\|list\|remove` | Word and phrase rewrites |
+| Command | What it does | Page |
+|---------|--------------|------|
+| `/ping_server` | Shows the server bot's latency and server details | [Monitoring](/docs/commands/monitoring) |
+| `/ping_client` | Shows the client's latency and uptime | [Monitoring](/docs/commands/monitoring) |
+| `/token_debug` | Shows how each user token appears to Discord | [Monitoring](/docs/commands/monitoring) |
+| `/block_add` | Blocks or unblocks a keyword | [Filtering](/docs/commands/filtering) |
+| `/block_list` | Lists the blocked keywords | [Filtering](/docs/commands/filtering) |
+| `/announcement_trigger_add` | Adds an announcement trigger | [Announcements](/docs/commands/announcements) |
+| `/announce_trigger_list` | Lists or deletes triggers | [Announcements](/docs/commands/announcements) |
+| `/announce_subscription_toggle` | Subscribes or unsubscribes a user | [Announcements](/docs/commands/announcements) |
+| `/announce_subscription_list` | Lists or deletes subscriptions | [Announcements](/docs/commands/announcements) |
+| `/announce_help` | Shows help for the announcement commands | [Announcements](/docs/commands/announcements) |
+| `/onjoin_role` | Adds or removes an on-join role | [Roles](/docs/commands/roles) |
+| `/onjoin_roles` | Lists or clears the on-join roles | [Roles](/docs/commands/roles) |
+| `/onjoin_sync` | Gives the on-join roles to current members | [Roles](/docs/commands/roles) |
+| `/onjoin_dm` | Turns join DM alerts for a server on or off | [Roles](/docs/commands/roles) |
+| `/role_block` | Blocks a role from cloning | [Roles](/docs/commands/roles) |
+| `/role_block_clear` | Clears all role blocks | [Roles](/docs/commands/roles) |
+| `/pull_assets` | Saves a server's emojis and stickers to an archive | [Assets](/docs/commands/assets) |
+| `/channel_webhook set`, `view`, `clear`, `list` | Manages one channel's webhook name and avatar | [Webhooks](/docs/commands/webhooks) |
+| `/channel_webhook set_all`, `clear_all` | Manages the webhook name and avatar of every channel | [Webhooks](/docs/commands/webhooks) |
+| `/role_mention add`, `list`, `delete` | Manages roles mentioned on cloned messages | [Webhooks](/docs/commands/webhooks#role-mentions) |
+| `/mapping_debug` | Shows the mapping's data and settings | [Exports and debugging](/docs/commands/exports) |
+| `/debug_report` | Makes a ZIP of the database with secrets removed | [Exports and debugging](/docs/commands/exports) |
+| `/rewrite add`, `list`, `remove` | Manages find-and-replace rules | [Rewrites](/docs/commands/rewrites) |
