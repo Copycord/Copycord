@@ -66,7 +66,7 @@ Replace it with one service that uses the **same `./data` volume**:
 # v4
 services:
   copycord:
-    image: ghcr.io/copycord/copycord:latest # or pin a v4 release tag; the v4 pre-release is only under its own tag, such as v4.0.0b1
+    image: ghcr.io/copycord/copycord:latest # or pin a release tag
     container_name: copycord
     environment:
       - PASSWORD=your-own-password  # required; Copycord will not start with the old default "copycord"
@@ -119,8 +119,6 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 # Windows (PowerShell)
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
-
-Until v4.0.0 is released, `main` has no install script; install the pre-release as shown in the [Quick Start](/docs/getting-started/quick-start).
 
 ### 4. Bring your data
 

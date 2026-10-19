@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
-Until v4.0.0 is released, these commands do not work yet; install the pre-release as shown in the [Quick Start](/docs/getting-started/quick-start), which walks through it step by step, including [Docker](/docs/getting-started/docker-install). Coming from v3? See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
+The [Quick Start](/docs/getting-started/quick-start) walks through it step by step, including [Docker](/docs/getting-started/docker-install). Coming from v3? See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
 
 :::warning Self-Bot Notice
 Copycord uses self-bot functionality (logging into Discord with a user token), which is against Discord's Terms of Service and could lead to account suspension. We strongly recommend using an **alternate account** to minimize risk.

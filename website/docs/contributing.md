@@ -112,7 +112,7 @@ Every pull request against `main` or `v4-dev` (and every push to `main`) runs th
 Other workflows:
 
 - **Release assets** (`release.yml`): when a GitHub release tagged `v*` is published, builds the wheel and sdist and attaches them to the release. The install scripts and `copycord update` install that wheel. Pre-releases feed the beta [update channel](/docs/cli#update-channels).
-- **Build & publish Copycord container** (`build_containers.yml`): publishes the Docker image for `v*.*.*` tags. A pre-release tag such as `v4.0.0b1` is published only under its own tag and never moves `latest`.
+- **Build & publish Copycord container** (`build_containers.yml`): publishes the Docker image for `v*.*.*` tags. A pre-release tag such as `v4.1.0b1` is published only under its own tag and never moves `latest`.
 - **Deploy Docs to GitHub Pages** (`deploy-docs.yml`): rebuilds this site when `website/` changes on `main`.
 - **Docker build smoke test**, **testing containers** and the weekly **Dependency audit** run on demand or on a schedule.
 

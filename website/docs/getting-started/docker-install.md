@@ -86,10 +86,6 @@ sudo chown -R 1000:1000 ./data
 v3 used three services (`admin`, `server`, `client`) with a `ROLE` variable. Copycord v4 is this one service and refuses to start while `ROLE` is set. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
 :::
 
-:::note Trying the v4 pre-release
-Pre-release images never move `latest`, which stays on the newest stable release. To run the v4 pre-release, set the image to its tag, for example `ghcr.io/copycord/copycord:v4.0.0b1`. The `docker-compose.yml` in the repository still pins a v3 release until v4.0.0 ships, so use the file above instead of that one.
-:::
-
 ### 3. Launch Copycord
 
 Open a terminal in the folder containing `docker-compose.yml` and run:

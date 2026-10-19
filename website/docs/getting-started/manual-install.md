@@ -76,18 +76,6 @@ Release installs check the downloaded wheel against the checksum GitHub lists fo
 
 Rarely needed: `--install-method release|git` (alias `--method`; `--git` and `--release` for short; PowerShell `-InstallMethod` or `-Git`; or `COPYCORD_INSTALL_METHOD`) forces the method instead of inferring it from `--version`, `COPYCORD_NODE_VERSION` picks the Node.js version for git builds (default 22.12.0), `COPYCORD_UV_VERSION` picks the uv version `install.ps1` installs, and `COPYCORD_ALLOW_ROOT=1` allows running as root or Administrator.
 
-:::note Installing the v4 pre-release
-Until v4.0.0 is released, `main` has no install script, so the one-liners above do not work yet. Use the script from the pre-release tag and add `--beta` (`-Beta`):
-
-```bash title="Linux / macOS"
-curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4.0.0b1/install.sh | sh -s -- --beta
-```
-
-```powershell title="Windows PowerShell"
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/v4.0.0b1/install.ps1))) -Beta
-```
-:::
-
 <Tabs groupId="os" queryString>
 <TabItem value="unix" label="Linux / macOS" default>
 

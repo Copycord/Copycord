@@ -46,18 +46,6 @@ The install script above is the recommended way. Docker is for advanced users wh
 
 Then run `copycord run`, open **http://localhost:8080** and log in with the password the installer shows at the end. The steps below explain each part.
 
-:::note Installing the v4 pre-release
-Until v4.0.0 is released, `main` has no install script. Install the newest pre-release from its tag instead; `--beta` (`-Beta` on Windows) also keeps `copycord update` on the beta channel:
-
-```bash title="Linux / macOS"
-curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4.0.0b1/install.sh | sh -s -- --beta
-```
-
-```powershell title="Windows PowerShell"
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/v4.0.0b1/install.ps1))) -Beta
-```
-:::
-
 ## Steps
 
 ### 1. Install Copycord
