@@ -79,7 +79,7 @@ COPYCORD_NO_UPDATE_CHECK=0
 An empty value, such as `TZ=`, means the default. The dashboard always asks for the password. If `PASSWORD` is empty or missing, `copycord run` makes a random one, saves it in this file and shows it once. In Docker, Copycord does not start until you set `PASSWORD`.
 
 :::note The dashboard password
-The installer writes a random `PASSWORD` into a new `.env` and shows it once; `copycord config get PASSWORD --show-secrets` prints it again. A `.env` made another way (by `copycord doctor --fix`, say) has the old default `copycord`: change it, since anyone who can reach the dashboard and knows the default can read your tokens.
+The installer writes a random `PASSWORD` into a new `.env` and shows it once; `copycord config get PASSWORD --show-secrets` prints it again. `copycord doctor --fix` also writes a random one when it recreates a missing `.env`. A `.env` from an older install can still have the old default `copycord`: change it, since anyone who can reach the dashboard and knows the default can read your tokens.
 :::
 
 ## Change a setting
@@ -135,12 +135,13 @@ Variables set in the real environment win over the file, for example `ADMIN_PORT
 |-----|---------|--------------|
 | `PASSWORD` | a random password from the installer | Dashboard password; always required. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
+| `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens: `127.0.0.1` is this computer only, `0.0.0.0` opens it to your network (then a real `PASSWORD` is required). See [Security defaults](/docs/configuration/security). |
 | `TZ` | `UTC` | Time zone for scheduled backups and export timestamps. |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; the dashboard's value wins once it is saved. |
 | `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
 | `BACKUP_DIR` | `<data dir>/backups` | Where the daily database backups go. |
 | `BACKUP_AT` | `03:17` | Time of the daily backup, HH:MM. |
 | `BACKUP_RETAIN` | `14` | How many daily backups to keep. |
-| `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update hint on start. |
+| `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update check on start. |
 
-The [CLI reference](/docs/cli#env-file) covers `SECRET_KEY` and the rarely needed tuning keys.
+`copycord config set` and `get` also know `SECRET_KEY`, which is not in the file: Copycord keeps its own key in `secret.key` in the data folder. The [CLI reference](/docs/cli#env-file) covers it and the rarely needed `BACKFILL_*` and `FORWARDING_*` tuning keys.

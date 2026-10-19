@@ -66,7 +66,7 @@ Replace it with one service that uses the **same `./data` volume**:
 # v4
 services:
   copycord:
-    image: ghcr.io/copycord/copycord:latest # or pin a v4 release tag
+    image: ghcr.io/copycord/copycord:latest # or pin a v4 release tag; the v4 pre-release is only under its own tag, such as v4.0.0b1
     container_name: copycord
     environment:
       - PASSWORD=your-own-password  # required; Copycord will not start with the old default "copycord"
@@ -88,7 +88,7 @@ Your mappings, settings and history are in `./data/data.db` and are picked up as
 If `ROLE` is still set, v4 stops right away with:
 
 ```
-ROLE is set, but Copycord v4 runs admin, server and client in one container and the ROLE option was removed. Delete ROLE from your compose file (and the extra server/client services), or stay on a v3 image tag.
+ROLE is set, but Copycord v4 removed the ROLE option. Delete ROLE from your compose file (and the extra server/client services), or stay on a v3 image tag.
 ```
 :::
 
@@ -120,14 +120,16 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
+Until v4.0.0 is released, `main` has no install script; install the pre-release as shown in the [Quick Start](/docs/getting-started/quick-start).
+
 ### 4. Bring your data
 
-Your v3 data is in the `data/` folder of your v3 install (for example `~/copycord/data` on Linux). v4 uses a per-user home directory instead:
+Your v3 data is in the `data/` folder of your v3 install (for example `~/copycord/data` on Linux). v4 uses the `data` folder in a per-user Copycord home instead:
 
 | OS | v4 data directory |
 |----|-------------------|
-| Linux, macOS | `~/.copycord` |
-| Windows | `%USERPROFILE%\.copycord` |
+| Linux, macOS | `~/.copycord/data` |
+| Windows | `%USERPROFILE%\.copycord\data` |
 
 Set `COPYCORD_HOME` (or pass `--home` to the installer) to use another folder; see [The Copycord home](/docs/getting-started/manual-install#home).
 
@@ -150,20 +152,22 @@ copycord service install --data-dir ~/copycord/data
 
 ```bash
 # Linux and macOS
-mkdir -p ~/.copycord
-cp -a ~/copycord/data/. ~/.copycord/
+mkdir -p ~/.copycord/data
+cp -a ~/copycord/data/. ~/.copycord/data/
 ```
 
 ```powershell
 # Windows (adjust the source path to your v3 folder)
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.copycord" | Out-Null
-Copy-Item -Recurse -Force "C:\Copycord\data\*" "$env:USERPROFILE\.copycord\"
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.copycord\data" | Out-Null
+Copy-Item -Recurse -Force "C:\Copycord\data\*" "$env:USERPROFILE\.copycord\data\"
 ```
+
+If you copied the files straight into `~/.copycord` instead, Copycord moves `data.db` and `secret.key` into `data` and the `*.out` logs into `logs` on its next start (see [The data directory](/docs/cli#data-dir)).
 
 Then run `copycord doctor` and `copycord run` without `--data-dir`.
 
 ### 5. Check and clean up
 
-`copycord doctor` should report `✓ database OK`. Start Copycord, open the dashboard and check your mappings. The first start writes the `pre-v4` backup described above.
+`copycord doctor` should report `✓ database OK` (with the schema version once v4 has opened it). Start Copycord, open the dashboard and check your mappings. The first start writes the `pre-v4` backup described above.
 
 Once v4 works, you can delete the v3 `code/` and `venvs/` folders, the launcher and the start scripts. Keep the `data/` folder if you chose option A.

@@ -87,6 +87,8 @@ The bot token is used by Copycord's server component to manage the cloned server
 3. Copy the generated URL and open it in your browser
 4. Select your **clone server** from the dropdown and click **Authorize**
 
+You can also do this later: once the bot token is saved in the dashboard, the **Add Bot to Server** button opens the same invite with the Administrator permission.
+
 :::info Why Administrator?
 Copycord needs to create channels, manage roles, create webhooks, and manage messages. Administrator permission covers all of these. You can use more granular permissions, but Administrator is the simplest and most reliable option.
 :::

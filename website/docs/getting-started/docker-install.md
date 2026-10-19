@@ -86,6 +86,10 @@ sudo chown -R 1000:1000 ./data
 v3 used three services (`admin`, `server`, `client`) with a `ROLE` variable. Copycord v4 is this one service and refuses to start while `ROLE` is set. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
 :::
 
+:::note Trying the v4 pre-release
+Pre-release images never move `latest`, which stays on the newest stable release. To run the v4 pre-release, set the image to its tag, for example `ghcr.io/copycord/copycord:v4.0.0b1`. The `docker-compose.yml` in the repository still pins a v3 release until v4.0.0 ships, so use the file above instead of that one.
+:::
+
 ### 3. Launch Copycord
 
 Open a terminal in the folder containing `docker-compose.yml` and run:
@@ -114,18 +118,19 @@ You should see one container running: `copycord`.
 docker compose logs -f
 ```
 
-This shows the dashboard's log plus warnings and errors from the server and client, each line tagged `[admin]`, `[server]` or `[client]`. The full server and client logs are in `./data/server.out` and `./data/client.out` and in the log viewers of the dashboard. See [Logs](/docs/dashboard/system#where-logs-go).
+This shows the dashboard's log plus warnings and errors from the server and client, each line tagged `[admin]`, `[server]` or `[client]`. The full server and client logs are in `./data/server.out` and `./data/client.out` (the member scraper writes `./data/scraper.out`) and on the dashboard's Logs page. See [Logs](/docs/dashboard/system#where-logs-go).
 
 ### Run CLI commands
 
-The [`copycord` command](/docs/cli) is installed inside the container. For example, to run the checks or read a setting:
+The [`copycord` command](/docs/cli) is installed inside the container. For example, to run the checks, read a setting or back up the database:
 
 ```bash
 docker compose exec copycord /opt/venvs/copycord/bin/copycord doctor
 docker compose exec copycord /opt/venvs/copycord/bin/copycord config get LOG_LEVEL
+docker compose exec copycord /opt/venvs/copycord/bin/copycord backup
 ```
 
-`copycord update` and `copycord service` are not used with Docker; update by pulling a new image as shown below.
+To restore a backup, see [`copycord restore`](/docs/cli#copycord-restore), which runs in a one-off container while Copycord is stopped. `copycord update` and `copycord service` are not used with Docker; update by pulling a new image as shown below.
 
 ### Stop Copycord
 
