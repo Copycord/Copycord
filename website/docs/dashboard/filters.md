@@ -5,55 +5,59 @@ title: Filters
 
 # Filters
 
-Filters give you fine-grained control over what Copycord clones for each mapping: which categories and channels, which roles, and which messages.
+Filters choose what Copycord clones for one mapping: which categories and channels, which roles, and which messages.
 
-## Opening the filters
+## Edit a mapping's filters
 
-1. Stop the bots, then open the **Configuration** page
-2. In **Cloning Configuration**, click **Filters** on the mapping card
-3. Edit the lists and save
+1. On the **Bots** card, click **Stop**.
+2. In **Cloning Configuration**, click **Filters** on the mapping card.
+3. Add or remove values in the lists described below. To add a value, type it and press Enter; you can also paste several IDs at once. To pick categories or channels by name, click the browse button next to the list.
+4. Click **Save Filters**.
 
-Each list takes IDs or words as chips. Type a value and press Enter, or paste several IDs at once. The browse buttons next to the category and channel lists open a picker of the host server's categories and channels, searchable by name or ID.
+## Allow only some channels
 
-## Whitelist (Allow-list)
+When an allow list has values, only what it lists is cloned. An empty list allows everything.
 
-Only what you list here is cloned. Leave a list empty to allow everything.
+| List | Effect |
+|------|--------|
+| **Allowed Category IDs** | Only these categories and their channels are cloned |
+| **Allowed Channel / Thread IDs** | Only these channels are cloned. Thread and forum post IDs work too |
 
-- **Allowed Category IDs**: only these categories (and their channels) are cloned
-- **Allowed Channel / Thread IDs**: only these channels are cloned. Thread and forum-post IDs work here too
+Use the allow lists when you want a few channels from a large server.
 
-**Best for**: when you only want a few specific channels from a large server.
+## Block some channels
 
-## Exclude (Deny-list)
+Everything is cloned except what the block lists name.
 
-Everything is cloned **except** what you list here.
+| List | Effect |
+|------|--------|
+| **Blocked Category IDs** | Channels in these categories are not cloned |
+| **Blocked Channel / Thread IDs** | These channels and threads are not cloned |
+| **Blocked Channel Name Patterns** | Channels whose names match are not cloned. `*` matches any text and `?` one character, for example `ticket-*`. A pattern without wildcards matches any name that contains it |
 
-- **Blocked Category IDs**: channels inside these categories are not cloned
-- **Blocked Channel / Thread IDs**: never sync these specific channels or threads
+You can combine allow and block lists, for example allow a category and block one channel in it.
 
-**Best for**: when you want most of the server but need to skip a few channels.
+To block a channel from the **Channels** page instead, use **Add channel to blacklist** in its row menu; see [Channels](/docs/dashboard/channels).
 
-You can combine the two, for example allow a category but block one channel inside it.
+## Block roles
 
-## Channel Name Blacklist
+1. Under **Blocked roles**, click **Fetch roles from Discord** to load the host server's roles.
+2. Tick the roles that should not be cloned.
 
-**Blocked Channel Name Patterns**: channels whose names match these patterns are not cloned. Patterns can use wildcards, for example `ticket-*`.
+You can also block roles with [`/role_block`](/docs/commands/roles#role_block).
 
-## Role Blocks
+## Block messages
 
-**Blocked roles** lists roles that are not cloned for this mapping. Click **Fetch roles from Discord** to load the host server's roles and tick the ones to block. You can also block roles with the `/role_block` [slash command](/docs/commands/roles).
+| List | Effect |
+|------|--------|
+| **Blocked Words / Phrases** | Messages that contain any of these words or phrases are not cloned |
+| **Whitelisted User IDs** | Only messages from these users are cloned |
+| **Blacklisted User IDs** | Messages from these users are not cloned |
 
-## Word Filters
+You can also manage blocked words with [`/block_add` and `/block_list`](/docs/commands/filtering).
 
-**Blocked Words / Phrases**: any message that contains one of these words or phrases is not cloned for this mapping. You can also manage blocked keywords with the `/block_add` and `/block_list` [slash commands](/docs/commands/filtering).
+## What happens to existing channels
 
-## User Filters
-
-- **Whitelisted User IDs**: only messages from these users are cloned
-- **Blacklisted User IDs**: messages from these users are not cloned
-
-## How filters interact with syncing
-
-- **Filtered-out channels** are not created in the clone server
-- If a channel is filtered out after it was already cloned, the existing clone channel remains (it won't be deleted automatically)
-- New channels created in filtered categories follow the filter rules
+- A channel that is filtered out is not created in the clone server.
+- A channel that was cloned before you filtered it out stays in the clone. Copycord does not delete it.
+- New channels in a filtered category follow the filter.
