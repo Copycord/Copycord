@@ -17,7 +17,7 @@ Copycord's slash commands manage your clone servers from Discord. This page list
 
 Each command is listed with what it does, its syntax, a table of its options and examples. In the syntax, `<value>` is a value you fill in and `[option:<value>]` is optional. In Discord, type the command name, then fill in each option in the field Discord shows for it.
 
-Message and DM exports, history imports, purges and asset syncs are not slash commands. They run as tasks on the dashboard's [Tasks](/docs/dashboard/tasks) page.
+Message, DM and asset exports, history imports, purges and asset syncs are not slash commands. They run as tasks on the dashboard's [Tasks](/docs/dashboard/tasks) page.
 
 ## All commands
 
@@ -32,7 +32,6 @@ Message and DM exports, history imports, purges and asset syncs are not slash co
 | `/onjoin_roles` | Lists or clears the on-join roles | [Roles](/docs/commands/roles) |
 | `/onjoin_sync` | Gives the on-join roles to current members | [Roles](/docs/commands/roles) |
 | `/onjoin_dm` | Turns join DM alerts for a server on or off | [Roles](/docs/commands/roles) |
-| `/pull_assets` | Saves a server's emojis and stickers to an archive | [Assets](/docs/commands/assets) |
 | `/channel_webhook set`, `view`, `clear`, `list` | Manages one channel's webhook name and avatar | [Webhooks](/docs/commands/webhooks) |
 | `/channel_webhook set_all`, `clear_all` | Manages the webhook name and avatar of every channel | [Webhooks](/docs/commands/webhooks) |
 | `/role_mention add`, `list`, `delete` | Manages roles mentioned on cloned messages | [Webhooks](/docs/commands/webhooks#role-mentions) |

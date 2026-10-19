@@ -26,6 +26,7 @@ from . import purge_assets  # noqa: F401,E402  registers purge_assets
 from . import export_dms  # noqa: F401,E402  registers export_dms
 from . import export_messages  # noqa: F401,E402  registers export_messages
 from . import avatars  # noqa: F401,E402  registers download_avatars
+from . import export_assets  # noqa: F401,E402  registers export_assets
 from . import sync_assets  # noqa: F401,E402  registers sync_assets
 from . import scrape  # noqa: F401,E402  registers scrape_members
 
