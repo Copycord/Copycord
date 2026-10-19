@@ -21,13 +21,14 @@ copycord:
 
 ### Install script
 
-Set the `ADMIN_PORT` environment variable when starting Copycord:
+Set `ADMIN_PORT` in the [settings file](/docs/getting-started/configuration), then restart Copycord:
 
 ```bash
-ADMIN_PORT=9060 copycord run
+copycord config set ADMIN_PORT 9060
+copycord restart
 ```
 
-For a background service, see [Environment variables for the service](/docs/cli#environment-variables-for-the-service).
+For a single run, the environment variable wins over the file: `ADMIN_PORT=9060 copycord run`. When the port is taken by another program, `copycord doctor --fix` offers to move the dashboard to the next free port. For a background service, see also [Environment variables for the service](/docs/cli#environment-variables-for-the-service).
 
 The dashboard is only reachable from this computer by default. `DASHBOARD_HOST=0.0.0.0` opens it to your network, and needs your own `PASSWORD`; see [Dashboard address](/docs/cli#dashboard-address).
 
@@ -41,15 +42,17 @@ These app config keys are set with `copycord config set KEY VALUE` and apply aft
 | `AUTO_UPDATE` | `false` | `true` lets the background service check every 6 hours, update itself and restart. A new version that does not start is replaced by the previous one. |
 | `AUTO_UPDATE_ALL_CHANNELS` | `false` | `true` lets auto-update follow the `beta` and `dev` channels too. Without it, only `stable` updates itself. |
 
+Auto-update only runs for a Copycord installed with the install script (or pipx) and running as a [service](/docs/cli#copycord-service). Docker and git checkouts are never updated this way.
+
 ## Proxy support
 
-Copycord routes all client (self bot) traffic through a proxy when enabled — including login, REST API calls, and the gateway WebSocket connection. This means your real IP never touches Discord.
+Copycord routes all client (self bot) traffic through a proxy when enabled: login, REST API calls and the gateway WebSocket connection. Your real IP then never reaches Discord.
 
 ### Configuring client proxies
 
 1. Go to the **Configuration** page → **Proxy** card
-2. Enable **"Enable proxies for client"**
-3. Paste one or more proxies — supported formats:
+2. Enable **Enable proxies for client**
+3. Paste or type one or more proxies and press Enter. Supported formats:
    ```
    host:port
    host:port:user:pass
@@ -65,7 +68,11 @@ Both HTTP and SOCKS5 proxies are supported.
 
 By default, one proxy is selected and used for all traffic. It only switches if the proxy fails.
 
-To rotate proxies on a schedule, enable **"Rotate every"** and set an interval (e.g. 1 hour). The client will automatically switch to the next healthy proxy after the set duration.
+To rotate proxies on a schedule, enable **Rotate every** and set an interval (e.g. 1 hour). The client will automatically switch to the next healthy proxy after the set duration.
+
+### Favorite proxies
+
+Click the **★** on a proxy to mark it a favorite. Favorites only change how the client connects to the Discord gateway: it logs in through a favorite whenever one works, moves to another favorite first when one drops, and falls back to a normal proxy when no favorite works, so it stays connected. With **Return to a favorite every** enabled, the client re-tests the favorites on that interval while it is on a fallback proxy and switches back as soon as one works again. With no favorites, every proxy is treated the same.
 
 :::tip
 Longer rotation intervals (1-4 hours) are recommended. Rotating too frequently can itself be a detection signal. Residential proxies are strongly preferred over datacenter IPs.
@@ -79,7 +86,7 @@ For large proxy lists, the test runs as a background task with a live progress b
 
 ### Failover
 
-If the active proxy drops or goes down, the client detects it automatically via the Discord gateway connection and switches to the next available proxy. No polling or extra API calls are made — detection is fully reactive.
+If the active proxy drops or goes down, the client detects it automatically via the Discord gateway connection and switches to the next available proxy. No polling or extra API calls are made: detection is fully reactive.
 
 A failed proxy is temporarily suspended so the client doesn't reconnect to it immediately. After the suspend duration expires, the proxy becomes eligible again.
 
@@ -103,7 +110,7 @@ All settings are saved to the database. Suspend duration takes effect on next cl
 
 ### Scraper proxies
 
-The member scraper shares the same proxy list. When proxies are configured, the scraper automatically uses them to distribute requests across different IPs.
+The member scraper shares the same proxy list. When proxies are saved, the Scrape members task on the **Tasks** page spreads its requests over them. Its **Scraper tokens and proxies** card edits the same list. **Clear** on the Proxy card removes every proxy.
 
 ## Internal ports
 
@@ -140,28 +147,28 @@ Make sure the directory is writable. For Docker, mount the appropriate volume. `
 
 By default, Copycord does not automatically start the server and client bots when it launches. To enable auto-start:
 
-1. Go to **Global Configuration** in the dashboard
-2. Set **AUTO_START** to `True`
+1. Stop the bots, then go to the **Global Configuration** card on the Configuration page
+2. Turn on **Auto Start** (`COPYCORD_AUTOSTART`)
 3. Click **Save**
 
 On the next launch, Copycord will validate your tokens and start both bots automatically if they are valid.
 
 ## Log pruning
 
-Copycord automatically prunes log files to prevent them from growing indefinitely. Configure the maximum size via **MAX_LOG_SIZE_MB** in Global Configuration:
+Copycord automatically prunes log files to prevent them from growing indefinitely. Configure the maximum size with **Max Log Size** (`LOG_MAX_SIZE_MB`) in Global Configuration:
 
 - Default: `10` MB
 - Set to `0` to disable pruning
 - Checks run every 5 minutes
 - Applies to `server.out` and `client.out` (see [Where logs go](/docs/dashboard/system#where-logs-go))
 
-The pruner uses memory-efficient seek-based reading — only the tail of the file is loaded into memory, even for very large log files. Writes are atomic (via temp file) to prevent data loss.
+The pruner reads only the tail of each file, so even very large log files are not loaded into memory. Writes are atomic (via temp file) to prevent data loss.
 
 ## Sync timing
 
 When the client starts, it scans each server you're cloning and sends the full structure (channels, roles, emojis, stickers) to the bot so it knows what to sync. Servers are processed one at a time with a delay between each to avoid hitting Discord's rate limits.
 
-After the initial startup sync, all changes are detected in real time via Discord gateway events — no periodic re-syncing is needed.
+After the initial startup sync, all changes are detected in real time via Discord gateway events; no periodic re-syncing is needed.
 
 Configure sync timing on the **Configuration** page under the **Sync Settings** card:
 
@@ -189,7 +196,7 @@ copycord:
 
 Without Docker: `SITEMAP_STRESS_TEST=true copycord run`.
 
-This continuously loops sitemap generation for all servers until the client is stopped. Only use this for testing — never in production.
+This continuously loops sitemap generation for all servers until the client is stopped. Only use this for testing, never in production.
 
 If you're using proxies for the client, traffic is routed through the proxy IP, keeping your real IP hidden from Discord.
 
@@ -202,7 +209,7 @@ Copycord can send alerts to a Discord channel via webhooks when something goes w
 1. Create a webhook in a Discord channel (Server Settings → Integrations → Webhooks)
 2. Open the **Notifications** card on the dashboard
 3. Paste the webhook URL
-4. Toggle which events you want to be notified about
+4. Toggle which events you want to be notified about (all four are on by default)
 
 ### Events
 
@@ -211,6 +218,6 @@ Copycord can send alerts to a Discord channel via webhooks when something goes w
 | **Client Offline** | The self-bot client has disconnected or stopped |
 | **Server Offline** | The server bot has disconnected or stopped |
 | **All Proxies Dead** | Every configured proxy has failed |
-| **Token Invalid** | A bot token has been revoked or is no longer valid |
+| **Token Invalid** | A token has been revoked or is no longer valid |
 
 Each event type has a 5-minute cooldown to prevent notification spam. Use the **Test** button to verify your webhook URL is working.

@@ -5,13 +5,13 @@ title: Cloning Options
 
 # Cloning Options
 
-These settings control what Copycord syncs between the source and clone servers. They can be configured per-mapping through the web dashboard.
+These settings control what Copycord syncs between the source and clone servers. Each mapping has its own: open a mapping card in the **Cloning Configuration** card on the Configuration page (stop the bots first; mappings are locked while they run). **Search settings…** at the top of the window filters the list.
 
 ## General
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| Enable Cloning | On | Master switch — disables all cloning when off |
+| Enable Cloning | On | Master switch: disables all cloning when off |
 | Clone Messages | On | Clone messages in real time via webhooks. When disabled, webhook creation is also skipped during sync |
 | On-Demand Webhooks | On | Webhooks are only created when a channel receives its first message instead of during sync. Makes server cloning much faster |
 
@@ -68,7 +68,7 @@ These settings control what Copycord syncs between the source and clone servers.
 | Clone Server Banner | Off | Clone the server banner |
 | Clone Invite Splash | Off | Clone the invite splash image |
 | Clone Discovery Splash | Off | Clone the discovery splash image |
-| Clone Server Tag | Off | Clone the server tag and badge. **Disabled** — Discord does not allow bots to set server tags yet; the toggle is inactive until they do |
+| Clone Server Tag | Off | Clone the server tag and badge. **Disabled**: Discord does not allow bots to set server tags yet, so the toggle is inactive until they do |
 | Sync Server Description | Off | Sync the server description |
 
 ## Message Customization
@@ -84,8 +84,31 @@ These options are configured via the **Optional Message Features** popup in the 
 | Append Timestamp | Off | Append the original message timestamp below the cloned message |
 | Append Author | Off | Append the original author's username below the cloned message |
 
+## Token Message Cloning
+
+By default the bot posts cloned messages through webhooks. The **Token Message Cloning** section of a mapping can send them from real Discord user accounts instead. The accounts must be members of the clone server.
+
+:::danger Accounts can be banned
+This uses user tokens. Discord may rate limit these accounts or ban them permanently at any time. Only use accounts you are willing to lose.
+:::
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| Send messages as users | Off | Send cloned messages from the user accounts below instead of webhooks |
+| Account selection | Rotate evenly | **Rotate evenly** cycles through the accounts so each sends an equal share. **Sticky per author** always sends a source user's messages from the same account |
+| Mirror author nickname | Off | Sticky per author only: rename the assigned account in the clone server to the author's display name |
+| Mirror author avatar | Off | Sticky per author only: try to set the account's avatar to the author's |
+| Mirror author roles | Off | Sticky per author only: give the assigned account the cloned roles that match the author's roles |
+| Fall back to webhook | On | When no account can send a message, send it through the webhook instead of dropping it |
+| Show typing indicator | Off | Show "typing…" briefly before each message |
+| Attachments as links | Off | Post links to the source attachments instead of uploading the files again |
+| Send through proxies | Off | Give each account its own proxy from the [proxy list](/docs/configuration/advanced#proxy-support) |
+| Send delay | 0 to 0 s | A random pause before each message, between the minimum and maximum, in seconds |
+
+Add accounts with **Add user token** (one at a time or several at once); each token is checked when it is added. The token menu has **Verify tokens** and **Delete all tokens**. Save a new mapping first, then open it again to add tokens.
+
 ---
 
 :::tip Recommended starting configuration
-Start with the defaults — they cover the most common use case (full channel and message cloning with roles and emojis). Enable additional sync options as needed. Options like Mirror Channel Permissions and Mirror Role Permissions add more API calls and may slow syncing on large servers.
+Start with the defaults: they cover the most common use case (full channel and message cloning with roles and emojis). Enable additional sync options as needed. Options like Mirror Channel Permissions and Mirror Role Permissions add more API calls and may slow syncing on large servers.
 :::

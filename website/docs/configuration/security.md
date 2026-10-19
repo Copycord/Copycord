@@ -25,7 +25,7 @@ The dashboard listens on `127.0.0.1`, so only the computer Copycord runs on can 
 2. Set `DASHBOARD_HOST=0.0.0.0` (every network) or one IP address of this computer, in `.env`: `copycord config set DASHBOARD_HOST 0.0.0.0`.
 3. Run `copycord restart`.
 
-Copycord refuses to start on any address other than `127.0.0.1` while the password is still `copycord`. Do not put the dashboard on the open internet as it is. Put it behind HTTPS (a reverse proxy, a VPN or a tunnel) first. See [Dashboard address](/docs/cli#dashboard-address).
+Copycord refuses to start on any address other than `127.0.0.1` while the password is still `copycord`, and `copycord doctor` reports it as a failure. `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check when something else, such as a reverse proxy with its own login, already protects the dashboard. Do not put the dashboard on the open internet as it is. Put it behind HTTPS (a reverse proxy, a VPN or a tunnel) first. See [Dashboard address](/docs/cli#dashboard-address).
 
 ## Behind a reverse proxy: TRUSTED_PROXIES
 
@@ -39,4 +39,4 @@ On Linux and macOS these are readable only by your user:
 - The `.env` file, which holds your password.
 - Backup archives, which contain `secret.key` and your database. Keep copies private too. See [Backups](/docs/dashboard/backups).
 
-The Docker image runs as user 1000, not root, so the `./data` folder must belong to that user.
+The Docker image runs Copycord as user 1000, not root. The container starts as root only to hand `./data` to that user, then drops to it; where ownership cannot be changed (Windows Docker Desktop bind mounts) it keeps running as root. See [Docker Install](/docs/getting-started/docker-install).
