@@ -5,100 +5,70 @@ title: Discord Setup
 
 # Discord Setup
 
-Copycord needs a clone server, a bot token and a user token. Get them before your first login to the dashboard.
+Create the clone server, get a user token and create the bot that Copycord needs. Do this before you log in to the dashboard for the first time.
 
-## Step 1: Create the clone server
+## Create the clone server
 
-Create a **new Discord server** that will receive all the mirrored content. This is where your bot will live.
+The clone server receives everything Copycord copies. Leave it empty: Copycord creates the channels, roles and emojis.
 
-1. Open Discord and click the **+** button in the server list
-2. Choose **Create My Own** and select any template
-3. Give it a name (e.g., "My Clone Server")
+1. In Discord, click **+** in the server list.
+2. Click **Create My Own** and choose any template.
+3. Enter a name and click **Create**.
 
-:::tip
-Keep the clone server empty. Copycord creates all channels, roles, and emojis automatically.
+## Get your user token
+
+Copycord's client reads the source servers with this Discord account.
+
+:::warning Use an alternate account
+Logging in to Discord with a user token is against Discord's Terms of Service. Use an alternate account, not your main one. The account must be a member of every server you want to clone.
 :::
 
-## Step 2: Obtain your user token
+1. Open Discord in your web browser, not the desktop app, and log in with the account.
+2. To open the developer tools, press **F12** (or **Ctrl+Shift+I**, on macOS **Cmd+Option+I**).
+3. To turn on device emulation, press **Ctrl+Shift+M** (on macOS **Cmd+Shift+M**).
+4. Click the **Console** tab and paste this code:
 
-The user token allows Copycord's client to read messages from source servers as your Discord account.
+   ```js
+   const iframe = document.createElement('iframe')
+   console.log(
+     'Token: %c%s',
+     'font-size:16px;',
+     JSON.parse(
+       document.body.appendChild(iframe).contentWindow.localStorage.token
+     )
+   )
+   iframe.remove()
+   ```
 
-:::warning Use an alt account
-Since self-botting violates Discord's Terms of Service, we strongly recommend using an **alternate Discord account**, not your main account. The alt account must be a member of the source server(s) you want to clone.
-:::
+5. Press **Enter**. The token appears in the console.
+6. Copy the token and keep it somewhere safe.
 
-### How to get your user token
+Anyone with your user token has full access to the account. Never share it or commit it to a repository.
 
-1. Open **Discord in your web browser** (not the desktop app) and log in with the account you want to use
-2. Press **F12** (or **Ctrl+Shift+I** / **Cmd+Option+I**) to open Developer Tools
-3. Enable **device emulation mode** by pressing **Ctrl+Shift+M** (or **Cmd+Shift+M**)
-4. Go to the **Console** tab and paste this code:
+## Create the bot
 
-```js
-const iframe = document.createElement('iframe')
-console.log(
-  'Token: %c%s',
-  'font-size:16px;',
-  JSON.parse(
-    document.body.appendChild(iframe).contentWindow.localStorage.token
-  )
-)
-iframe.remove()
-```
+Copycord's server part uses the bot to manage the clone server.
 
-5. Press **Enter**: your token appears in the console
-6. **Copy and store this token securely** and treat it like a password
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications).
+2. Click **New Application**, enter a name such as `Copycord` and click **Create**.
+3. In the sidebar, click **Installation**, set **Install Link** to **None** and click **Save Changes**.
+4. In the sidebar, click **Bot**.
+5. Click **Reset Token**, then copy the new token and keep it somewhere safe.
+6. Turn off **Public Bot**, so only you can add the bot to servers.
+7. Under **Privileged Gateway Intents**, turn on **Presence Intent**, **Server Members Intent** and **Message Content Intent**.
+8. Click **Save Changes**.
 
-:::danger Keep your token secret
-Anyone with your user token has full access to your Discord account. Never share it publicly or commit it to version control.
-:::
+## Invite the bot to your clone server
 
-## Step 3: Create and configure the bot
+1. In the sidebar, click **OAuth2**.
+2. Under **OAuth2 URL Generator**, select the `bot` scope and the `Administrator` bot permission.
+3. Open the generated URL in your browser.
+4. Choose your clone server and click **Authorize**.
 
-The bot token is used by Copycord's server component to manage the cloned server.
+You can also invite the bot later from the dashboard: once the bot token is saved, **Add Bot to Server** opens the same invite.
 
-### Create the bot application
+Copycord creates channels, roles, webhooks and messages, and Administrator covers all of them. You can grant narrower permissions instead, but missing ones make syncs fail.
 
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click **New Application** and give it a name (e.g., "Copycord")
-3. Click **Create**
+## Next steps
 
-### Configure the bot
-
-1. In the left sidebar, click **Installation**
-   - Set the **Install Link** to `None`
-   - Click **Save Changes**
-
-2. In the left sidebar, click **Bot**
-   - Click **Reset Token** and copy the new token, then store it securely
-   - Disable **Public Bot** (so only you can add it to servers)
-   - Enable these **Privileged Gateway Intents**:
-     - ✅ **Presence Intent**
-     - ✅ **Server Members Intent**
-     - ✅ **Message Content Intent**
-   - Click **Save Changes**
-
-### Invite the bot to your clone server
-
-1. In the left sidebar, click **OAuth2**
-2. Under **OAuth2 URL Generator**:
-   - **Scopes**: check `bot`
-   - **Bot Permissions**: check `Administrator`
-3. Copy the generated URL and open it in your browser
-4. Select your **clone server** from the dropdown and click **Authorize**
-
-You can also do this later: once the bot token is saved in the dashboard, the **Add Bot to Server** button opens the same invite with the Administrator permission.
-
-:::info Why Administrator?
-Copycord needs to create channels, manage roles, create webhooks, and manage messages. Administrator permission covers all of these. You can use more granular permissions, but Administrator is the simplest and most reliable option.
-:::
-
-## Summary
-
-At this point you should have:
-
-- ✅ A **clone server** with the bot added
-- ✅ A **user token** from your alt account (which is a member of source servers)
-- ✅ A **bot token** from the Developer Portal
-
-You paste both tokens into the dashboard after the install. If you have not installed Copycord yet, go back to the [Quick Start](/docs/getting-started/quick-start); otherwise continue with [First Run](/docs/getting-started/first-run).
+You now have a clone server with the bot in it, a user token and a bot token. If you have not installed Copycord yet, continue with the [Quick Start](/docs/getting-started/quick-start). Otherwise continue with [First Run](/docs/getting-started/first-run).

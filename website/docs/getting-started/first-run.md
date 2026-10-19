@@ -4,106 +4,62 @@ title: First Run
 description: Log in to the dashboard, save your tokens and create your first guild mapping.
 ---
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
-
 # First Run
 
-All of Copycord's setup happens in the web dashboard; there is no setup command. This page picks up after the [Quick Start](/docs/getting-started/quick-start) install and ends with your first server clone.
+Set up Copycord in the web dashboard after you install it: save your tokens, create your first clone and start the bots. All setup happens in the dashboard.
 
-## 1. Start Copycord
+## Before you begin
 
-<Tabs groupId="os" queryString>
-<TabItem value="unix" label="Linux / macOS" default>
+- Copycord is installed and running. See the [Quick Start](/docs/getting-started/quick-start), or [Docker Install](/docs/getting-started/docker-install) for Docker.
+- You have a clone server, a bot token and a user token. See [Discord Setup](/docs/getting-started/discord-setup).
 
-```bash title="Terminal"
-copycord run
-```
+## Log in
 
-</TabItem>
-<TabItem value="windows" label="Windows">
+Open `http://localhost:8080` and log in with the password the installer showed at the end. If you changed `ADMIN_PORT`, use that port.
 
-```powershell title="PowerShell"
-copycord run
-```
+To print the password again, run `copycord config get PASSWORD --show-secrets`. To choose your own, see [Configuration File (.env)](/docs/getting-started/configuration#change-a-setting).
 
-</TabItem>
-<TabItem value="docker" label="Docker">
+## Save your tokens and settings
 
-```bash title="Terminal"
-docker compose up -d
-```
+The **Configuration** page opens after you log in. In its **Global Configuration** card:
 
-</TabItem>
-</Tabs>
+1. In **Server Token**, paste the bot token.
+2. In **Client Token**, paste the user token.
+3. Optional: in **Command Users**, add your Discord user ID so you can use the [slash commands](/docs/commands/overview) in your clone server.
+4. Click **Save**.
 
-The dashboard, the server bot and the client start together. If you installed the [service](/docs/cli#copycord-service), Copycord is already running.
+To find your Discord user ID, turn on **Developer Mode** in Discord's **Settings > Advanced**, right-click your username and click **Copy User ID**.
 
-## 2. Log in
+The card also has **Auto Start** (start the bots whenever Copycord starts), **Log Level** and **Max Log Size**. The button next to **Client Token** manages backup client tokens.
 
-Open **http://localhost:8080** and log in with the password the installer showed at the end (`copycord config get PASSWORD --show-secrets` prints it again). If you changed `ADMIN_PORT`, use that port.
+## Add the bot to your clone server
 
-:::tip Pick your own password
-To use a password you can remember: `copycord config set PASSWORD 'your-new-password'`, then `copycord restart`. See [Configuration File (.env)](/docs/getting-started/configuration).
-:::
+If you did not invite the bot during [Discord Setup](/docs/getting-started/discord-setup#invite-the-bot-to-your-clone-server), click **Add Bot to Server** at the bottom of the Global Configuration card and choose your clone server. The button turns on once the server token is saved and checked.
 
-## 3. Enter your tokens
+## Create a guild mapping
 
-On the **Configuration** page (the first page after you log in), in the **Global Configuration** card:
+A guild mapping links a source server to your clone server. Mappings are locked while the bots run, so create it before you start them.
 
-1. **Server Token** (`SERVER_TOKEN`): paste the **bot token** from the Discord Developer Portal
-2. **Client Token** (`CLIENT_TOKEN`): paste the **user token** from your browser
+1. In the **Cloning Configuration** card, click **+** (Add new mapping).
+2. Optional: enter a **Mapping Name**.
+3. In **Host Guild**, enter the ID of the server you want to clone. Your user account must be a member of it.
+4. In **Clone Guild**, enter the ID of your clone server.
+5. Click **Save Mapping**.
 
-Click **Save**. [Discord Setup](/docs/getting-started/discord-setup) shows how to get both tokens. The button next to **Client Token** manages backup client tokens.
+The same window holds the [cloning options](/docs/configuration/cloning-options) for this mapping. You can add as many mappings as you need.
 
-## 4. Set command users
+## Start the bots
 
-In the same card, add your Discord user ID to **Command Users**. This lets you use Copycord's slash commands in your clone server. The card also has **Auto Start** (start the bots whenever Copycord starts), **Log Level** and **Max Log Size**.
+In the **Bots** card, click **Start**. The button stays off until both tokens are saved and valid. When each bot is connected, its **State** shows "running".
 
-:::tip How to find your Discord user ID
-1. Open Discord Settings, then Advanced, and enable **Developer Mode**
-2. Right-click your username anywhere in Discord
-3. Click **Copy User ID**
-:::
+Copycord then reads the source server, creates the matching channels, categories and roles in your clone server, and copies new messages as they are sent. To change the mappings or the Global Configuration card later, stop the bots first.
 
-## 5. Add your bot to the clone server
+To follow what happens, open the **Logs** page, or click **View server logs** or **View client logs** in the Bots card. The terminal, or `docker compose logs`, shows only warnings and errors from the bots. See [Where logs go](/docs/dashboard/system#where-logs-go).
 
-Once your server token is saved and checked, the **Add Bot to Server** button at the bottom of the Global Configuration card turns on. Click it to invite your bot to the clone server with the right permissions.
+## Next steps
 
-## 6. Start the bots
-
-In the **Bots** card, click **Start** to launch the server bot and the client. Start stays off until both tokens are saved and valid. The **State** of each turns to "running" when it is connected.
-
-## 7. Create a guild mapping
-
-A **guild mapping** links a source server to your clone server:
-
-1. In the **Cloning Configuration** card, click **+** (Add new mapping)
-2. Optionally give it a **Mapping Name**
-3. Enter the **Host Guild**: the ID of the server you want to clone (your user account must be in it)
-4. Enter the **Clone Guild**: the ID of the empty server where your bot is
-5. Click **Save Mapping**
-
-The same window holds the [cloning options](/docs/configuration/cloning-options) for this mapping. While the bots run, the mappings and the Global Configuration card are locked; stop the bots to change them.
-
-## 8. Watch it sync
-
-With the mapping created and both bots running, Copycord:
-
-1. **Scans** the source server structure
-2. **Creates** matching channels, categories and roles in the clone
-3. **Forwards** new messages in real time
-
-You see the activity on the dashboard's **Logs** page, through **View server logs** and **View client logs** in the Bots card, and in your clone server. The terminal (or `docker compose logs`) only shows warnings and errors from the server and client; see [Logs](/docs/dashboard/system#where-logs-go).
-
-## What's next?
-
-- **[Backfill history](/docs/dashboard/backfill)**: import messages from before you set up Copycord, with the Backfill channels task on the **Tasks** page
-- **[Configure filters](/docs/dashboard/filters)**: choose which channels to include or exclude
-- **[Cloning options](/docs/configuration/cloning-options)**: fine-tune what gets synced
-- **[Forwarding](/docs/dashboard/forwarding)**: send messages to Telegram or other services
-- **[Slash commands](/docs/commands/overview)**: manage your clone from within Discord
-
-:::tip Multiple servers
-Create as many guild mappings as you need. Copycord clones several source servers at once.
-:::
+- [Backfill](/docs/dashboard/backfill): copy the messages sent before you set up Copycord.
+- [Filters](/docs/dashboard/filters): choose which channels to include or exclude.
+- [Cloning options](/docs/configuration/cloning-options): choose what gets synced.
+- [Forwarding](/docs/dashboard/forwarding): send messages to Telegram or other services.
+- [Slash commands](/docs/commands/overview): manage your clone from Discord.
