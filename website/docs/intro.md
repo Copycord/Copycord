@@ -6,17 +6,17 @@ title: What is Copycord?
 
 # What is Copycord?
 
-**Copycord** is the ultimate open-source Discord server mirroring tool. It lets you clone entire Discord servers (channels, roles, emojis, stickers and full message history) while keeping everything in perfect sync with real-time message forwarding and automatic structure updates.
+**Copycord** is an open-source Discord server mirroring tool. It clones entire Discord servers (channels, roles, emojis, stickers and message history) and keeps the clone in sync with real-time message cloning and automatic structure updates.
 
 ## How it works
 
-Copycord has three parts that work together:
+Copycord has three parts. They run together in one app, started with `copycord run` or one Docker container:
 
 | Part | Role | What it does |
 |---------|------|-------------|
 | **Client** | Source watcher | A self-bot that monitors your source server for new messages, edits, deletes, and structure changes |
 | **Server** | Clone manager | A Discord bot that manages the cloned server: it creates channels, posts messages via webhooks, syncs roles |
-| **Admin** | Web dashboard | A FastAPI web app where you configure mappings, manage filters, run backfills, and monitor everything |
+| **Admin** | Web dashboard | A web app where you configure mappings and filters, run tasks such as backfills and exports, and monitor everything |
 
 ```
 Source Server ──► Client (self-bot) ──► Server (bot) ──► Clone Server
@@ -31,15 +31,15 @@ Source Server ──► Client (self-bot) ──► Server (bot) ──► Clone
 - **Multi-server cloning**: Mirror multiple servers simultaneously
 - **Real-time message sync**: Messages, edits, and deletes forwarded instantly via webhooks
 - **Dynamic structure sync**: New channels, roles, renames, and deletions auto-synced
-- **Deep history import**: Backfill entire channel histories, not just new messages
-- **Message forwarding**: Forward messages to Telegram, Pushover, or any webhook
+- **Tasks**: Backfill channel history, purge messages or assets, sync assets, export messages and DMs, download avatars and scrape members from the Tasks page, with progress and a history of every run
+- **Message forwarding**: Forward messages to Telegram, Pushover or a Discord webhook
 - **Advanced filtering**: Whitelist/exclude channels, block keywords, rewrite text
 - **Custom branding**: Rename channels, customize webhook names and avatars
-- **Member scraper**: Export user IDs, usernames, avatars, and bios
-- **DM export**: Export direct message history to JSON or a webhook from the Tasks page
+- **Sending as users**: Optionally post cloned messages from user accounts instead of webhooks
+- **Client proxies**: Route the client through HTTP or SOCKS5 proxies with rotation and failover
 - **Announcement system**: Keyword-triggered notifications with user subscriptions
-- **Database backups**: Automatic daily backups with restore capability
-- **Web dashboard**: Modern UI to manage everything from your browser
+- **Database backups**: Automatic daily backups, plus `copycord backup` and `copycord restore`
+- **Command line**: Install, update, run as a background service and check your setup with the [`copycord` command](/docs/cli)
 
 ## Quick start
 
@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
-The [Quick Start](/docs/getting-started/quick-start) walks through it step by step, including [Docker](/docs/getting-started/docker-install). Coming from v3? See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
+Until v4.0.0 is released, these commands do not work yet; install the pre-release as shown in the [Quick Start](/docs/getting-started/quick-start), which walks through it step by step, including [Docker](/docs/getting-started/docker-install). Coming from v3? See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
 
 :::warning Self-Bot Notice
 Copycord uses self-bot functionality (logging into Discord with a user token), which is against Discord's Terms of Service and could lead to account suspension. We strongly recommend using an **alternate account** to minimize risk.

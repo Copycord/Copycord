@@ -43,9 +43,12 @@ services:
       - "8080:8080"
     volumes:
       - ./data:/data
+    environment:
+      - PASSWORD=copycord
+      - COPYCORD_ENV=dev
 ```
 
-Add an `environment:` entry with `- PASSWORD=...`; the container does not start without one. Then build and start:
+Change `PASSWORD` to your own first: the container listens on every network (`DASHBOARD_HOST=0.0.0.0`), and Copycord refuses to start there with the default password `copycord`. `COPYCORD_ENV=dev` turns on developer options such as the member scraper's debug report. Then build and start:
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build
@@ -53,7 +56,7 @@ docker compose -f docker-compose.dev.yml up --build
 
 This builds the image from the root `Dockerfile`: it builds the dashboard frontend with Node, installs Copycord from `pyproject.toml` on Python 3.14 and runs `copycord run`. Rebuild with the same command after every change. The dashboard is at **http://localhost:8080** and your test data stays in `./data`.
 
-The container output shows the dashboard's log plus warnings and errors from the server and client. For the full server and client logs, open the dashboard log viewers or read `./data/server.out` and `./data/client.out` (see [Where logs go](/docs/dashboard/system#where-logs-go)).
+The container output shows the dashboard's log plus warnings and errors from the server and client. For the full server and client logs, open the dashboard's Logs page or read `./data/server.out` and `./data/client.out` (see [Where logs go](/docs/dashboard/system#where-logs-go)).
 
 :::note No more ROLE
 v4 has no `ROLE` variable and no separate `admin`, `server` and `client` services. Copycord refuses to start while `ROLE` is set.
@@ -61,23 +64,28 @@ v4 has no `ROLE` variable and no separate `admin`, `server` and `client` service
 
 ### Building the frontend
 
-The Docker build compiles the frontend for you. To check frontend changes on their own:
+The dashboard is a React and TypeScript app built with Vite, in `src/copycord/admin/web`. The Docker build compiles it for you. To check frontend changes on their own:
 
 ```bash
 cd src/copycord/admin/web
 npm ci
-npm run build
+npm run build       # type check, then build into dist/
+npm test            # the Vitest suite
 ```
+
+`npm run dev` starts the Vite dev server.
 
 ## Running tests
 
-Install the test dependencies (in a virtual environment of your choice) and run the suite from the repository root:
+Install the test dependencies (in a virtual environment of your choice) and run the suite from the repository root, as CI does:
 
 ```bash
-pip install pytest pytest-asyncio -r tests/requirements-test.txt
+pip install -r tests/requirements-test.txt
 COPYCORD_SKIP_FRONTEND=1 pip install -e .
 python -m pytest tests/ -v
 ```
+
+The Playwright end-to-end tests for the dashboard live in `e2e/`; its `README.md` explains how to run them.
 
 Run a single file while you work, for example `python -m pytest tests/test_cli.py -v`.
 
@@ -91,7 +99,7 @@ find src/ -name '*.py' -print0 | xargs -0 python -m py_compile
 
 ## Continuous integration
 
-Every pull request against `main` (and every push to `main`) runs the **Tests** workflow (`.github/workflows/ci.yml`):
+Every pull request against `main` or `v4-dev` (and every push to `main`) runs the **Tests** workflow (`.github/workflows/ci.yml`):
 
 | Job | What it checks |
 |-----|----------------|
@@ -104,7 +112,7 @@ Every pull request against `main` (and every push to `main`) runs the **Tests** 
 Other workflows:
 
 - **Release assets** (`release.yml`): when a GitHub release tagged `v*` is published, builds the wheel and sdist and attaches them to the release. The install scripts and `copycord update` install that wheel. Pre-releases feed the beta [update channel](/docs/cli#update-channels).
-- **Build & publish Copycord container** (`build_containers.yml`): publishes the Docker image for `v*.*.*` tags.
+- **Build & publish Copycord container** (`build_containers.yml`): publishes the Docker image for `v*.*.*` tags. A pre-release tag such as `v4.0.0b1` is published only under its own tag and never moves `latest`.
 - **Deploy Docs to GitHub Pages** (`deploy-docs.yml`): rebuilds this site when `website/` changes on `main`.
 - **Docker build smoke test**, **testing containers** and the weekly **Dependency audit** run on demand or on a schedule.
 
@@ -114,27 +122,30 @@ Other workflows:
 copycord/
 ├── src/
 │   └── copycord/        # The one installed package
-│       ├── __main__.py  # CLI: run, version, doctor, config
+│       ├── __main__.py  # CLI: run, restart, doctor, config, backup, restore, uninstall
 │       ├── supervisor.py # Starts and supervises admin, server and client
 │       ├── service.py   # copycord service (systemd, launchd, Scheduled Task)
 │       ├── update.py    # copycord update and update channels
+│       ├── update_check.py # Update check on start and auto-update
+│       ├── envfile.py   # <home>/.env
 │       ├── logging_setup.py # Terminal and server.out/client.out logging
 │       ├── admin/           # FastAPI web dashboard
-│       │   ├── app.py       # Main FastAPI application
-│       │   ├── auth.py      # Authentication
-│       │   ├── frontend/    # Vite frontend source
-│       │   ├── templates/   # Jinja2 HTML templates
-│       │   └── static/      # Built frontend assets
+│       │   ├── app.py       # Main FastAPI application and API
+│       │   ├── auth.py      # Login and sessions
+│       │   ├── tasks/       # Tasks page: backfills, purges, exports, scraping
+│       │   └── web/         # React SPA source (Vite); the wheel ships the build
 │       ├── server/          # Discord bot (py-cord)
 │       │   ├── server.py    # Core sync engine
 │       │   ├── commands.py  # Slash commands
 │       │   ├── backfill.py  # History import
+│       │   ├── token_sender.py # Sending cloned messages from user tokens
 │       │   ├── roles.py     # Role management
 │       │   ├── emojis.py    # Emoji cloning
 │       │   └── stickers.py  # Sticker cloning
 │       ├── client/          # Self-bot client
 │       │   ├── client.py    # Main client
 │       │   ├── forwarding.py # External forwarding
+│       │   ├── proxy_rotator.py # Client proxies
 │       │   └── sitemap.py   # Guild structure mapping
 │       ├── selfclient/      # Copycord's own user-account Discord library (gateway, HTTP, models)
 │       └── common/          # Shared code
@@ -143,6 +154,7 @@ copycord/
 │           ├── paths.py     # Data directory per OS
 │           └── websockets.py # Communication between the parts
 ├── tests/               # pytest suite
+├── e2e/                 # Playwright tests for the dashboard
 ├── install.sh           # Install script for Linux and macOS
 ├── install.ps1          # Install script for Windows
 ├── pyproject.toml       # Package definition and dependencies
