@@ -12,6 +12,7 @@ import { Field, FieldSelect, Input } from "../../../components/ui/Field";
 import type { TaskRun, TaskStep } from "../../../types/tasks";
 import { formatCount } from "../StepList";
 import { BackfillForm } from "./backfill/BackfillForm";
+import { EXPORT_ASSETS_ENTRY } from "./export_assets/entry";
 import { EXPORT_DMS_ENTRY } from "./export_dms/entry";
 import { EXPORT_MESSAGES_ENTRY } from "./export_messages/entry";
 import { DOWNLOAD_AVATARS_ENTRY } from "./download_avatars/entry";
@@ -214,6 +215,7 @@ export const TASK_TYPES: Record<string, TaskTypeEntry> = {
   purge_assets: PURGE_ASSETS,
   sync_assets: SYNC_ASSETS,
   export_dms: EXPORT_DMS_ENTRY,
+  export_assets: EXPORT_ASSETS_ENTRY,
   export_messages: EXPORT_MESSAGES_ENTRY,
   download_avatars: DOWNLOAD_AVATARS_ENTRY,
   scrape_members: SCRAPE_MEMBERS_ENTRY,
