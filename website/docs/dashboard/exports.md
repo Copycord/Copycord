@@ -4,7 +4,7 @@ title: Exports and downloads
 
 # Exports and downloads
 
-Three task types on the [Tasks](/docs/dashboard/tasks) page save data that your user account (the client) can read: **Export messages**, **Export DMs** and **Download avatars**. All three need the server bot and the client running.
+Four task types on the [Tasks](/docs/dashboard/tasks) page save data that your user account (the client) can read: **Export messages**, **Export DMs**, **Export assets** and **Download avatars**. All four need the server bot and the client running.
 
 Each run saves its result in the data directory (`/data` in Docker). When the run ends, its run page has a **Download** link for the file.
 
@@ -49,6 +49,19 @@ To export a DM history:
 4. Click **Export DMs**.
 
 The file is saved as `exports/dm/<user id>/<time>/messages.json`. Only one DM export per user can run at a time.
+
+## Export assets
+
+**Export assets** saves the emojis, the stickers or both from one of your user account's servers to a `.tar.gz` archive.
+
+To export a server's emojis and stickers:
+
+1. Open the **Tasks** page, pick **Export assets** in **Task types** and click **Run task**.
+2. In **Server**, pick the server. Type to filter by name or ID.
+3. Optional: in **Assets**, pick **Emojis** or **Stickers**. The default is **Emojis and stickers**.
+4. Click **Export assets**.
+
+To get the archive, click **Download archive** on the run page. The archive is saved as `assets/<server>_<guild id>/<server>_<guild id>__<time>.tar.gz`, with the emojis in an `emoji/` folder and the stickers in a `stickers/` folder. Only one asset export per server can run at a time. The run's summary counts the emojis and stickers saved out of each total. If you cancel a run, the archive keeps the assets saved before the cancel.
 
 ## Download avatars
 
