@@ -10,21 +10,24 @@ The [installer](/docs/getting-started/quick-start) installs the `copycord` comma
 ```
 copycord run [--data-dir PATH]
 copycord restart
-copycord doctor [--verbose] [--fix] [--json] [--data-dir PATH]
+copycord doctor [--verbose] [--fix] [--brief] [--json] [--data-dir PATH]
 copycord config get KEY [--show-secrets] [--json] [--data-dir PATH]
 copycord config set KEY VALUE [--data-dir PATH]
 copycord config unset KEY [--data-dir PATH]
 copycord config export [FILE] [--show-secrets] [--json] [--data-dir PATH]
 copycord config import FILE [--data-dir PATH]
+copycord config init [--data-dir PATH]
 copycord service install [--user | --system] [--data-dir PATH]
 copycord service status [--user | --system] [--json]
 copycord service start|stop|restart [--user | --system]
 copycord service uninstall [--user | --system] [--yes]
 copycord backup [--json] [--data-dir PATH]
 copycord restore [ARCHIVE] [--yes] [--data-dir PATH]
-copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--tag VERSION] [--no-install] [--force]
+copycord update [--tag VERSION] [--no-backup] [--yes] [--force] [--data-dir PATH]
+copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--no-install]
 copycord update status [--json]
 copycord uninstall [--purge|--keep-data] [--yes] [--keep-service] [--dry-run] [--data-dir PATH]
+copycord help [advanced]
 copycord --version | -V [--json]
 copycord --no-color <command>
 copycord --verbose <command>
@@ -35,6 +38,7 @@ copycord --verbose <command>
 ```
 $ copycord
 Copycord v4.0.0
+  Home: /home/you/.copycord
 
 Usage: copycord <command> [options]
 
@@ -48,6 +52,10 @@ Settings:
 
 Service:
   service    Run Copycord in the background (install, status, start, stop, restart, uninstall)
+
+Backups:
+  backup     Back up the database now
+  restore    Restore the database from a backup
 
 Updates:
   update     Update Copycord to the latest version
@@ -70,6 +78,7 @@ Options:
   --verbose      Show more detail, and the full error if something fails
 
 Run copycord <command> --help for the options of one command.
+More: copycord help advanced
 Docs: https://copycord.github.io/Copycord/docs/cli
 ```
 
@@ -94,6 +103,7 @@ Arguments:
 
 Options:
   --data-dir PATH  Data directory (sets DATA_DIR)
+  --json           Print one JSON document on stdout and nothing else
   --tag VERSION    Install this exact version once; the saved channel does not
                    change
   ...
@@ -104,9 +114,8 @@ Examples:
   ...
 
 Advanced (channels and git installs):
-  --channel stable|beta|dev  Switch to this channel and save it (stable:
-                             GitHub releases, beta: GitHub pre-releases too,
-                             dev: a git ref, needs npm)
+  --channel stable|beta|dev  Switch to this channel and save it (beta adds
+                             pre-releases, dev installs a git ref)
   ...
 
   copycord update --channel beta                switch to pre-releases
@@ -192,7 +201,7 @@ Copycord keeps its database (`data.db`), `secret.key`, backups, exports and the 
 
 Older installs kept everything loose in the home. When Copycord starts and finds `data.db` or `secret.key` directly in the home and no `data/data.db`, it first backs up the database to `backups/data-pre-update-layout-<timestamp>.db`, then moves the data files into `data` and the `*.out` files into `logs`, and logs one line: `Moved Copycord data into <home>/data and logs into <home>/logs`. It never overwrites a file that is already in the new place and never deletes anything. If a move fails, it puts everything back and keeps using the old layout. `copycord doctor` shows `data files loose in the home` until then, and `copycord doctor --fix` does the same move when Copycord is stopped. Docker data is never moved. If `~/.copycord` does not exist but an older install left a `data.db` in `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows), Copycord keeps using that folder and prints a notice. It never moves data by itself; to move, stop Copycord and move the folder to `~/.copycord`.
 
-`--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `doctor`, every `config` command, `service install` and `uninstall`.
+`--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `doctor`, every `config` command, `service install`, `backup`, `restore`, `update` and `uninstall`.
 
 ## copycord run {#copycord-run}
 
@@ -261,12 +270,12 @@ copycord doctor --data-dir ~/copycord/data
 | Group | Checks |
 |-------|--------|
 | Install | The version, commit and update channel; Python is 3.12 to 3.14; the web UI files are installed; the required packages (`curl_cffi`, `py-cord`, `fastapi`, `uvicorn`) import, as one `dependencies OK` line that names only the missing ones |
-| Settings | `<home>/.env` exists; `PASSWORD` is not still the default `copycord`; a `FAIL` when the removed `ROLE` variable is still set |
-| Data | The Copycord home exists and is writable; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the data files are in the `data` folder, not loose in the home; the last backup in the backups folder is under 2 days old and did not fail its check |
-| Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running |
+| Settings | `<home>/.env` exists; a dashboard password is set (`no dashboard password` is only info, since `copycord run` makes one) and is not still the default `copycord`; a `FAIL` when the dashboard listens beyond this computer without a real password; a `FAIL` when the removed `ROLE` variable is still set |
+| Data | The Copycord home exists and is writable; the data files are in the `data` folder, not loose in the home; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the last backup in the backups folder is under 2 days old and did not fail its check |
+| Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running, and on Linux whether the user service starts at boot |
 | Updates | The update check, cached for 24 hours. A network error is only reported, never a failure |
 
-Piped or redirected to a file it prints plain sections, like this on a new install:
+Piped or redirected to a file it prints plain sections, like this on a new install whose `.env` still has the default password:
 
 ```
 Install
@@ -281,6 +290,7 @@ Settings
 
 Data
 ✓ home writable
+✓ data folder layout
 • database created on first run
 • no backups yet
 
@@ -342,8 +352,10 @@ A check that was fixed shows on its own line as fixed, for example `✓ .env cre
 |-------|-----|------|
 | `.env not found` | Writes `<home>/.env` with every setting at its default, the same file the installer writes | Automatic |
 | `home folder missing` | Creates the Copycord home | Automatic |
+| `data files loose in the home` | Moves the data files into `data` and the logs into `logs` (see [The data directory](#data-dir)); refuses while the service is running | Automatic |
 | `last backup ... ago`, `no backups yet`, `last backup failed its check` | Backs up the database now, the same `.tar.gz` the daily backup makes | Automatic |
 | `service installed, not running` | Starts the service | Automatic |
+| `service starts only when you log in` (Linux) | Turns on lingering for your account so the user service starts at boot; when that needs root, prints the `loginctl` command to run | Automatic |
 | `service runs in a console window` (Windows) | Writes the service task again so it runs without a window, with the same data directory, and restarts it | Automatic |
 | `web UI missing`, `missing dependencies` | Reinstalls the version you have from your update channel (a dev install rebuilds the same ref), through `copycord update`, which backs up the database first | Automatic |
 | `port 8080 in use` | Asks `y/N` to move to the next free port and writes it as `ADMIN_PORT` in `.env` | Guided |
@@ -367,10 +379,11 @@ Install
 
 Settings
 ✓ .env created with the default settings  /home/you/.copycord/.env (fixed)
-! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
+✓ dashboard password set
 
 Data
 ✓ home writable
+✓ data folder layout
 • database created on first run
 • no backups yet
 
@@ -381,19 +394,16 @@ Running
 Updates
 ✓ up to date
 
-Needs your attention
-! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
-
 ✓ Fixed 1 issue
-! 1 thing needs your attention
+✓ Everything looks good  start it with copycord run
 ```
 
-The recreated `.env` sets the default password `copycord`, so it is listed after the fix. Change `PASSWORD` in `<home>/.env`, then run `copycord restart`.
+The recreated `.env` gets a new random `PASSWORD`, like the one the installer writes. `copycord config get PASSWORD --show-secrets` prints it.
 
 
 ## copycord config {#copycord-config}
 
-Reads and writes Copycord's settings. Most live in the database (the same values the dashboard's Global Configuration card shows, such as `COMMAND_USERS`, `LOG_LEVEL` or `AUTO_START`). The few that are read from the environment only, such as `PASSWORD` and `ADMIN_PORT`, live in [`<home>/.env`](#env-file); `get`, `set` and `unset` pick the right place by the key.
+Reads and writes Copycord's settings. Most live in the database (the same values the dashboard's Global Configuration card shows, such as `COMMAND_USERS`, `COPYCORD_AUTOSTART`, `LOG_LEVEL` or `LOG_MAX_SIZE_MB`). The few that are read from the environment only, such as `PASSWORD` and `ADMIN_PORT`, live in [`<home>/.env`](#env-file); `get`, `set` and `unset` pick the right place by the key.
 
 ```bash
 copycord config get LOG_LEVEL
@@ -471,7 +481,7 @@ COPYCORD_NO_UPDATE_CHECK=0
 An empty value, such as `TZ=`, means the default. The dashboard always asks for the password. If `PASSWORD` is empty or missing, `copycord run` makes a random one, saves it in this file and shows it once. In Docker, Copycord does not start until you set `PASSWORD`.
 
 :::note The dashboard password
-`copycord config init`, which the installers run, writes a random `PASSWORD` into a new file, and the installer shows it once. `copycord config get PASSWORD --show-secrets` prints it again. A file written by `copycord doctor --fix` has the old default `copycord`; change it.
+`copycord config init`, which the installers run, writes a random `PASSWORD` into a new file, and the installer shows it once. `copycord config get PASSWORD --show-secrets` prints it again. `copycord doctor --fix` also writes a random one when it recreates a missing file. A file from an older install can still have the old default `copycord`; change it.
 :::
 
 To change a setting, edit the file, then restart Copycord:
@@ -496,7 +506,7 @@ copycord restart
 | `PASSWORD` | a random password in the file | Dashboard password; always required. |
 | `SECRET_KEY` | a key saved in `<data dir>/secret.key` | Signs the dashboard login cookie. Not in the file; add it only to use a key of your own. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
-| `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens. Commented out in the file, so only this computer can open it. See [Dashboard address](#dashboard-address). |
+| `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens. The file sets `127.0.0.1`, so only this computer can open it. See [Dashboard address](#dashboard-address). |
 | `TZ` | `UTC` | Time zone for scheduled backups and export timestamps, e.g. `America/New_York`. |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG` for the first log lines; an app config key, so the dashboard's value wins once it is saved and `copycord config set LOG_LEVEL` writes the database. |
 | `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
@@ -814,7 +824,7 @@ It runs these steps in order:
 
 | Option | What it does |
 |--------|--------------|
-| `--purge` | Deletes the Copycord home. Without `--yes` the question only offers delete or cancel. |
+| `--purge` | Deletes the Copycord home. Without `--yes` the question only offers delete or cancel, and Enter cancels. |
 | `--keep-data` | Keeps the Copycord home. Without `--yes` the question only offers keep or cancel. |
 | `--yes`, `-y` | Skips the question |
 | `--keep-service` | Leaves the OS service installed |
