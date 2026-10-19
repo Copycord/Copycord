@@ -5,7 +5,7 @@ title: Roles
 
 # Role Commands
 
-Commands for managing roles in your clone server — auto-assignment, blocking, and mention pings.
+Commands for managing roles in your clone server: auto-assignment, blocking, and mention pings.
 
 ## On-Join Roles
 

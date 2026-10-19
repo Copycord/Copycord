@@ -55,7 +55,7 @@ wrong, or after changing proxy settings.
 ```
 
 **Options:**
-- `limit` — how many tokens to include (default 25, maximum 100). If some are
+- `limit`: how many tokens to include (default 25, maximum 100). If some are
   left out the file says how many.
 
 **The file contains, per token:**
@@ -63,13 +63,13 @@ wrong, or after changing proxy settings.
 - Its leased proxy, with credentials masked
 - The **egress IP** the outside world actually sees for that account
 - The exact headers sent, captured from a real request rather than read off the
-  configuration — the two are not the same
+  configuration, since the two are not the same
 - The decoded device fingerprint the account reports to Discord
 - A comparison against a real Discord desktop client, listing anything missing,
   mismatched, or sent that a real client would not send
 
 The response is only visible to you. Authorization headers are redacted and
-never leave the server, and proxy passwords are masked — but the file still
+never leave the server, and proxy passwords are masked, but the file still
 describes your accounts, so keep it private.
 
 :::tip
