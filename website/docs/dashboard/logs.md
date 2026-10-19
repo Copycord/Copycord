@@ -1,26 +1,34 @@
 ---
-title: Event Logs
+title: Event logs
 ---
 
-# Event Logs
+# Event logs
 
-The **Logs** page (**Event Logs**) is a structured audit trail of what Copycord changed in your clone servers:
+The **Logs** page (**Event Logs**) records what Copycord changed in your clone servers. Use it to check when a channel, role or webhook was created, changed or deleted, and to find errors.
 
-- Structure sync events (channel, category, role, emoji and sticker creation, deletion, rename and moves)
-- Permission sync events
-- Webhook creation events
-- Guild metadata updates
+It records these events:
+
+- Structure sync: channels, categories, roles, emojis and stickers created, deleted, renamed or moved
+- Permission sync
+- Webhooks created
+- Server details updated
 - Thread operations
-- Error events
+- Errors
 
 For the bots' text logs, see [Where logs go](/docs/dashboard/system#where-logs-go).
 
-## Features
+## Find an event
 
-- **Search logs**: matches the event details, the channel, category and guild names, the log, guild and channel IDs, and the values in each event's metadata, such as a clone channel ID or a sync task ID
-- **Filter by type**: **All Events** or one event type. The dropdown only shows event types that have logs
-- **Expandable rows**: click an entry to see its details and metadata (source and clone IDs, changed fields, category info)
-- **Refresh logs**: reload the current view
-- **Delete**: delete a single entry, or **Clear all logs**. Both ask for confirmation and cannot be undone
+1. Optional: in **Filter by type**, pick one event type, or **All Events**. The list shows only types that have entries.
+2. Optional: type in **Search logs**. The search matches the event details, the channel, category and guild names, the log, guild and channel IDs, and the values in each event's details, such as a clone channel ID or a sync task ID.
+3. Scroll the table. Entries load 50 at a time.
+4. Click an entry to expand it. It shows the event's details, such as the source and clone IDs, the changed fields and the category.
 
-Logs load 50 at a time; the next 50 load as you scroll to the end of the table.
+To reload the list, click **Refresh logs**.
+
+## Delete events
+
+- To delete one entry, click **Delete** on it and confirm.
+- To delete every entry, click **Clear all logs** and confirm.
+
+Deleted entries cannot be restored.
