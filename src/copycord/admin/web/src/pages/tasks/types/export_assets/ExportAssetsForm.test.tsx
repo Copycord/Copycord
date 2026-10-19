@@ -82,7 +82,7 @@ describe("ExportAssetsForm", () => {
     await waitFor(() => expect(server()).not.toHaveAttribute("readonly"));
     fireEvent.click(server());
     const names = within(await screen.findByRole("listbox")).getAllByRole("option").map((o) => o.textContent);
-    expect(names).toEqual(["Pick a server", "Alpha", "Beta"]);
+    expect(names).toEqual(["Alpha", "Beta"]);
   });
 
   it("keeps the same controls while the servers load and after", async () => {
