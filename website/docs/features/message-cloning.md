@@ -1,82 +1,60 @@
 ---
 sidebar_position: 1
-title: Message Cloning
+title: Message cloning
 ---
 
-# Message Cloning
+# Message cloning
 
-Copycord's core feature is real-time message cloning: every message sent in a source server appears in your clone server within seconds.
+Message cloning copies every new message in a source server to your clone server within seconds. This page explains how a message travels, what is copied, and how edits, deletes and mentions are handled.
 
-## How messages are cloned
+## How a message is cloned
 
-```
-Source Server        Client (self-bot)        Server (bot)           Clone Server
-     │                    │                       │                      │
-     │  New message       │                       │                      │
-     ├───────────────────►│                       │                      │
-     │                    │  WebSocket forward     │                      │
-     │                    ├──────────────────────►│                      │
-     │                    │                       │  Webhook post         │
-     │                    │                       ├─────────────────────►│
-     │                    │                       │                      │  Message appears
-```
+1. Someone posts a message in the source server.
+2. The client, your user account, sees the message and reads its content, embeds and attachments.
+3. The client passes the message to the server bot.
+4. The server bot posts it in the matching clone channel through a webhook, with the original author's name and avatar.
 
-1. A user posts a message in the source server
-2. The **client** (self-bot) detects the message via Discord gateway events
-3. The client extracts the content, embeds, attachments, and metadata
-4. The message is sent to the **server** bot via WebSocket
-5. The server posts the message to the matching clone channel using a **webhook**
+A mapping can post messages from user accounts instead of a webhook; see [Token message cloning](/docs/dashboard/guild-mappings#token-message-cloning).
 
-The webhook preserves the original author's username and avatar, making messages look natural in the clone. A mapping can instead send messages from user accounts; see [Token message cloning](/docs/dashboard/guild-mappings#token-message-cloning).
+Messages sent before you set up Copycord are copied with the [Backfill channels](/docs/dashboard/backfill) task. Every cloned message is listed on the [Messages](/docs/dashboard/messages) page.
 
-Messages sent before you set up Copycord are imported with the [Backfill channels](/docs/dashboard/backfill) task. Every cloned message is listed on the [Messages](/docs/dashboard/messages) page.
+## What is cloned
 
-## What gets cloned
+| Content | How it is cloned |
+|---------|------------------|
+| Text | The full text |
+| Embeds | Cleaned up and posted again |
+| Attachments | Downloaded and uploaded again |
+| Stickers | Matched to the cloned stickers |
+| Replies | Posted as messages, with an optional link to the original (**Tag Replies**) |
+| Threads | Created in the clone, with their messages |
+| Forum posts | Created in the clone, with their tags and guidelines |
+| Forwarded messages | Posted with the forwarded content |
+| System messages | Copied, for example join notices and pins |
 
-| Content | Supported | Notes |
-|---------|-----------|-------|
-| Text messages | Yes | Full content preserved |
-| Embeds | Yes | Sanitized and re-posted |
-| Attachments | Yes | Downloaded and re-uploaded |
-| Stickers | Yes | Matched to cloned stickers |
-| Replies | Yes | Optional reference tag via `TAG_REPLY_MSG` |
-| Threads | Yes | Auto-created, messages forwarded |
-| Forum posts | Yes | Tags and guidelines synced |
-| Forwarded messages | Yes | References resolved |
-| System messages | Yes | Join notifications, pins, etc. |
+## Edits and deletes
 
-## Message edits
+Each mapping decides what happens when a source message changes. These settings are in the mapping's **Settings**, under **Messages**:
 
-When a message is edited in the source server, Copycord can:
+- **Edit Messages**: the clone is edited to match.
+- **Resend Edited Messages**: the edited message is posted again as a new message.
+- **Delete Messages**: the clone is deleted when the source message is deleted.
 
-- **Edit** the cloned message to match (when `EDIT_MESSAGES` is enabled)
-- **Resend** the edited message as a new post (when `RESEND_EDITED_MESSAGES` is enabled)
+Copycord matches each source message to its clone through the message records it stores. A message whose record was [purged](/docs/dashboard/purge-and-sync#purge-messages) is no longer edited or deleted.
 
-## Message deletes
+## Mentions and identity
 
-When a message is deleted in the source, Copycord deletes the corresponding cloned message (when `DELETE_MESSAGES` is enabled).
+- User mentions become a readable `@username`.
+- **Disable @everyone** removes `@everyone` and `@here` pings, and **Disable Role Mentions** removes role pings.
+- **Anonymize Users** replaces each author's name and avatar with a random name, such as "SwiftFox123", and a random image, to hide who posted in the source server.
 
-## Mention handling
+These are optional message features of a mapping; see [Change how cloned messages look](/docs/dashboard/guild-mappings#change-how-cloned-messages-look).
 
-Copycord sanitizes mentions in cloned messages:
+## Webhooks
 
-- `<@user_id>` mentions are converted to readable `@username` format
-- `@everyone` and `@here` can be stripped via `DISABLE_EVERYONE_MENTIONS`
-- Role mentions can be stripped via `DISABLE_ROLE_MENTIONS`
+Webhooks let Copycord post each message with the author's name and avatar.
 
-## User anonymization
+- With **On-Demand Webhooks** on (the default), Copycord creates a channel's webhook when the first message arrives for it.
+- With it off, Copycord creates all webhooks after the structure sync.
 
-When `ANONYMIZE_USERS` is enabled, Copycord replaces the original author's identity with:
-- A random username (e.g., "SwiftFox123")
-- A random avatar image
-
-This hides the real identity of users in the source server.
-
-## Webhook system
-
-Copycord uses Discord webhooks to post cloned messages. Webhooks allow messages to appear with custom usernames and avatars, making them look like they were posted by the original author.
-
-- By default (`ON_DEMAND_WEBHOOKS: true`), webhooks are created on-demand when a channel receives its first message
-- If `ON_DEMAND_WEBHOOKS` is disabled, webhooks are batch-created in the background after structure sync
-- A webhook pool is maintained for performance
-- Custom webhook identities can be set per-channel via the `/channel_webhook` commands
+To post a channel's messages under one fixed name and avatar instead, use [`/channel_webhook`](/docs/commands/webhooks).
