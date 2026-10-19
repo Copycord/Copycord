@@ -13,7 +13,7 @@ Install Copycord with one command, start it, and finish the setup in the web das
 
 ## What you need
 
-- **Linux, macOS or Windows.** You do not need Python, Node.js or Docker: the installer brings everything.
+- **A computer running Linux, macOS or Windows.**
 - **A bot token and a user token from Discord.** [Discord Setup](/docs/getting-started/discord-setup) shows how to get both and how to create the clone server.
 
 :::tip
@@ -63,8 +63,6 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4.0.0b1/install.
 ### 1. Install Copycord
 
 Run the command for your system from above. The installer runs numbered steps:
-
-![The Copycord installer in a terminal: the banner, four steps with check marks and the success box](/img/install-script.svg)
 
 1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) if it is missing. uv provides Python 3.14.
 2. **Finding the release:** the newest stable [GitHub release](https://github.com/Copycord/Copycord/releases) (with `--beta`, pre-releases too).
