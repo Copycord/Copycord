@@ -9,72 +9,58 @@ import TabItem from '@theme/TabItem';
 
 # Install Options
 
-The [Quick Start](/docs/getting-started/quick-start) covers the default install. This page covers everything else the installer can do: its flags, installing a branch, a custom Copycord home, and how to update and uninstall.
+Change how the installer works: install a specific version, test a branch, use another folder, or update and uninstall Copycord. For the default install, see the [Quick Start](/docs/getting-started/quick-start). The installer is not used with Docker; see [Docker Install](/docs/getting-started/docker-install).
 
 ## What the installer does
 
-<Tabs groupId="os" queryString>
-<TabItem value="unix" label="Linux / macOS" default>
+The installer runs as your normal user and installs Copycord for that user only; it does not run as root or as Administrator. It works in these steps:
 
-```bash title="Terminal"
-curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh
-```
+1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/), the tool that provides Python 3.14 and Copycord's packages, when it is missing.
+2. **Finding the release:** picks the newest stable release, the newest pre-release with `--beta`, or the version you give with `--version`.
+3. **Installing Copycord:** downloads the release, checks it against the SHA-256 checksum GitHub lists for it and installs it.
+4. **Finishing up:** adds `copycord` to your `PATH`, saves a custom home, writes [`.env`](/docs/getting-started/configuration) if it does not exist yet and saves the update channel when you chose one.
+5. **Repairing:** on an upgrade or reinstall only, runs [`copycord doctor --fix --brief`](/docs/cli#doctor-fix) to apply automatic repairs, such as starting a stopped service. This step never fails the install.
+6. **Verifying:** with `--verify` only, runs `copycord --version` and `copycord doctor` and fails the install if either fails.
 
-</TabItem>
-<TabItem value="windows" label="Windows">
+When the same version is already installed, the installer says so and exits without changes; `--force` reinstalls. An older version is upgraded.
 
-```powershell title="PowerShell (not as Administrator)"
-irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
-```
+The installer ends with a box that shows the Copycord home, the settings file, the next commands, the dashboard address and the dashboard password. `install.sh` shows the password only on the first install; `install.ps1` shows it on every run. A reinstall never changes an existing `.env`, so your password stays the same. If the password is still `copycord` from an older install, `install.sh` asks you to change it.
 
-</TabItem>
-<TabItem value="docker" label="Docker">
-
-The installer is not used with Docker. See [Docker Install](/docs/getting-started/docker-install).
-
-</TabItem>
-</Tabs>
-
-It prints the banner and first checks for an existing install. When the `copycord` command is there and `copycord --version` shows what this run would install (the same release version, or for a git ref the same commit as the remote head of that ref, read with `git ls-remote`), it prints `✓ Copycord v4-dev (b2d8c1c) is already installed` and a hint to run `copycord update` or rerun with `--force` (`-Force` on Windows), then exits without changing anything. An older install is upgraded. When the check cannot be done (no network, unknown output), it installs as usual. A dry run skips the check.
-
-Otherwise it runs numbered steps:
-
-1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) when it is not on your `PATH`. uv provides Python 3.14 and Copycord's dependencies.
-2. **Finding the release:** the newest stable release, the newest pre-release with `--beta`, or the one you asked for with `--version`.
-3. **Installing Copycord:** downloads the release wheel, checks it against the SHA-256 checksum GitHub lists for it, and runs `uv tool install --force` with it, a per-user install with no sudo.
-4. **Finishing up:** adds uv's tool directory to your `PATH` when needed (`uv tool update-shell`), saves a custom home in `~/.copycord-home`, writes [`.env`](/docs/getting-started/configuration) in the Copycord home if it does not exist yet (with `copycord config init`), and saves the update channel when you chose one.
-5. **Repairing (upgrades and reinstalls only):** when Copycord or its home was already there, runs [`copycord doctor --fix --brief`](/docs/cli#doctor-fix) to apply the automatic repairs, such as starting a stopped service or taking an overdue backup. It prints a line for each repair, any failed check and `All checks passed` or the number of warnings; it never fails the install. A first install skips this step.
-6. **Verifying (`--verify` only):** runs `copycord --version` and `copycord doctor` and fails the install if either fails.
-
-A [git build](#branches) replaces steps 2 and 3 with **Installing Node** (only when Node.js 22 or newer is missing), **Fetching** the ref, **Building the admin frontend** and **Installing Copycord** from the checkout.
-
-It ends with a box that shows the Copycord home, the settings file, the next commands (`copycord run`, `copycord restart`, `copycord update`) and a **Needs your attention** list: the dashboard address (the port and address from your settings file) and the dashboard password. The installer makes up a random password when it creates the settings file and shows it in that box; `install.sh` shows it only on that first install, `install.ps1` shows the password from the settings file on every run. It is saved as `PASSWORD` in `.env`; if you lose it, `copycord config get PASSWORD --show-secrets` prints it, and `copycord config set PASSWORD 'your-new-password'` changes it. An existing settings file is never changed, so a reinstall keeps your password. If an older install still has the default password `copycord`, `install.sh` asks you to change it. Before replacing a running [service](/docs/cli#copycord-service), the installer stops it and starts it again afterwards, also when the install fails. It does not start Copycord otherwise and does not touch Docker. It refuses to run as root (on Windows, as Administrator): Copycord installs for your user.
+If Copycord runs as a [service](/docs/cli#copycord-service), the installer stops it before installing and starts it again afterwards, also when the install fails. Otherwise it does not start Copycord.
 
 ## Flags
 
-On Linux and macOS, pass flags after `sh -s --`. On Windows, set the environment variable before the `irm` line, or run the script as a script block to pass parameters. Flags win over environment variables.
+To pass flags on Linux and macOS, add them after `sh -s --`. On Windows, run the script as a script block with parameters, or set the environment variable before the `irm` line. Flags win over environment variables.
 
-| `install.sh` | `install.ps1` | Environment | What it does |
-|--------------|---------------|-------------|--------------|
-| `--version <value>` | `-Version <value>` (alias `-Tag`) | `COPYCORD_VERSION` | A release version (`4.0.0`, `v4.0.0`, `4.0.0b1`) installs that release. Anything else (a branch, tag or commit SHA) builds from git at that ref. |
-| `--beta` | `-Beta` | `COPYCORD_BETA=1` or `COPYCORD_CHANNEL=beta` | The newest release, pre-releases included. Saved as the `copycord update` channel. |
-| `--home <path>` | `-CopycordHome <path>` (alias `-Home`) | `COPYCORD_HOME` | The [Copycord home](#home) (default `~/.copycord`). Must be an absolute path. |
-| `--repo owner/name` | `-Repo owner/name` | `COPYCORD_REPO` | Repository to install from (default `Copycord/Copycord`). |
-| `--git-dir <path>` (alias `--dir`) | `-GitDir <path>` (alias `-Dir`) | `COPYCORD_GIT_DIR` | Git builds: a folder the installer owns (default `<home>/src`). Each install replaces every file in it, so never point it at your own copy of the code. |
-| `--verify` | `-Verify` | `COPYCORD_VERIFY=1` | Run `copycord --version` and `copycord doctor` after installing and fail if either fails. |
-| `--dry-run` | `-DryRun` | `COPYCORD_DRY_RUN=1` | Print the plan and every action, change nothing. |
-| `--verbose` | `-ShowOutput` (alias `-Verbose`) | `COPYCORD_VERBOSE=1` | Show the full output of every step instead of a spinner. |
-| `--force` | `-Force` | `COPYCORD_FORCE=1` | Reinstall even when the same version is already installed. |
-| `--help` | `-Help` | | Show the options. |
-| | | `NO_COLOR=1` | Plain output. |
+| `install.sh` | `install.ps1` | Environment variable | Description |
+|--------------|---------------|----------------------|-------------|
+| `--version <value>` | `-Version <value>` (alias `-Tag`) | `COPYCORD_VERSION` | A release version (`4.0.0`, `v4.0.0`, `4.0.0b1`) installs that release. Any other value (a branch, tag or commit) [builds from git](#branches). |
+| `--beta` | `-Beta` | `COPYCORD_BETA=1` or `COPYCORD_CHANNEL=beta` | Installs the newest release, pre-releases included, and saves `beta` as the update channel. |
+| `--home <path>` | `-CopycordHome <path>` (alias `-Home`) | `COPYCORD_HOME` | The [Copycord home](#home). Must be an absolute path. |
+| `--repo owner/name` | `-Repo owner/name` | `COPYCORD_REPO` | Repository to install from. Default `Copycord/Copycord`. |
+| `--git-dir <path>` (alias `--dir`) | `-GitDir <path>` (alias `-Dir`) | `COPYCORD_GIT_DIR` | Folder for git builds. Default `<home>/src`. |
+| `--verify` | `-Verify` | `COPYCORD_VERIFY=1` | Runs `copycord --version` and `copycord doctor` after installing and fails if either fails. |
+| `--dry-run` | `-DryRun` | `COPYCORD_DRY_RUN=1` | Prints the plan and every action without changing anything. |
+| `--verbose` | `-ShowOutput` (alias `-Verbose`) | `COPYCORD_VERBOSE=1` | Shows the full output of every step. |
+| `--force` | `-Force` | `COPYCORD_FORCE=1` | Reinstalls the version that is already installed. |
+| `--help` | `-Help` | | Shows the options. |
+| | | `NO_COLOR=1` | Prints without color. |
 
-:::warning `--git-dir` is not for your own copy of the code
-A git build resets the folder to the version you asked for and deletes every other file in it. To protect your work, `install.sh` only does that to a folder it created itself, or to an unchanged copy of the same repository. Any other folder stops the install with a message and nothing is changed; pick an empty or new folder instead.
+:::warning `--git-dir` deletes files
+A git build resets the folder to the version you asked for and deletes every other file in it. Never point `--git-dir` at your own copy of the code. `install.sh` only resets a folder it created or an unchanged copy of the same repository, and stops without changes for any other folder.
 :::
 
-Release installs check the downloaded wheel against the checksum GitHub lists for it and stop if they differ. Set `GITHUB_TOKEN` if many installs share one network and GitHub starts refusing the release lookup.
+Less common settings:
 
-Rarely needed: `--install-method release|git` (alias `--method`; `--git` and `--release` for short; PowerShell `-InstallMethod` or `-Git`; or `COPYCORD_INSTALL_METHOD`) forces the method instead of inferring it from `--version`, `COPYCORD_NODE_VERSION` picks the Node.js version for git builds (default 22.12.0), `COPYCORD_UV_VERSION` picks the uv version `install.ps1` installs, and `COPYCORD_ALLOW_ROOT=1` allows running as root or Administrator.
+| Flag or variable | Description |
+|------------------|-------------|
+| `--install-method release\|git` (alias `--method`, or `--git` and `--release`); PowerShell `-InstallMethod` or `-Git`; `COPYCORD_INSTALL_METHOD` | Forces the install method instead of choosing it from `--version`. |
+| `COPYCORD_NODE_VERSION` | Node.js version for git builds. Default `22.12.0`. |
+| `COPYCORD_UV_VERSION` | uv version that `install.ps1` installs. |
+| `COPYCORD_ALLOW_ROOT=1` | Allows running as root or Administrator. |
+| `GITHUB_TOKEN` | A GitHub token, for when many installs share one network and GitHub refuses the release lookup. |
+
+Examples:
 
 <Tabs groupId="os" queryString>
 <TabItem value="unix" label="Linux / macOS" default>
@@ -104,14 +90,14 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 </TabItem>
 <TabItem value="docker" label="Docker">
 
-Pin a release with the image tag, for example `ghcr.io/copycord/copycord:v4.0.0`.
+To pin a release, use its image tag, for example `ghcr.io/copycord/copycord:v4.0.0`.
 
 </TabItem>
 </Tabs>
 
 ## Test a branch {#branches}
 
-Testers can install any branch, tag or commit without a release. The installer then clones the repository into `<home>/src`, builds the dashboard with npm and installs that checkout. It needs git; when Node.js 22 or newer is missing it downloads the official build from nodejs.org, checks its SHA-256 and unpacks it into `<home>/node`, without sudo.
+To test a branch, tag or commit that has no release, pass it to `--version`. The installer clones the repository into `<home>/src`, builds the dashboard and installs that copy. This needs git. When Node.js 22 or newer is missing, the installer downloads the official build, checks its SHA-256 checksum and unpacks it into `<home>/node`, without sudo.
 
 <Tabs groupId="os" queryString>
 <TabItem value="unix" label="Linux / macOS" default>
@@ -135,45 +121,41 @@ Branches are not published as images. Use the installer to test one.
 </TabItem>
 </Tabs>
 
-A branch of `Copycord/Copycord` is saved as the `dev` update channel, so `copycord update` keeps following it. A branch of a fork works with `--repo you/Copycord --version my-fix`; to update a fork, run the installer again. To go back to releases, run `copycord update --channel stable`.
+A branch of `Copycord/Copycord` is saved as the `dev` update channel, so `copycord update` keeps following it. For a branch of a fork, add `--repo you/Copycord`; to update a fork, run the installer again. To go back to releases, run `copycord update --channel stable`.
 
-A release install can also switch to a branch with `copycord update --channel dev --ref v4-dev`; without Node.js it downloads Node into `<home>/node` the same way.
+An installed release can also switch to a branch with `copycord update --channel dev --ref v4-dev`. See [update channels](/docs/cli#update-channels).
 
 ## The Copycord home {#home}
 
-Everything Copycord stores lives in one folder: `.env`, the `data` folder (`data.db`, `secret.key`, the daily backups and exports), the `logs` folder, and for git builds `src/` and `node/`.
+The Copycord home is the folder that holds everything Copycord stores: `.env`, the `data` folder (`data.db`, `secret.key`, backups and exports), the `logs` folder and, for git builds, `src` and `node`.
 
 | OS | Default |
 |----|---------|
 | Linux, macOS | `~/.copycord` |
 | Windows | `%USERPROFILE%\.copycord` |
 
-`--home` (or `COPYCORD_HOME`) picks another folder. The installer saves a custom home in `~/.copycord-home`, so `copycord run`, the service and the other commands find it without the environment variable. See [The data directory](/docs/cli#data-dir) for `--data-dir`.
+To use another folder, install with `--home` or set `COPYCORD_HOME`. The installer saves a custom home in `~/.copycord-home`, so every `copycord` command and the service find it. To keep only the data somewhere else, see [The data directory](/docs/cli#data-dir).
 
 ## Update
 
 ```bash title="Terminal"
 copycord update                    # the newest release on your channel
 copycord update --channel beta     # switch to beta (or stable, dev) and update
-copycord update status             # only show what is installed and what is available
+copycord update status             # show what is installed and what is available
 ```
 
-`copycord run` prints a one-line hint at start when an update is out; it asks GitHub at most once a day. Auto-update is off by default. A running service is restarted after an update. With `copycord config set AUTO_UPDATE true`, a Copycord running as a service updates itself on the stable channel, and goes back to the previous version if the new one does not start. See [`copycord update`](/docs/cli#copycord-update).
+A running service is restarted after an update. When an update is out, `copycord run` prints a hint at start. To let the service update itself, see [Auto-update](/docs/cli#auto-update).
 
 ### Downgrading and backups {#downgrade}
 
-Every `copycord update`, upgrade or downgrade, first copies the database to `data-pre-update-<version>-<UTC timestamp>.db` in the backups directory (`<data dir>/backups` unless `BACKUP_DIR` is set) and keeps the newest 5. A failed backup stops the update; `--no-backup` skips it. Copycord refuses to start on a database from a newer version and tells you to `copycord update` back or restore one of those backups, so a downgrade never changes your data. See [Downgrading and backups](/docs/cli#downgrade).
+Every `copycord update` first copies the database to the backups folder, and Copycord does not start on a database from a newer version. To go back to an older version, see [Downgrading and backups](/docs/cli#downgrade).
 
 ## Uninstall
 
 ```bash title="Terminal"
 copycord uninstall                  # remove Copycord; asks whether to delete your data
-copycord uninstall --yes            # no prompts, keep the Copycord home
-copycord uninstall --yes --purge    # no prompts, delete the Copycord home: database, logs, backups, .env
+copycord uninstall --yes            # no questions, keep the Copycord home
+copycord uninstall --yes --purge    # no questions, delete the Copycord home: database, logs, backups, .env
 ```
 
-It asks one question about your data (the Copycord home): **Keep my data**, **Delete everything (database, logs, backups, settings)** or **Cancel**. Enter keeps it, and the end of the output says where it is. In a script, `--purge` deletes and `--keep-data` keeps; `--yes` on its own keeps the data. `--dry-run` shows the steps without changing anything. See [`copycord uninstall`](/docs/cli#copycord-uninstall).
-
-:::note Coming from v3?
-The old launcher (`Copycord.exe`, `launcher.py`) is replaced by the install script. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
-:::
+Without options, `copycord uninstall` asks whether to keep your data, delete it or cancel; **Enter** keeps it. See [`copycord uninstall`](/docs/cli#copycord-uninstall).

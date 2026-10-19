@@ -9,37 +9,85 @@ import TabItem from '@theme/TabItem';
 
 # Configuration File (.env)
 
-Almost everything in Copycord is set in the dashboard: tokens, mappings, filters, cloning options. A few settings are needed before the dashboard starts, such as its password and port. Those live in `.env` in the Copycord home, which `copycord` reads on every start, for `copycord run` and the service alike.
+Change the settings Copycord needs before the dashboard starts, such as the dashboard password and port. Everything else, including tokens, mappings, filters and cloning options, is set in the dashboard.
 
 ## Where it is
+
+The file is `.env` in the Copycord home. Copycord reads it every time it starts, with `copycord run` or as a service.
+
+| OS | File |
+|----|------|
+| Linux, macOS | `~/.copycord/.env` |
+| Windows | `%USERPROFILE%\.copycord\.env` |
+| Docker | Not used. Set the keys under `environment:` in `docker-compose.yml`. |
+
+With a [custom home](/docs/getting-started/manual-install#home), the file is `.env` in that folder.
+
+## Change a setting
+
+To change a setting, edit the file or run `copycord config set`, then restart Copycord.
 
 <Tabs groupId="os" queryString>
 <TabItem value="unix" label="Linux / macOS" default>
 
-```text title="Settings file"
-~/.copycord/.env
+```bash title="Terminal"
+copycord config set PASSWORD 'your-new-password'
+copycord restart
 ```
+
+To edit the file by hand, run `nano ~/.copycord/.env`.
 
 </TabItem>
 <TabItem value="windows" label="Windows">
 
-```text title="Settings file"
-%USERPROFILE%\.copycord\.env
+```powershell title="PowerShell"
+copycord config set PASSWORD 'your-new-password'
+copycord restart
 ```
+
+To edit the file by hand, run `notepad "$HOME\.copycord\.env"`.
 
 </TabItem>
 <TabItem value="docker" label="Docker">
 
-Docker does not use `.env` in the Copycord home. Set these keys under `environment:` in `docker-compose.yml`, then run `docker compose up -d`. See [Docker Install](/docs/getting-started/docker-install).
+```yaml title="docker-compose.yml"
+    environment:
+      - PASSWORD=your-new-password
+```
+
+```bash title="Terminal"
+docker compose up -d
+```
 
 </TabItem>
 </Tabs>
 
-With a custom home (`--home` or `COPYCORD_HOME`, see [Install Options](/docs/getting-started/manual-install#home)) it is `.env` in that folder.
+`copycord restart` restarts the [service](/docs/cli#copycord-service). If Copycord runs in a terminal, press **Ctrl+C** and run `copycord run` again instead.
 
-## The file the installer writes
+`copycord config set` changes the key's line in place and keeps your comments. `copycord config get PASSWORD` prints `********`; add `--show-secrets` to see the value. Variables set in the environment win over the file, for example `ADMIN_PORT=9060 copycord run`.
 
-The installer writes the file on the first install (with `copycord config init`, which you can also run yourself), with every key set to its default, and never overwrites it afterwards. `PASSWORD` is random, and the backups go to `data/backups` in the Copycord home. On Linux, for a user named `alice`:
+## Keys
+
+An empty value, such as `TZ=`, means the default.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `PASSWORD` | A random password | Dashboard password. Always required. |
+| `ADMIN_PORT` | `8080` | Dashboard port. |
+| `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens. `127.0.0.1` allows only this computer; `0.0.0.0` opens it to your network and requires your own `PASSWORD`. See [Security defaults](/docs/configuration/security). |
+| `TZ` | `UTC` | Time zone for scheduled backups and export timestamps. |
+| `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`. The value saved in the dashboard wins. |
+| `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
+| `BACKUP_DIR` | `<data dir>/backups` | Folder for the daily database backups. |
+| `BACKUP_AT` | `03:17` | Time of the daily backup, as `HH:MM`. |
+| `BACKUP_RETAIN` | `14` | Number of daily backups to keep. |
+| `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update check on start. |
+
+The [CLI reference](/docs/cli#env-file) also covers `SECRET_KEY` and the `BACKFILL_*` and `FORWARDING_*` tuning keys.
+
+## The default file
+
+The installer writes the file on the first install, with every key at its default, and never overwrites it. You can write it yourself with `copycord config init`. On Linux, for a user named `alice`:
 
 ```ini title="~/.copycord/.env"
 # Copycord settings. Everything else is in the dashboard.
@@ -76,72 +124,10 @@ BACKUP_RETAIN=14
 COPYCORD_NO_UPDATE_CHECK=0
 ```
 
-An empty value, such as `TZ=`, means the default. The dashboard always asks for the password. If `PASSWORD` is empty or missing, `copycord run` makes a random one, saves it in this file and shows it once. In Docker, Copycord does not start until you set `PASSWORD`.
+## The dashboard password
 
-:::note The dashboard password
-The installer writes a random `PASSWORD` into a new `.env` and shows it once; `copycord config get PASSWORD --show-secrets` prints it again. `copycord doctor --fix` also writes a random one when it recreates a missing `.env`. A `.env` from an older install can still have the old default `copycord`: change it, since anyone who can reach the dashboard and knows the default can read your tokens.
+The installer and `copycord doctor --fix` write a random `PASSWORD` when they create the file. If `PASSWORD` is empty or missing, `copycord run` creates a random one, saves it in the file and shows it once. After `copycord config unset PASSWORD`, the next start creates a new one. In Docker, Copycord does not start until you set `PASSWORD`.
+
+:::warning
+A `.env` from an older install can still have the password `copycord`. Change it: anyone who can reach the dashboard and knows that password can read your tokens.
 :::
-
-## Change a setting
-
-Edit the line in the file, or let `copycord config set` do it for you. Then restart Copycord so it reads the file again.
-
-<Tabs groupId="os" queryString>
-<TabItem value="unix" label="Linux / macOS" default>
-
-```bash title="Terminal"
-nano ~/.copycord/.env
-# or
-copycord config set PASSWORD 'your-new-password'
-
-copycord restart
-```
-
-</TabItem>
-<TabItem value="windows" label="Windows">
-
-```powershell title="PowerShell"
-notepad "$HOME\.copycord\.env"
-# or
-copycord config set PASSWORD 'your-new-password'
-
-copycord restart
-```
-
-</TabItem>
-<TabItem value="docker" label="Docker">
-
-```yaml title="docker-compose.yml"
-    environment:
-      - PASSWORD=your-new-password
-```
-
-```bash title="Terminal"
-docker compose up -d
-```
-
-</TabItem>
-</Tabs>
-
-`copycord restart` restarts the [service](/docs/cli#copycord-service). If Copycord runs in a terminal, press **Ctrl+C** and run `copycord run` again instead.
-
-`copycord config set` updates the key's line in place and keeps your comments. `copycord config get PASSWORD` prints `********` (add `--show-secrets` to see it). After `copycord config unset PASSWORD`, the next start makes a new random password.
-
-Variables set in the real environment win over the file, for example `ADMIN_PORT=9060 copycord run`.
-
-## The keys
-
-| Key | Default | What it does |
-|-----|---------|--------------|
-| `PASSWORD` | a random password from the installer | Dashboard password; always required. |
-| `ADMIN_PORT` | `8080` | Dashboard port. |
-| `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens: `127.0.0.1` is this computer only, `0.0.0.0` opens it to your network (then a real `PASSWORD` is required). See [Security defaults](/docs/configuration/security). |
-| `TZ` | `UTC` | Time zone for scheduled backups and export timestamps. |
-| `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; the dashboard's value wins once it is saved. |
-| `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
-| `BACKUP_DIR` | `<data dir>/backups` | Where the daily database backups go. |
-| `BACKUP_AT` | `03:17` | Time of the daily backup, HH:MM. |
-| `BACKUP_RETAIN` | `14` | How many daily backups to keep. |
-| `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update check on start. |
-
-`copycord config set` and `get` also know `SECRET_KEY`, which is not in the file: Copycord keeps its own key in `secret.key` in the data folder. The [CLI reference](/docs/cli#env-file) covers it and the rarely needed `BACKFILL_*` and `FORWARDING_*` tuning keys.

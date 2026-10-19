@@ -8,155 +8,118 @@ import TabItem from '@theme/TabItem';
 
 # Docker Install
 
-Docker runs Copycord with everything it needs. Use it if you already run your apps with Docker; otherwise the [one-command installer](/docs/getting-started/quick-start) is simpler.
+Run Copycord in a Docker container. Use this if you already run your apps with Docker; otherwise the [Quick Start](/docs/getting-started/quick-start) installer is simpler.
 
 ## Install Docker
 
 <Tabs groupId="os" queryString>
 <TabItem value="unix" label="Linux / macOS" default>
 
-On Linux (Ubuntu, Debian and most others):
+On Linux (Ubuntu, Debian and most others), run:
 
 ```bash title="Terminal"
 curl -fsSL https://get.docker.com | sh
-docker --version
-docker compose version
 ```
 
-On macOS, install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop) and follow the wizard.
+On macOS, install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop).
 
 </TabItem>
 <TabItem value="windows" label="Windows">
 
-Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop), follow the wizard and restart if asked.
+Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop) and restart if asked.
 
 </TabItem>
 <TabItem value="docker" label="Docker">
 
-Docker is already installed. Continue below.
+Docker is already installed. Continue with the next section.
 
 </TabItem>
 </Tabs>
 
-## Set up Copycord
+To check the install, run `docker compose version`.
 
-### 1. Create the project folder
+## Start Copycord
 
-Create a new folder for Copycord and add the `docker-compose.yml` file:
+1. Create a folder named `copycord`.
+2. In that folder, create a file named `docker-compose.yml` with this content, and put your own password after `PASSWORD=`:
 
-```
-copycord/
-├── docker-compose.yml
-└── data/              ← created automatically
-```
+   ```yaml title="docker-compose.yml"
+   services:
+     copycord:
+       image: ghcr.io/copycord/copycord:latest # or a release tag, such as v4.0.0
+       container_name: copycord
+       environment:
+         - PASSWORD=  # required
+       ports:
+         - '8080:8080'
+       volumes:
+         - ./data:/data
+       restart: unless-stopped
+   ```
 
-### 2. Create docker-compose.yml
+3. In the same folder, start the container:
 
-Create a file named `docker-compose.yml` with the following content. Copycord runs as one container with the dashboard, server and client together:
+   ```bash title="Terminal"
+   docker compose up -d
+   ```
 
-```yaml title="docker-compose.yml"
-services:
-  copycord:
-    image: ghcr.io/copycord/copycord:latest # pinning a release tag (e.g. v4.0.0) is recommended
-    container_name: copycord
-    environment:
-      - PASSWORD=  # set your own password; required in Docker
-    ports:
-      - '8080:8080'       # change the left port if 8080 is taken (e.g. "9060:8080")
-    volumes:
-      - ./data:/data
-    restart: unless-stopped
-```
+   Docker downloads the image and starts Copycord. Your data is stored in the `data` folder next to `docker-compose.yml`.
 
-:::tip Customizing the password
-Put your own password after `PASSWORD=`. The container listens on every network (`DASHBOARD_HOST=0.0.0.0`), so Copycord will not start while the password is empty or still `copycord`. If another layer already protects the dashboard, `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check.
-:::
+4. Open `http://localhost:8080`, log in with your `PASSWORD` and continue with [First Run](/docs/getting-started/first-run).
 
-:::note Non-root user and volume ownership
-Copycord runs as a non-root user (`copycord`, uid and gid 1000). The container starts as root only to give `./data` to uid 1000, which also fixes a folder left root-owned by an older image that ran as root, then switches to that user. On a volume where ownership cannot be changed (Windows Docker Desktop bind mounts), Copycord keeps running as root, as v3 did.
+The container accepts connections from every network, so Copycord does not start while `PASSWORD` is empty or `copycord`. If another layer, such as a reverse proxy with its own login, already protects the dashboard, `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check.
 
-If you start the container as a non-root user yourself (`user:` in compose) and Copycord exits with "is not writable", fix it once on the host:
+## Manage the container
 
-```bash
-sudo chown -R 1000:1000 ./data
-```
-:::
+Run these commands in the folder with `docker-compose.yml`.
 
-:::note Upgrading from v3
-v3 used three services (`admin`, `server`, `client`) with a `ROLE` variable. Copycord v4 is this one service and refuses to start while `ROLE` is set. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
-:::
+| Task | Command |
+|------|---------|
+| Check that it runs | `docker compose ps` |
+| Follow the log | `docker compose logs -f` |
+| Stop | `docker compose down` |
+| Start or apply a change to `docker-compose.yml` | `docker compose up -d` |
 
-### 3. Launch Copycord
-
-Open a terminal in the folder containing `docker-compose.yml` and run:
-
-```bash
-docker compose up -d
-```
-
-This pulls the Copycord image and starts the container. The dashboard will be available at:
-
-**http://localhost:8080**
-
-### Verify it's running
-
-```bash
-docker compose ps
-```
-
-You should see one container running: `copycord`.
-
-## Managing Copycord
-
-### View logs
-
-```bash
-docker compose logs -f
-```
-
-This shows the dashboard's log plus warnings and errors from the server and client, each line tagged `[admin]`, `[server]` or `[client]`. The full server and client logs are in `./data/server.out` and `./data/client.out` (the member scraper writes `./data/scraper.out`) and on the dashboard's Logs page. See [Logs](/docs/dashboard/system#where-logs-go).
-
-### Run CLI commands
-
-The [`copycord` command](/docs/cli) is installed inside the container. For example, to run the checks, read a setting or back up the database:
-
-```bash
-docker compose exec copycord /opt/venvs/copycord/bin/copycord doctor
-docker compose exec copycord /opt/venvs/copycord/bin/copycord config get LOG_LEVEL
-docker compose exec copycord /opt/venvs/copycord/bin/copycord backup
-```
-
-To restore a backup, see [`copycord restore`](/docs/cli#copycord-restore), which runs in a one-off container while Copycord is stopped. `copycord update` and `copycord service` are not used with Docker; update by pulling a new image as shown below.
-
-### Stop Copycord
-
-```bash
-docker compose down
-```
-
-Or use **Docker Desktop** on Windows/macOS to stop the container from the GUI.
+The log shows the dashboard's lines and the warnings and errors from the server and client, tagged `[admin]`, `[server]` or `[client]`. The full logs are on the dashboard's **Logs** page and in `data/server.out`, `data/client.out` and `data/scraper.out`. See [Where logs go](/docs/dashboard/system#where-logs-go).
 
 ### Update Copycord
 
-1. If you pinned a release tag, edit `docker-compose.yml` and change it to the [latest release](https://github.com/Copycord/Copycord/releases)
-2. Pull and restart:
+1. If you pinned a release tag, change it in `docker-compose.yml` to the [latest release](https://github.com/Copycord/Copycord/releases).
+2. Pull the new image and restart:
 
-```bash
-docker compose pull
-docker compose up -d
-```
+   ```bash title="Terminal"
+   docker compose pull
+   docker compose up -d
+   ```
 
 ### Change the dashboard port
 
-Edit `docker-compose.yml` and change the port mapping on the `copycord` service:
+To use another port, change the left number of the port mapping, then run `docker compose up -d`:
 
-```yaml
-ports:
-  - '9060:8080'  # dashboard now at http://localhost:9060
+```yaml title="docker-compose.yml"
+    ports:
+      - '9060:8080'  # dashboard at http://localhost:9060
 ```
 
-Then restart: `docker compose up -d`
+### Run copycord commands
 
-## Next steps
+The [`copycord` command](/docs/cli) is installed in the container. To run it, prefix it with `docker compose exec copycord /opt/venvs/copycord/bin/`:
 
-Open **http://localhost:8080**, log in with the `PASSWORD` you set and continue with [First Run](/docs/getting-started/first-run).
+```bash title="Terminal"
+docker compose exec copycord /opt/venvs/copycord/bin/copycord doctor
+docker compose exec copycord /opt/venvs/copycord/bin/copycord backup
+```
+
+To restore a backup, see [`copycord restore`](/docs/cli#copycord-restore). `copycord update` and `copycord service` do not apply to Docker.
+
+## File ownership
+
+Copycord runs as the user `copycord` (uid and gid 1000). The container starts as root only to give the `data` folder to that user, then switches to it. Where ownership cannot be changed, such as Docker Desktop bind mounts on Windows, Copycord keeps running as root.
+
+If you set `user:` in the compose file and Copycord exits with "is not writable", give the folder to uid 1000 once on the host:
+
+```bash title="Terminal"
+sudo chown -R 1000:1000 ./data
+```
+
+If you ran Copycord v3 with Docker, see [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
