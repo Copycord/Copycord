@@ -357,6 +357,34 @@ class TestHeartbeat:
             assert ops[i + 1] == 40, ops
 
     @pytest.mark.asyncio
+    async def test_session_id_rotates_every_30_minutes_without_op41(self, monkeypatch):
+        monkeypatch.setattr(sc_gateway, "TIME_SPENT_INTERVAL", 0.05)
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws)
+        first_id = client.heartbeat_session_id
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: client.heartbeat_session_id != first_id)
+        await stop(client, task)
+
+        op41 = ws.frames(41)
+        assert len(op41) == 1, "op 41 goes out on connect only while unfocused"
+        assert op41[0]["d"]["session_id"] == first_id
+        from copycord.common import selfbot_headers
+
+        assert selfbot_headers._HEARTBEAT_SESSIONS.get(TOKEN) == client.heartbeat_session_id
+
+    @pytest.mark.asyncio
+    async def test_op41_timestamp_is_when_the_id_was_made(self):
+        ws = FakeWS([hello()])
+        client, _ = make_client(ws)
+        made = client.heartbeat_session_started
+        await asyncio.sleep(0.01)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(41))
+        await stop(client, task)
+        assert ws.frames(41)[0]["d"]["initialization_timestamp"] == made
+
+    @pytest.mark.asyncio
     async def test_server_heartbeat_request_is_answered(self):
         ws = FakeWS([hello(), {"op": 1, "d": None}])
         client, _ = make_client(ws)

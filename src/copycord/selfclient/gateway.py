@@ -389,6 +389,8 @@ class GatewayClient:
 
         # Per client, not per socket. Shared with the REST super-properties on READY.
         self.heartbeat_session_id = str(uuid.uuid4())
+        # When the id was made: op 41's initialization_timestamp.
+        self.heartbeat_session_started = int(time.time() * 1000)
 
         self._guild_ids: List[str] = []
         self._subscribed_guilds: set = set()
@@ -839,9 +841,20 @@ class GatewayClient:
     # OP 41: UPDATE_TIME_SPENT_SESSION_ID
 
     async def _time_spent_loop(self) -> None:
+        # The id is regenerated every 30 minutes. op 41 itself repeats only while
+        # the client is focused or in a call, and Copycord is neither, so the
+        # repeat sends nothing; the new id goes out in the super properties.
         while True:
             await asyncio.sleep(TIME_SPENT_INTERVAL)
-            await self._send_time_spent()
+            self._rotate_heartbeat_session()
+
+    def _rotate_heartbeat_session(self) -> None:
+        self.heartbeat_session_id = str(uuid.uuid4())
+        self.heartbeat_session_started = int(time.time() * 1000)
+        try:
+            fingerprint.set_heartbeat_session_id(self.token, self.heartbeat_session_id)
+        except Exception as e:  # the REST headers keep the old id
+            log.debug("heartbeat session id update failed: %r", e)
 
     async def _send_time_spent(self) -> None:
         """op 41, then the op 40 the web client always sends with it."""
@@ -850,7 +863,7 @@ class GatewayClient:
             {
                 "op": GatewayOp.UPDATE_TIME_SPENT_SESSION_ID,
                 "d": {
-                    "initialization_timestamp": int(time.time() * 1000),
+                    "initialization_timestamp": self.heartbeat_session_started,
                     "session_id": self.heartbeat_session_id,
                     "client_launch_id": self._gateway_properties().get("client_launch_id"),
                 },
