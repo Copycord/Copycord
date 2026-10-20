@@ -17,7 +17,7 @@ line, appended and flushed as it happens.
 
 What is recorded is what Copycord hands its transports: the header dict given
 to curl_cffi (its impersonation profile adds defaults and fixes the order on the
-wire; wire_probe.py records that side), the JSON bodies, every gateway frame
+wire; wire_probe.py adds a "wire_probe" record of that side), the JSON bodies, every gateway frame
 sent and every one received after zlib-stream decoding. X-Super-Properties stays
 base64 in the headers, as Chrome sends it and discord-capture records it, and is
 also given decoded as superProperties.
@@ -552,6 +552,16 @@ class TrafficRecorder:
             )
         except Exception as e:
             logger.debug("traffic capture ws_closed failed for %s: %r", self.id, e)
+
+    # what arrived at the echo service (wire_probe.py)
+
+    def wire_probe(self, event: str, result: Dict[str, Any]) -> None:
+        """One wire_probe record: the gateway event that triggered it and the
+        probe's result, already scrubbed of the token and proxy credentials."""
+        try:
+            self._emit("wire_probe", {"event": event, **(result or {})})
+        except Exception as e:
+            logger.debug("traffic capture wire_probe failed for %s: %r", self.id, e)
 
     # lifecycle
 

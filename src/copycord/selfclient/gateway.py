@@ -460,8 +460,7 @@ class GatewayClient:
         self._proxy_in_use: Optional[str] = None
         self.session_id: Optional[str] = None
         self.resume_url: Optional[str] = None
-        # What the last connection used, for the connect record (wire_probe.py).
-        self.connected_url: Optional[str] = None
+        # The properties the last IDENTIFY sent.
         self.identify_properties: Optional[Dict[str, Any]] = None
         # For science's ready_payload_received: (json bytes, zlib bytes) of the last
         # IDENTIFY, and (bytes received, json chars, unpack ms, received at ms) of
@@ -689,7 +688,6 @@ class GatewayClient:
         )
 
         self.connect_count += 1
-        self.connected_url = url
         ws = await self._open(url, proxy)
         self._proxy_in_use = proxy
         self._ws = ws

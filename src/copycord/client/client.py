@@ -739,11 +739,8 @@ class ClientListener:
                 logger.debug("[status] heartbeat publish failed", exc_info=True)
 
     def _record_wire(self, event: str) -> None:
-        """Record what Discord sees from this account (client_headers.json), in the background."""
-        bot = self.bot
-        wire_probe.schedule_connect_record(
-            getattr(bot, "token", None), getattr(bot, "gateway", None), event=event
-        )
+        """Record what Discord sees from this account (dev traffic capture), in the background."""
+        wire_probe.schedule_connect_record(getattr(self.bot, "token", None), event=event)
 
     async def on_ready(self):
         self._record_wire("READY")

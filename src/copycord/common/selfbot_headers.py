@@ -28,9 +28,7 @@ from copycord.common.exit_timezone import (
     note_token_proxy as _note_token_proxy,
     timezone_for as _timezone_for,
 )
-from copycord.common.env import is_dev
 from copycord.common.http_session import shared_session
-from copycord.common.paths import data_dir
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
 
 try:
@@ -140,95 +138,9 @@ async def _scrape_build_number_from_web(
     return None
 
 
-# The last build number scraped from Discord, kept across restarts so a failed
-# scrape falls back to a recent real build instead of the one baked into this
-# release. Only the number is stored: the user agent and browser version follow
-# the TLS impersonation target, which can change with a curl_cffi upgrade.
-#
-# The same file records, per account, the full REST headers the client sends
-# (Authorization left out) and the decoded X-Super-Properties, keyed by the
-# token's short hash, so what Copycord presents to Discord can be read back.
-# On each gateway connect, wire_probe.py adds what arrived at an echo service
-# ("wire": headers, TLS and HTTP/2 fingerprints, exit IP) and the IDENTIFY sent
-# ("gateway"). That part is a record only; nothing loads it back in.
-#
-# The file exists only in dev mode (COPYCORD_ENV=dev). Otherwise it is neither
-# written nor read, and a failed scrape falls back to DEFAULT_BUILD.
-BUILD_CACHE_FILE = "client_headers.json"
+# A scraped number below this is not a real build; a failed scrape keeps the
+# current build (DEFAULT_BUILD until a scrape succeeds).
 _MIN_BUILD = 400000
-
-
-def _build_cache_path():
-    return data_dir() / BUILD_CACHE_FILE
-
-
-def _read_cache() -> dict:
-    """The file's contents, or {} outside dev mode."""
-    if not is_dev():
-        return {}
-    try:
-        data = json.loads(_build_cache_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _write_cache(data: dict) -> None:
-    """Best effort and atomic; a failure only costs the record and the fallback.
-    Outside dev mode nothing is written."""
-    if not is_dev():
-        return
-    path = _build_cache_path()
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        tmp.replace(path)
-    except OSError as e:
-        logger.debug("client headers file write failed: %r", e)
-
-
-def load_cached_build_number() -> int | None:
-    """The cached build number, or None when there is no usable cache."""
-    build = _read_cache().get("build")
-    number = build.get("client_build_number") if isinstance(build, dict) else None
-    if isinstance(number, int) and not isinstance(number, bool) and number >= _MIN_BUILD:
-        return number
-    return None
-
-
-def save_cached_build_number(number: int) -> None:
-    data = _read_cache()
-    data["build"] = {"client_build_number": int(number), "fetched_at": int(time.time())}
-    _write_cache(data)
-
-
-def record_client_headers(token: str) -> None:
-    """Store the headers this account sends now, without its token."""
-    headers = {k: v for k, v in build_headers(token).items() if k.lower() != "authorization"}
-    data = _read_cache()
-    accounts = data.get("accounts") if isinstance(data.get("accounts"), dict) else {}
-    key = _token_log_id(token)
-    # Keep the connect record (wire_probe.py) that shares this entry.
-    entry = accounts.get(key) if isinstance(accounts.get(key), dict) else {}
-    entry.update(
-        {
-            "updated_at": int(time.time()),
-            "headers": headers,
-            "super_properties": _sent_super_props(token),
-        }
-    )
-    accounts[key] = entry
-    data["accounts"] = accounts
-    _write_cache(data)
-
-
-def _use_cached_build() -> None:
-    """After a failed scrape, move to the cached build when it is newer than the current one."""
-    cached = load_cached_build_number()
-    if cached and cached > int(get_build_info().get("client_build_number") or 0):
-        logger.info("Using cached Discord build: %s", cached)
-        set_build_info({"client_build_number": cached})
 
 
 async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> dict:
@@ -238,7 +150,6 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
     try:
         scraped = await _scrape_build_number_from_web(sess)
         if not scraped or scraped < _MIN_BUILD:
-            _use_cached_build()
             logger.debug(
                 "build number unresolved; keeping %s",
                 get_build_info().get("client_build_number"),
@@ -248,11 +159,9 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
         logger.info("Fetched latest Discord build: %s", scraped)
         if scraped != get_build_info().get("client_build_number"):
             set_build_info({"client_build_number": scraped})
-        save_cached_build_number(scraped)
         return get_build_info()
     except Exception as e:
         logger.debug("build-info fetch failed: %r", e)
-        _use_cached_build()
         return get_build_info()
 
 
@@ -417,10 +326,6 @@ def _fingerprint(token: str) -> dict:
     if fp is None:
         fp = make_fingerprint(token)
         _FINGERPRINT_CACHE[token] = fp
-        try:
-            record_client_headers(token)
-        except Exception as e:  # the record must never break a request
-            logger.debug("client headers record failed for %s: %r", _token_log_id(token), e)
     return fp
 
 
@@ -430,14 +335,7 @@ _HEARTBEAT_SESSIONS: dict[str, str] = {}
 def set_heartbeat_session_id(token: str, session_id: str | None) -> None:
     """Record the heartbeat session id a gateway connection just produced."""
     if session_id:
-        new_id = str(session_id)
-        changed = _HEARTBEAT_SESSIONS.get(token) != new_id
-        _HEARTBEAT_SESSIONS[token] = new_id
-        if changed:
-            try:
-                record_client_headers(token)  # show the id now being sent
-            except Exception as e:  # the record must never break the caller
-                logger.debug("client headers record failed for %s: %r", _token_log_id(token), e)
+        _HEARTBEAT_SESSIONS[token] = str(session_id)
     else:
         _HEARTBEAT_SESSIONS.pop(token, None)
 

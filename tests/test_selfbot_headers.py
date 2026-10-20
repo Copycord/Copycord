@@ -17,7 +17,7 @@ from copycord.common import selfbot_headers as sh
 @pytest.fixture(autouse=True)
 def _restore_build(tmp_path, monkeypatch):
     """Snapshot and restore the module-global build so tests don't leak state,
-    and keep the build cache in a temp data dir. Not dev mode unless a test sets it."""
+    and point the data dir at a temp dir. Not dev mode unless a test sets it."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.delenv("COPYCORD_ENV", raising=False)
     original = sh.get_build_info()
@@ -311,171 +311,23 @@ class TestRefreshBuildInfo:
         assert out["client_build_number"] == before
 
 
-class TestBuildCache:
-    """The last scraped build is kept in <data dir>/client_headers.json (dev mode)."""
-
-    @pytest.fixture(autouse=True)
-    def _dev(self, monkeypatch):
-        monkeypatch.setenv("COPYCORD_ENV", "dev")
-
-    @pytest.mark.asyncio
-    async def test_a_scraped_build_is_cached(self, tmp_path):
-        await sh.refresh_build_info(_ScrapeSession(build=610001))
-        data = json.loads((tmp_path / sh.BUILD_CACHE_FILE).read_text())
-        assert data["build"]["client_build_number"] == 610001
-        assert set(data["build"]) == {"client_build_number", "fetched_at"}
-
-    @pytest.mark.asyncio
-    async def test_failed_scrape_falls_back_to_the_cached_build(self):
-        sh.save_cached_build_number(sh.DEFAULT_BUILD["client_build_number"] + 5000)
-        out = await sh.refresh_build_info(_ScrapeSession(raise_exc=RuntimeError("offline")))
-        assert out["client_build_number"] == sh.DEFAULT_BUILD["client_build_number"] + 5000
-
-    @pytest.mark.asyncio
-    async def test_unresolved_scrape_falls_back_to_the_cached_build(self):
-        sh.save_cached_build_number(sh.DEFAULT_BUILD["client_build_number"] + 7)
-        out = await sh.refresh_build_info(_ScrapeSession(asset_body="nothing useful here"))
-        assert out["client_build_number"] == sh.DEFAULT_BUILD["client_build_number"] + 7
-
-    @pytest.mark.asyncio
-    async def test_an_older_cache_never_replaces_a_newer_build(self):
-        sh.set_build_info({"client_build_number": 650000})
-        sh.save_cached_build_number(620000)
-        out = await sh.refresh_build_info(_ScrapeSession(build=1234))
-        assert out["client_build_number"] == 650000
-
-    @pytest.mark.parametrize(
-        "body", ["not json", "[]", '{"build": []}', '{"build": {"client_build_number": "610000"}}',
-                 '{"build": {"client_build_number": 12}}', '{"build": {"client_build_number": true}}']
-    )
-    def test_a_bad_cache_is_ignored(self, tmp_path, body):
-        (tmp_path / sh.BUILD_CACHE_FILE).write_text(body)
-        assert sh.load_cached_build_number() is None
-
-    def test_no_cache_file(self):
-        assert sh.load_cached_build_number() is None
-
-    def test_cache_write_failure_is_quiet(self, monkeypatch, tmp_path):
-        blocker = tmp_path / "file"
-        blocker.write_text("x")
-        monkeypatch.setenv("DATA_DIR", str(blocker / "sub"))
-        sh.save_cached_build_number(610000)  # must not raise
-        assert sh.load_cached_build_number() is None
-
-
-class TestClientHeadersRecord:
-    """Each account's full REST headers are recorded, without its token (dev mode)."""
+class TestNoBuildFile:
+    """Nothing about builds or headers is kept on disk, dev mode or not; a failed
+    scrape keeps the current build, DEFAULT_BUILD until a scrape succeeds."""
 
     TOKEN = "record-token-abc.def.ghi"
 
-    @pytest.fixture(autouse=True)
-    def _fresh_fingerprints(self, monkeypatch):
-        monkeypatch.setenv("COPYCORD_ENV", "dev")
-        sh.set_build_info(sh.get_build_info())  # clears the per-token fingerprint cache
-
-    def _file(self, tmp_path):
-        return json.loads((tmp_path / sh.BUILD_CACHE_FILE).read_text())
-
-    def test_first_use_records_the_headers_without_the_token(self, tmp_path):
-        sent = sh.build_headers(self.TOKEN)
-        raw = (tmp_path / sh.BUILD_CACHE_FILE).read_text()
-        assert self.TOKEN not in raw
-        entry = self._file(tmp_path)["accounts"][sh._token_log_id(self.TOKEN)]
-        expected = {k: v for k, v in sent.items() if k != "Authorization"}
-        assert entry["headers"] == expected
-        assert "Authorization" not in entry["headers"]
-        assert entry["super_properties"] == json.loads(base64.b64decode(sent["X-Super-Properties"]))
-
-    def test_accounts_and_build_live_side_by_side(self, tmp_path):
-        sh.save_cached_build_number(612345)
-        sh.build_headers(self.TOKEN)
-        sh.build_headers("other-token-xyz")
-        data = self._file(tmp_path)
-        assert data["build"]["client_build_number"] == 612345
-        assert set(data["accounts"]) == {sh._token_log_id(self.TOKEN), sh._token_log_id("other-token-xyz")}
-
-    def test_a_new_build_rerecords_on_next_use(self, tmp_path):
-        sh.build_headers(self.TOKEN)
-        sh.set_build_info({"client_build_number": 655555})
-        sh.build_headers(self.TOKEN)
-        entry = self._file(tmp_path)["accounts"][sh._token_log_id(self.TOKEN)]
-        assert entry["super_properties"]["client_build_number"] == 655555
-
-    def test_a_heartbeat_id_refreshes_the_snapshot(self, tmp_path):
-        sh.build_headers(self.TOKEN)
-        key = sh._token_log_id(self.TOKEN)
-        data = self._file(tmp_path)
-        data["accounts"][key]["wire"] = {"seen": 1}
-        data["accounts"][key]["gateway"] = {"seen": 2}
-        sh._write_cache(data)
-        sh.set_heartbeat_session_id(self.TOKEN, "hb-123")
-        try:
-            entry = self._file(tmp_path)["accounts"][key]
-            assert entry["super_properties"]["client_heartbeat_session_id"] == "hb-123"
-            decoded = json.loads(base64.b64decode(entry["headers"]["X-Super-Properties"]))
-            assert decoded == entry["super_properties"]
-            assert "Authorization" not in entry["headers"]
-            assert entry["wire"] == {"seen": 1}
-            assert entry["gateway"] == {"seen": 2}
-            sent = sh.build_headers(self.TOKEN)
-            assert {k: v for k, v in sent.items() if k != "Authorization"} == entry["headers"]
-        finally:
-            sh.set_heartbeat_session_id(self.TOKEN, None)
-
-    def test_an_unchanged_heartbeat_id_is_not_rerecorded(self, monkeypatch):
-        sh.build_headers(self.TOKEN)
-        calls = []
-        monkeypatch.setattr(sh, "record_client_headers", lambda token: calls.append(token))
-        try:
-            sh.set_heartbeat_session_id(self.TOKEN, "hb-1")
-            sh.set_heartbeat_session_id(self.TOKEN, "hb-1")
-            assert calls == [self.TOKEN]
-            sh.set_heartbeat_session_id(self.TOKEN, "hb-2")
-            assert calls == [self.TOKEN, self.TOKEN]
-        finally:
-            sh.set_heartbeat_session_id(self.TOKEN, None)
-
-    def test_a_heartbeat_record_failure_does_not_propagate(self, monkeypatch):
-        def boom(token):
-            raise RuntimeError("disk gone")
-        sh.build_headers(self.TOKEN)
-        monkeypatch.setattr(sh, "record_client_headers", boom)
-        try:
-            sh.set_heartbeat_session_id(self.TOKEN, "hb-9")
-            assert sh._HEARTBEAT_SESSIONS[self.TOKEN] == "hb-9"
-        finally:
-            sh.set_heartbeat_session_id(self.TOKEN, None)
-
-    def test_a_record_failure_never_breaks_a_request(self, monkeypatch):
-        def boom(token):
-            raise RuntimeError("disk gone")
-        monkeypatch.setattr(sh, "record_client_headers", boom)
-        sh.set_build_info(sh.get_build_info())  # clears the fingerprint cache
-        assert sh.build_headers(self.TOKEN)["Authorization"] == self.TOKEN
-
-
-class TestOutsideDev:
-    """Outside dev mode client_headers.json is never written or read."""
-
-    TOKEN = "record-token-abc.def.ghi"
-
-    @pytest.fixture(autouse=True, params=[None, "", "prod", "development"])
-    def _not_dev(self, request, monkeypatch):
+    @pytest.fixture(autouse=True, params=[None, "dev", "prod"])
+    def _mode(self, request, monkeypatch):
         if request.param is None:
             monkeypatch.delenv("COPYCORD_ENV", raising=False)
         else:
             monkeypatch.setenv("COPYCORD_ENV", request.param)
-        sh.set_build_info(sh.get_build_info())  # clears the per-token fingerprint cache
+        sh.set_build_info(dict(sh.DEFAULT_BUILD))  # also clears the per-token fingerprint cache
 
     @pytest.mark.asyncio
     async def test_nothing_is_written(self, tmp_path):
         await sh.refresh_build_info(_ScrapeSession(build=610001))
-        sh.save_cached_build_number(610002)
-        sh.build_headers(self.TOKEN)
-        sh._write_cache({"build": {"client_build_number": 610003}})
-        assert list(tmp_path.iterdir()) == []
-
-    def test_a_heartbeat_id_writes_nothing(self, tmp_path):
         sh.build_headers(self.TOKEN)
         try:
             sh.set_heartbeat_session_id(self.TOKEN, "hb-123")
@@ -484,16 +336,29 @@ class TestOutsideDev:
             sh.set_heartbeat_session_id(self.TOKEN, None)
 
     @pytest.mark.asyncio
-    async def test_the_cache_is_not_read(self, tmp_path):
-        sh.set_build_info(dict(sh.DEFAULT_BUILD))
+    async def test_a_leftover_file_is_not_read(self, tmp_path):
         cached = sh.DEFAULT_BUILD["client_build_number"] + 5000
-        (tmp_path / sh.BUILD_CACHE_FILE).write_text(
+        (tmp_path / "client_headers.json").write_text(
             json.dumps({"build": {"client_build_number": cached, "fetched_at": 1}})
         )
-        assert sh._read_cache() == {}
-        assert sh.load_cached_build_number() is None
         out = await sh.refresh_build_info(_ScrapeSession(raise_exc=RuntimeError("offline")))
         assert out["client_build_number"] == sh.DEFAULT_BUILD["client_build_number"]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_scrape_keeps_a_scraped_build(self):
+        await sh.refresh_build_info(_ScrapeSession(build=650000))
+        out = await sh.refresh_build_info(_ScrapeSession(asset_body="nothing useful here"))
+        assert out["client_build_number"] == 650000
+
+    def test_a_heartbeat_id_reaches_the_headers(self):
+        sh.set_heartbeat_session_id(self.TOKEN, "hb-1")
+        try:
+            _, props = _props(self.TOKEN)
+            assert props["client_heartbeat_session_id"] == "hb-1"
+        finally:
+            sh.set_heartbeat_session_id(self.TOKEN, None)
+        _, props = _props(self.TOKEN)
+        assert "client_heartbeat_session_id" not in props
 
 
 def test_context_properties_encodes_location():
