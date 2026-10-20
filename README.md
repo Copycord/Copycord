@@ -21,7 +21,7 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 <br>
 
 > [!IMPORTANT]
-> **🚀 Copycord v4 beta is here!** A complete rebuild with a one-command installer, one container instead of three, a brand-new dashboard and a Tasks page for backfills and exports.
+> **🚀 Copycord v4 beta is here!** Install with one command, enjoy a brand-new dashboard and run backfills and exports from the new Tasks page. Your v3 setup carries over.
 >
 > <details>
 > <summary><b>How to join the beta</b></summary>
@@ -39,22 +39,6 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 > Coming from v3? Before the first start, copy everything in your old `data` folder into `~/.copycord/data` (Windows: `%USERPROFILE%\.copycord\data`).
 >
 > Then run `copycord run` and open http://localhost:8080. Future betas arrive with `copycord update`.
->
-> **Docker**
-> ```yaml
-> services:
->   copycord:
->     image: ghcr.io/copycord/copycord:beta
->     container_name: copycord
->     environment:
->       - PASSWORD=change-me
->     ports:
->       - '8080:8080'
->     volumes:
->       - ./data:/data
->     restart: unless-stopped
-> ```
-> Coming from v3 Docker? Replace your three services with this one, keep your `./data` folder and run `docker compose up -d --remove-orphans`.
 >
 > Full release notes: [v4.0.0.1](https://github.com/Copycord/Copycord/releases/tag/v4.0.0.1)
 > </details>
