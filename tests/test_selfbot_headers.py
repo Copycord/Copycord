@@ -15,8 +15,10 @@ from copycord.common import selfbot_headers as sh
 
 
 @pytest.fixture(autouse=True)
-def _restore_build():
-    """Snapshot and restore the module-global build so tests don't leak state."""
+def _restore_build(tmp_path, monkeypatch):
+    """Snapshot and restore the module-global build so tests don't leak state,
+    and keep the build cache in a temp data dir."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
     original = sh.get_build_info()
     yield
     sh.set_build_info(original)
@@ -250,6 +252,55 @@ class TestRefreshBuildInfo:
             _ScrapeSession(asset_body="nothing useful here")
         )
         assert out["client_build_number"] == before
+
+
+class TestBuildCache:
+    """The last scraped build is kept in <data dir>/client_build.json."""
+
+    @pytest.mark.asyncio
+    async def test_a_scraped_build_is_cached(self, tmp_path):
+        await sh.refresh_build_info(_ScrapeSession(build=610001))
+        data = json.loads((tmp_path / sh.BUILD_CACHE_FILE).read_text())
+        assert data["client_build_number"] == 610001
+        # Only the number and a timestamp: nothing about the token or the agent.
+        assert set(data) == {"client_build_number", "fetched_at"}
+
+    @pytest.mark.asyncio
+    async def test_failed_scrape_falls_back_to_the_cached_build(self):
+        sh.save_cached_build_number(sh.DEFAULT_BUILD["client_build_number"] + 5000)
+        out = await sh.refresh_build_info(_ScrapeSession(raise_exc=RuntimeError("offline")))
+        assert out["client_build_number"] == sh.DEFAULT_BUILD["client_build_number"] + 5000
+
+    @pytest.mark.asyncio
+    async def test_unresolved_scrape_falls_back_to_the_cached_build(self):
+        sh.save_cached_build_number(sh.DEFAULT_BUILD["client_build_number"] + 7)
+        out = await sh.refresh_build_info(_ScrapeSession(asset_body="nothing useful here"))
+        assert out["client_build_number"] == sh.DEFAULT_BUILD["client_build_number"] + 7
+
+    @pytest.mark.asyncio
+    async def test_an_older_cache_never_replaces_a_newer_build(self):
+        sh.set_build_info({"client_build_number": 650000})
+        sh.save_cached_build_number(620000)
+        out = await sh.refresh_build_info(_ScrapeSession(build=1234))
+        assert out["client_build_number"] == 650000
+
+    @pytest.mark.parametrize(
+        "body", ["not json", "[]", '{"client_build_number": "610000"}', '{"client_build_number": 12}',
+                 '{"client_build_number": true}']
+    )
+    def test_a_bad_cache_is_ignored(self, tmp_path, body):
+        (tmp_path / sh.BUILD_CACHE_FILE).write_text(body)
+        assert sh.load_cached_build_number() is None
+
+    def test_no_cache_file(self):
+        assert sh.load_cached_build_number() is None
+
+    def test_cache_write_failure_is_quiet(self, monkeypatch, tmp_path):
+        blocker = tmp_path / "file"
+        blocker.write_text("x")
+        monkeypatch.setenv("DATA_DIR", str(blocker / "sub"))
+        sh.save_cached_build_number(610000)  # must not raise
+        assert sh.load_cached_build_number() is None
 
 def test_context_properties_encodes_location():
     val = sh.context_properties("chat_input")

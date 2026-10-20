@@ -29,6 +29,7 @@ from copycord.common.exit_timezone import (
     timezone_for as _timezone_for,
 )
 from copycord.common.http_session import shared_session
+from copycord.common.paths import data_dir
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
 
 try:
@@ -138,25 +139,75 @@ async def _scrape_build_number_from_web(
     return None
 
 
+# The last build number scraped from Discord, kept across restarts so a failed
+# scrape falls back to a recent real build instead of the one baked into this
+# release. Only the number is stored: the user agent and browser version follow
+# the TLS impersonation target, which can change with a curl_cffi upgrade.
+BUILD_CACHE_FILE = "client_build.json"
+_MIN_BUILD = 400000
+
+
+def _build_cache_path():
+    return data_dir() / BUILD_CACHE_FILE
+
+
+def load_cached_build_number() -> int | None:
+    """The cached build number, or None when there is no usable cache."""
+    try:
+        data = json.loads(_build_cache_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    number = data.get("client_build_number") if isinstance(data, dict) else None
+    if isinstance(number, int) and not isinstance(number, bool) and number >= _MIN_BUILD:
+        return number
+    return None
+
+
+def save_cached_build_number(number: int) -> None:
+    """Best effort: write the cache atomically; a failure only costs the fallback."""
+    path = _build_cache_path()
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(
+            json.dumps({"client_build_number": int(number), "fetched_at": int(time.time())}),
+            encoding="utf-8",
+        )
+        tmp.replace(path)
+    except OSError as e:
+        logger.debug("build cache write failed: %r", e)
+
+
+def _use_cached_build() -> None:
+    """After a failed scrape, move to the cached build when it is newer than the current one."""
+    cached = load_cached_build_number()
+    if cached and cached > int(get_build_info().get("client_build_number") or 0):
+        logger.info("Using cached Discord build: %s", cached)
+        set_build_info({"client_build_number": cached})
+
+
 async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> dict:
     """Refresh the shared build number from Discord's live web assets."""
     # Without a caller's session, use the role's shared one (closed on role shutdown).
     sess = session or shared_session()
     try:
         scraped = await _scrape_build_number_from_web(sess)
-        if not scraped or scraped < 400000:
+        if not scraped or scraped < _MIN_BUILD:
+            _use_cached_build()
             logger.debug(
-                "build number unresolved; keeping built-in %s",
-                DEFAULT_BUILD["client_build_number"],
+                "build number unresolved; keeping %s",
+                get_build_info().get("client_build_number"),
             )
             return get_build_info()
 
         logger.info("Fetched latest Discord build: %s", scraped)
         if scraped != get_build_info().get("client_build_number"):
             set_build_info({"client_build_number": scraped})
+        save_cached_build_number(scraped)
         return get_build_info()
     except Exception as e:
         logger.debug("build-info fetch failed: %r", e)
+        _use_cached_build()
         return get_build_info()
 
 
