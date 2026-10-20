@@ -471,7 +471,6 @@ class TestResume:
 
         assert second.sent[0]["op"] == 6, "RESUME, not IDENTIFY"
         assert not second.frames(2)
-        assert not second.frames(4), "no op 4 on RESUME"
         assert second.sent[0]["d"] == {"token": TOKEN, "session_id": "sess-1", "seq": 1}
 
         subs = {}
@@ -480,6 +479,73 @@ class TestResume:
         assert set(subs) == {"10", "20"}
         for features in subs.values():
             assert features["typing"] is True and features["threads"] is True
+
+    @pytest.mark.asyncio
+    async def test_resume_sends_the_browser_order(self):
+        first = FakeWS([hello(), ready(guilds=("10", "20")), {"op": 7, "d": None}])
+        second = FakeWS([hello(), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}])
+        client, _ = make_client(first, second)
+        session_id = client.heartbeat_session_id
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: second.frames(37) and client.is_connected)
+        await asyncio.sleep(0.05)
+        await stop(client, task)
+
+        ops = second.ops()
+        assert ops[:4] == [6, 3, 4, 37], "op 6, op 3, op 4, op 37; op 40 waits"
+        assert set(ops[4:]) <= {40}
+        assert list(second.sent[1]["d"].items()) == [
+            ("status", "online"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", True),
+        ]
+        assert list(second.sent[2]["d"].items()) == list(sc_gateway.IDLE_VOICE_STATE.items())
+        assert not second.frames(41), "no op 41 on RESUME"
+        assert client.heartbeat_session_id == session_id, "RESUME keeps the id"
+        assert first.frames(41)[0]["d"]["session_id"] == session_id
+
+    @pytest.mark.asyncio
+    async def test_resume_op37_has_the_full_shape(self):
+        first = FakeWS([hello(), ready(guilds=("10", "20", "30")), {"op": 7, "d": None}])
+        second = FakeWS([hello(), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}])
+        client, _ = make_client(first, second)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: second.frames(37) and client.is_connected)
+        await asyncio.sleep(0.05)
+        await stop(client, task)
+
+        (op37,) = second.frames(37)
+        subs = op37["d"]["subscriptions"]
+        assert list(subs) == ["10", "20", "30"]
+        for features in subs.values():
+            assert list(features.items()) == [
+                ("typing", True),
+                ("threads", True),
+                ("activities", True),
+                ("members", []),
+                ("member_updates", False),
+                ("channels", {}),
+                ("thread_member_lists", []),
+            ]
+        # Fresh connect keeps the short shape.
+        for features in first.frames(37)[0]["d"]["subscriptions"].values():
+            assert list(features) == ["typing", "activities", "threads"]
+
+    @pytest.mark.asyncio
+    async def test_resume_heartbeats_follow_as_backgrounded(self):
+        first = FakeWS([hello(), ready(), {"op": 7, "d": None}])
+        second = FakeWS([hello(50), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}], auto_ack=True)
+        client, _ = make_client(first, second)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: len(second.frames(40)) >= 2)
+        await stop(client, task)
+
+        ops = second.ops()
+        assert ops[:4] == [6, 3, 4, 37]
+        assert set(ops[4:]) == {40}
+        for beat in second.frames(40):
+            assert beat["d"]["qos"] == {"active": False, "ver": 31, "reasons": []}
 
     @pytest.mark.asyncio
     async def test_non_resumable_invalid_session_identifies_fresh(self):
@@ -647,6 +713,17 @@ class TestSubscriptionFrames:
     def test_batches_stay_under_byte_cap(self):
         for frame in build_subscription_frames(_snowflakes(1000)):
             assert len(json.dumps(frame["d"])) <= MAX_SUBSCRIPTION_PAYLOAD
+        full = sc_gateway.RESUME_SUBSCRIPTION_FEATURES
+        frames = build_subscription_frames(_snowflakes(1000), full)
+        assert len(frames) > 1
+        for frame in frames:
+            assert len(json.dumps(frame["d"])) <= MAX_SUBSCRIPTION_PAYLOAD
+
+    def test_resume_shape_lists_are_not_shared(self):
+        (frame,) = build_subscription_frames(["1", "2"], sc_gateway.RESUME_SUBSCRIPTION_FEATURES)
+        subs = frame["d"]["subscriptions"]
+        assert subs["1"]["members"] is not subs["2"]["members"]
+        assert subs["1"]["members"] is not sc_gateway.RESUME_SUBSCRIPTION_FEATURES["members"]
 
     def test_dedupes_and_skips_empty(self):
         frames = build_subscription_frames(["1", 1, None, "", "2", "1"])
@@ -873,6 +950,25 @@ class TestSentFrameLog:
         await stop(client, task)
         assert _sent_lines(caplog)[0] == "op 6 RESUME session=sess-9 seq=12"
         assert TOKEN not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_resume_logs_one_line_per_frame(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="selfclient.gateway")
+        first = FakeWS([hello(), ready(guilds=("1", "2")), {"op": 7, "d": None}])
+        second = FakeWS([hello(), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}])
+        client, _ = make_client(first, second)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: second.frames(37) and client.is_connected)
+        await stop(client, task)
+
+        lines = _sent_lines(caplog)
+        assert lines == [sc_gateway.frame_summary(m) for m in first.sent + second.sent]
+        assert lines[len(first.sent):][:4] == [
+            "op 6 RESUME session=sess-1 seq=1",
+            "op 3 presence status=online afk=True activities=0",
+            "op 4 voice guild=None channel=None flags=2",
+            "op 37 subscribe guilds=2",
+        ]
 
     @pytest.mark.asyncio
     async def test_a_send_on_a_closed_socket_logs_no_sent_line(self, caplog):

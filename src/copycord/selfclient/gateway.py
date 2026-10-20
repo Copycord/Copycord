@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import json
 import logging
 import random
@@ -86,6 +87,18 @@ SUBSCRIPTION_FEATURES = {
     "threads": True,
 }
 
+# What op 37 carries per guild right after a RESUME: the full shape, in the
+# browser's key order (notes2.har). Opening a guild uses the short one above.
+RESUME_SUBSCRIPTION_FEATURES = {
+    "typing": True,
+    "threads": True,
+    "activities": True,
+    "members": [],
+    "member_updates": False,
+    "channels": {},
+    "thread_member_lists": [],
+}
+
 # Discord drops oversized op 37 frames, so batches are split to stay under this.
 MAX_SUBSCRIPTION_PAYLOAD = 15360
 
@@ -125,10 +138,12 @@ def gateway_url(host: str = GATEWAY_HOST, *, zlib_stream: bool = False) -> str:
     return urlunsplit(parts._replace(path=path, query=urlencode(params)))
 
 
-def build_subscription_frames(guild_ids: Iterable[Any]) -> List[Dict[str, Any]]:
+def build_subscription_frames(
+    guild_ids: Iterable[Any], features: Dict[str, Any] = SUBSCRIPTION_FEATURES
+) -> List[Dict[str, Any]]:
     """Batch guild ids into as few op 37 frames as the size cap allows."""
     frames: List[Dict[str, Any]] = []
-    batch: Dict[str, Dict[str, bool]] = {}
+    batch: Dict[str, Dict[str, Any]] = {}
     seen: set = set()
 
     def flush() -> None:
@@ -145,14 +160,14 @@ def build_subscription_frames(guild_ids: Iterable[Any]) -> List[Dict[str, Any]]:
         if gid in seen:
             continue
         seen.add(gid)
-        batch[gid] = dict(SUBSCRIPTION_FEATURES)
+        batch[gid] = copy.deepcopy(features)
         if (
             len(batch) > 1
             and len(json.dumps({"subscriptions": batch})) > MAX_SUBSCRIPTION_PAYLOAD
         ):
             del batch[gid]
             flush()
-            batch[gid] = dict(SUBSCRIPTION_FEATURES)
+            batch[gid] = copy.deepcopy(features)
     flush()
     return frames
 
@@ -798,11 +813,21 @@ class GatewayClient:
         await self._cancel_task("_heartbeat_task")
 
         if self.session_id and self.sequence is not None:
-            # The first beat is jittered, as the gateway docs ask.
-            self._heartbeat_task = asyncio.create_task(
-                self._heartbeat_loop(self._ws, self.heartbeat_interval * random.random())
-            )
+            # The web client's order: op 6, op 3, op 4, op 37, then op 40 a
+            # while later. No op 41: the heartbeat session id carries over.
+            # A headless client is a background tab, so even the first beat
+            # reports inactive.
+            self._qos_foregrounded = False
+            ws = self._ws
             await self._send_resume()
+            await self._send_presence_update()
+            await self._send_voice_state()
+            await self._send_resume_subscriptions()
+            if self._ws is ws:
+                # The first beat is jittered, as the gateway docs ask.
+                self._heartbeat_task = asyncio.create_task(
+                    self._heartbeat_loop(ws, self.heartbeat_interval * random.random())
+                )
         else:
             # The web client's order: op 2, op 4, op 41, op 40. The op 40
             # paired with op 41 is the first beat, so the loop waits a full interval.
@@ -893,6 +918,13 @@ class GatewayClient:
             }
         )
 
+    async def _send_resume_subscriptions(self) -> None:
+        """op 37 in the full shape for every guild the session was subscribed to."""
+        ids = [g for g in self._guild_ids if g in self._subscribed_guilds]
+        ids += sorted(self._subscribed_guilds.difference(ids))
+        for frame in build_subscription_frames(ids, RESUME_SUBSCRIPTION_FEATURES):
+            await self._send(frame)
+
     # OP 41: UPDATE_TIME_SPENT_SESSION_ID
 
     # Sent once per fresh IDENTIFY. The browser repeats op 41 only while
@@ -968,8 +1000,8 @@ class GatewayClient:
             await self.subscribe_guilds(self._guild_ids, force=True)
 
         elif event == "RESUMED":
+            # op 37 already went out right after op 6.
             log.info("RESUMED session=%s seq=%s", self.session_id, self.sequence)
-            await self.subscribe_guilds(self._guild_ids, force=True)
 
         elif event == "GUILD_CREATE":
             gid = data_dict.get("id")
@@ -1074,6 +1106,7 @@ __all__ = [
     "GATEWAY_HOST",
     "CAPABILITIES",
     "SUBSCRIPTION_FEATURES",
+    "RESUME_SUBSCRIPTION_FEATURES",
     "MAX_SUBSCRIPTION_PAYLOAD",
     "RESUME_CLOSE_CODE",
     "ZLIB_SUFFIX",
