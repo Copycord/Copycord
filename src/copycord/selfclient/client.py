@@ -241,6 +241,7 @@ class Client:
                 science = ScienceReporter(self.token, self.http, gateway)
                 # Registered with on(), so it sees READY before the cache does.
                 on_event("READY", science.on_ready)
+                on_event("RESUMED", science.on_resumed)
                 on_new_session(science.on_heartbeat_session)
                 science.start()
                 self.science = science

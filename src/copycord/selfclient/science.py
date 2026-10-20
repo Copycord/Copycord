@@ -12,7 +12,8 @@
 The web client queues events from page load and flushes them once READY gives
 it an ``analytics_token``. Copycord sends the four a browser sends on its own
 from startup through READY: client_heartbeat, session_start_client,
-gateway_connected and ready_payload_received, and client_heartbeat again
+gateway_connected and ready_payload_received; gateway_connected and
+connection_resumed together after a RESUME; and client_heartbeat again
 when a fresh IDENTIFY makes a new heartbeat session id (the id does not
 rotate on a timer). Shapes and key orders follow Mac's
 Chrome 155 capture (2026-10-20). Events tracked before READY carry no
@@ -290,11 +291,20 @@ class ScienceReporter:
         self._failed_attempts += 1
 
     def connected(self, url: str) -> None:
-        """A socket opened: gateway_connected."""
+        """A socket opened: gateway_connected.
+
+        On a socket that will RESUME it waits for connection_resumed, so the
+        two go out in one POST as the browser's do.
+        """
         try:
             now = _now_ms()
             attempt = self._attempt_ms or now
             first = self._first_attempt_ms or attempt
+            gateway = self.gateway
+            resuming = bool(
+                getattr(gateway, "session_id", None)
+                and getattr(gateway, "sequence", None) is not None
+            )
             self.track(
                 "gateway_connected",
                 {
@@ -305,6 +315,7 @@ class ScienceReporter:
                     "duration_ms_since_first_connect_attempt": now - first,
                     "duration_ms_since_connect_attempt_start": now - attempt,
                 },
+                hold=resuming,
             )
             self._connections += 1
             self._connected_ms = now
@@ -312,6 +323,16 @@ class ScienceReporter:
             self._first_attempt_ms = None
         except Exception as exc:
             log.debug("science gateway_connected failed: %r", exc)
+
+    async def on_resumed(self, data: Any) -> None:
+        """RESUMED: connection_resumed, then flush it with the held gateway_connected."""
+        try:
+            # Inferred: notes2.har shows the event on RESUME but no capture has
+            # its properties, so it carries only the keys every event has.
+            self.track("connection_resumed", {}, hold=True)
+            self.flush_soon(0.0)
+        except Exception as exc:
+            log.debug("science RESUMED handling failed: %r", exc)
 
     async def on_ready(self, data: Any) -> None:
         """READY: ready_payload_received, then flush with its analytics token.
@@ -400,8 +421,11 @@ class ScienceReporter:
             "client_viewport_height": height,
         }
 
-    def track(self, event_type: str, properties: Dict[str, Any]) -> Dict[str, Any]:
-        """Queue one event; it goes out with the next flush."""
+    def track(
+        self, event_type: str, properties: Dict[str, Any], *, hold: bool = False
+    ) -> Dict[str, Any]:
+        """Queue one event; it goes out with the next flush. ``hold`` schedules
+        none, for an event that waits for a later one."""
         self.sequence += 1
         props: Dict[str, Any] = {"client_track_timestamp": _now_ms()}
         heartbeat_id = getattr(self.gateway, "heartbeat_session_id", None)
@@ -416,7 +440,7 @@ class ScienceReporter:
         self.queue.append(event)
         if len(self.queue) > MAX_QUEUED:
             del self.queue[: len(self.queue) - MAX_QUEUED]
-        if self.analytics_token and event_type != "ready_payload_received":
+        if self.analytics_token and not hold and event_type != "ready_payload_received":
             self.flush_soon()
         return event
 

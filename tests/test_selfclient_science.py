@@ -481,6 +481,83 @@ class TestNewHeartbeatSession:
         assert super_props(kwargs["headers"])["client_heartbeat_session_id"] == gateway.heartbeat_session_id
 
 
+# resume
+
+
+class TestResume:
+    @pytest.mark.asyncio
+    async def test_resume_posts_gateway_connected_and_connection_resumed_once(self, token):
+        session = FakeSession()
+        first = FakeWS([hello(), ready_frame()])
+        second = FakeWS([hello(), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}])
+        sockets = [first, second]
+
+        async def connector(url, headers, proxy):
+            return sockets.pop(0)
+
+        client = Client(http=HTTPClient(token, session=session), connector=connector, refresh_build=False)
+        await client.login(token)
+        task = asyncio.ensure_future(client.connect())
+        await wait_until(lambda: session.science_posts())
+        gateway = client.gateway
+        gateway.base_reconnect_delay = 0.001
+        gateway.max_reconnect_delay = 0.01
+        client.science.flush_delay = 0.01
+        first_id = gateway.heartbeat_session_id
+        # op 7: reconnect and RESUME.
+        first.queue.put_nowait(json.dumps({"op": 7, "d": None}))
+        await wait_until(lambda: len(session.science_posts()) >= 2)
+        await asyncio.sleep(0.1)
+        await stop(client, task)
+
+        assert second.sent[0]["op"] == 6
+        posts = session.science_posts()
+        assert len(posts) == 2, "one POST for the resume"
+        body = posts[1][2]["json"]
+        assert body["token"] == ANALYTICS_TOKEN
+        events = body["events"]
+        assert [e["type"] for e in events] == ["gateway_connected", "connection_resumed"]
+        assert [e["properties"]["event_sequence_number"] for e in events] == [5, 6]
+        connected, resumed = (e["properties"] for e in events)
+        assert list(connected) == CAPTURE_KEYS["gateway_connected"][:-1] + [
+            "client_uuid", "client_send_timestamp",
+        ]
+        assert connected["is_reconnect"] is True
+        assert connected["gateway_url"] == "wss://gateway-us-east1-b.discord.gg"
+        # Inferred: no capture has connection_resumed's keys, so only the common ones.
+        assert list(resumed) == [
+            "client_track_timestamp",
+            "client_heartbeat_session_id",
+            "event_sequence_number",
+            *COMMON_TAIL,
+            "client_uuid",
+            "client_send_timestamp",
+        ]
+        for props in (connected, resumed):
+            assert props["client_heartbeat_session_id"] == first_id == gateway.heartbeat_session_id
+
+    @pytest.mark.asyncio
+    async def test_a_fresh_connect_does_not_hold_gateway_connected(self):
+        science = sc.ScienceReporter("tok-fresh", None, StubGateway())
+        science.analytics_token = ANALYTICS_TOKEN
+        scheduled = []
+        science.flush_soon = lambda delay=None: scheduled.append(delay)
+        science.connected("wss://gateway.discord.gg/?v=9")
+        assert scheduled == [None]
+
+        gateway = StubGateway()
+        gateway.session_id, gateway.sequence = "sess-1", 4
+        science = sc.ScienceReporter("tok-resume", None, gateway)
+        science.analytics_token = ANALYTICS_TOKEN
+        scheduled = []
+        science.flush_soon = lambda delay=None: scheduled.append(delay)
+        science.connected("wss://gateway-us-east1-b.discord.gg/?v=9")
+        assert scheduled == [], "held for connection_resumed"
+        await science.on_resumed({})
+        assert scheduled == [0.0]
+        assert [e["type"] for e in science.queue] == ["gateway_connected", "connection_resumed"]
+
+
 # the reporter on its own
 
 
