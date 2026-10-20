@@ -29,6 +29,7 @@ from typing import Optional
 from copycord.common.config import Config
 from copycord.common.db import DBManager
 from copycord.server.rate_limiter import RateLimitManager
+from copycord.server import search as message_search
 
 logger = logging.getLogger("server")
 
@@ -89,6 +90,23 @@ def _format_discord_timestamp(value) -> str:
         return f"`{value}`"
 
     return f"<t:{ts}:f> (<t:{ts}:R>)"
+
+
+async def _search_author_autocomplete(actx: discord.AutocompleteContext):
+    """Authors of this clone server's cloned messages. Autocomplete skips cog_check, so the
+    COMMAND_USERS gate is repeated here; anyone else gets no names."""
+    cog = getattr(actx.command, "cog", None)
+    inter = actx.interaction
+    if cog is None or inter is None or inter.guild_id is None:
+        return []
+    user = getattr(inter, "user", None)
+    if user is None or user.id not in cog.allowed_users:
+        return []
+    try:
+        return message_search.author_choices(cog.db, int(inter.guild_id), actx.value or "")
+    except Exception:
+        logger.exception("[search] author autocomplete failed")
+        return []
 
 
 class CloneCommands(commands.Cog):
@@ -302,6 +320,58 @@ class CloneCommands(commands.Cog):
         embed.add_field(name="Client Uptime", value=uptime_str, inline=True)
 
         await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @guild_scoped_slash_command(
+        name="search",
+        description="Find cloned messages by original author, channel, date or attachments.",
+    )
+    async def search(
+        self,
+        ctx: discord.ApplicationContext,
+        author: str = Option(
+            str,
+            description="Original author of the message",
+            required=False,
+            default=None,
+            autocomplete=_search_author_autocomplete,
+        ),
+        channel: discord.abc.GuildChannel = Option(
+            discord.abc.GuildChannel,
+            description="Only messages in this channel or thread",
+            required=False,
+            default=None,
+            channel_types=[
+                discord.ChannelType.text,
+                discord.ChannelType.news,
+                discord.ChannelType.public_thread,
+                discord.ChannelType.private_thread,
+                discord.ChannelType.news_thread,
+            ],
+        ),
+        after: str = Option(
+            str,
+            description="Sent on or after: YYYY-MM-DD, 7d, 24h, today or yesterday (UTC)",
+            required=False,
+            default=None,
+        ),
+        before: str = Option(
+            str,
+            description="Sent on or before: YYYY-MM-DD, 7d, 24h, today or yesterday (UTC)",
+            required=False,
+            default=None,
+        ),
+        has: str = Option(
+            str,
+            description="Only messages with attachments or embeds",
+            required=False,
+            default=None,
+            choices=list(message_search.HAS_CHOICES),
+        ),
+    ):
+        """Pages of cloned messages matching the filters, newest first, with jump links."""
+        await message_search.run_search(
+            self.db, ctx, author=author, channel=channel, after=after, before=before, has=has
+        )
 
     @guild_scoped_slash_command(
         name="block_add",

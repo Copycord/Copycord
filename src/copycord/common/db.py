@@ -946,6 +946,9 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_messages_clone_msg ON messages(cloned_message_id);",
                 "CREATE INDEX IF NOT EXISTS idx_messages_orig_guild ON messages(original_guild_id);",
                 "CREATE INDEX IF NOT EXISTS idx_messages_clone_guild ON messages(cloned_guild_id);",
+                # /search: newest first within one clone guild, and by author within it (also the autocomplete)
+                "CREATE INDEX IF NOT EXISTS idx_messages_clone_guild_ts ON messages(cloned_guild_id, message_ts, original_message_id);",
+                "CREATE INDEX IF NOT EXISTS idx_messages_clone_guild_author ON messages(cloned_guild_id, author_id, message_ts);",
             ],
         )
 
@@ -2733,10 +2736,12 @@ class DBManager:
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
         channel_id: int | None = None,
+        cloned_channel_id: int | None = None,
         author_id: int | None = None,
         created_from: int | None = None,
         created_to: int | None = None,
         has_attachments: bool | None = None,
+        has_embeds: bool | None = None,
     ) -> tuple[list[str], list]:
         where: list[str] = []
         params: list = []
@@ -2759,6 +2764,9 @@ class DBManager:
         if channel_id is not None:
             where.append("m.original_channel_id = ?")
             params.append(int(channel_id))
+        if cloned_channel_id is not None:
+            where.append("m.cloned_channel_id = ?")
+            params.append(int(cloned_channel_id))
         if author_id is not None:
             where.append("m.author_id = ?")
             params.append(int(author_id))
@@ -2772,6 +2780,10 @@ class DBManager:
             where.append("m.attachment_count > 0")
         elif has_attachments is False:
             where.append("COALESCE(m.attachment_count, 0) = 0")
+        if has_embeds is True:
+            where.append("m.embed_count > 0")
+        elif has_embeds is False:
+            where.append("COALESCE(m.embed_count, 0) = 0")
         q = (q or "").strip()
         if q:
             like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -2824,6 +2836,59 @@ class DBManager:
         )
         params.append(int(limit))
         return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def search_messages(
+        self,
+        cloned_guild_id: int,
+        *,
+        limit: int = 10,
+        after: tuple | None = None,
+        **filters,
+    ) -> list[dict]:
+        """One keyset page of a clone guild's cloned messages for /search, newest first. Takes the
+        list_messages filters; rows without a clone message are left out. `after` is the
+        (message_ts, original_message_id) of the last row of the previous page."""
+        where, params = self._message_filters(cloned_guild_id=int(cloned_guild_id), **filters)
+        where.append("m.cloned_message_id IS NOT NULL AND m.cloned_channel_id IS NOT NULL")
+        if after is not None:
+            where.append("(m.message_ts, m.original_message_id) < (?, ?)")
+            params += [int(after[0]), int(after[1])]
+        sql = (
+            "SELECT m.original_message_id, m.cloned_guild_id, m.cloned_channel_id, m.cloned_message_id,"
+            " m.author_id, m.author_name, m.author_username, m.attachment_count, m.embed_count, m.message_ts"
+            " FROM messages m WHERE " + " AND ".join(where)
+            + " ORDER BY m.message_ts DESC, m.original_message_id DESC LIMIT ?"
+        )
+        params.append(int(limit))
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def distinct_authors(self, cloned_guild_id: int, prefix: str = "", limit: int = 25) -> list[dict]:
+        """Authors with cloned messages in this clone guild whose name, username or id starts with
+        `prefix` (any case), most recently active first, with the name from their latest message."""
+        sql = (
+            "SELECT author_id, author_name, author_username, MAX(message_ts) AS last_ts"
+            " FROM messages WHERE cloned_guild_id = ? AND author_id IS NOT NULL"
+            " AND cloned_message_id IS NOT NULL"
+        )
+        params: list = [int(cloned_guild_id)]
+        prefix = (prefix or "").strip().lstrip("@")
+        if prefix:
+            like = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            sql += (
+                " AND (author_name LIKE ? ESCAPE '\\' OR author_username LIKE ? ESCAPE '\\'"
+                " OR CAST(author_id AS TEXT) LIKE ? ESCAPE '\\')"
+            )
+            params += [like, like, like]
+        sql += " GROUP BY author_id ORDER BY last_ts DESC, author_id LIMIT ?"
+        params.append(int(limit))
+        return [
+            {
+                "author_id": int(r["author_id"]),
+                "author_name": r["author_name"],
+                "author_username": r["author_username"],
+            }
+            for r in self.conn.execute(sql, params).fetchall()
+        ]
 
     def get_message_row(self, original_message_id: int, cloned_guild_id: int | None = None) -> dict | None:
         sql = f"SELECT {self._MESSAGE_COLUMNS} {self._MESSAGE_FROM} WHERE m.original_message_id = ?"
