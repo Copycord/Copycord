@@ -1,7 +1,8 @@
 // Screenshots of the Redeem code modal in each state, both /api/redeem routes mocked.
 // Usage: E2E_BASE_URL=http://127.0.0.1:18182 node --experimental-strip-types scripts/roleclaims-shots.ts [out-dir]
 // States: menu-hover, idle, waiting, result-claimed, result-already, result-invalid, result-server-down; written as
-// roleclaims-<state>.png at 1900x1000. menu-hover is the open side menu with the pointer on the gold Redeem code entry. result-claimed catches the gift animation mid-play. waiting holds the start
+// roleclaims-<state>.png at 1900x1000. menu-hover is the open side menu with the pointer on the gold Redeem code entry. idle shows the
+// dim over the header. result-claimed catches the gift animation and the confetti mid-play. waiting holds the start
 // POST unanswered so the spinner stays up.
 
 import fs from "node:fs";
@@ -87,6 +88,11 @@ async function main() {
     await shot(page, "menu-hover");
 
     page = await openModal(browser, state, { config: CONFIG });
+    // The dim covers the header too, and the header and the side menu are inert under it.
+    const inert = await page.evaluate(() =>
+      ["header[role=banner]", "#side-menu"].map((s) => `${s}=${document.querySelector(s)?.hasAttribute("inert")}`).join(" "),
+    );
+    console.log(`INERT ${inert}`);
     await shot(page, "idle");
 
     page = await openModal(browser, state, { config: CONFIG, start: "hold" });
