@@ -316,13 +316,11 @@ def _commands_module():
 
 def test_search_command_registered_with_options():
     mod = _commands_module()
-    # Cog.__new__ copies the commands onto the instance and binds them, which drops self and ctx
-    cog = mod.CloneCommands.__new__(mod.CloneCommands)
-    cmd = next(c for c in cog.get_commands() if c.name == "search")
+    cmd = vars(mod.CloneCommands)["search"]
     assert isinstance(cmd, discord.SlashCommand)
-    opts = {o.name: o for o in cmd.options}
-    block = next(c for c in cog.get_commands() if c.name == "block_add")
-    assert [o.name for o in block.options] == ["keyword"]
+    # until the cog is added to a bot, py-cord lists ctx as an option of every command; block_add shows the baseline
+    extra = {o.name for o in vars(mod.CloneCommands)["block_add"].options} - {"keyword"}
+    opts = {o.name: o for o in cmd.options if o.name not in extra}
     assert list(opts) == ["author", "channel", "after", "before", "has"]
     assert not any(o.required for o in opts.values())
     assert opts["author"].autocomplete is not None
