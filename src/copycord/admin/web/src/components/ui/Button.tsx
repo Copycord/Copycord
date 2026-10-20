@@ -109,6 +109,11 @@ const FLAT = "ring-0! shadow-none! enabled:hover:shadow-none!";
 const ATTACHED =
   "enabled:hover:translate-y-0! enabled:hover:shadow-none! enabled:active:translate-y-0! enabled:active:scale-100!";
 
+/** The classes of a button variant and size, for a link that looks like a button. */
+export function buttonClass(variant: ButtonVariant = "secondary", size: ButtonSize = "md"): string {
+  return cx(BASE, LIFTS[variant] && LIFT, VARIANT[variant], SIZE[size]);
+}
+
 export function Button({
   variant = "secondary",
   size = "md",
@@ -131,10 +136,7 @@ export function Button({
       aria-disabled={disabled || loading || undefined}
       aria-busy={loading || undefined}
       className={cx(
-        BASE,
-        LIFTS[variant] && LIFT,
-        VARIANT[variant],
-        SIZE[size],
+        buttonClass(variant, size),
         wide && "min-w-[170px]",
         flat && FLAT,
         attached && ATTACHED,

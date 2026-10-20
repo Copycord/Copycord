@@ -3,13 +3,13 @@ import { cx } from "./cx";
 
 export interface SpinnerProps {
   /** A named size, or a pixel box (with the sm ring) to fill a glyph slot such as a status icon. */
-  size?: "sm" | "md" | "lg" | number;
+  size?: "sm" | "md" | "lg" | "xl" | number;
   /** The status word; null when a labelled host (a status glyph) already says it, so the ring is decorative. */
   label?: string | null;
   className?: string;
 }
 
-const SIZE = { sm: "size-4 border-2", md: "size-6 border-2", lg: "size-10 border-[3px]" } as const;
+const SIZE = { sm: "size-4 border-2", md: "size-6 border-2", lg: "size-10 border-[3px]", xl: "size-14 border-4" } as const;
 
 export function Spinner({ size = "md", label = "Loading", className }: SpinnerProps) {
   const px = typeof size === "number";

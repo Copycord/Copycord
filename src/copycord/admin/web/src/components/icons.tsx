@@ -2,7 +2,7 @@
 
 import type { SidebarItem } from "../types/api";
 
-export type IconKey = SidebarItem["key"] | "tasks" | "messages" | "logout";
+export type IconKey = SidebarItem["key"] | "tasks" | "messages" | "logout" | "gift";
 
 const PATHS: Record<IconKey, string[]> = {
   config: [
@@ -27,6 +27,10 @@ const PATHS: Record<IconKey, string[]> = {
   tasks: [
     "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
     "M15.91 11.672a.375.375 0 0 1 0 .656l-5.603 3.113a.375.375 0 0 1-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112Z",
+  ],
+  // gift, the Redeem code entry
+  gift: [
+    "M21 11.25v8.25a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5v-8.25M12 4.875A2.625 2.625 0 1 0 9.375 7.5H12m0-2.625V7.5m0-2.625A2.625 2.625 0 1 1 14.625 7.5H12m0 0V21m-8.625-9.75h18c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125h-18c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z",
   ],
   logout: [
     "M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9",

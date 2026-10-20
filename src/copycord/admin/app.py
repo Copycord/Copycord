@@ -72,6 +72,7 @@ from copycord.common.paths import data_dir, out_candidates, out_dir
 from copycord.common.http_session import close_shared_session, shared_session
 from copycord.common.timezone import configured_tz_name
 from copycord.common import inprocess
+from copycord.common import install_identity
 from copycord.common.backup_scheduler import (
     BackupConfig,
     DailySQLiteBackupScheduler,
@@ -98,6 +99,7 @@ from copycord.admin.tasks import avatars as task_avatars
 from copycord.admin.tasks import scrape as task_scrape
 from copycord.admin.tasks import routes as task_routes
 from copycord.admin import messages as messages_api
+from copycord.admin import role_claims as role_claims_api
 from copycord.admin.tasks.repo import SqliteTaskRepo
 from copycord.admin.tasks.service import TaskService
 from contextlib import suppress
@@ -409,6 +411,7 @@ async def app_redirect(request: Request, path: str = ""):
 
 app.include_router(task_routes.router)
 app.include_router(messages_api.router)
+app.include_router(role_claims_api.router)
 messages_api.configure(
     db=db, send=lambda payload, timeout: _ws_cmd(SERVER_AGENT_URL, payload, timeout=timeout)
 )
@@ -2047,6 +2050,15 @@ async def _apply_db_log_level_and_banner():
         SERVER_CTRL_URL,
         CLIENT_CTRL_URL,
     )
+
+
+@_on_startup
+async def _load_install_key():
+    """Create the install key on the first start that has none (fresh or upgraded)."""
+    try:
+        install_identity.load_or_create(DATA_DIR)
+    except Exception:
+        LOGGER.exception("Install key: load failed")
 
 
 @_on_startup

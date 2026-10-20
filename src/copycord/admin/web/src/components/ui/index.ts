@@ -1,6 +1,6 @@
 export { Badge, StatusPill } from "./Badge";
 export type { BadgeTone, Status } from "./Badge";
-export { Button } from "./Button";
+export { Button, buttonClass } from "./Button";
 export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button";
 export { Card, CARD_HOVER, PageFrame } from "./Card";
 export { Checkbox, Radio } from "./Checkbox";

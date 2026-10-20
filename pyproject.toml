@@ -19,6 +19,7 @@ dependencies = [
     "aiohttp>=3.9,<4",
     "aiohttp-socks>=0.8,<1",
     "itsdangerous>=2.1",
+    "cryptography>=44.0",
     "tzdata==2025.2",
     "py-cord==2.8.1",
     "curl_cffi==0.16.2",

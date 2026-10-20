@@ -41,6 +41,7 @@ describe("App shell", () => {
       "Forwarding",
       "System",
       "Logs",
+      "Redeem code",
       "Log out",
     ]);
     expect(within(nav).getByText("Guilds").closest("a")).toHaveAttribute("aria-current", "page");

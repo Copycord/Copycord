@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { PROMO_LINKS } from "../pages/dashboard/config/model";
 import type { SidebarItem } from "../types/api";
 import { DISCORD_PATH, MenuIcon } from "./icons";
+import { RoleClaimsModal } from "./RoleClaimsModal";
 
 /** A menu entry; the Tasks and Messages keys sit outside SidebarItem. */
 export type MenuItem = Omit<SidebarItem, "key"> & { key: SidebarItem["key"] | "tasks" | "messages" };
@@ -52,8 +53,10 @@ export interface SidebarProps {
 
 export function Sidebar({ onNavigate, hide = [], footer = "version", version }: SidebarProps) {
   const [busy, setBusy] = useState(false);
+  const [claimsOpen, setClaimsOpen] = useState(false);
   return (
     <>
+      <RoleClaimsModal open={claimsOpen} onClose={() => setClaimsOpen(false)} />
       <nav aria-label="Site menu" className="min-h-0 flex-auto overflow-auto py-3">
         <ul className="m-0 flex flex-col gap-1.5 py-1.5">
           {SIDEBAR_ITEMS.filter((item) => !hide.includes(item.key)).map((item) => (
@@ -72,6 +75,23 @@ export function Sidebar({ onNavigate, hide = [], footer = "version", version }: 
               </NavLink>
             </li>
           ))}
+          <li>
+            <button
+              type="button"
+              data-role-claims
+              aria-haspopup="dialog"
+              className={`${ITEM} cursor-pointer border-0 bg-transparent text-left font-[inherit] text-[length:inherit] hover:bg-rail-hover`}
+              onClick={() => {
+                onNavigate?.();
+                setClaimsOpen(true);
+              }}
+            >
+              <span aria-hidden="true">
+                <MenuIcon name="gift" className="block size-[18px]" />
+              </span>
+              <span>Redeem code</span>
+            </button>
+          </li>
           <li>
             <a
               href="/login"
