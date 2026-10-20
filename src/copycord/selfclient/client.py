@@ -19,7 +19,6 @@ import asyncio
 import datetime as _dt
 import inspect
 import logging
-import uuid
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
 from . import events
@@ -143,7 +142,10 @@ class Client:
         self._closed = False
         self._listeners: Dict[str, List[Coro]] = {}
         self._tasks: set = set()
-        self._chunk_requests: Dict[str, Tuple[List[Member], asyncio.Future]] = {}
+        # op 8 carries no nonce, so one request per guild is in flight at a time
+        # and its GUILD_MEMBERS_CHUNKs are matched by guild id.
+        self._chunk_requests: Dict[int, Tuple[List[Member], asyncio.Future]] = {}
+        self._chunk_locks: Dict[int, asyncio.Lock] = {}
 
     # state passthrough
 
@@ -498,24 +500,25 @@ class Client:
         """Members over the gateway (op 8), since user tokens cannot list them over REST."""
         if self.gateway is None:
             raise ClientException("fetch_members needs a connected gateway")
-        nonce = uuid.uuid4().hex
-        future: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._chunk_requests[nonce] = ([], future)
-        try:
-            await self.gateway.request_guild_members(
-                _snowflake(guild),
-                query=query,
-                limit=limit,
-                presences=presences,
-                user_ids=[_snowflake(u) for u in user_ids] if user_ids is not None else None,
-                nonce=nonce,
-            )
-            return await asyncio.wait_for(future, timeout)
-        finally:
-            self._chunk_requests.pop(nonce, None)
+        gid = _snowflake(guild)
+        lock = self._chunk_locks.setdefault(gid, asyncio.Lock())
+        async with lock:
+            future: asyncio.Future = asyncio.get_running_loop().create_future()
+            self._chunk_requests[gid] = ([], future)
+            try:
+                await self.gateway.request_guild_members(
+                    gid,
+                    query=query,
+                    limit=limit,
+                    presences=presences,
+                    user_ids=[_snowflake(u) for u in user_ids] if user_ids is not None else None,
+                )
+                return await asyncio.wait_for(future, timeout)
+            finally:
+                self._chunk_requests.pop(gid, None)
 
     def _resolve_chunk(self, chunk: Any) -> None:
-        entry = self._chunk_requests.get(getattr(chunk, "nonce", None) or "")
+        entry = self._chunk_requests.get(getattr(chunk, "guild_id", None) or 0)
         if entry is None:
             return
         members, future = entry
