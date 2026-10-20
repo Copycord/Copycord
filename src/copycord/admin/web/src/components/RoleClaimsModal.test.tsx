@@ -105,7 +105,7 @@ async function resultView(title: string, tone: string) {
   expect(result).toHaveClass("opacity-100");
   expect(result).not.toHaveAttribute("aria-hidden");
   // The claimed gift draws its svg once the lazy player has loaded.
-  await waitFor(() => expect(result.querySelector(`[data-role-claims-icon="${tone}"] svg`)).toBeInTheDocument());
+  await waitFor(() => expect(result.querySelector(`[data-role-claims-icon="${tone}"] svg, [data-role-claims-icon="${tone}"] img`)).toBeInTheDocument());
   expect(view("form")).toHaveClass("opacity-0");
   expect(view("form")).toHaveAttribute("inert");
   expect(view("waiting")).toBeEmptyDOMElement();
@@ -358,6 +358,9 @@ describe("RoleClaimsModal", () => {
     const { user, onClose } = await submitCode("ABCD");
     const result = await resultView("Role already claimed", "info");
     expect(result.querySelector("[data-role-claims-icon]")).toHaveClass("text-info");
+    const infoIcon = result.querySelector('[data-role-claims-icon="info"]')!;
+    expect(infoIcon.querySelector("img")).toHaveAttribute("src", "/static/logo.png");
+    expect(infoIcon.querySelector("svg")).not.toBeInTheDocument();
     expect(result.querySelector("[data-gift-animation]")).not.toBeInTheDocument();
     expect(lottie.loadAnimation).not.toHaveBeenCalled();
     expect(within(result).getByRole("heading", { name: "Role already claimed" })).toHaveClass("text-2xl");

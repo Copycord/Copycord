@@ -398,6 +398,14 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
               >
                 {result.tone === "good" ? (
                   <GiftAnimation className="size-24! -m-2" fallback={<ToneIcon tone="good" />} />
+                ) : result.tone === "info" ? (
+                  <img
+                    src="/static/logo.png"
+                    alt=""
+                    aria-hidden="true"
+                    draggable={false}
+                    className="pointer-events-none block size-20 rounded-2xl select-none"
+                  />
                 ) : (
                   <ToneIcon tone={result.tone} />
                 )}
