@@ -29,6 +29,7 @@ import zlib
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 
+from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
 
 from . import fingerprint
@@ -467,6 +468,9 @@ class GatewayClient:
         # the last frame read.
         self.identify_sizes: Optional[Tuple[int, int]] = None
         self.last_frame_stats: Optional[Tuple[int, int, float, int]] = None
+        # Dev mode's traffic record (traffic_capture.py) and the current socket's id in it.
+        self._capture: Any = None
+        self._capture_ws: Optional[str] = None
         self.sequence: Optional[int] = None
         self.heartbeat_interval: float = 41.25
         self.latency: float = float("inf")
@@ -659,13 +663,17 @@ class GatewayClient:
 
     async def _open(self, url: str, proxy: Optional[str]) -> Any:
         headers = self._ws_headers()
+        capture = self._capture = traffic_capture.recorder_for(self.token)
+        self._capture_ws = capture.ws_open(url, headers) if capture is not None else None
         try:
             if self._connector is not None:
                 return await self._connector(url, headers, proxy)
             return await open_websocket(url, headers, proxy)
-        except GatewayDialError:
-            raise
         except Exception as exc:
+            if capture is not None:
+                capture.ws_closed(self._capture_ws, error=exc)
+            if isinstance(exc, GatewayDialError):
+                raise
             raise GatewayDialError(f"{type(exc).__name__}: {exc}") from exc
 
     async def _connect(self) -> None:
@@ -705,6 +713,8 @@ class GatewayClient:
                 pass
 
         code, reason = _close_info(ws, closed_exc)
+        if self._capture is not None:
+            self._capture.ws_closed(self._capture_ws, code, reason)
         self._handle_close(code, reason)
 
     def _handle_close(self, code: Optional[int], reason: str) -> None:
@@ -760,6 +770,15 @@ class GatewayClient:
                 (time.perf_counter() - started) * 1000,
                 int(time.time() * 1000),
             )
+            if self._capture is not None:
+                binary = isinstance(raw, (bytes, bytearray, memoryview))
+                self._capture.ws_recv(
+                    self._capture_ws,
+                    msg,
+                    size=compressed,
+                    decoded_size=len(text.encode("utf-8")) if binary else None,
+                    binary=binary,
+                )
             compressed = 0
             if not isinstance(msg, dict):
                 continue
@@ -1077,29 +1096,32 @@ class GatewayClient:
         ws = self._ws
         if ws is None:
             return
+        text = json.dumps(payload)
         try:
-            await ws.send(json.dumps(payload))
+            await ws.send(text)
         except _WSClosed:
             log.warning("tried to send on a closed socket")
             return
-        self._log_sent(payload)
+        self._log_sent(payload, text)
 
     async def _send_bypass(self, payload: Dict[str, Any]) -> None:
         """Send without the ratelimiter, for heartbeats."""
         ws = self._ws
         if ws is None:
             return
+        text = json.dumps(payload)
         try:
-            await ws.send(json.dumps(payload))
+            await ws.send(text)
         except _WSClosed:
             log.warning("tried to send heartbeat on closed socket")
             return
-        self._log_sent(payload)
+        self._log_sent(payload, text)
 
-    @staticmethod
-    def _log_sent(payload: Dict[str, Any]) -> None:
+    def _log_sent(self, payload: Dict[str, Any], text: str) -> None:
         if log.isEnabledFor(logging.DEBUG):
             log.debug("sent %s", frame_summary(payload))
+        if self._capture is not None:
+            self._capture.ws_sent(self._capture_ws, payload, text)
 
 
 __all__ = [

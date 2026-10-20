@@ -19,6 +19,7 @@ from typing import Optional
 
 from curl_cffi import CurlWsFlag
 
+from copycord.common import traffic_capture
 from copycord.common.selfbot_headers import (
     _token_log_id,
     build_headers,
@@ -144,6 +145,9 @@ class GatewaySession:
         self.fatal = False
         self._seq: Optional[int] = None
         self._qos_foregrounded = True
+        # Dev mode's traffic record (traffic_capture.py) and this socket's id in it.
+        self._capture = None
+        self._capture_ws: Optional[str] = None
 
     async def __aenter__(self):
         await self.connect()
@@ -159,10 +163,14 @@ class GatewaySession:
         Sets fatal when the close code says this token is finished.
         """
         session = await get_tls_session(self._token, use_proxy=self._use_proxy)
+        capture = self._capture = traffic_capture.recorder_for(self._token)
+        # No headers of our own: curl_cffi's impersonation profile sets them.
+        self._capture_ws = capture.ws_open(GATEWAY_URL, {}) if capture is not None else None
         try:
             self._ws = await session.ws_connect(GATEWAY_URL)
         except Exception as e:
             self._log.debug("[avatar] gateway connect failed: %s", e)
+            self._capture_closed(error=e)
             return False
 
         self._inflator = zlib.decompressobj()
@@ -182,9 +190,9 @@ class GatewaySession:
             self.heartbeat_session_id = str(uuid.uuid4())
 
             # The web client's order: op 2, op 4, op 41, op 40.
-            await self._ws.send_json(await _identify_payload(self._token))
-            await self._ws.send_json({"op": _OP_VOICE_STATE_UPDATE, "d": dict(IDLE_VOICE_STATE)})
-            await self._ws.send_json(
+            await self._send_json(await _identify_payload(self._token))
+            await self._send_json({"op": _OP_VOICE_STATE_UPDATE, "d": dict(IDLE_VOICE_STATE)})
+            await self._send_json(
                 {
                     "op": _OP_UPDATE_TIME_SPENT_SESSION_ID,
                     "d": {
@@ -245,6 +253,7 @@ class GatewaySession:
             if flags & CurlWsFlag.CLOSE:
                 raw = chunk if isinstance(chunk, (bytes, bytearray)) else chunk.encode()
                 code = int.from_bytes(raw[:2], "big") if len(raw) >= 2 else 0
+                self._capture_closed(code, raw[2:].decode("utf-8", "replace"))
                 raise _GatewayClosed(code)
 
             self._buf.extend(
@@ -258,7 +267,8 @@ class GatewaySession:
             if not raw:
                 return None
 
-            if raw[-4:] == _ZLIB_SUFFIX:
+            compressed = raw[-4:] == _ZLIB_SUFFIX
+            if compressed:
                 try:
                     text = self._inflator.decompress(raw).decode("utf-8")
                 except Exception as e:
@@ -271,15 +281,35 @@ class GatewaySession:
                     continue
 
             try:
-                return json.loads(text)
+                msg = json.loads(text)
             except Exception:
                 continue
+            if self._capture is not None:
+                self._capture.ws_recv(
+                    self._capture_ws,
+                    msg,
+                    size=len(raw),
+                    decoded_size=len(text.encode("utf-8")) if compressed else None,
+                    binary=compressed,
+                )
+            return msg
+
+    async def _send_json(self, payload: dict) -> None:
+        await self._ws.send_json(payload)
+        if self._capture is not None:
+            self._capture.ws_sent(self._capture_ws, payload)
+
+    def _capture_closed(self, code=None, reason=None, *, error=None) -> None:
+        """The socket's end in the traffic record, once."""
+        if self._capture is not None and self._capture_ws is not None:
+            self._capture.ws_closed(self._capture_ws, code, reason, error=error)
+        self._capture_ws = None
 
     async def _send_heartbeat(self) -> None:
         """op 40, the web client's heartbeat; only the first one is foregrounded."""
         active = self._qos_foregrounded
         self._qos_foregrounded = False
-        await self._ws.send_json(
+        await self._send_json(
             {
                 "op": _OP_QOS_HEARTBEAT,
                 "d": {
@@ -323,6 +353,7 @@ class GatewaySession:
             except Exception:
                 pass
             self._ws = None
+        self._capture_closed()
 
 
 async def set_avatar(
@@ -354,13 +385,25 @@ async def set_avatar(
         session = await get_tls_session(token, use_proxy=use_proxy)
         from copycord.common.proxy_pool import get_pool
 
-        resp = await session.patch(
-            f"{DISCORD_API_BASE}/users/@me",
-            json={"avatar": to_data_uri(data, ctype)},
-            headers=build_headers(token),
-            timeout=60,
-            proxy=get_pool().current(token),
-        )
+        url = f"{DISCORD_API_BASE}/users/@me"
+        body = {"avatar": to_data_uri(data, ctype)}
+        headers = build_headers(token)
+        capture = traffic_capture.recorder_for(token)
+        rid = capture.request("PATCH", url, headers, body=body, has_body=True) if capture else None
+        try:
+            resp = await session.patch(
+                url,
+                json=body,
+                headers=headers,
+                timeout=60,
+                proxy=get_pool().current(token),
+            )
+        except Exception as e:
+            if capture is not None:
+                capture.failed(rid, e)
+            raise
+        if capture is not None:
+            capture.response(rid, resp.status_code)
         if resp.status_code in (200, 204):
             logger.info("[avatar] updated profile picture for token %s", ref)
             return True

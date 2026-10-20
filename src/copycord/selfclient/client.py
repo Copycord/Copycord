@@ -21,6 +21,8 @@ import inspect
 import logging
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
+from copycord.common import traffic_capture
+
 from . import events
 from .errors import ClientException, NotFound
 from .gateway import GatewayClient, open_websocket
@@ -301,6 +303,8 @@ class Client:
                 await self.http.close()
             except Exception:
                 log.debug("http close failed", exc_info=True)
+        # Dev mode's traffic record ends here on a clean shutdown.
+        traffic_capture.stop(self.token, "client closed")
         self._ready.clear()
 
     def clear(self) -> None:

@@ -36,6 +36,8 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from copycord.common import traffic_capture
+
 from . import fingerprint
 from .http import API_BASE
 
@@ -502,9 +504,19 @@ class ScienceReporter:
         kwargs: Dict[str, Any] = {"json": body, "headers": headers, "timeout": http.timeout}
         if http.proxy:
             kwargs["proxy"] = http.proxy
+        url = f"{API_BASE}{SCIENCE_PATH}"
+        capture = traffic_capture.recorder_for(self.token)
+        rid = capture.request("POST", url, headers, body=body, has_body=True) if capture else None
         # Straight to the session: one attempt, no retry, and a refusal stays at debug.
-        resp = await http.session.request("POST", f"{API_BASE}{SCIENCE_PATH}", **kwargs)
+        try:
+            resp = await http.session.request("POST", url, **kwargs)
+        except Exception as exc:
+            if capture is not None:
+                capture.failed(rid, exc)
+            raise
         status = int(getattr(resp, "status_code", 0) or 0)
+        if capture is not None:
+            capture.response(rid, status)
         if 200 <= status < 300:
             log.debug(
                 "science POST sent %d event(s) [%s]: HTTP %s",

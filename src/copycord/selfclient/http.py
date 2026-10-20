@@ -24,6 +24,7 @@ import re
 import time
 from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
 
+from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
 
 from .enums import API_VERSION
@@ -402,18 +403,29 @@ class HTTPClient:
             kwargs["json"] = json
         if self.proxy:
             kwargs["proxy"] = self.proxy
+        # Dev mode only: None otherwise.
+        capture = traffic_capture.recorder_for(self.token or send_headers.get("Authorization"))
 
         last_retry_after = FALLBACK_RETRY_AFTER
         last_body: Any = None
         for attempt in range(1, self.max_retries + 1):
             await self._wait_for_bucket(route)
+            rid = None
+            if capture is not None:
+                rid = capture.request(
+                    method, url, send_headers, params=query, body=json, has_body=has_body
+                )
             try:
                 resp = await self.session.request(method, url, **kwargs)
             except Exception as e:
+                if capture is not None:
+                    capture.failed(rid, e)
                 log.warning("%s %s raised %r", method, path, e)
                 raise HTTPException(0, None, method=method, path=path, body=repr(e)) from e
 
             status = int(getattr(resp, "status_code", 0) or 0)
+            if capture is not None:
+                capture.response(rid, status)
             self._record_bucket(route, resp)
 
             if status == 429:
