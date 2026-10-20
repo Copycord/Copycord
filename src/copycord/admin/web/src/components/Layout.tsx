@@ -84,6 +84,7 @@ export function Layout() {
     <>
       <header
         role="banner"
+        data-modal-inert
         className={`fixed inset-x-0 top-0 ${Z.header} flex h-header items-center gap-2.5 border-b border-b-border bg-page px-4`}
       >
         <button
@@ -134,6 +135,7 @@ export function Layout() {
       <div
         id="menu-backdrop"
         data-testid="menu-backdrop"
+        data-modal-inert
         aria-hidden="true"
         hidden={!drawerOpen}
         className={`fixed inset-x-0 top-header bottom-0 ${Z.drawer} bg-shadow-60`}
@@ -144,6 +146,7 @@ export function Layout() {
       <aside
         id="side-menu"
         aria-label="Site menu"
+        data-modal-inert
         className={`fixed top-header bottom-0 left-0 ${Z.drawer} flex w-drawer flex-col overflow-hidden border-r border-r-border bg-page bg-(image:--card-gradient) transition-transform duration-[220ms] ${
           drawerOpen ? "visible translate-x-0" : "invisible -translate-x-full"
         }`}

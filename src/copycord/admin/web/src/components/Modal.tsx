@@ -1,18 +1,22 @@
 // Accessible modal: renders into document.body, traps Tab focus, closes on
 // Escape and on overlay click, and gives focus back to the opener on close.
-// The box hangs 6vh below the header instead of being centered, and the
-// MODAL_* classes let the dialogs with their own shell match it.
+// The dim covers the whole viewport, header included, and the box hangs 6vh
+// below the header instead of being centered; the MODAL_* classes let the
+// dialogs with their own shell match it.
 
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { Z } from "./ui/cx";
 
-/** Overlay fixed below the header, the box at the top center. */
-export const MODAL_OVERLAY = "fixed inset-x-0 top-header bottom-0 z-40 flex items-start justify-center";
+/** Overlay over the whole viewport, above the header (Z.modal), the box at the top center. */
+export const MODAL_OVERLAY = `fixed inset-0 ${Z.modal} flex items-start justify-center`;
 export const MODAL_BACKDROP = "absolute inset-0 bg-black/[0.68]";
+/** The box's top margin: 6vh below the header. */
+export const MODAL_TOP = "mt-[calc(var(--spacing-header)+6vh)]";
 /** The dialog box without its width (min(900px, 92vw) unless a dialog sets its own). */
 export const MODAL_CARD =
-  "relative z-[1] mt-[6vh] flex max-h-[80vh] flex-col rounded-panel border border-border bg-surface-deep text-text shadow-popover outline-none";
+  `relative z-[1] ${MODAL_TOP} flex max-h-[80vh] flex-col rounded-panel border border-border bg-surface-deep text-text shadow-popover outline-none`;
 export const MODAL_HEADER = "flex items-center justify-between px-4 py-3";
 export const MODAL_TITLE = "m-0 text-base font-bold text-text";
 /** Square close button. */
@@ -36,11 +40,16 @@ export interface ModalProps {
   closeId?: string;
 }
 
-// The page behind an open dialog does not scroll.
+// The page behind an open dialog does not scroll, and the app chrome (the header and the side
+// menu, marked data-modal-inert) is inert: no clicks, no focus, out of the accessibility tree.
 // Counted so closing the inner of two stacked dialogs keeps the lock; the last one restores
-// the overflow the body had before the first opened.
+// the overflow the body had before the first opened and lifts the inert.
 let scrollLocks = 0;
 let overflowBeforeLock = "";
+
+const setChromeInert = (on: boolean) => {
+  for (const el of document.querySelectorAll("[data-modal-inert]")) el.toggleAttribute("inert", on);
+};
 
 export function useScrollLock(active: boolean) {
   useEffect(() => {
@@ -48,11 +57,15 @@ export function useScrollLock(active: boolean) {
     if (scrollLocks === 0) {
       overflowBeforeLock = document.body.style.overflow;
       document.body.style.overflow = "hidden";
+      setChromeInert(true);
     }
     scrollLocks += 1;
     return () => {
       scrollLocks -= 1;
-      if (scrollLocks === 0) document.body.style.overflow = overflowBeforeLock;
+      if (scrollLocks === 0) {
+        document.body.style.overflow = overflowBeforeLock;
+        setChromeInert(false);
+      }
     };
   }, [active]);
 }

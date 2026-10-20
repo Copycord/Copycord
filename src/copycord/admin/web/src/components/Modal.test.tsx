@@ -103,6 +103,46 @@ describe("Modal scroll lock", () => {
   });
 });
 
+describe("Modal over the app chrome", () => {
+  /** The header and the side menu as Layout marks them, plus the dialog. */
+  function Shell({ open }: { open: boolean }) {
+    return (
+      <>
+        <header data-modal-inert>
+          <button type="button">Menu</button>
+        </header>
+        <aside data-modal-inert>
+          <a href="/logs">Logs</a>
+        </aside>
+        <Modal open={open} title="Edit" onClose={() => undefined}>
+          body
+        </Modal>
+      </>
+    );
+  }
+
+  it("dims the whole viewport, header included, above the header layer, the box still under the header", () => {
+    render(<Shell open />);
+    const overlay = screen.getByTestId("modal-overlay");
+    expect(overlay).toHaveClass("fixed", "inset-0", "z-40");
+    expect(overlay).not.toHaveClass("top-header");
+    expect(overlay.firstElementChild).toHaveClass("absolute", "inset-0");
+    expect(screen.getByRole("dialog")).toHaveClass("mt-[calc(var(--spacing-header)+6vh)]");
+  });
+
+  it("makes the header and the side menu inert while open and lifts it on close", () => {
+    const view = render(<Shell open={false} />);
+    const chrome = () => Array.from(document.querySelectorAll("[data-modal-inert]"));
+    expect(chrome().every((el) => !el.hasAttribute("inert"))).toBe(true);
+    view.rerender(<Shell open />);
+    expect(chrome()).toHaveLength(2);
+    expect(chrome().every((el) => el.hasAttribute("inert"))).toBe(true);
+    view.rerender(<Shell open={false} />);
+    expect(chrome().every((el) => !el.hasAttribute("inert"))).toBe(true);
+    expect(document.body.style.overflow).toBe("");
+  });
+});
+
 describe("TipLabel placement", () => {
   afterEach(() => vi.restoreAllMocks());
 

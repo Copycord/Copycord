@@ -17,12 +17,12 @@ interface ShellProps {
   cardClass: string;
   headerClass?: string;
   titleClass?: string;
-  /** Stacking order: the discard confirm (Modal, z-40) sits above the filters modal and below nothing else. */
+  /** Stacking order: above the header and the drawer (z-30); the discard confirm (Modal, z-40) sits above the filters modal and below nothing else. */
   layer?: number;
   children: ReactNode;
 }
 
-export function Shell({ id, closeId, titleId, title, onClose, cardClass, headerClass, titleClass, layer = 30, children }: ShellProps) {
+export function Shell({ id, closeId, titleId, title, onClose, cardClass, headerClass, titleClass, layer = 32, children }: ShellProps) {
   useScrollLock(true);
   return createPortal(
     <div id={id} className={`modal show ${MODAL_OVERLAY}`} style={{ zIndex: layer }} aria-hidden="false">

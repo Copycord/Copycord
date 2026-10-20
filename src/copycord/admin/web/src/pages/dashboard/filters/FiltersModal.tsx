@@ -199,7 +199,7 @@ export function FiltersModal({ mapping, onClosed }: FiltersModalProps) {
         cardClass="my-[5vh] max-h-[85vh] w-[min(960px,94vw)] rounded-[20px]"
         headerClass="flex items-center justify-between px-5 py-4"
         titleClass="m-0 text-[15px] leading-[1.3] font-semibold text-text"
-        layer={30}
+        layer={32}
       >
         <form
           id="form-filters"

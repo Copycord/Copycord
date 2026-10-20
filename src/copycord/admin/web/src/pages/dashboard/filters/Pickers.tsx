@@ -229,7 +229,7 @@ export function RolePicker({ mappingId, initial, onApply, onClose, onStatus }: R
   const ids = shown.map((r) => String(r.id));
 
   return (
-    <Shell id="roleBlocksModal" closeId="roleBlocksCloseBtn" titleId="roleBlocksTitle" title="Role Blocks" onClose={onClose} cardClass="mt-[6vh] max-h-[80vh] w-[min(640px,94vw)] rounded-[18px]" layer={35}>
+    <Shell id="roleBlocksModal" closeId="roleBlocksCloseBtn" titleId="roleBlocksTitle" title="Role Blocks" onClose={onClose} cardClass="max-h-[80vh] w-[min(640px,94vw)] rounded-[18px]" layer={35}>
       <div className="modal-body flex min-h-0 flex-col gap-3 overflow-y-auto px-[18px] pt-4 pb-[18px]">
         <p className="text-xs text-muted">Select which roles you want to block for this mapping.</p>
         <div className="role-blocks-search">
