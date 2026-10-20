@@ -25,6 +25,7 @@ from . import events
 from .errors import ClientException, NotFound
 from .gateway import GatewayClient, open_websocket
 from .http import HTTPClient
+from .science import ScienceReporter
 from .models import (
     DMChannel,
     Emoji,
@@ -134,6 +135,8 @@ class Client:
         self.refresh_build = refresh_build
         self.http: Optional[HTTPClient] = http
         self.gateway: Any = None
+        # Posts /science as Chrome does; one per gateway client.
+        self.science: Optional[ScienceReporter] = None
         self._gateway_factory = gateway_factory or GatewayClient
         self._connector = connector
         self._connection = ConnectionState(max_messages=max_messages)
@@ -231,13 +234,35 @@ class Client:
             connector=self._tracked_connector,
         )
         gateway.on_dispatch(self._on_gateway_dispatch)
+        self.science = None
+        if self.http is not None:
+            try:
+                on_event, on_rotation = gateway.on, gateway.on_heartbeat_session
+                science = ScienceReporter(self.token, self.http, gateway)
+                # Registered with on(), so it sees READY before the cache does.
+                on_event("READY", science.on_ready)
+                on_rotation(science.on_heartbeat_session)
+                science.start()
+                self.science = science
+            except Exception as exc:  # science must never stop the gateway
+                log.debug("science reporter not attached: %r", exc)
         return gateway
 
     async def _tracked_connector(self, url: str, headers: Dict[str, str], proxy: Optional[str]) -> Any:
-        if self._connector is not None:
-            ws = await self._connector(url, headers, proxy)
-        else:
-            ws = await open_websocket(url, headers, proxy)
+        science = self.science
+        if science is not None:
+            science.connect_attempt()
+        try:
+            if self._connector is not None:
+                ws = await self._connector(url, headers, proxy)
+            else:
+                ws = await open_websocket(url, headers, proxy)
+        except BaseException:
+            if science is not None:
+                science.connect_failed()
+            raise
+        if science is not None:
+            science.connected(url)
         self.dispatch("connect")
         return _TrackedSocket(ws, lambda: self.dispatch("disconnect"))
 
@@ -246,6 +271,8 @@ class Client:
         if self.token is None:
             raise ClientException("login() must be called before connect()")
         self.loop = asyncio.get_running_loop()
+        if self.science is not None:
+            await self.science.close()
         self.gateway = self._make_gateway(reconnect)
         await self.gateway.run(refresh_build=self.refresh_build)
 
@@ -266,6 +293,8 @@ class Client:
                 await self.gateway.close()
             except Exception:
                 log.debug("gateway close failed", exc_info=True)
+        if self.science is not None:
+            await self.science.close()
         if self.http is not None:
             try:
                 await self.http.close()

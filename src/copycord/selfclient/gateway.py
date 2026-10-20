@@ -400,6 +400,11 @@ class GatewayClient:
         # What the last connection used, for the connect record (wire_probe.py).
         self.connected_url: Optional[str] = None
         self.identify_properties: Optional[Dict[str, Any]] = None
+        # For science's ready_payload_received: (json bytes, zlib bytes) of the last
+        # IDENTIFY, and (bytes received, json chars, unpack ms, received at ms) of
+        # the last frame read.
+        self.identify_sizes: Optional[Tuple[int, int]] = None
+        self.last_frame_stats: Optional[Tuple[int, int, float, int]] = None
         self.sequence: Optional[int] = None
         self.heartbeat_interval: float = 41.25
         self.latency: float = float("inf")
@@ -421,6 +426,7 @@ class GatewayClient:
 
         self._handlers: Dict[str, List[EventHandler]] = {}
         self._dispatch_handlers: List[DispatchHandler] = []
+        self._heartbeat_session_handlers: List[Callable[[], Any]] = []
 
     # Public API
 
@@ -431,6 +437,10 @@ class GatewayClient:
     def on_dispatch(self, handler: DispatchHandler) -> None:
         """Call ``handler(event, d)`` for every dispatch."""
         self._dispatch_handlers.append(handler)
+
+    def on_heartbeat_session(self, handler: Callable[[], Any]) -> None:
+        """Call ``handler()`` each time the heartbeat session id rotates."""
+        self._heartbeat_session_handlers.append(handler)
 
     @property
     def is_connected(self) -> bool:
@@ -660,8 +670,11 @@ class GatewayClient:
         self.sequence = None
 
     async def _event_loop(self, ws: Any, inflater: Optional[ZlibStreamInflater]) -> None:
+        compressed = 0
         async for raw in ws:
+            started = time.perf_counter()
             if isinstance(raw, (bytes, bytearray, memoryview)):
+                compressed += len(raw)
                 if inflater is None:
                     text: Optional[str] = bytes(raw).decode("utf-8", errors="replace")
                 else:
@@ -678,11 +691,20 @@ class GatewayClient:
                         continue
             else:
                 text = raw
+                compressed = len(raw)
             try:
                 msg = json.loads(text)
             except (TypeError, ValueError):
                 log.warning("non-JSON frame received")
+                compressed = 0
                 continue
+            self.last_frame_stats = (
+                compressed,
+                len(text),
+                (time.perf_counter() - started) * 1000,
+                int(time.time() * 1000),
+            )
+            compressed = 0
             if not isinstance(msg, dict):
                 continue
             if await self._handle_frame(ws, msg):
@@ -798,26 +820,27 @@ class GatewayClient:
             props.get("os_version"),
             self.heartbeat_session_id,
         )
-        await self._send(
-            {
-                "op": GatewayOp.IDENTIFY,
-                "d": {
-                    "token": self.token,
-                    "capabilities": self.capabilities,
-                    "properties": props,
-                    # The web client's; the real status follows in op 3 on READY.
-                    "presence": {
-                        "status": "unknown",
-                        "since": 0,
-                        "activities": [],
-                        "afk": False,
-                    },
-                    # Payload compression; transport compression is the URL's `compress`.
-                    "compress": False,
-                    "client_state": {"guild_versions": {}},
+        payload = {
+            "op": GatewayOp.IDENTIFY,
+            "d": {
+                "token": self.token,
+                "capabilities": self.capabilities,
+                "properties": props,
+                # The web client's; the real status follows in op 3 on READY.
+                "presence": {
+                    "status": "unknown",
+                    "since": 0,
+                    "activities": [],
+                    "afk": False,
                 },
-            }
-        )
+                # Payload compression; transport compression is the URL's `compress`.
+                "compress": False,
+                "client_state": {"guild_versions": {}},
+            },
+        }
+        raw = json.dumps(payload).encode("utf-8")
+        self.identify_sizes = (len(raw), len(zlib.compress(raw)))
+        await self._send(payload)
 
     async def _send_voice_state(self) -> None:
         await self._send({"op": GatewayOp.VOICE_STATE_UPDATE, "d": dict(IDLE_VOICE_STATE)})
@@ -852,6 +875,11 @@ class GatewayClient:
             fingerprint.set_heartbeat_session_id(self.token, self.heartbeat_session_id)
         except Exception as e:  # the REST headers keep the old id
             log.debug("heartbeat session id update failed: %r", e)
+        for handler in self._heartbeat_session_handlers:
+            try:
+                handler()
+            except Exception as e:  # a listener must not stop the rotation
+                log.debug("heartbeat session handler failed: %r", e)
 
     async def _send_time_spent(self) -> None:
         """op 41, then the op 40 the web client always sends with it."""
