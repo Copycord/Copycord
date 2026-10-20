@@ -215,7 +215,7 @@ def record_client_headers(token: str) -> None:
         {
             "updated_at": int(time.time()),
             "headers": headers,
-            "super_properties": dict(_fingerprint(token)["super_props"]),
+            "super_properties": _sent_super_props(token),
         }
     )
     accounts[key] = entry
@@ -394,20 +394,33 @@ _HEARTBEAT_SESSIONS: dict[str, str] = {}
 def set_heartbeat_session_id(token: str, session_id: str | None) -> None:
     """Record the heartbeat session id a gateway connection just produced."""
     if session_id:
-        _HEARTBEAT_SESSIONS[token] = str(session_id)
+        new_id = str(session_id)
+        changed = _HEARTBEAT_SESSIONS.get(token) != new_id
+        _HEARTBEAT_SESSIONS[token] = new_id
+        if changed:
+            try:
+                record_client_headers(token)  # show the id now being sent
+            except Exception as e:  # the record must never break the caller
+                logger.debug("client headers record failed for %s: %r", _token_log_id(token), e)
     else:
         _HEARTBEAT_SESSIONS.pop(token, None)
+
+
+def _sent_super_props(token: str) -> dict:
+    """The super properties build_headers sends: the base fingerprint plus the heartbeat id."""
+    props = dict(_fingerprint(token)["super_props"])
+    heartbeat_id = _HEARTBEAT_SESSIONS.get(token)
+    if heartbeat_id:
+        props["client_heartbeat_session_id"] = heartbeat_id
+    return props
 
 
 def build_headers(token: str, *, referer: str | None = None) -> dict:
     """Full header dict for a user-token REST request."""
     fp = _fingerprint(token)
 
-    heartbeat_id = _HEARTBEAT_SESSIONS.get(token)
-    if heartbeat_id:
-        props = dict(fp["super_props"])
-        props["client_heartbeat_session_id"] = heartbeat_id
-        super_props_b64 = _b64_props(props)
+    if _HEARTBEAT_SESSIONS.get(token):
+        super_props_b64 = _b64_props(_sent_super_props(token))
     else:
         super_props_b64 = fp["super_props_b64"]
 

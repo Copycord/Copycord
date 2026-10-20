@@ -345,6 +345,51 @@ class TestClientHeadersRecord:
         entry = self._file(tmp_path)["accounts"][sh._token_log_id(self.TOKEN)]
         assert entry["super_properties"]["client_build_number"] == 655555
 
+    def test_a_heartbeat_id_refreshes_the_snapshot(self, tmp_path):
+        sh.build_headers(self.TOKEN)
+        key = sh._token_log_id(self.TOKEN)
+        data = self._file(tmp_path)
+        data["accounts"][key]["wire"] = {"seen": 1}
+        data["accounts"][key]["gateway"] = {"seen": 2}
+        sh._write_cache(data)
+        sh.set_heartbeat_session_id(self.TOKEN, "hb-123")
+        try:
+            entry = self._file(tmp_path)["accounts"][key]
+            assert entry["super_properties"]["client_heartbeat_session_id"] == "hb-123"
+            decoded = json.loads(base64.b64decode(entry["headers"]["X-Super-Properties"]))
+            assert decoded == entry["super_properties"]
+            assert "Authorization" not in entry["headers"]
+            assert entry["wire"] == {"seen": 1}
+            assert entry["gateway"] == {"seen": 2}
+            sent = sh.build_headers(self.TOKEN)
+            assert {k: v for k, v in sent.items() if k != "Authorization"} == entry["headers"]
+        finally:
+            sh.set_heartbeat_session_id(self.TOKEN, None)
+
+    def test_an_unchanged_heartbeat_id_is_not_rerecorded(self, monkeypatch):
+        sh.build_headers(self.TOKEN)
+        calls = []
+        monkeypatch.setattr(sh, "record_client_headers", lambda token: calls.append(token))
+        try:
+            sh.set_heartbeat_session_id(self.TOKEN, "hb-1")
+            sh.set_heartbeat_session_id(self.TOKEN, "hb-1")
+            assert calls == [self.TOKEN]
+            sh.set_heartbeat_session_id(self.TOKEN, "hb-2")
+            assert calls == [self.TOKEN, self.TOKEN]
+        finally:
+            sh.set_heartbeat_session_id(self.TOKEN, None)
+
+    def test_a_heartbeat_record_failure_does_not_propagate(self, monkeypatch):
+        def boom(token):
+            raise RuntimeError("disk gone")
+        sh.build_headers(self.TOKEN)
+        monkeypatch.setattr(sh, "record_client_headers", boom)
+        try:
+            sh.set_heartbeat_session_id(self.TOKEN, "hb-9")
+            assert sh._HEARTBEAT_SESSIONS[self.TOKEN] == "hb-9"
+        finally:
+            sh.set_heartbeat_session_id(self.TOKEN, None)
+
     def test_a_record_failure_never_breaks_a_request(self, monkeypatch):
         def boom(token):
             raise RuntimeError("disk gone")
@@ -373,6 +418,14 @@ class TestOutsideDev:
         sh.build_headers(self.TOKEN)
         sh._write_cache({"build": {"client_build_number": 610003}})
         assert list(tmp_path.iterdir()) == []
+
+    def test_a_heartbeat_id_writes_nothing(self, tmp_path):
+        sh.build_headers(self.TOKEN)
+        try:
+            sh.set_heartbeat_session_id(self.TOKEN, "hb-123")
+            assert list(tmp_path.iterdir()) == []
+        finally:
+            sh.set_heartbeat_session_id(self.TOKEN, None)
 
     @pytest.mark.asyncio
     async def test_the_cache_is_not_read(self, tmp_path):
