@@ -89,9 +89,6 @@ SUBSCRIPTION_FEATURES = {
 # Discord drops oversized op 37 frames, so batches are split to stay under this.
 MAX_SUBSCRIPTION_PAYLOAD = 15360
 
-# op 41 cadence, the web client's.
-TIME_SPENT_INTERVAL = 30 * 60
-
 # op 40 `qos.ver` the web client sends.
 QOS_VERSION = 31
 
@@ -432,10 +429,14 @@ class GatewayClient:
         self.proxy_pool = proxy_pool
         self._connector = connector
 
-        # Per client, not per socket. Shared with the REST super-properties on READY.
+        # Per gateway session, not per socket: a fresh IDENTIFY after the first
+        # makes a new one, RESUME keeps it, and nothing rotates it on a timer
+        # (a 32-minute Chrome capture kept one id throughout). Shared with the
+        # REST super-properties on READY.
         self.heartbeat_session_id = str(uuid.uuid4())
         # When the id was made: op 41's initialization_timestamp.
         self.heartbeat_session_started = int(time.time() * 1000)
+        self._identified: bool = False
 
         self._guild_ids: List[str] = []
         self._subscribed_guilds: set = set()
@@ -459,7 +460,6 @@ class GatewayClient:
         # The first op 40 on each socket reports the client as foregrounded.
         self._qos_foregrounded: bool = True
         self._heartbeat_task: Optional[asyncio.Task] = None
-        self._time_spent_task: Optional[asyncio.Task] = None
         self._stopped: bool = False
         self._invalid_session_delay: Tuple[float, float] = (1.0, 5.0)
         # (code, reason) of a close no reconnect can fix.
@@ -485,7 +485,8 @@ class GatewayClient:
         self._dispatch_handlers.append(handler)
 
     def on_heartbeat_session(self, handler: Callable[[], Any]) -> None:
-        """Call ``handler()`` each time the heartbeat session id rotates."""
+        """Call ``handler()`` when a fresh IDENTIFY after the first makes a new
+        heartbeat session id."""
         self._heartbeat_session_handlers.append(handler)
 
     @property
@@ -528,7 +529,6 @@ class GatewayClient:
                 delay = min(delay * 2, self.max_reconnect_delay)
         finally:
             await self._cancel_task("_heartbeat_task")
-            await self._cancel_task("_time_spent_task")
 
         if self.fatal_close is not None:
             code, reason = self.fatal_close
@@ -540,7 +540,6 @@ class GatewayClient:
         """Stop for good, closing with 1000 so the session is not resumable."""
         self._stopped = True
         await self._cancel_task("_heartbeat_task")
-        await self._cancel_task("_time_spent_task")
         ws = self._ws
         if ws is not None:
             try:
@@ -807,14 +806,15 @@ class GatewayClient:
         else:
             # The web client's order: op 2, op 4, op 41, op 40. The op 40
             # paired with op 41 is the first beat, so the loop waits a full interval.
+            if self._identified:
+                self._new_heartbeat_session()
+            self._identified = True
             self._heartbeat_task = asyncio.create_task(
                 self._heartbeat_loop(self._ws, self.heartbeat_interval)
             )
             await self._send_identify()
             await self._send_voice_state()
-            await self._cancel_task("_time_spent_task")
             await self._send_time_spent()
-            self._time_spent_task = asyncio.create_task(self._time_spent_loop())
 
     async def _heartbeat_loop(self, ws: Any, first_delay: float) -> None:
         await asyncio.sleep(first_delay)
@@ -895,15 +895,10 @@ class GatewayClient:
 
     # OP 41: UPDATE_TIME_SPENT_SESSION_ID
 
-    async def _time_spent_loop(self) -> None:
-        # The id is regenerated every 30 minutes. op 41 itself repeats only while
-        # the client is focused or in a call, and Copycord is neither, so the
-        # repeat sends nothing; the new id goes out in the super properties.
-        while True:
-            await asyncio.sleep(TIME_SPENT_INTERVAL)
-            self._rotate_heartbeat_session()
+    # Sent once per fresh IDENTIFY. The browser repeats op 41 only while
+    # focused or in a call; Copycord is neither, and RESUME sends none.
 
-    def _rotate_heartbeat_session(self) -> None:
+    def _new_heartbeat_session(self) -> None:
         self.heartbeat_session_id = str(uuid.uuid4())
         self.heartbeat_session_started = int(time.time() * 1000)
         try:
@@ -913,7 +908,7 @@ class GatewayClient:
         for handler in self._heartbeat_session_handlers:
             try:
                 handler()
-            except Exception as e:  # a listener must not stop the rotation
+            except Exception as e:  # a listener must not stop the IDENTIFY
                 log.debug("heartbeat session handler failed: %r", e)
 
     async def _send_time_spent(self) -> None:

@@ -450,18 +450,19 @@ class TestFirstBatch:
         ]
 
 
-# rotation
+# a new heartbeat session
 
 
-class TestRotation:
+class TestNewHeartbeatSession:
     @pytest.mark.asyncio
-    async def test_a_rotated_id_sends_client_heartbeat_again(self, token):
+    async def test_a_new_id_sends_client_heartbeat_again(self, token):
         session = FakeSession()
         client, task, _ = await run_client(token, session, [hello(), ready_frame()])
         client.science.flush_delay = 0.01
         gateway = client.gateway
         first_id = gateway.heartbeat_session_id
-        gateway._rotate_heartbeat_session()
+        # What a fresh IDENTIFY after the first does.
+        gateway._new_heartbeat_session()
         await wait_until(lambda: len(session.science_posts()) == 2)
         await stop(client, task)
 

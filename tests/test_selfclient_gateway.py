@@ -358,21 +358,61 @@ class TestHeartbeat:
             assert ops[i + 1] == 40, ops
 
     @pytest.mark.asyncio
-    async def test_session_id_rotates_every_30_minutes_without_op41(self, monkeypatch):
-        monkeypatch.setattr(sc_gateway, "TIME_SPENT_INTERVAL", 0.05)
-        ws = FakeWS([hello(), ready()])
+    async def test_session_id_does_not_rotate_after_31_minutes(self):
+        ws = FakeWS([hello(), ready()], auto_ack=True)
         client, _ = make_client(ws)
         first_id = client.heartbeat_session_id
+        made = client.heartbeat_session_started
+        new_sessions = []
+        client.on_heartbeat_session(lambda: new_sessions.append(client.heartbeat_session_id))
         task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: client.heartbeat_session_id != first_id)
+        await wait_until(lambda: ws.frames(37))
+
+        # Move the loop clock 31 minutes ahead, one 45 s heartbeat at a time,
+        # so every timer due in that span fires.
+        loop = asyncio.get_running_loop()
+        real_time = loop.time
+        offset = 0.0
+        loop.time = lambda: real_time() + offset
+        try:
+            for _ in range(42):
+                beats = len(ws.frames(40))
+                offset += 45.0
+                for _ in range(500):
+                    if len(ws.frames(40)) > beats:
+                        break
+                    await asyncio.sleep(0.001)
+        finally:
+            del loop.time
         await stop(client, task)
 
+        assert len(ws.frames(40)) >= 42, "31 minutes of heartbeats went by"
+        assert client.heartbeat_session_id == first_id
+        assert client.heartbeat_session_started == made
+        assert new_sessions == []
         op41 = ws.frames(41)
-        assert len(op41) == 1, "op 41 goes out on connect only while unfocused"
+        assert len(op41) == 1, "op 41 goes out on connect only"
         assert op41[0]["d"]["session_id"] == first_id
         from copycord.common import selfbot_headers
 
-        assert selfbot_headers._HEARTBEAT_SESSIONS.get(TOKEN) == client.heartbeat_session_id
+        assert selfbot_headers._HEARTBEAT_SESSIONS.get(TOKEN) == first_id
+
+    @pytest.mark.asyncio
+    async def test_a_fresh_identify_makes_a_new_session_id(self):
+        first = FakeWS([hello(), ready(), {"op": 9, "d": False}])
+        second = FakeWS([hello()])
+        client, _ = make_client(first, second)
+        first_id = client.heartbeat_session_id
+        new_sessions = []
+        client.on_heartbeat_session(lambda: new_sessions.append(client.heartbeat_session_id))
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: second.frames(41))
+        await stop(client, task)
+
+        assert first.frames(41)[0]["d"]["session_id"] == first_id
+        new_id = second.frames(41)[0]["d"]["session_id"]
+        assert new_id == client.heartbeat_session_id != first_id
+        assert new_sessions == [new_id]
 
     @pytest.mark.asyncio
     async def test_op41_timestamp_is_when_the_id_was_made(self):

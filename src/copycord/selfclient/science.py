@@ -13,7 +13,8 @@ The web client queues events from page load and flushes them once READY gives
 it an ``analytics_token``. Copycord sends the four a browser sends on its own
 from startup through READY: client_heartbeat, session_start_client,
 gateway_connected and ready_payload_received, and client_heartbeat again
-whenever the heartbeat session id rotates. Shapes and key orders follow Mac's
+when a fresh IDENTIFY makes a new heartbeat session id (the id does not
+rotate on a timer). Shapes and key orders follow Mac's
 Chrome 155 capture (2026-10-20). Events tracked before READY carry no
 client_uuid, as in that capture: the browser's generator needs the user id.
 
@@ -273,7 +274,7 @@ class ScienceReporter:
         )
 
     def on_heartbeat_session(self) -> None:
-        """The gateway rotated its heartbeat session id."""
+        """A fresh IDENTIFY made a new heartbeat session id."""
         try:
             self.track_heartbeat()
         except Exception as exc:
