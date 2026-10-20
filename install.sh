@@ -54,7 +54,7 @@ Usage:
 
 Options:
   --repo owner/name      GitHub repository (default: $DEFAULT_REPO)
-  --version <value>      a release version (4.0.0, v4.0.0, 4.0.0b1) installs
+  --version <value>      a release version (4.0.0.1, v4.0.0.1) installs
                          that release; anything else (a branch, tag or
                          commit sha) installs from git at that ref
   --beta                 release: newest release, pre-releases included;
@@ -310,11 +310,13 @@ fetch() {
 }
 
 newest_version() {
-    # The highest version among the tag names on stdin (v4.1.0 > v4.1.0rc1 > v4.1.0b2).
+    # The highest version among the tag names on stdin: v4.0.0.2 > v4.0.0.1 > v4.0.0,
+    # and older suffix tags still sort (v4.0.0 > v4.0.0rc1 > v4.0.0b2).
     awk '{
         v = $0; sub(/^v/, "", v)
-        if (!match(v, /^[0-9]+\.[0-9]+\.[0-9]+/)) next
-        rest = substr(v, RLENGTH + 1); split(substr(v, 1, RLENGTH), p, ".")
+        if (!match(v, /^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?/)) next
+        rest = substr(v, RLENGTH + 1)
+        if (split(substr(v, 1, RLENGTH), p, ".") < 4) p[4] = 0
         rank = 3; n = 0
         if (rest != "") {
             rank = -1
@@ -323,13 +325,14 @@ newest_version() {
             else if (rest ~ /^[-.]?(c|rc|pre|preview)/) rank = 2
             num = rest; gsub(/[^0-9]/, " ", num); split(num, q, " "); n = q[1] + 0
         }
-        print p[1], p[2], p[3], rank, n, $0
-    }' | sort -k1,1n -k2,2n -k3,3n -k4,4n -k5,5n | tail -n 1 | awk '{ print $6 }'
+        print p[1], p[2], p[3], p[4], rank, n, $0
+    }' | sort -k1,1n -k2,2n -k3,3n -k4,4n -k5,5n -k6,6n | tail -n 1 | awk '{ print $7 }'
 }
 
 release_tag() {
     # The tag this run installs: --version, else the newest stable release
-    # (/latest), or for beta the highest version of the non-draft releases.
+    # (/latest, which skips GitHub pre-releases), or for beta the highest version
+    # of the non-draft releases, pre-releases included.
     if [ -n "$VERSION" ]; then
         printf 'v%s\n' "$VERSION"
         return 0
@@ -367,7 +370,7 @@ json_field() {
 # means release, anything else a git ref.
 INFERRED=""
 if [ -z "$METHOD_SET" ] && [ -n "$VERSION" ]; then
-    if printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$'; then
+    if printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$'; then
         METHOD="release"
     else
         METHOD="git"

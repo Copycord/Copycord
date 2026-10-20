@@ -68,7 +68,7 @@ Usage:
 
 Options:
   -Repo owner/name            GitHub repository (default: $DefaultRepo)
-  -Version <value>            a release version (4.0.0, v4.0.0, 4.0.0b1) installs
+  -Version <value>            a release version (4.0.0.1, v4.0.0.1) installs
   (alias -Tag)                that release; anything else (a branch, tag or
                               commit sha) installs from git at that ref
   -Beta                       release: newest release, pre-releases included;
@@ -126,7 +126,7 @@ Test a branch, no release needed:
     # Without an explicit method, a -Version that looks like a release version
     # means release, anything else a git ref.
     if (-not $Opts.MethodSet -and -not $Opts.Git -and $version) {
-        $method = if ($version -cmatch '^v?\d+\.\d+\.\d+([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$') { 'release' } else { 'git' }
+        $method = if ($version -cmatch '^v?\d+\.\d+\.\d+(\.\d+)?([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$') { 'release' } else { 'git' }
         $inferred = ', inferred from -Version'
     }
     $homeDir = if ($Opts.CopycordHome) { $Opts.CopycordHome } else { Join-Path $env:USERPROFILE '.copycord' }
@@ -321,16 +321,19 @@ Test a branch, no release needed:
     }
 
     function ReleaseKey([string]$Tag) {
-        # A sort key for a release tag: 4.1.0 > 4.1.0rc1 > 4.1.0b2 > 4.1.0a1; '' when it is no version.
-        if ($Tag -notmatch '^v?(\d+)\.(\d+)\.(\d+)(?:[-.]?(a|alpha|b|beta|c|rc|pre|preview)[.-]?(\d*))?$') { return '' }
-        $rank = switch ($Matches[4]) { { $_ -in @('a', 'alpha') } { 0 } { $_ -in @('b', 'beta') } { 1 } { $_ -in @('c', 'rc', 'pre', 'preview') } { 2 } default { 3 } }
-        $num = if ($Matches[5]) { [int]$Matches[5] } else { 0 }
-        return '{0:D6}{1:D6}{2:D6}{3}{4:D6}' -f [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $rank, $num
+        # A sort key for a release tag: 4.0.0.2 > 4.0.0.1 > 4.0.0, and older suffix tags
+        # still sort (4.0.0 > 4.0.0rc1 > 4.0.0b2 > 4.0.0a1); '' when it is no version.
+        if ($Tag -notmatch '^v?(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:[-.]?(a|alpha|b|beta|c|rc|pre|preview)[.-]?(\d*))?$') { return '' }
+        $build = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
+        $rank = switch ($Matches[5]) { { $_ -in @('a', 'alpha') } { 0 } { $_ -in @('b', 'beta') } { 1 } { $_ -in @('c', 'rc', 'pre', 'preview') } { 2 } default { 3 } }
+        $num = if ($Matches[6]) { [int]$Matches[6] } else { 0 }
+        return '{0:D6}{1:D6}{2:D6}{3:D6}{4}{5:D6}' -f [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $build, $rank, $num
     }
 
     function FindRelease {
         # The release this run installs: -Version, else the highest stable version
-        # (/latest), or for beta the highest version of any release that is not a draft.
+        # (/latest, which skips GitHub pre-releases), or for beta the highest version of
+        # any release that is not a draft, pre-releases included.
         # GitHub lists releases by date, not by version, so the list is sorted here.
         $hdr = $Headers.Clone()
         if ($env:GITHUB_TOKEN) { $hdr['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
