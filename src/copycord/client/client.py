@@ -37,6 +37,7 @@ from copycord.selfclient.models import (
 from copycord.selfclient.events import RawMessageDeleteEvent, RawMessageUpdateEvent
 from copycord.common.config import Config, CURRENT_VERSION
 from copycord.common.selfbot_headers import refresh_build_info
+from copycord.common import wire_probe
 from copycord.common.db import DBManager
 from copycord.common.http_session import close_shared_session
 from copycord.common.paths import data_dir
@@ -709,6 +710,7 @@ class ClientListener:
 
     async def on_resumed(self):
         """Fired when the gateway successfully reconnects."""
+        self._record_wire("RESUMED")
         if self.proxy_rotator.enabled and self.proxy_rotator._current_proxy:
             self.proxy_rotator.report_success(self.proxy_rotator._current_proxy)
 
@@ -732,7 +734,15 @@ class ClientListener:
             except Exception:
                 logger.debug("[status] heartbeat publish failed", exc_info=True)
 
+    def _record_wire(self, event: str) -> None:
+        """Record what Discord sees from this account (client_headers.json), in the background."""
+        bot = self.bot
+        wire_probe.schedule_connect_record(
+            getattr(bot, "token", None), getattr(bot, "gateway", None), event=event
+        )
+
     async def on_ready(self):
+        self._record_wire("READY")
         await self.forwarding.start()
         self._reload_mapped_ids()
 

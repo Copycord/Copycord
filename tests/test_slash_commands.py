@@ -13,6 +13,7 @@ REMOVED = {
     "announce_help",
     "role_block",
     "role_block_clear",
+    "token_debug",
 }
 
 

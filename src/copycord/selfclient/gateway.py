@@ -383,6 +383,9 @@ class GatewayClient:
         self._proxy_in_use: Optional[str] = None
         self.session_id: Optional[str] = None
         self.resume_url: Optional[str] = None
+        # What the last connection used, for the connect record (wire_probe.py).
+        self.connected_url: Optional[str] = None
+        self.identify_properties: Optional[Dict[str, Any]] = None
         self.sequence: Optional[int] = None
         self.heartbeat_interval: float = 41.25
         self.latency: float = float("inf")
@@ -598,6 +601,7 @@ class GatewayClient:
         )
 
         self.connect_count += 1
+        self.connected_url = url
         ws = await self._open(url, proxy)
         self._proxy_in_use = proxy
         self._ws = ws
@@ -745,6 +749,7 @@ class GatewayClient:
 
     async def _send_identify(self) -> None:
         props = self._gateway_properties()
+        self.identify_properties = dict(props)
         log.debug(
             "sending IDENTIFY (build=%s, os=%s, heartbeat_session=%s)",
             props.get("client_build_number"),

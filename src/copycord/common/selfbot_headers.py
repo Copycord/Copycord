@@ -147,7 +147,9 @@ async def _scrape_build_number_from_web(
 # The same file records, per account, the full REST headers the client sends
 # (Authorization left out) and the decoded X-Super-Properties, keyed by the
 # token's short hash, so what Copycord presents to Discord can be read back.
-# That part is a record only; nothing loads the headers back in.
+# On each gateway connect, wire_probe.py adds what arrived at an echo service
+# ("wire": headers, TLS and HTTP/2 fingerprints, exit IP) and the IDENTIFY sent
+# ("gateway"). That part is a record only; nothing loads it back in.
 BUILD_CACHE_FILE = "client_headers.json"
 _MIN_BUILD = 400000
 
@@ -196,11 +198,17 @@ def record_client_headers(token: str) -> None:
     headers = {k: v for k, v in build_headers(token).items() if k.lower() != "authorization"}
     data = _read_cache()
     accounts = data.get("accounts") if isinstance(data.get("accounts"), dict) else {}
-    accounts[_token_log_id(token)] = {
-        "updated_at": int(time.time()),
-        "headers": headers,
-        "super_properties": dict(_fingerprint(token)["super_props"]),
-    }
+    key = _token_log_id(token)
+    # Keep the connect record (wire_probe.py) that shares this entry.
+    entry = accounts.get(key) if isinstance(accounts.get(key), dict) else {}
+    entry.update(
+        {
+            "updated_at": int(time.time()),
+            "headers": headers,
+            "super_properties": dict(_fingerprint(token)["super_props"]),
+        }
+    )
+    accounts[key] = entry
     data["accounts"] = accounts
     _write_cache(data)
 
