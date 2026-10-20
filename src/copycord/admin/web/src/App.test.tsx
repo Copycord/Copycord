@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { App, PAGES } from "./App";
 import { CSRF_HEADER } from "./lib/api";
-import { logout } from "./components/Sidebar";
+import { logout, Sidebar } from "./components/Sidebar";
 import { ToastProvider } from "./components/Toast";
 import { ConfirmProvider } from "./components/ui";
 
@@ -48,7 +48,12 @@ describe("App shell", () => {
   });
 
   it("turns the Redeem code entry gold on hover, label, gift and wash, where the page links take the grey wash", () => {
-    renderAt("/guilds");
+    // The menu alone, so no page loads behind it.
+    render(
+      <MemoryRouter initialEntries={["/guilds"]}>
+        <Sidebar />
+      </MemoryRouter>,
+    );
     const nav = screen.getByRole("navigation", { name: "Site menu" });
     const redeem = within(nav).getByRole("button", { name: "Redeem code" });
     expect(redeem).toHaveClass("hover:text-gold", "hover:bg-gold/10", "transition-colors");
