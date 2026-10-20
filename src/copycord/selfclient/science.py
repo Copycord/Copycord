@@ -481,7 +481,12 @@ class ScienceReporter:
         resp = await http.session.request("POST", f"{API_BASE}{SCIENCE_PATH}", **kwargs)
         status = int(getattr(resp, "status_code", 0) or 0)
         if 200 <= status < 300:
-            log.debug("science POST sent %d event(s): HTTP %s", len(body["events"]), status)
+            log.debug(
+                "science POST sent %d event(s) [%s]: HTTP %s",
+                len(body["events"]),
+                ", ".join(str(e.get("type")) for e in body["events"]),
+                status,
+            )
             return True
         log.debug("science POST refused: HTTP %s", status)
         return False

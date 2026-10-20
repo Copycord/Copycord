@@ -556,6 +556,34 @@ class TestReporter:
         assert not [rec for rec in caplog.records if rec.levelno > logging.DEBUG]
 
     @pytest.mark.asyncio
+    async def test_a_sent_post_logs_its_event_types_and_status(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="selfclient.science")
+        session = FakeSession(science_status=204)
+        r = sc.ScienceReporter("tok", StubHTTP(session), StubGateway())
+        r.track("client_heartbeat", {})
+        await r.on_ready({"user": {"id": USER_ID}, "analytics_token": ANALYTICS_TOKEN})
+        await r.wait_idle()
+        sent = [rec for rec in caplog.records if rec.name == "selfclient.science"]
+        assert [(rec.levelno, rec.getMessage()) for rec in sent] == [
+            (
+                logging.DEBUG,
+                "science POST sent 2 event(s) [client_heartbeat, ready_payload_received]: HTTP 204",
+            )
+        ]
+        assert ANALYTICS_TOKEN not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_a_refused_post_logs_its_status_at_debug(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="selfclient.science")
+        r = sc.ScienceReporter("tok", StubHTTP(FakeSession(science_status=429)), StubGateway())
+        await r.on_ready({"user": {"id": USER_ID}, "analytics_token": ANALYTICS_TOKEN})
+        await r.wait_idle()
+        sent = [rec for rec in caplog.records if rec.name == "selfclient.science"]
+        assert [(rec.levelno, rec.getMessage()) for rec in sent] == [
+            (logging.DEBUG, "science POST refused: HTTP 429")
+        ]
+
+    @pytest.mark.asyncio
     async def test_a_failing_science_post_does_not_touch_the_gateway(self, token):
         session = FakeSession(science_error=OSError("boom"))
         client, task, ws = await run_client(token, session, [hello(), ready_frame()])
