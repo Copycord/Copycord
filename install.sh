@@ -390,11 +390,17 @@ case "$REPO" in
     */*) ;;
     *) die "--repo must look like owner/name, not '$REPO'" ;;
 esac
+# A root login (a VPS with only root) installs for root. sudo from a normal account
+# is refused: it would leave root-owned files and the install under the wrong user.
 if [ "$(id -u)" = "0" ] && [ "${COPYCORD_ALLOW_ROOT:-}" != "1" ]; then
-    if [ "$DRY_RUN" = "1" ]; then
-        warn "running as root; a real install refuses unless COPYCORD_ALLOW_ROOT=1"
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        if [ "$DRY_RUN" = "1" ]; then
+            warn "running with sudo; a real install refuses unless COPYCORD_ALLOW_ROOT=1"
+        else
+            die "do not run this with sudo; run it as $SUDO_USER without sudo. Set COPYCORD_ALLOW_ROOT=1 to install for root anyway."
+        fi
     else
-        die "do not run this as root; Copycord installs for your user. Set COPYCORD_ALLOW_ROOT=1 to do it anyway."
+        warn "running as root; Copycord installs for root"
     fi
 fi
 

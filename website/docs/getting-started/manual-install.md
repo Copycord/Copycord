@@ -13,7 +13,7 @@ Change how the installer works: install a specific version, test a branch, use a
 
 ## What the installer does
 
-The installer runs as your normal user and installs Copycord for that user only; it does not run as root or as Administrator. It works in these steps:
+The installer installs Copycord for the user who runs it. Run it as your normal user, not with `sudo` or as Administrator. On a Linux server where you log in as root, it installs for root. It works in these steps:
 
 1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/), the tool that provides Python 3.14 and Copycord's packages, when it is missing.
 2. **Finding the release:** picks the newest stable release, the newest pre-release with `--beta`, or the version you give with `--version`.
