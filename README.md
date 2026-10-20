@@ -28,12 +28,12 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 >
 > **Linux / macOS**
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4.0.0.2/install.sh | sh -s -- --beta
+> curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4-dev/install.sh | sh -s -- --beta
 > ```
 >
 > **Windows** (PowerShell, not as Administrator)
 > ```powershell
-> $env:COPYCORD_BETA=1; irm https://raw.githubusercontent.com/Copycord/Copycord/v4.0.0.2/install.ps1 | iex
+> $env:COPYCORD_BETA=1; irm https://raw.githubusercontent.com/Copycord/Copycord/v4-dev/install.ps1 | iex
 > ```
 >
 > Coming from v3? Before the first start, copy everything in your old `data` folder into `~/.copycord/data` (Windows: `%USERPROFILE%\.copycord\data`).
