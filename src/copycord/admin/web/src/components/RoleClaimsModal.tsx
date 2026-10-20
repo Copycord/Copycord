@@ -2,7 +2,7 @@
 // member gets from the /redeem slash command in the Copycord Discord. Redeem (or pasting a full code) posts it to
 // /api/redeem/start (contract in src/copycord/admin/role_claims.py) and the modal cross-fades to a spinner and
 // "Verifying..." while it is out; the helper grants the role there and then, so there is no login window. The answer
-// cross-fades to a result view: claimed (the gift), already claimed, or an error with an arrow Back to the form.
+// cross-fades to a result view: claimed (the gift), already claimed, or an error, each with an arrow Back to the form.
 // Nothing here says what a code redeems. The code lives in this component's state only: never logged, never stored.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -55,7 +55,7 @@ export interface Result {
   detail?: string;
 }
 
-/** Done closes the modal after a claim; every other outcome offers Back. */
+/** A claim (or already claimed) shows bigger and its Back returns to an empty form; an error's Back keeps the code. */
 const isDone = (r: Result) => r.tone === "good" || r.tone === "info";
 
 const TONE_TEXT: Record<ResultTone, string> = {
@@ -64,8 +64,8 @@ const TONE_TEXT: Record<ResultTone, string> = {
   danger: "text-danger",
 };
 /** GitHub Octicons 24 px, filled (MIT, primer/octicons): check-circle-fill for already claimed (and for claimed
- *  when the gift animation cannot load), x-circle-fill for errors. Claimed shows the gift animation, 64 px with
- *  -8 px margins so it takes the 48 px icon's slot. */
+ *  when the gift animation cannot load), x-circle-fill for errors. Claimed shows the gift animation, 96 px with
+ *  -8 px margins. */
 const CHECK_CIRCLE_FILL =
   "M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12Zm16.28-2.72a.751.751 0 0 0-.018-1.042.751.751 0 0 0-1.042-.018l-5.97 5.97-2.47-2.47a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042l3 3a.75.75 0 0 0 1.06 0Z";
 const TONE_PATH: Record<ResultTone, string> = {
@@ -173,8 +173,6 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
   flowRef.current = flow;
   /** Bumped on every redeem and on close, so a late start answer after the modal closed is dropped. */
   const attemptRef = useRef(0);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
 
   const reveal = useReveal(load.kind !== "loading");
 
@@ -225,8 +223,9 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
     wasAway.current = flow.kind !== "idle";
   }, [flow.kind, waiting, showing]);
 
-  // Back goes to the form, the code kept.
+  // Back goes to the form, the code kept after an error (cleared after a claim).
   const back = () => {
+    if (result && isDone(result)) setCode("");
     flowRef.current = { kind: "idle" };
     setFlow({ kind: "idle" });
   };
@@ -259,8 +258,8 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
     }
     if (attemptRef.current !== attempt) return;
     const next = answerResult(answer);
-    // A personal code is single use: a claimed one is gone, so the box starts empty next time.
-    if (next.tone === "good") setCode("");
+    // A personal code is single use: a claimed (or already claimed) one is gone, so the box starts empty next time.
+    if (isDone(next)) setCode("");
     showResult(next);
   };
 
@@ -380,49 +379,43 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
           data-role-claims-view="result"
           aria-hidden={!showing || undefined}
           inert={!showing || undefined}
-          className={`${VIEW} relative flex flex-col items-center justify-center px-4 text-center ${result && !isDone(result) ? "pt-8" : ""} ${showing ? "opacity-100" : "pointer-events-none opacity-0"}`}
+          className={`${VIEW} relative flex flex-col items-center justify-center px-4 text-center ${result ? "pt-8" : ""} ${showing ? "opacity-100" : "pointer-events-none opacity-0"}`}
         >
           {result ? (
             <>
-              {!isDone(result) ? (
-                <button
-                  ref={actionRef}
-                  type="button"
-                  className="group absolute left-0 top-0 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-muted outline-none transition-colors duration-150 hover:bg-white/5 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 motion-reduce:transition-none"
-                  onClick={back}
-                >
-                  <BackArrow />
-                  Back
-                </button>
-              ) : null}
+              <button
+                ref={actionRef}
+                type="button"
+                className="group absolute left-0 top-0 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-muted outline-none transition-colors duration-150 hover:bg-white/5 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 motion-reduce:transition-none"
+                onClick={back}
+              >
+                <BackArrow />
+                Back
+              </button>
               <span
                 data-role-claims-icon={result.tone}
                 className={`mb-4 grid place-items-center ${TONE_TEXT[result.tone]} transition-transform duration-[180ms] ease-out motion-reduce:transition-none ${showing ? "scale-100" : "scale-90 motion-reduce:scale-100"}`}
               >
                 {result.tone === "good" ? (
-                  <GiftAnimation className="-m-2" fallback={<ToneIcon tone="good" />} />
+                  <GiftAnimation className="size-24! -m-2" fallback={<ToneIcon tone="good" />} />
                 ) : (
                   <ToneIcon tone={result.tone} />
                 )}
               </span>
               <div role={result.tone === "danger" ? "alert" : "status"} className="flex flex-col items-center">
-                <h3 className="m-0 line-clamp-2 text-lg font-bold break-words text-text">{result.title}</h3>
+                <h3
+                  className={`m-0 line-clamp-2 ${isDone(result) ? "text-2xl" : "text-lg"} font-bold break-words text-text`}
+                >
+                  {result.title}
+                </h3>
                 {result.detail ? (
-                  <p className="mt-1.5 mb-0 line-clamp-2 text-sm leading-relaxed break-words text-muted">
+                  <p
+                    className={`mt-1.5 mb-0 line-clamp-2 ${isDone(result) ? "text-base" : "text-sm"} leading-relaxed break-words text-muted`}
+                  >
                     {result.detail}
                   </p>
                 ) : null}
               </div>
-              {isDone(result) ? (
-                <Button
-                  ref={actionRef}
-                  variant="primary"
-                  className={`group mt-5 w-full max-w-[240px] ${ROW}`}
-                  onClick={() => onCloseRef.current()}
-                >
-                  Done
-                </Button>
-              ) : null}
             </>
           ) : null}
         </div>

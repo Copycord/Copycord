@@ -269,7 +269,7 @@ describe("RoleClaimsModal", () => {
     expect(views.querySelector("form")).toBeInTheDocument();
   });
 
-  it("claimed: the gift plays and Done closes the modal; reopening starts empty", async () => {
+  it("claimed: the gift plays, no Done, Back returns to an empty form; reopening starts empty", async () => {
     mockApi();
     lottie.loadAnimation.mockClear();
     lottie.destroy.mockClear();
@@ -281,7 +281,8 @@ describe("RoleClaimsModal", () => {
     expect(within(result).getAllByText("Role claimed")).toHaveLength(1);
     const box = result.querySelector<HTMLElement>('[data-role-claims-icon="good"] [data-gift-animation]')!;
     expect(box).toHaveAttribute("aria-hidden", "true");
-    expect(box).toHaveClass("size-16", "-m-2");
+    expect(box).toHaveClass("size-24!", "-m-2");
+    expect(within(result).getByRole("heading", { name: "Role claimed" })).toHaveClass("text-2xl");
     expect(lottie.loadAnimation).toHaveBeenCalledTimes(1);
     expect(lottie.loadAnimation).toHaveBeenCalledWith({
       container: box,
@@ -292,12 +293,17 @@ describe("RoleClaimsModal", () => {
     });
     expect(lottie.goToAndStop).not.toHaveBeenCalled();
     expect(lottie.destroy).not.toHaveBeenCalled();
-    const done = within(result).getByRole("button", { name: "Done" });
-    await waitFor(() => expect(done).toHaveFocus());
-    expect(within(result).queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
-    expect(done.querySelector("svg")).toBeNull();
+    expect(within(result).queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
+    const back = within(result).getByRole("button", { name: "Back" });
+    expect(back.querySelector("svg[data-role-claims-back-arrow]")).toBeInTheDocument();
+    await waitFor(() => expect(back).toHaveFocus());
+    await user.click(back);
+    expect(screen.getByPlaceholderText("Enter code")).toHaveValue("");
+    expect(view("form")).toHaveClass("opacity-100");
+    expect(view("result")).toHaveClass("opacity-0");
+    await waitFor(() => expect(screen.getByPlaceholderText("Enter code")).toHaveFocus());
     expect(onClose).not.toHaveBeenCalled();
-    await user.click(done);
+    await user.click(within(dialog()!).getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(dialog()).not.toBeInTheDocument());
     await waitFor(() => expect(lottie.destroy).toHaveBeenCalledTimes(1));
@@ -346,7 +352,7 @@ describe("RoleClaimsModal", () => {
   it.each([
     ["with status already", { detail: "Role already claimed", status: "already" }],
     ["without status", { detail: "Conflict" }],
-  ])("a 409 %s shows the already view, its icon, no gift, and Done closes", async (_case, body) => {
+  ])("a 409 %s shows the already view, its icon, no gift, no Done, and Back returns to an empty form", async (_case, body) => {
     mockApi(CONFIG, () => json(body, 409));
     lottie.loadAnimation.mockClear();
     const { user, onClose } = await submitCode("ABCD");
@@ -354,10 +360,15 @@ describe("RoleClaimsModal", () => {
     expect(result.querySelector("[data-role-claims-icon]")).toHaveClass("text-info");
     expect(result.querySelector("[data-gift-animation]")).not.toBeInTheDocument();
     expect(lottie.loadAnimation).not.toHaveBeenCalled();
-    expect(within(result).queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+    expect(within(result).getByRole("heading", { name: "Role already claimed" })).toHaveClass("text-2xl");
+    expect(within(result).queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
+    const back = within(result).getByRole("button", { name: "Back" });
+    await waitFor(() => expect(back).toHaveFocus());
+    await user.click(back);
+    expect(screen.getByPlaceholderText("Enter code")).toHaveValue("");
+    expect(view("form")).toHaveClass("opacity-100");
+    await waitFor(() => expect(screen.getByPlaceholderText("Enter code")).toHaveFocus());
     expect(onClose).not.toHaveBeenCalled();
-    await user.click(within(result).getByRole("button", { name: "Done" }));
-    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("an invalid code: the error view with the detail, and the arrow Back goes to the form with the code", async () => {
