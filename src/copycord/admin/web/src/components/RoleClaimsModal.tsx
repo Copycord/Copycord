@@ -402,21 +402,26 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
                   </p>
                 ) : null}
               </div>
-              <Button
-                ref={actionRef}
-                variant={isDone(result) ? "primary" : "secondary"}
-                className={`group mt-5 w-full max-w-[240px] ${ROW}`}
-                onClick={isDone(result) ? () => onCloseRef.current() : back}
-              >
-                {isDone(result) ? (
-                  "Done"
-                ) : (
-                  <>
-                    <BackArrow />
-                    Back
-                  </>
-                )}
-              </Button>
+              {isDone(result) ? (
+                <Button
+                  ref={actionRef}
+                  variant="primary"
+                  className={`group mt-5 w-full max-w-[240px] ${ROW}`}
+                  onClick={() => onCloseRef.current()}
+                >
+                  Done
+                </Button>
+              ) : (
+                <button
+                  ref={actionRef}
+                  type="button"
+                  className="group mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-muted outline-none transition-colors duration-150 hover:bg-white/5 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 motion-reduce:transition-none"
+                  onClick={back}
+                >
+                  <BackArrow />
+                  Back
+                </button>
+              )}
             </>
           ) : null}
         </div>
