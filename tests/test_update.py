@@ -140,6 +140,7 @@ class Recorder:
 
 @pytest.fixture()
 def uv_tool(monkeypatch, fake_net):
+    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
     monkeypatch.setattr(update, "detect_installer", lambda: update.UV_TOOL)
     monkeypatch.setattr(update.shutil, "which", lambda name: f"/usr/bin/{name}")
     rec = Recorder()
@@ -183,6 +184,7 @@ def test_update_failure_skips_restart(uv_tool, monkeypatch):
 
 
 def test_update_pipx(monkeypatch, fake_net):
+    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
     monkeypatch.setattr(update, "detect_installer", lambda: update.PIPX)
     monkeypatch.setattr(update.shutil, "which", lambda name: f"/usr/bin/{name}")
     rec = Recorder()
