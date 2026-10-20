@@ -6,6 +6,8 @@ import logging
 import discord
 
 REMOVED = {
+    "block_add",
+    "block_list",
     "announcement_trigger_add",
     "announce_subscription_toggle",
     "announce_trigger_list",
@@ -35,5 +37,5 @@ def _command_names():
 
 def test_removed_commands_are_not_registered():
     names = _command_names()
-    assert "onjoin_dm" in names and "block_list" in names
+    assert "onjoin_dm" in names
     assert not names & REMOVED

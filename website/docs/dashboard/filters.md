@@ -52,7 +52,7 @@ To block a channel from the **Channels** page instead, use **Add channel to blac
 | **Whitelisted User IDs** | Only messages from these users are cloned |
 | **Blacklisted User IDs** | Messages from these users are not cloned |
 
-You can also manage blocked words with [`/block_add` and `/block_list`](/docs/commands/filtering).
+Blocked words are set here, per mapping, in **Blocked Words / Phrases**. There is no slash command for them.
 
 ## What happens to existing channels
 

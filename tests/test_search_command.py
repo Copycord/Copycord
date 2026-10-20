@@ -318,8 +318,8 @@ def test_search_command_registered_with_options():
     mod = _commands_module()
     cmd = vars(mod.CloneCommands)["search"]
     assert isinstance(cmd, discord.SlashCommand)
-    # until the cog is added to a bot, py-cord lists ctx as an option of every command; block_add shows the baseline
-    extra = {o.name for o in vars(mod.CloneCommands)["block_add"].options} - {"keyword"}
+    # until the cog is added to a bot, py-cord lists ctx as an option of every command; onjoin_dm shows the baseline
+    extra = {o.name for o in vars(mod.CloneCommands)["onjoin_dm"].options} - {"server_id"}
     opts = {o.name: o for o in cmd.options if o.name not in extra}
     assert list(opts) == ["author", "channel", "after", "before", "has"]
     assert not any(o.required for o in opts.values())

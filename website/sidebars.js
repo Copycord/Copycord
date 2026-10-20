@@ -59,7 +59,6 @@ const sidebars = {
       items: [
         'commands/overview',
         'commands/monitoring',
-        'commands/filtering',
         'commands/roles',
         'commands/search',
         'commands/webhooks',

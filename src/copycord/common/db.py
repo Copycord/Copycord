@@ -2094,42 +2094,6 @@ class DBManager:
             )
             return cur.rowcount > 0
 
-    def remove_blocked_keyword(
-        self,
-        keyword: str,
-        *,
-        original_guild_id: int | None,
-        cloned_guild_id: int | None,
-    ) -> bool:
-        """Remove the keyword for the guild pair; True if a row was deleted."""
-        kw_norm = keyword.strip().lower()
-        if not kw_norm:
-            return False
-
-        with self._tx():
-            cur = self.conn.execute(
-                """
-                DELETE FROM blocked_keywords
-                WHERE LOWER(keyword) = LOWER(?)
-                AND (
-                        (original_guild_id IS NULL AND ? IS NULL)
-                    OR original_guild_id = ?
-                    )
-                AND (
-                        (cloned_guild_id IS NULL AND ? IS NULL)
-                    OR cloned_guild_id = ?
-                    )
-                """,
-                (
-                    kw_norm,
-                    int(original_guild_id) if original_guild_id is not None else None,
-                    int(original_guild_id) if original_guild_id is not None else None,
-                    int(cloned_guild_id) if cloned_guild_id is not None else None,
-                    int(cloned_guild_id) if cloned_guild_id is not None else None,
-                ),
-            )
-            return cur.rowcount > 0
-
     def get_all_emoji_mappings(self) -> list[sqlite3.Row]:
         """Return all emoji mappings."""
         return self.conn.execute("SELECT * FROM emoji_mappings").fetchall()
@@ -4093,47 +4057,6 @@ class DBManager:
             "SELECT * FROM guild_mappings WHERE cloned_guild_id = ? LIMIT 1",
             (int(cloned_guild_id),),
         ).fetchone()
-
-    def get_blocked_keywords_for_origin(self, original_guild_id: int) -> list[str]:
-        """Keywords for this origin guild plus global NULL/NULL ones; deduped, lowercased, sorted."""
-        rows = self.conn.execute(
-            """
-            SELECT keyword
-            FROM blocked_keywords
-            WHERE original_guild_id = ?
-            OR original_guild_id IS NULL
-            """,
-            (int(original_guild_id),),
-        ).fetchall()
-
-        kws = {
-            str(r["keyword"]).strip().lower() for r in rows if str(r["keyword"]).strip()
-        }
-        return sorted(kws)
-
-    def toggle_blocked_keyword(
-        self,
-        keyword: str,
-        *,
-        original_guild_id: int | None,
-        cloned_guild_id: int | None,
-    ) -> tuple[bool, str]:
-        """Toggle the keyword for the mapping. Returns (changed, action) with action 'added' | 'removed' | 'none'."""
-        if self.add_blocked_keyword(
-            keyword,
-            original_guild_id=original_guild_id,
-            cloned_guild_id=cloned_guild_id,
-        ):
-            return True, "added"
-
-        if self.remove_blocked_keyword(
-            keyword,
-            original_guild_id=original_guild_id,
-            cloned_guild_id=cloned_guild_id,
-        ):
-            return True, "removed"
-
-        return False, "none"
 
     def get_filters_for_mapping(self, mapping_id: str) -> dict:
         """Return {"whitelist": {"category": [...], "channel": [...]}, "exclude": {...same...}, "blocked_words": [...]} for a mapping."""
