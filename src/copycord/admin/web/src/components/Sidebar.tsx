@@ -27,6 +27,11 @@ const ITEM =
   "relative flex w-full items-center gap-3 rounded-rail px-4 py-2.5 text-white no-underline transition-colors " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent/70";
 
+// The Redeem code entry: gold label, gift and wash on hover, so it reads as the reward it opens.
+export const REDEEM_ITEM =
+  `${ITEM} cursor-pointer border-0 bg-transparent text-left font-[inherit] text-[length:inherit] ` +
+  "hover:bg-gold/10 hover:text-gold";
+
 // .sm-footer-link
 const FOOTER_LINK = "inline-flex items-center gap-2 leading-none";
 
@@ -80,7 +85,7 @@ export function Sidebar({ onNavigate, hide = [], footer = "version", version }: 
               type="button"
               data-role-claims
               aria-haspopup="dialog"
-              className={`${ITEM} cursor-pointer border-0 bg-transparent text-left font-[inherit] text-[length:inherit] hover:bg-rail-hover`}
+              className={REDEEM_ITEM}
               onClick={() => {
                 onNavigate?.();
                 setClaimsOpen(true);

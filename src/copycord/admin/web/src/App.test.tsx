@@ -47,6 +47,17 @@ describe("App shell", () => {
     expect(within(nav).getByText("Guilds").closest("a")).toHaveAttribute("aria-current", "page");
   });
 
+  it("turns the Redeem code entry gold on hover, label, gift and wash, where the page links take the grey wash", () => {
+    renderAt("/guilds");
+    const nav = screen.getByRole("navigation", { name: "Site menu" });
+    const redeem = within(nav).getByRole("button", { name: "Redeem code" });
+    expect(redeem).toHaveClass("hover:text-gold", "hover:bg-gold/10", "transition-colors");
+    expect(redeem).not.toHaveClass("hover:bg-rail-hover");
+    expect(redeem.querySelector("svg")).toHaveAttribute("stroke", "currentColor");
+    expect(within(nav).getByText("Channels").closest("a")).toHaveClass("hover:bg-rail-hover");
+    expect(within(nav).getByText("Channels").closest("a")).not.toHaveClass("hover:text-gold");
+  });
+
   it("renders the Tasks page at a run url, not NotFound, with Tasks lit in the menu", async () => {
     renderAt("/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     // The type rail is only in the page, not its skeleton, so the chunk has replaced the skeleton.

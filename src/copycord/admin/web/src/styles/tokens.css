@@ -136,6 +136,8 @@
   --color-warn: #f5a524;
   --color-fail: #f0506e;
   --color-favorite: #f5a524;
+  /* The Redeem code menu item's hover: its label and gift turn gold over a faint gold wash. */
+  --color-gold: #f5c542;
   --color-update: #f0506e;
   --color-good-pale: #8fe6bd;
   --color-danger-pale: #f7a1b2;
