@@ -2,11 +2,12 @@
 // member gets from the /redeem slash command in the Copycord Discord. Redeem (or pasting a full code) posts it to
 // /api/redeem/start (contract in src/copycord/admin/role_claims.py) and the modal cross-fades to a spinner and
 // "Verifying..." while it is out; the helper grants the role there and then, so there is no login window. The answer
-// cross-fades to a result view: claimed (the gift), already claimed, or an error, each with an arrow Back to the form.
+// cross-fades to a result view: claimed (the gift and confetti), already claimed, or an error, each with an arrow Back to the form.
 // Nothing here says what a code redeems. The code lives in this component's state only: never logged, never stored.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, errorText } from "../lib/api";
+import { celebrate } from "../lib/celebrate";
 import { GiftAnimation } from "./GiftAnimation";
 import { Modal } from "./Modal";
 import { useToast } from "./Toast";
@@ -261,6 +262,7 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
     // A personal code is single use: a claimed (or already claimed) one is gone, so the box starts empty next time.
     if (isDone(next)) setCode("");
     showResult(next);
+    if (next.tone === "good") void celebrate();
   };
 
   let body: ReactNode;

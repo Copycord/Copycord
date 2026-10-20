@@ -15,6 +15,7 @@ import type {
   MsgFeatureKey,
 } from "../../../../types/dashboard-mappings";
 import { errorText } from "../../../../lib/api";
+import { celebrate } from "../../../../lib/celebrate";
 import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
 import { MsgFeaturesModal } from "./MsgFeaturesModal";
@@ -159,6 +160,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
       await saveMapping(form);
       await onSaved();
       notify(isEdit ? "Mapping updated." : "Mapping created.", "success");
+      if (!isEdit) void celebrate();
       onClose();
     } catch (err) {
       const msg = errorText(err, "Failed to save mapping");

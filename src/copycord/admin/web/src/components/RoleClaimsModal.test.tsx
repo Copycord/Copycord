@@ -20,6 +20,9 @@ const lottie = vi.hoisted(() => {
 });
 vi.mock("lottie-web/build/player/lottie_light", () => ({ default: { loadAnimation: lottie.loadAnimation } }));
 
+const celebrate = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("../lib/celebrate", () => ({ celebrate }));
+
 const CONFIG: RoleClaimsConfig = { configured: true };
 const CLAIMED = { status: "claimed", message: "Role claimed", reward: "role" };
 const INTRO = "Join the Copycord Community Discord server to claim codes that unlock exclusive rewards.";
@@ -50,6 +53,7 @@ function heldStart() {
 let open: MockInstance<typeof window.open>;
 beforeEach(() => {
   open = vi.spyOn(window, "open").mockReturnValue(null);
+  celebrate.mockClear();
 });
 afterEach(() => {
   expect(open).not.toHaveBeenCalled();
@@ -416,6 +420,23 @@ describe("RoleClaimsModal", () => {
     await user.click(within(result).getByRole("button", { name: "Back" }));
     expect(screen.getByPlaceholderText("Enter code")).toHaveValue("ABCD");
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("claimed throws confetti once", async () => {
+    mockApi();
+    await submitCode("ABCD");
+    await resultView("Role claimed", "good");
+    expect(celebrate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["already claimed", 409, { detail: "Role already claimed", status: "already" }, "Already claimed", "info"],
+    ["an error", 400, { detail: "Invalid code" }, "Invalid code", "danger"],
+  ])("%s throws no confetti", async (_case, status, body, title, tone) => {
+    mockApi(CONFIG, () => json(body, status));
+    await submitCode("ABCD");
+    await resultView(title, tone);
+    expect(celebrate).not.toHaveBeenCalled();
   });
 
   it("a late answer after the modal closed is dropped", async () => {
