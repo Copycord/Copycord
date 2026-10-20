@@ -171,7 +171,7 @@ def test_result_line_and_page():
     }
     line = search.result_line(row)
     assert f"<#{CH_A}>" in line and f"<t:{BASE}:R>" in line and "📎2" in line and "🔗" not in line
-    assert f"[Jump](https://discord.com/channels/{G}/{CH_A}/77)" in line
+    assert f"https://discord.com/channels/{G}/{CH_A}/77" in line
     assert "A\\*nn" in line
     e = search.render_page([row], 3, "from Ann (@ann)")
     assert e.footer.text == "Page 3 | from Ann (@ann)"

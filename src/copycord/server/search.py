@@ -154,7 +154,7 @@ def result_line(row: dict) -> str:
     if row.get("embed_count"):
         marks += f" 🔗{int(row['embed_count'])}"
     ts = int(row.get("message_ts") or 0)
-    return f"**{name}** in <#{row['cloned_channel_id']}> <t:{ts}:R>{marks} [Jump]({jump_url(row)})"
+    return f"**{name}** in <#{row['cloned_channel_id']}> <t:{ts}:R>{marks} {jump_url(row)}"
 
 
 def filters_summary(*, author: dict | None, channel_name: str | None, after, before, has) -> str:

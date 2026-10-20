@@ -37,6 +37,6 @@ Set at least one option. Dates are in UTC and take these forms:
 /search channel:#media has:attachments before:2026-10-01
 ```
 
-Only you see the reply. It shows 10 messages per page: the author, the channel, how long ago it was sent, 📎 with the number of attachments, 🔗 with the number of embeds, and a **Jump** link. The footer shows the page number and your filters. When there are more results, use **Prev** and **Next** to move between pages. Only you can press them, and they stop working after 10 minutes; run the command again to keep going.
+Only you see the reply. It shows 10 messages per page: the author, the channel, how long ago it was sent, 📎 with the number of attachments, 🔗 with the number of embeds, and the message link, which Discord shows as a clickable link to the message. The footer shows the page number and your filters. When there are more results, use **Prev** and **Next** to move between pages. Only you can press them, and they stop working after 10 minutes; run the command again to keep going.
 
 Messages cloned before Copycord recorded authors have no author, so an `author` search does not find them. Messages that were never posted in the clone are left out.
