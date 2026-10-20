@@ -93,6 +93,19 @@ MAX_SUBSCRIPTION_PAYLOAD = 15360
 # op 41 cadence, the web client's.
 TIME_SPENT_INTERVAL = 30 * 60
 
+# op 40 `qos.ver` the web client sends.
+QOS_VERSION = 31
+
+# op 4 the web client sends right after IDENTIFY: in no voice channel.
+IDLE_VOICE_STATE = {
+    "guild_id": None,
+    "channel_id": None,
+    "self_mute": True,
+    "self_deaf": False,
+    "self_video": False,
+    "flags": 2,
+}
+
 EventHandler = Callable[[Any], Awaitable[Any]]
 DispatchHandler = Callable[[str, Any], Awaitable[Any]]
 Connector = Callable[[str, Dict[str, str], Optional[str]], Awaitable[Any]]
@@ -391,6 +404,8 @@ class GatewayClient:
         self.latency: float = float("inf")
         self._last_ack: float = time.monotonic()
         self._last_heartbeat: float = 0.0
+        # The first op 40 on each socket reports the client as foregrounded.
+        self._qos_foregrounded: bool = True
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._time_spent_task: Optional[asyncio.Task] = None
         self._stopped: bool = False
@@ -607,6 +622,7 @@ class GatewayClient:
         self._ws = ws
         self._last_ack = time.monotonic()
         self._last_heartbeat = 0.0
+        self._qos_foregrounded = True
         inflater = ZlibStreamInflater() if use_zlib else None
         closed_exc: Optional[BaseException] = None
         try:
@@ -718,16 +734,27 @@ class GatewayClient:
         log.debug("hello, heartbeat interval %.2fs", self.heartbeat_interval)
 
         await self._cancel_task("_heartbeat_task")
-        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(self._ws))
 
         if self.session_id and self.sequence is not None:
+            # The first beat is jittered, as the gateway docs ask.
+            self._heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(self._ws, self.heartbeat_interval * random.random())
+            )
             await self._send_resume()
         else:
+            # The web client's order: op 2, op 4, op 41, op 40. The op 40
+            # paired with op 41 is the first beat, so the loop waits a full interval.
+            self._heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(self._ws, self.heartbeat_interval)
+            )
             await self._send_identify()
+            await self._send_voice_state()
+            await self._cancel_task("_time_spent_task")
+            await self._send_time_spent()
+            self._time_spent_task = asyncio.create_task(self._time_spent_loop())
 
-    async def _heartbeat_loop(self, ws: Any) -> None:
-        # The first beat is jittered, as the gateway docs ask.
-        await asyncio.sleep(self.heartbeat_interval * random.random())
+    async def _heartbeat_loop(self, ws: Any, first_delay: float) -> None:
+        await asyncio.sleep(first_delay)
         while self._ws is ws:
             await self._send_heartbeat()
             if time.monotonic() - self._last_ack > self.heartbeat_interval * 2:
@@ -737,10 +764,26 @@ class GatewayClient:
                 return
             await asyncio.sleep(self.heartbeat_interval)
 
+    def _heartbeat_payload(self) -> Dict[str, Any]:
+        """op 40; the client reads as backgrounded after the first one."""
+        active = self._qos_foregrounded
+        self._qos_foregrounded = False
+        return {
+            "op": GatewayOp.QOS_HEARTBEAT,
+            "d": {
+                "seq": self.sequence,
+                "qos": {
+                    "active": active,
+                    "ver": QOS_VERSION,
+                    "reasons": ["foregrounded"] if active else [],
+                },
+            },
+        }
+
     async def _send_heartbeat(self) -> None:
         self._last_heartbeat = time.monotonic()
         log.debug("heartbeat sent (seq=%s)", self.sequence)
-        await self._send_bypass({"op": GatewayOp.HEARTBEAT, "d": self.sequence})
+        await self._send_bypass(self._heartbeat_payload())
 
     # IDENTIFY / RESUME
 
@@ -763,26 +806,22 @@ class GatewayClient:
                     "token": self.token,
                     "capabilities": self.capabilities,
                     "properties": props,
+                    # The web client's; the real status follows in op 3 on READY.
                     "presence": {
-                        "status": self.status,
-                        "activities": [self.activity] if self.activity else [],
+                        "status": "unknown",
                         "since": 0,
+                        "activities": [],
                         "afk": False,
                     },
                     # Payload compression; transport compression is the URL's `compress`.
                     "compress": False,
-                    "client_state": {
-                        "guild_versions": {},
-                        "highest_last_message_id": "0",
-                        "read_state_version": 0,
-                        "user_guild_settings_version": -1,
-                        "user_settings_version": -1,
-                        "private_channels_version": "0",
-                        "api_code_version": 0,
-                    },
+                    "client_state": {"guild_versions": {}},
                 },
             }
         )
+
+    async def _send_voice_state(self) -> None:
+        await self._send({"op": GatewayOp.VOICE_STATE_UPDATE, "d": dict(IDLE_VOICE_STATE)})
 
     async def _send_resume(self) -> None:
         log.debug("sending RESUME (session=%s, seq=%s)", self.session_id, self.sequence)
@@ -800,12 +839,12 @@ class GatewayClient:
     # OP 41: UPDATE_TIME_SPENT_SESSION_ID
 
     async def _time_spent_loop(self) -> None:
-        await self._send_time_spent()
         while True:
             await asyncio.sleep(TIME_SPENT_INTERVAL)
             await self._send_time_spent()
 
     async def _send_time_spent(self) -> None:
+        """op 41, then the op 40 the web client always sends with it."""
         log.debug("sending OP 41 (time spent session)")
         await self._send(
             {
@@ -817,6 +856,7 @@ class GatewayClient:
                 },
             }
         )
+        await self._send_heartbeat()
 
     # Dispatch
 
@@ -859,9 +899,6 @@ class GatewayClient:
             # A new session keeps no subscriptions from the old one.
             self._subscribed_guilds.clear()
             await self.subscribe_guilds(self._guild_ids, force=True)
-
-            await self._cancel_task("_time_spent_task")
-            self._time_spent_task = asyncio.create_task(self._time_spent_loop())
 
         elif event == "RESUMED":
             log.info("RESUMED session=%s seq=%s", self.session_id, self.sequence)
@@ -908,14 +945,15 @@ class GatewayClient:
             )
         if self.activity:
             activities.append(self.activity)
+        # The web client's shape; it reports afk once the tab is unfocused.
         await self._send(
             {
                 "op": GatewayOp.PRESENCE_UPDATE,
                 "d": {
                     "status": self.status,
-                    "activities": activities,
                     "since": 0,
-                    "afk": False,
+                    "activities": activities,
+                    "afk": True,
                 },
             }
         )

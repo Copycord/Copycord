@@ -278,10 +278,8 @@ def make_fingerprint(token: str) -> dict:
 
     user_agent = build["browser_user_agent"]
 
-    common = {
-        "os": "Windows",
-        "browser": "Chrome",
-        "device": "",
+    # Key order is the browser's: Discord sees it in the JSON.
+    browser = {
         "system_locale": LOCALE,
         "has_client_mods": False,
         "browser_user_agent": user_agent,
@@ -292,7 +290,11 @@ def make_fingerprint(token: str) -> dict:
     }
 
     super_props = {
-        **common,
+        "os": "Windows",
+        "browser": "Chrome",
+        "device": "",
+        "device_model_name": "",
+        **browser,
         "referrer_current": "https://discord.com/",
         "referring_domain_current": "discord.com",
         "release_channel": build["release_channel"],
@@ -305,15 +307,24 @@ def make_fingerprint(token: str) -> dict:
     }
 
     gateway_props = {
-        **common,
+        "os": "Windows",
+        "browser": "Chrome",
+        "device": "",
+        **browser,
         "referrer_current": "",
         "referring_domain_current": "",
         "release_channel": build["release_channel"],
         "client_build_number": build["client_build_number"],
         "client_event_source": None,
         "client_launch_id": launch_id,
+        "launch_signature": launch_signature,
+        "client_app_state": "focused",
+        "is_fast_connect": False,
+        "gateway_connect_reasons": "AppSkeleton",
         "installation_id": install_id,
-        "is_fast_connect": True,
+        "device_model_name": "",
+        # Constant in every browser capture; undocumented.
+        "qos_token": "CgIIAQ==",
     }
 
     headers = {

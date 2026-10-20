@@ -12,6 +12,7 @@ import asyncio
 import base64
 import json
 import re
+import time
 import uuid
 import zlib
 from typing import Optional
@@ -25,6 +26,7 @@ from copycord.common.selfbot_headers import (
     get_tls_session,
     set_heartbeat_session_id,
 )
+from copycord.selfclient.gateway import IDLE_VOICE_STATE, QOS_VERSION
 
 DISCORD_API_BASE = "https://discord.com/api/v9"
 GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json&compress=zlib-stream"
@@ -33,11 +35,14 @@ GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json&compress=zlib-stream"
 _OP_DISPATCH = 0
 _OP_HEARTBEAT = 1
 _OP_IDENTIFY = 2
+_OP_VOICE_STATE_UPDATE = 4
 _OP_HELLO = 10
 _OP_INVALID_SESSION = 9
+_OP_QOS_HEARTBEAT = 40
+_OP_UPDATE_TIME_SPENT_SESSION_ID = 41
 
 
-_CAPABILITIES = 1767421
+_CAPABILITIES = 1734653
 
 
 _READY_TIMEOUT = 20.0
@@ -136,6 +141,8 @@ class GatewaySession:
         self._buf = bytearray()
         self.heartbeat_session_id: Optional[str] = None
         self.fatal = False
+        self._seq: Optional[int] = None
+        self._qos_foregrounded = True
 
     async def __aenter__(self):
         await self.connect()
@@ -173,7 +180,22 @@ class GatewaySession:
             # it on every REST call for the session's lifetime.
             self.heartbeat_session_id = str(uuid.uuid4())
 
+            # The web client's order: op 2, op 4, op 41, op 40.
             await self._ws.send_json(await _identify_payload(self._token))
+            await self._ws.send_json({"op": _OP_VOICE_STATE_UPDATE, "d": dict(IDLE_VOICE_STATE)})
+            await self._ws.send_json(
+                {
+                    "op": _OP_UPDATE_TIME_SPENT_SESSION_ID,
+                    "d": {
+                        "initialization_timestamp": int(time.time() * 1000),
+                        "session_id": self.heartbeat_session_id,
+                        "client_launch_id": gateway_properties(self._token).get(
+                            "client_launch_id"
+                        ),
+                    },
+                }
+            )
+            await self._send_heartbeat()
             self._heartbeat = asyncio.create_task(self._heartbeat_loop(interval))
 
             deadline = asyncio.get_running_loop().time() + _READY_TIMEOUT
@@ -182,6 +204,8 @@ class GatewaySession:
                 if not frame:
                     continue
                 op = frame.get("op")
+                if frame.get("s") is not None:
+                    self._seq = frame["s"]
                 if op == _OP_DISPATCH and frame.get("t") == "READY":
                     set_heartbeat_session_id(self._token, self.heartbeat_session_id)
                     return True
@@ -194,7 +218,7 @@ class GatewaySession:
                     )
                     return False
                 if op == _OP_HEARTBEAT:
-                    await self._ws.send_json({"op": _OP_HEARTBEAT, "d": None})
+                    await self._send_heartbeat()
         except _GatewayClosed as e:
             self.fatal = e.code in _FATAL_CLOSE_CODES
             self._log.debug(
@@ -250,18 +274,33 @@ class GatewaySession:
             except Exception:
                 continue
 
+    async def _send_heartbeat(self) -> None:
+        """op 40, the web client's heartbeat; only the first one is foregrounded."""
+        active = self._qos_foregrounded
+        self._qos_foregrounded = False
+        await self._ws.send_json(
+            {
+                "op": _OP_QOS_HEARTBEAT,
+                "d": {
+                    "seq": self._seq,
+                    "qos": {
+                        "active": active,
+                        "ver": QOS_VERSION,
+                        "reasons": ["foregrounded"] if active else [],
+                    },
+                },
+            }
+        )
+
     async def _heartbeat_loop(self, interval: float) -> None:
         """Keep the session alive while we hold it.
 
-        The first beat is jittered so a fleet reconnecting together does not beat in lockstep.
+        The first beat went out with op 41, so the loop starts a full interval later.
         """
         try:
-            import random
-
-            await asyncio.sleep(interval * random.random())
             while True:
-                await self._ws.send_json({"op": _OP_HEARTBEAT, "d": None})
                 await asyncio.sleep(interval)
+                await self._send_heartbeat()
         except asyncio.CancelledError:
             raise
         except Exception:

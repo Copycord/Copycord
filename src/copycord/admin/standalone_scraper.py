@@ -1053,13 +1053,19 @@ class StandaloneScraper:
                     hb_interval = hello["d"]["heartbeat_interval"] / 1000.0
 
                     hb_stop = asyncio.Event()
-                    seq_num = [None]
+                    # The client's op 40 heartbeats: a new socket starts foregrounded.
+                    identity.sequence = None
+                    identity._qos_foregrounded = True
 
                     async def heartbeater():
-                        await asyncio.sleep(hb_interval * random.uniform(0.1, 0.9))
+                        # The op 40 paired with op 41 below is the first beat.
+                        try:
+                            await asyncio.wait_for(hb_stop.wait(), timeout=hb_interval)
+                        except asyncio.TimeoutError:
+                            pass
                         while not hb_stop.is_set():
                             try:
-                                await ws.send(json.dumps({"op": 1, "d": seq_num[0]}))
+                                await identity._send_heartbeat()
                             except Exception:
                                 return
                             try:
@@ -1071,9 +1077,10 @@ class StandaloneScraper:
 
                     hb_task = asyncio.create_task(heartbeater())
 
-                    # The client's own IDENTIFY: capabilities, this token's web-client
-                    # properties, presence, compress and client_state.
+                    # The client's own connect: IDENTIFY, op 4, then op 41 and its op 40.
                     await identity._send_identify()
+                    await identity._send_voice_state()
+                    await identity._send_time_spent()
 
                     ready = False
 
@@ -1187,7 +1194,7 @@ class StandaloneScraper:
                             d = data.get("d")
                             s = data.get("s")
                             if s is not None:
-                                seq_num[0] = s
+                                identity.sequence = s
 
                             if op == 0 and t == "READY":
                                 ready = True
