@@ -44,13 +44,17 @@ describe("celebrate", () => {
     expect(fire).toHaveBeenCalledTimes(22);
   });
 
-  it("does nothing under prefers-reduced-motion", async () => {
+  it("still plays under prefers-reduced-motion", async () => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: (query: string) => ({ matches: query === "(prefers-reduced-motion: reduce)" }),
     });
-    await celebrate();
-    vi.advanceTimersByTime(4000);
-    expect(fire).not.toHaveBeenCalled();
+    try {
+      await celebrate();
+      vi.advanceTimersByTime(4000);
+      expect(fire).toHaveBeenCalledTimes(22);
+    } finally {
+      delete (window as { matchMedia?: unknown }).matchMedia;
+    }
   });
 });
