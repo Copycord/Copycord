@@ -380,10 +380,21 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
           data-role-claims-view="result"
           aria-hidden={!showing || undefined}
           inert={!showing || undefined}
-          className={`${VIEW} flex flex-col items-center justify-center px-4 text-center ${showing ? "opacity-100" : "pointer-events-none opacity-0"}`}
+          className={`${VIEW} relative flex flex-col items-center justify-center px-4 text-center ${result && !isDone(result) ? "pt-8" : ""} ${showing ? "opacity-100" : "pointer-events-none opacity-0"}`}
         >
           {result ? (
             <>
+              {!isDone(result) ? (
+                <button
+                  ref={actionRef}
+                  type="button"
+                  className="group absolute left-0 top-0 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-muted outline-none transition-colors duration-150 hover:bg-white/5 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 motion-reduce:transition-none"
+                  onClick={back}
+                >
+                  <BackArrow />
+                  Back
+                </button>
+              ) : null}
               <span
                 data-role-claims-icon={result.tone}
                 className={`mb-4 grid place-items-center ${TONE_TEXT[result.tone]} transition-transform duration-[180ms] ease-out motion-reduce:transition-none ${showing ? "scale-100" : "scale-90 motion-reduce:scale-100"}`}
@@ -411,17 +422,7 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
                 >
                   Done
                 </Button>
-              ) : (
-                <button
-                  ref={actionRef}
-                  type="button"
-                  className="group mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-muted outline-none transition-colors duration-150 hover:bg-white/5 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60 motion-reduce:transition-none"
-                  onClick={back}
-                >
-                  <BackArrow />
-                  Back
-                </button>
-              )}
+              ) : null}
             </>
           ) : null}
         </div>
