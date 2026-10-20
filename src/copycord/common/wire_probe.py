@@ -15,6 +15,7 @@ real request through the token's own session and proxy lease to an echo
 service (tls.peet.ws) and stores what arrived in client_headers.json, under
 the account's entry. The Authorization value is replaced by a placeholder
 before it leaves, and nothing written carries the token or proxy credentials.
+Only in dev mode (COPYCORD_ENV=dev); a normal install never sends the probe.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from typing import Any, Optional
 from urllib.parse import parse_qs, urlsplit
 
 from copycord.common import selfbot_headers as sh
+from copycord.common.env import is_dev
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
 
 logger = logging.getLogger("common.wire_probe")
@@ -254,8 +256,9 @@ async def record_connect(token: str, gateway: dict) -> None:
 def schedule_connect_record(
     token: Optional[str], gateway: Any = None, *, event: str = "READY"
 ) -> Optional[asyncio.Task]:
-    """Start the record in the background; the connect never waits on it."""
-    if not token:
+    """Start the record in the background; the connect never waits on it.
+    Dev mode only (COPYCORD_ENV=dev): otherwise nothing is sent or written."""
+    if not token or not is_dev():
         return None
     try:
         snapshot = gateway_snapshot(gateway, event)

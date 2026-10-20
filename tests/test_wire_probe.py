@@ -257,6 +257,7 @@ class TestConnectHook:
             return {"ok": True}
 
         monkeypatch.setattr(wp, "probe_wire", slow_probe)
+        monkeypatch.setenv("COPYCORD_ENV", "dev")
         task = wp.schedule_connect_record(TOKEN, _gateway(), event="READY")
         assert task is not None and not task.done()
         assert task in wp._TASKS
@@ -264,9 +265,48 @@ class TestConnectHook:
         await task
         assert json.loads(_file(tmp_path))["accounts"][sh._token_log_id(TOKEN)]["wire"] == {"ok": True}
 
-    def test_no_token_or_no_loop_schedules_nothing(self):
+    def test_no_token_or_no_loop_schedules_nothing(self, monkeypatch):
+        monkeypatch.setenv("COPYCORD_ENV", "dev")
         assert wp.schedule_connect_record(None) is None
         assert wp.schedule_connect_record(TOKEN) is None  # no running loop: quietly skipped
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("value", [None, "", "prod", "development"])
+    async def test_outside_dev_schedules_nothing(self, monkeypatch, tmp_path, value):
+        if value is None:
+            monkeypatch.delenv("COPYCORD_ENV", raising=False)
+        else:
+            monkeypatch.setenv("COPYCORD_ENV", value)
+
+        async def no_probe(token):
+            raise AssertionError("probe sent outside dev mode")
+
+        monkeypatch.setattr(wp, "probe_wire", no_probe)
+        before = len(wp._TASKS)
+        assert wp.schedule_connect_record(TOKEN, _gateway(), event="READY") is None
+        assert len(wp._TASKS) == before
+        await asyncio.sleep(0)
+        path = tmp_path / sh.BUILD_CACHE_FILE
+        data = json.loads(path.read_text()) if path.exists() else {}
+        entry = (data.get("accounts") or {}).get(sh._token_log_id(TOKEN)) or {}
+        assert "wire" not in entry and "gateway" not in entry
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("value", ["dev", "DEV", " Dev "])
+    async def test_dev_schedules(self, monkeypatch, tmp_path, value):
+        monkeypatch.setenv("COPYCORD_ENV", value)
+        calls = []
+
+        async def probe(token):
+            calls.append(token)
+            return {"ok": True}
+
+        monkeypatch.setattr(wp, "probe_wire", probe)
+        task = wp.schedule_connect_record(TOKEN, _gateway(), event="READY")
+        assert task is not None
+        await task
+        assert calls == [TOKEN]
+        assert json.loads(_file(tmp_path))["accounts"][sh._token_log_id(TOKEN)]["wire"] == {"ok": True}
 
     def _listener(self, monkeypatch):
         calls = []
