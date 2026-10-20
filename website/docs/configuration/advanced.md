@@ -86,19 +86,18 @@ The Scrape members task on the **Tasks** page spreads its requests over the same
 
 ### What Discord sees
 
-This check runs only when `COPYCORD_ENV` is `dev`, and `client_headers.json` exists only in dev mode. On a normal install the client sends no request to `tls.peet.ws` and neither writes nor reads `client_headers.json`; if it cannot fetch the current Discord build, it uses the build that ships with Copycord. In dev mode the file also holds each account's headers and the last Discord build fetched, which the client falls back to when a fetch fails.
+This check runs only when `COPYCORD_ENV` is `dev`. On a normal install the client sends no request to `tls.peet.ws` and writes no traffic record. If the client cannot fetch the current Discord build, it uses the build that ships with Copycord, in dev mode too.
 
-Each time the client connects to Discord, it records what Discord sees from each account in `client_headers.json` in the [data directory](/docs/cli#data-dir). Use it to check that an account goes out through the proxy you expect and looks like a real Discord client.
+In dev mode the client records each account's Discord traffic in `captures/<date>-<time>-<account code>/events.jsonl` in the [data directory](/docs/cli#data-dir): the headers and bodies of its requests, every gateway message, and the device details sent when the account connects. Each time the client connects to Discord, it also adds a `wire_probe` record of what Discord sees from the account. Use it to check that an account goes out through the proxy you expect and looks like a real Discord client.
 
-For each account, the file holds:
+Each `wire_probe` record holds:
 
 - The request headers as they arrive, with the authorization header removed.
 - The TLS and HTTP/2 fingerprints of the connection.
 - The IP address Discord sees, and the proxy, with its credentials masked.
 - A comparison with a real Discord client, listing anything missing, different, or sent that a real client would not send.
-- The device details sent when the account connects.
 
-To take this reading, the client sends one request per connect, through the account's own connection and proxy, to the public echo service `tls.peet.ws`. The request carries a placeholder instead of the account's token. Accounts are listed by a short code, not by token, but the file still describes your accounts, so keep it private.
+To take this reading, the client sends one request per connect, through the account's own connection and proxy, to the public echo service `tls.peet.ws`. The request carries a placeholder instead of the account's token. Tokens and other secrets are redacted and accounts are named by a short code, but the record still describes your accounts, so keep it private.
 
 ## Ports
 
