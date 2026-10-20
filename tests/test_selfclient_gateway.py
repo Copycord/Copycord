@@ -247,8 +247,10 @@ class TestHandshake:
             "presence",
             "compress",
             "client_state",
+            "qos_token",
         ]
         assert d["client_state"] == {"guild_versions": {}}
+        assert d["qos_token"] == "CgIIAQ=="
         assert list(d["presence"].items()) == [
             ("status", "unknown"),
             ("since", 0),
@@ -260,6 +262,7 @@ class TestHandshake:
             "os",
             "browser",
             "device",
+            "device_model_name",
             "system_locale",
             "has_client_mods",
             "browser_user_agent",
@@ -278,14 +281,11 @@ class TestHandshake:
             "is_fast_connect",
             "gateway_connect_reasons",
             "installation_id",
-            "device_model_name",
-            "qos_token",
         ]
         assert props["device_model_name"] == ""
         assert props["client_app_state"] == "focused"
         assert props["is_fast_connect"] is False
         assert props["gateway_connect_reasons"] == "AppSkeleton"
-        assert props["qos_token"] == "CgIIAQ=="
         rest = sc_gateway.fingerprint.selfbot_headers._fingerprint(TOKEN)["super_props"]
         assert props["launch_signature"] == rest["launch_signature"]
 

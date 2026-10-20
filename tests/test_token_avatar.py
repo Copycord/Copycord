@@ -283,8 +283,10 @@ class TestAvatarGatewaySession:
             "presence",
             "compress",
             "client_state",
+            "qos_token",
         ]
         assert d["client_state"] == {"guild_versions": {}}
+        assert d["qos_token"] == "CgIIAQ=="
         assert d["presence"] == {"status": "unknown", "since": 0, "activities": [], "afk": False}
         assert d["properties"] == token_avatar.gateway_properties("avatar-token")
 

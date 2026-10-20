@@ -95,6 +95,10 @@ TIME_SPENT_INTERVAL = 30 * 60
 # op 40 `qos.ver` the web client sends.
 QOS_VERSION = 31
 
+# IDENTIFY's top-level `qos_token`, last in `d`. Constant in every browser
+# capture; undocumented.
+QOS_TOKEN = "CgIIAQ=="
+
 # op 4 the web client sends right after IDENTIFY: in no voice channel.
 IDLE_VOICE_STATE = {
     "guild_id": None,
@@ -867,6 +871,7 @@ class GatewayClient:
                 # Payload compression; transport compression is the URL's `compress`.
                 "compress": False,
                 "client_state": {"guild_versions": {}},
+                "qos_token": QOS_TOKEN,
             },
         }
         raw = json.dumps(payload).encode("utf-8")

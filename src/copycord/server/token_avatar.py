@@ -26,7 +26,7 @@ from copycord.common.selfbot_headers import (
     get_tls_session,
     set_heartbeat_session_id,
 )
-from copycord.selfclient.gateway import IDLE_VOICE_STATE, QOS_VERSION
+from copycord.selfclient.gateway import IDLE_VOICE_STATE, QOS_TOKEN, QOS_VERSION
 
 DISCORD_API_BASE = "https://discord.com/api/v9"
 GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json&compress=zlib-stream"
@@ -120,6 +120,7 @@ async def _identify_payload(token: str) -> dict:
             "client_state": {
                 "guild_versions": {},
             },
+            "qos_token": QOS_TOKEN,
         },
     }
 

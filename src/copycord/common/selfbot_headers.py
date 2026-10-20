@@ -311,6 +311,7 @@ def make_fingerprint(token: str) -> dict:
         "os": "Windows",
         "browser": "Chrome",
         "device": "",
+        "device_model_name": "",
         **browser,
         "referrer_current": "",
         "referring_domain_current": "",
@@ -323,9 +324,7 @@ def make_fingerprint(token: str) -> dict:
         "is_fast_connect": False,
         "gateway_connect_reasons": "AppSkeleton",
         "installation_id": install_id,
-        "device_model_name": "",
-        # Constant in every browser capture; undocumented.
-        "qos_token": "CgIIAQ==",
+        # qos_token is not a property: IDENTIFY carries it at the top level.
     }
 
     headers = {

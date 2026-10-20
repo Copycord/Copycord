@@ -184,11 +184,17 @@ class TestGatewayProperties:
         )
         assert g["is_fast_connect"] is False
         assert g["gateway_connect_reasons"] == "AppSkeleton"
-        assert g["qos_token"] == "CgIIAQ=="
 
     def test_gateway_props_omit_the_rest_only_fields(self):
         g = sh.gateway_properties("token-abc")
         assert "client_heartbeat_session_id" not in g
+        # IDENTIFY carries qos_token beside the properties, not in them.
+        assert "qos_token" not in g
+
+    def test_gateway_props_key_order_matches_chrome(self):
+        g = sh.gateway_properties("token-order")
+        assert list(g)[:4] == ["os", "browser", "device", "device_model_name"]
+        assert list(g)[-1] == "installation_id"
 
     def test_gateway_props_share_the_rest_launch_signature(self):
         _, rest = _props("token-abc")
