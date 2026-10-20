@@ -82,9 +82,8 @@ CAPABILITIES = Capabilities.DEFAULT  # 1734653
 # once subscribed via `typing`, adding `threads` later sends no THREAD_LIST_SYNC.
 SUBSCRIPTION_FEATURES = {
     "typing": True,
-    "threads": True,
     "activities": True,
-    "member_updates": True,
+    "threads": True,
 }
 
 # Discord drops oversized op 37 frames, so batches are split to stay under this.
@@ -524,20 +523,18 @@ class GatewayClient:
         limit: int = 0,
         presences: bool = False,
         user_ids: Optional[Iterable[Any]] = None,
-        nonce: Optional[str] = None,
     ) -> None:
-        """Send op 8; the answer arrives as GUILD_MEMBERS_CHUNK."""
-        d: Dict[str, Any] = {
-            "guild_id": str(guild_id),
-            "limit": int(limit),
-            "presences": bool(presences),
-        }
+        """Send op 8 in one of the web client's two shapes, without a nonce.
+
+        The answer arrives as GUILD_MEMBERS_CHUNK; callers match it by guild.
+        """
+        d: Dict[str, Any] = {"guild_id": [str(guild_id)]}
         if user_ids is not None:
             d["user_ids"] = [str(u) for u in user_ids]
         else:
             d["query"] = query
-        if nonce is not None:
-            d["nonce"] = nonce
+            d["limit"] = int(limit)
+        d["presences"] = bool(presences)
         await self._send({"op": GatewayOp.REQUEST_GUILD_MEMBERS, "d": d})
 
     async def change_presence(
