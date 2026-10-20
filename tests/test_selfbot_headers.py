@@ -255,15 +255,14 @@ class TestRefreshBuildInfo:
 
 
 class TestBuildCache:
-    """The last scraped build is kept in <data dir>/client_build.json."""
+    """The last scraped build is kept in <data dir>/client_headers.json."""
 
     @pytest.mark.asyncio
     async def test_a_scraped_build_is_cached(self, tmp_path):
         await sh.refresh_build_info(_ScrapeSession(build=610001))
         data = json.loads((tmp_path / sh.BUILD_CACHE_FILE).read_text())
-        assert data["client_build_number"] == 610001
-        # Only the number and a timestamp: nothing about the token or the agent.
-        assert set(data) == {"client_build_number", "fetched_at"}
+        assert data["build"]["client_build_number"] == 610001
+        assert set(data["build"]) == {"client_build_number", "fetched_at"}
 
     @pytest.mark.asyncio
     async def test_failed_scrape_falls_back_to_the_cached_build(self):
@@ -285,8 +284,8 @@ class TestBuildCache:
         assert out["client_build_number"] == 650000
 
     @pytest.mark.parametrize(
-        "body", ["not json", "[]", '{"client_build_number": "610000"}', '{"client_build_number": 12}',
-                 '{"client_build_number": true}']
+        "body", ["not json", "[]", '{"build": []}', '{"build": {"client_build_number": "610000"}}',
+                 '{"build": {"client_build_number": 12}}', '{"build": {"client_build_number": true}}']
     )
     def test_a_bad_cache_is_ignored(self, tmp_path, body):
         (tmp_path / sh.BUILD_CACHE_FILE).write_text(body)
@@ -301,6 +300,51 @@ class TestBuildCache:
         monkeypatch.setenv("DATA_DIR", str(blocker / "sub"))
         sh.save_cached_build_number(610000)  # must not raise
         assert sh.load_cached_build_number() is None
+
+
+class TestClientHeadersRecord:
+    """Each account's full REST headers are recorded, without its token."""
+
+    TOKEN = "record-token-abc.def.ghi"
+
+    @pytest.fixture(autouse=True)
+    def _fresh_fingerprints(self):
+        sh.set_build_info(sh.get_build_info())  # clears the per-token fingerprint cache
+
+    def _file(self, tmp_path):
+        return json.loads((tmp_path / sh.BUILD_CACHE_FILE).read_text())
+
+    def test_first_use_records_the_headers_without_the_token(self, tmp_path):
+        sent = sh.build_headers(self.TOKEN)
+        raw = (tmp_path / sh.BUILD_CACHE_FILE).read_text()
+        assert self.TOKEN not in raw
+        entry = self._file(tmp_path)["accounts"][sh._token_log_id(self.TOKEN)]
+        expected = {k: v for k, v in sent.items() if k != "Authorization"}
+        assert entry["headers"] == expected
+        assert "Authorization" not in entry["headers"]
+        assert entry["super_properties"] == json.loads(base64.b64decode(sent["X-Super-Properties"]))
+
+    def test_accounts_and_build_live_side_by_side(self, tmp_path):
+        sh.save_cached_build_number(612345)
+        sh.build_headers(self.TOKEN)
+        sh.build_headers("other-token-xyz")
+        data = self._file(tmp_path)
+        assert data["build"]["client_build_number"] == 612345
+        assert set(data["accounts"]) == {sh._token_log_id(self.TOKEN), sh._token_log_id("other-token-xyz")}
+
+    def test_a_new_build_rerecords_on_next_use(self, tmp_path):
+        sh.build_headers(self.TOKEN)
+        sh.set_build_info({"client_build_number": 655555})
+        sh.build_headers(self.TOKEN)
+        entry = self._file(tmp_path)["accounts"][sh._token_log_id(self.TOKEN)]
+        assert entry["super_properties"]["client_build_number"] == 655555
+
+    def test_a_record_failure_never_breaks_a_request(self, monkeypatch):
+        def boom(token):
+            raise RuntimeError("disk gone")
+        monkeypatch.setattr(sh, "record_client_headers", boom)
+        sh.set_build_info(sh.get_build_info())  # clears the fingerprint cache
+        assert sh.build_headers(self.TOKEN)["Authorization"] == self.TOKEN
 
 def test_context_properties_encodes_location():
     val = sh.context_properties("chat_input")

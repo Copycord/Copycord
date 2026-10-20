@@ -143,7 +143,12 @@ async def _scrape_build_number_from_web(
 # scrape falls back to a recent real build instead of the one baked into this
 # release. Only the number is stored: the user agent and browser version follow
 # the TLS impersonation target, which can change with a curl_cffi upgrade.
-BUILD_CACHE_FILE = "client_build.json"
+#
+# The same file records, per account, the full REST headers the client sends
+# (Authorization left out) and the decoded X-Super-Properties, keyed by the
+# token's short hash, so what Copycord presents to Discord can be read back.
+# That part is a record only; nothing loads the headers back in.
+BUILD_CACHE_FILE = "client_headers.json"
 _MIN_BUILD = 400000
 
 
@@ -151,31 +156,53 @@ def _build_cache_path():
     return data_dir() / BUILD_CACHE_FILE
 
 
-def load_cached_build_number() -> int | None:
-    """The cached build number, or None when there is no usable cache."""
+def _read_cache() -> dict:
     try:
         data = json.loads(_build_cache_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    number = data.get("client_build_number") if isinstance(data, dict) else None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_cache(data: dict) -> None:
+    """Best effort and atomic; a failure only costs the record and the fallback."""
+    path = _build_cache_path()
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
+    except OSError as e:
+        logger.debug("client headers file write failed: %r", e)
+
+
+def load_cached_build_number() -> int | None:
+    """The cached build number, or None when there is no usable cache."""
+    build = _read_cache().get("build")
+    number = build.get("client_build_number") if isinstance(build, dict) else None
     if isinstance(number, int) and not isinstance(number, bool) and number >= _MIN_BUILD:
         return number
     return None
 
 
 def save_cached_build_number(number: int) -> None:
-    """Best effort: write the cache atomically; a failure only costs the fallback."""
-    path = _build_cache_path()
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(
-            json.dumps({"client_build_number": int(number), "fetched_at": int(time.time())}),
-            encoding="utf-8",
-        )
-        tmp.replace(path)
-    except OSError as e:
-        logger.debug("build cache write failed: %r", e)
+    data = _read_cache()
+    data["build"] = {"client_build_number": int(number), "fetched_at": int(time.time())}
+    _write_cache(data)
+
+
+def record_client_headers(token: str) -> None:
+    """Store the headers this account sends now, without its token."""
+    headers = {k: v for k, v in build_headers(token).items() if k.lower() != "authorization"}
+    data = _read_cache()
+    accounts = data.get("accounts") if isinstance(data.get("accounts"), dict) else {}
+    accounts[_token_log_id(token)] = {
+        "updated_at": int(time.time()),
+        "headers": headers,
+        "super_properties": dict(_fingerprint(token)["super_props"]),
+    }
+    data["accounts"] = accounts
+    _write_cache(data)
 
 
 def _use_cached_build() -> None:
@@ -336,6 +363,10 @@ def _fingerprint(token: str) -> dict:
     if fp is None:
         fp = make_fingerprint(token)
         _FINGERPRINT_CACHE[token] = fp
+        try:
+            record_client_headers(token)
+        except Exception as e:  # the record must never break a request
+            logger.debug("client headers record failed for %s: %r", _token_log_id(token), e)
     return fp
 
 
