@@ -86,7 +86,7 @@ The Scrape members task on the **Tasks** page spreads its requests over the same
 
 ### What Discord sees
 
-This check runs only when `COPYCORD_ENV` is `dev`. On a normal install the client sends no request to `tls.peet.ws` and writes none of the details below; `client_headers.json` still holds each account's headers and the cached Discord build.
+This check runs only when `COPYCORD_ENV` is `dev`, and `client_headers.json` exists only in dev mode. On a normal install the client sends no request to `tls.peet.ws` and neither writes nor reads `client_headers.json`; if it cannot fetch the current Discord build, it uses the build that ships with Copycord. In dev mode the file also holds each account's headers and the last Discord build fetched, which the client falls back to when a fetch fails.
 
 Each time the client connects to Discord, it records what Discord sees from each account in `client_headers.json` in the [data directory](/docs/cli#data-dir). Use it to check that an account goes out through the proxy you expect and looks like a real Discord client.
 

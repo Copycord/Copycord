@@ -28,6 +28,7 @@ from copycord.common.exit_timezone import (
     note_token_proxy as _note_token_proxy,
     timezone_for as _timezone_for,
 )
+from copycord.common.env import is_dev
 from copycord.common.http_session import shared_session
 from copycord.common.paths import data_dir
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
@@ -150,6 +151,9 @@ async def _scrape_build_number_from_web(
 # On each gateway connect, wire_probe.py adds what arrived at an echo service
 # ("wire": headers, TLS and HTTP/2 fingerprints, exit IP) and the IDENTIFY sent
 # ("gateway"). That part is a record only; nothing loads it back in.
+#
+# The file exists only in dev mode (COPYCORD_ENV=dev). Otherwise it is neither
+# written nor read, and a failed scrape falls back to DEFAULT_BUILD.
 BUILD_CACHE_FILE = "client_headers.json"
 _MIN_BUILD = 400000
 
@@ -159,6 +163,9 @@ def _build_cache_path():
 
 
 def _read_cache() -> dict:
+    """The file's contents, or {} outside dev mode."""
+    if not is_dev():
+        return {}
     try:
         data = json.loads(_build_cache_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -167,7 +174,10 @@ def _read_cache() -> dict:
 
 
 def _write_cache(data: dict) -> None:
-    """Best effort and atomic; a failure only costs the record and the fallback."""
+    """Best effort and atomic; a failure only costs the record and the fallback.
+    Outside dev mode nothing is written."""
+    if not is_dev():
+        return
     path = _build_cache_path()
     tmp = path.with_name(path.name + ".tmp")
     try:

@@ -79,6 +79,7 @@ class _Pool:
 @pytest.fixture(autouse=True)
 def _env(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("COPYCORD_ENV", "dev")  # the file exists only in dev mode
     original = sh.get_build_info()
     sh.set_build_info(original)  # clears the per-token fingerprint cache
     yield
@@ -245,6 +246,18 @@ class TestRecord:
         entry = json.loads(_file(tmp_path))["accounts"][sh._token_log_id(TOKEN)]
         assert entry["super_properties"]["client_build_number"] == 655555
         assert entry["wire"]["ok"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("value", [None, "", "prod", "development"])
+    async def test_outside_dev_nothing_is_written(self, monkeypatch, tmp_path, value):
+        if value is None:
+            monkeypatch.delenv("COPYCORD_ENV", raising=False)
+        else:
+            monkeypatch.setenv("COPYCORD_ENV", value)
+        _fake(monkeypatch, _Session())
+        sh.build_headers(TOKEN)
+        await wp.record_connect(TOKEN, wp.gateway_snapshot(_gateway(), "READY"))
+        assert not (tmp_path / sh.BUILD_CACHE_FILE).exists()
 
 
 class TestConnectHook:

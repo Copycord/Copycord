@@ -17,8 +17,9 @@ from copycord.common import selfbot_headers as sh
 @pytest.fixture(autouse=True)
 def _restore_build(tmp_path, monkeypatch):
     """Snapshot and restore the module-global build so tests don't leak state,
-    and keep the build cache in a temp data dir."""
+    and keep the build cache in a temp data dir. Not dev mode unless a test sets it."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("COPYCORD_ENV", raising=False)
     original = sh.get_build_info()
     yield
     sh.set_build_info(original)
@@ -255,7 +256,11 @@ class TestRefreshBuildInfo:
 
 
 class TestBuildCache:
-    """The last scraped build is kept in <data dir>/client_headers.json."""
+    """The last scraped build is kept in <data dir>/client_headers.json (dev mode)."""
+
+    @pytest.fixture(autouse=True)
+    def _dev(self, monkeypatch):
+        monkeypatch.setenv("COPYCORD_ENV", "dev")
 
     @pytest.mark.asyncio
     async def test_a_scraped_build_is_cached(self, tmp_path):
@@ -303,12 +308,13 @@ class TestBuildCache:
 
 
 class TestClientHeadersRecord:
-    """Each account's full REST headers are recorded, without its token."""
+    """Each account's full REST headers are recorded, without its token (dev mode)."""
 
     TOKEN = "record-token-abc.def.ghi"
 
     @pytest.fixture(autouse=True)
-    def _fresh_fingerprints(self):
+    def _fresh_fingerprints(self, monkeypatch):
+        monkeypatch.setenv("COPYCORD_ENV", "dev")
         sh.set_build_info(sh.get_build_info())  # clears the per-token fingerprint cache
 
     def _file(self, tmp_path):
@@ -345,6 +351,41 @@ class TestClientHeadersRecord:
         monkeypatch.setattr(sh, "record_client_headers", boom)
         sh.set_build_info(sh.get_build_info())  # clears the fingerprint cache
         assert sh.build_headers(self.TOKEN)["Authorization"] == self.TOKEN
+
+
+class TestOutsideDev:
+    """Outside dev mode client_headers.json is never written or read."""
+
+    TOKEN = "record-token-abc.def.ghi"
+
+    @pytest.fixture(autouse=True, params=[None, "", "prod", "development"])
+    def _not_dev(self, request, monkeypatch):
+        if request.param is None:
+            monkeypatch.delenv("COPYCORD_ENV", raising=False)
+        else:
+            monkeypatch.setenv("COPYCORD_ENV", request.param)
+        sh.set_build_info(sh.get_build_info())  # clears the per-token fingerprint cache
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_written(self, tmp_path):
+        await sh.refresh_build_info(_ScrapeSession(build=610001))
+        sh.save_cached_build_number(610002)
+        sh.build_headers(self.TOKEN)
+        sh._write_cache({"build": {"client_build_number": 610003}})
+        assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.asyncio
+    async def test_the_cache_is_not_read(self, tmp_path):
+        sh.set_build_info(dict(sh.DEFAULT_BUILD))
+        cached = sh.DEFAULT_BUILD["client_build_number"] + 5000
+        (tmp_path / sh.BUILD_CACHE_FILE).write_text(
+            json.dumps({"build": {"client_build_number": cached, "fetched_at": 1}})
+        )
+        assert sh._read_cache() == {}
+        assert sh.load_cached_build_number() is None
+        out = await sh.refresh_build_info(_ScrapeSession(raise_exc=RuntimeError("offline")))
+        assert out["client_build_number"] == sh.DEFAULT_BUILD["client_build_number"]
+
 
 def test_context_properties_encodes_location():
     val = sh.context_properties("chat_input")
