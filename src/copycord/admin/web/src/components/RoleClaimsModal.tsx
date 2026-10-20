@@ -104,7 +104,7 @@ function ToneIcon({ tone }: { tone: ResultTone }) {
   );
 }
 
-const ALREADY: Result = { tone: "info", title: "Role already claimed" };
+const ALREADY: Result = { tone: "info", title: "Already claimed" };
 const CLAIMED = "Role claimed";
 
 /** A start answer as a result: claimed, with the helper's message under the title when it says more. */

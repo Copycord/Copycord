@@ -106,7 +106,7 @@ async function main() {
       start: { status: 409, body: { detail: "Role already claimed", status: "already" } },
     });
     await submit(page, CODE);
-    await resultView(page, "Role already claimed");
+    await resultView(page, "Already claimed");
     await shot(page, "result-already");
 
     page = await openModal(browser, state, { config: CONFIG, start: { status: 400, body: { detail: "Invalid code" } } });

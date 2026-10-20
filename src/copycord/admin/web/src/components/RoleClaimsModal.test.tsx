@@ -356,14 +356,14 @@ describe("RoleClaimsModal", () => {
     mockApi(CONFIG, () => json(body, 409));
     lottie.loadAnimation.mockClear();
     const { user, onClose } = await submitCode("ABCD");
-    const result = await resultView("Role already claimed", "info");
+    const result = await resultView("Already claimed", "info");
     expect(result.querySelector("[data-role-claims-icon]")).toHaveClass("text-info");
     const infoIcon = result.querySelector('[data-role-claims-icon="info"]')!;
     expect(infoIcon.querySelector("img")).toHaveAttribute("src", "/static/logo.png");
     expect(infoIcon.querySelector("svg")).not.toBeInTheDocument();
     expect(result.querySelector("[data-gift-animation]")).not.toBeInTheDocument();
     expect(lottie.loadAnimation).not.toHaveBeenCalled();
-    expect(within(result).getByRole("heading", { name: "Role already claimed" })).toHaveClass("text-2xl");
+    expect(within(result).getByRole("heading", { name: "Already claimed" })).toHaveClass("text-2xl");
     expect(within(result).queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
     const back = within(result).getByRole("button", { name: "Back" });
     await waitFor(() => expect(back).toHaveFocus());
