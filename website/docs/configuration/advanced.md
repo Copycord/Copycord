@@ -84,6 +84,20 @@ The client sends Discord the time zone of the address it connects from, through 
 
 The Scrape members task on the **Tasks** page spreads its requests over the same proxy list. Its **Scraper tokens and proxies** card edits that list too.
 
+### What Discord sees
+
+Each time the client connects to Discord, it records what Discord sees from each account in `client_headers.json` in the [data directory](/docs/cli#data-dir). Use it to check that an account goes out through the proxy you expect and looks like a real Discord client.
+
+For each account, the file holds:
+
+- The request headers as they arrive, with the authorization header removed.
+- The TLS and HTTP/2 fingerprints of the connection.
+- The IP address Discord sees, and the proxy, with its credentials masked.
+- A comparison with a real Discord client, listing anything missing, different, or sent that a real client would not send.
+- The device details sent when the account connects.
+
+To take this reading, the client sends one request per connect, through the account's own connection and proxy, to the public echo service `tls.peet.ws`. The request carries a placeholder instead of the account's token. Accounts are listed by a short code, not by token, but the file still describes your accounts, so keep it private.
+
 ## Ports
 
 Only the dashboard port (`ADMIN_PORT`, default `8080`) must be reachable. Copycord also uses two ports on `127.0.0.1` for its parts to talk to each other: `9101` and `9102`. If another program uses one of them, set other ports in the environment:

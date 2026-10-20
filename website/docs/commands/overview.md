@@ -25,7 +25,6 @@ Message, DM and asset exports, history imports, purges and asset syncs are not s
 |---------|--------------|------|
 | `/ping_server` | Shows the server bot's latency and server details | [Monitoring](/docs/commands/monitoring) |
 | `/ping_client` | Shows the client's latency and uptime | [Monitoring](/docs/commands/monitoring) |
-| `/token_debug` | Shows how each user token appears to Discord | [Monitoring](/docs/commands/monitoring) |
 | `/block_add` | Blocks or unblocks a keyword | [Filtering](/docs/commands/filtering) |
 | `/block_list` | Lists the blocked keywords | [Filtering](/docs/commands/filtering) |
 | `/onjoin_role` | Adds or removes an on-join role | [Roles](/docs/commands/roles) |
