@@ -232,7 +232,7 @@ COMMAND_ADVANCED = {
 # (name, text) for the environment overrides on the advanced page.
 ADVANCED_ENV = (
     ("COPYCORD_HOME", "Use another Copycord home instead of ~/.copycord"),
-    ("COPYCORD_ALLOW_ROOT", "Let the install scripts run as root or Administrator (set to 1)"),
+    ("COPYCORD_ALLOW_ROOT", "Let the install scripts run with sudo or as Administrator (set to 1)"),
     ("COPYCORD_TASK_NAME", "Windows: the name of the Scheduled Task for the service"),
     ("COPYCORD_SKIP_FRONTEND", "doctor: skip the web UI checks, for git installs without a build"),
     ("COPYCORD_ALLOW_INSECURE_DASHBOARD", "Listen beyond this computer with no or the default password (set to 1)"),
