@@ -303,7 +303,8 @@ def make_fingerprint(token: str) -> dict:
         "client_launch_id": launch_id,
         "launch_signature": launch_signature,
         "client_app_state": "focused",
-        "client_heartbeat_session_id": "",
+        # client_heartbeat_session_id is absent until the gateway produces one;
+        # _sent_super_props then adds it last, where the browser puts it.
     }
 
     gateway_props = {

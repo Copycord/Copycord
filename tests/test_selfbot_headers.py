@@ -85,7 +85,6 @@ class TestFingerprintShape:
             "client_launch_id",
             "launch_signature",
             "client_app_state",
-            "client_heartbeat_session_id",
         ]
         assert props["device_model_name"] == ""
 
@@ -95,7 +94,7 @@ class TestFingerprintShape:
             _, props = _props("token-order-hb")
         finally:
             sh.set_heartbeat_session_id("token-order-hb", None)
-        assert list(props)[-1] == "client_heartbeat_session_id"
+        assert list(props)[-2:] == ["client_app_state", "client_heartbeat_session_id"]
         assert props["client_heartbeat_session_id"] == "hb-1"
 
     def test_sends_the_client_hints_a_browser_sends(self):
@@ -218,7 +217,14 @@ class TestHeartbeatSessionId:
         sh.set_heartbeat_session_id("hb-token", None)
         _, props = _props("hb-token")
 
-        assert props["client_heartbeat_session_id"] == ""
+        assert "client_heartbeat_session_id" not in props
+        assert "client_heartbeat_session_id" not in sh.make_fingerprint("hb-token")["super_props"]
+
+    def test_absent_again_once_the_id_is_cleared(self):
+        sh.set_heartbeat_session_id("hb-token", "sess-1")
+        sh.set_heartbeat_session_id("hb-token", None)
+        _, props = _props("hb-token")
+        assert "client_heartbeat_session_id" not in props
 
     def test_carried_on_every_request_once_known(self):
         sh.set_heartbeat_session_id("hb-token", "sess-42")
