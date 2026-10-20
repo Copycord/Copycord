@@ -272,7 +272,7 @@ async def test_run_search_pages_through_every_result(db):
         descs.append(inter.response.edit_message.call_args.kwargs["embed"].description)
     lines = "\n".join(descs).splitlines()
     assert len(lines) == 25 and len(descs) == 3
-    assert lines[0].endswith(f"/{CH_A}/{25 + 10_000})") and lines[-1].endswith(f"/{CH_A}/{1 + 10_000})")
+    assert lines[0].endswith(f"/{CH_A}/{25 + 10_000}") and lines[-1].endswith(f"/{CH_A}/{1 + 10_000}")
 
 
 @pytest.mark.asyncio
