@@ -245,3 +245,89 @@ class TestFailureIsNotRetried:
         await _prepare(m, URL)
         m.clear_bad_tokens()
         assert not m._avatar_skip
+
+
+# The avatar session's gateway frames: the same as the selfclient's.
+
+import asyncio  # noqa: E402
+import json  # noqa: E402
+
+import copycord.server.token_avatar as token_avatar  # noqa: E402
+
+
+class _FakeGatewayWS:
+    def __init__(self, frames):
+        self.frames = [json.dumps(f).encode() for f in frames]
+        self.sent = []
+
+    async def recv(self):
+        if not self.frames:
+            await asyncio.sleep(3600)
+        return self.frames.pop(0), 0
+
+    async def send_json(self, payload):
+        self.sent.append(json.loads(json.dumps(payload)))
+
+    async def close(self):
+        pass
+
+
+class TestAvatarGatewaySession:
+    def test_identify_uses_the_browser_capabilities_and_shape(self):
+        d = asyncio.run(token_avatar._identify_payload("avatar-token"))["d"]
+        assert d["capabilities"] == 1734653
+        assert list(d) == [
+            "token",
+            "capabilities",
+            "properties",
+            "presence",
+            "compress",
+            "client_state",
+        ]
+        assert d["client_state"] == {"guild_versions": {}}
+        assert d["presence"] == {"status": "unknown", "since": 0, "activities": [], "afk": False}
+        assert d["properties"] == token_avatar.gateway_properties("avatar-token")
+
+    @pytest.mark.asyncio
+    async def test_connect_sends_the_browser_order(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        ws = _FakeGatewayWS(
+            [
+                {"op": 10, "d": {"heartbeat_interval": 41250}},
+                {"op": 0, "t": "READY", "s": 1, "d": {}},
+            ]
+        )
+
+        class _Session:
+            async def ws_connect(self, url):
+                return ws
+
+        async def _tls(token, use_proxy=False):
+            return _Session()
+
+        monkeypatch.setattr(token_avatar, "get_tls_session", _tls)
+        import logging as _logging
+
+        gw = token_avatar.GatewaySession("avatar-token", _logging.getLogger("t"))
+        try:
+            assert await gw.connect() is True
+            session_id = gw.heartbeat_session_id
+        finally:
+            await gw.close()
+
+        assert [m["op"] for m in ws.sent] == [2, 4, 41, 40]
+        assert ws.sent[1]["d"] == {
+            "guild_id": None,
+            "channel_id": None,
+            "self_mute": True,
+            "self_deaf": False,
+            "self_video": False,
+            "flags": 2,
+        }
+        op41 = ws.sent[2]["d"]
+        assert list(op41) == ["initialization_timestamp", "session_id", "client_launch_id"]
+        assert op41["session_id"] == session_id
+        assert ws.sent[3]["d"] == {
+            "seq": None,
+            "qos": {"active": True, "ver": 31, "reasons": ["foregrounded"]},
+        }

@@ -1,4 +1,4 @@
-"""selfclient.gateway: handshake, heartbeat, resume, close codes, op 37, zlib-stream.
+"""selfclient.gateway: handshake, op 40 heartbeat, resume, close codes, op 37, zlib-stream.
 
 A fake websocket replays canned frames through the connector. Heartbeat
 intervals are tens of milliseconds so those paths run in real time.
@@ -51,7 +51,7 @@ class FakeWS:
     async def send(self, data):
         msg = json.loads(data)
         self.sent.append(msg)
-        if self.auto_ack and msg.get("op") == 1:
+        if self.auto_ack and msg.get("op") == 40:
             self.feed({"op": 11})
 
     async def close(self, code=1000, reason=""):
@@ -150,12 +150,6 @@ def ready(session="sess-1", resume="wss://resume.example.gg", guilds=("1", "2"),
     }
 
 
-@pytest.fixture
-def no_jitter(monkeypatch):
-    """First heartbeat right away instead of at interval * random()."""
-    monkeypatch.setattr(sc_gateway.random, "random", lambda: 0.0)
-
-
 # url
 
 
@@ -212,9 +206,102 @@ class TestHandshake:
             subs.update(frame["d"]["subscriptions"])
         assert set(subs) == {"1", "2", "3"}
         op41 = ws.frames(41)[0]["d"]
+        assert list(op41) == ["initialization_timestamp", "session_id", "client_launch_id"]
         assert op41["session_id"] == client.heartbeat_session_id
-        assert op41["client_launch_id"]
+        assert op41["client_launch_id"] == client.identify_properties["client_launch_id"]
         assert client.session_id == "sess-1"
+
+    @pytest.mark.asyncio
+    async def test_fresh_connect_sends_the_browser_order(self):
+        ws = FakeWS([hello()])
+        client, _ = make_client(ws)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(40))
+        await stop(client, task)
+
+        assert ws.ops()[:4] == [2, 4, 41, 40]
+        op4 = ws.frames(4)[0]["d"]
+        assert list(op4.items()) == [
+            ("guild_id", None),
+            ("channel_id", None),
+            ("self_mute", True),
+            ("self_deaf", False),
+            ("self_video", False),
+            ("flags", 2),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_identify_matches_the_browser(self):
+        ws = FakeWS([hello()])
+        client, _ = make_client(ws)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(2))
+        await stop(client, task)
+
+        d = ws.frames(2)[0]["d"]
+        assert list(d) == [
+            "token",
+            "capabilities",
+            "properties",
+            "presence",
+            "compress",
+            "client_state",
+        ]
+        assert d["client_state"] == {"guild_versions": {}}
+        assert list(d["presence"].items()) == [
+            ("status", "unknown"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", False),
+        ]
+        props = d["properties"]
+        assert list(props) == [
+            "os",
+            "browser",
+            "device",
+            "system_locale",
+            "has_client_mods",
+            "browser_user_agent",
+            "browser_version",
+            "os_version",
+            "referrer",
+            "referring_domain",
+            "referrer_current",
+            "referring_domain_current",
+            "release_channel",
+            "client_build_number",
+            "client_event_source",
+            "client_launch_id",
+            "launch_signature",
+            "client_app_state",
+            "is_fast_connect",
+            "gateway_connect_reasons",
+            "installation_id",
+            "device_model_name",
+            "qos_token",
+        ]
+        assert props["device_model_name"] == ""
+        assert props["client_app_state"] == "focused"
+        assert props["is_fast_connect"] is False
+        assert props["gateway_connect_reasons"] == "AppSkeleton"
+        assert props["qos_token"] == "CgIIAQ=="
+        rest = sc_gateway.fingerprint.selfbot_headers._fingerprint(TOKEN)["super_props"]
+        assert props["launch_signature"] == rest["launch_signature"]
+
+    @pytest.mark.asyncio
+    async def test_ready_presence_has_the_browser_shape(self):
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(3))
+        await stop(client, task)
+
+        assert list(ws.frames(3)[0]["d"].items()) == [
+            ("status", "online"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", True),
+        ]
 
 
 # heartbeat
@@ -222,39 +309,76 @@ class TestHandshake:
 
 class TestHeartbeat:
     @pytest.mark.asyncio
-    async def test_heartbeat_sent_on_interval(self, no_jitter):
+    async def test_heartbeat_sent_on_interval(self):
         ws = FakeWS(
             [hello(20), {"op": 0, "t": "SOMETHING", "s": 5, "d": {}}], auto_ack=True
         )
         client, dialer = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: len(ws.frames(1)) >= 3)
+        await wait_until(lambda: len(ws.frames(40)) >= 3)
         await stop(client, task)
 
-        assert ws.frames(1)[-1]["d"] == 5, "heartbeat carries the last sequence"
+        assert ws.frames(40)[-1]["d"]["seq"] == 5, "heartbeat carries the last sequence"
+        assert not ws.frames(1), "the web client sends no op 1"
         assert len(dialer.urls) == 1, "an acked connection must not reconnect"
         assert client.latency != float("inf")
+
+    @pytest.mark.asyncio
+    async def test_qos_heartbeat_foregrounded_first_then_backgrounded(self):
+        ws = FakeWS([hello(20)], auto_ack=True)
+        client, _ = make_client(ws)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: len(ws.frames(40)) >= 3)
+        await stop(client, task)
+
+        first, *later = ws.frames(40)
+        assert first == {
+            "op": 40,
+            "d": {"seq": None, "qos": {"active": True, "ver": 31, "reasons": ["foregrounded"]}},
+        }
+        assert list(first["d"]) == ["seq", "qos"]
+        assert list(first["d"]["qos"]) == ["active", "ver", "reasons"]
+        for beat in later:
+            assert beat["d"]["qos"] == {"active": False, "ver": 31, "reasons": []}
+
+    @pytest.mark.asyncio
+    async def test_every_op41_is_followed_by_op40(self):
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(37))
+        await client._send_time_spent()
+        await stop(client, task)
+
+        ops = ws.ops()
+        positions = [i for i, op in enumerate(ops) if op == 41]
+        assert len(positions) == 2
+        for i in positions:
+            assert ops[i + 1] == 40, ops
 
     @pytest.mark.asyncio
     async def test_server_heartbeat_request_is_answered(self):
         ws = FakeWS([hello(), {"op": 1, "d": None}])
         client, _ = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: ws.frames(1))
+        # One op 40 goes with op 41; the second answers the request.
+        await wait_until(lambda: len(ws.frames(40)) >= 2)
         await stop(client, task)
+        assert not ws.frames(1)
 
     @pytest.mark.asyncio
-    async def test_zombie_reconnects_when_no_ack(self, no_jitter):
+    async def test_zombie_reconnects_when_no_ack(self):
         first = FakeWS([hello(20)])
         second = FakeWS([hello()])
         client, dialer = make_client(first, second)
         task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: second.frames(2))
+        await wait_until(lambda: second.frames(40))
         await stop(client, task)
 
         assert first.closed and first.close_code == RESUME_CLOSE_CODE
-        assert len(first.frames(1)) >= 2
+        assert len(first.frames(40)) >= 2
         assert len(dialer.urls) >= 2
+        assert second.frames(40)[0]["d"]["qos"]["active"] is True, "each socket starts foregrounded"
 
 
 # resume
@@ -278,6 +402,7 @@ class TestResume:
 
         assert second.sent[0]["op"] == 6, "RESUME, not IDENTIFY"
         assert not second.frames(2)
+        assert not second.frames(4), "no op 4 on RESUME"
         assert second.sent[0]["d"] == {"token": TOKEN, "session_id": "sess-1", "seq": 1}
 
         subs = {}

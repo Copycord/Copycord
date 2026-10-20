@@ -207,6 +207,10 @@ async def test_scrape_uses_each_tokens_own_session_headers_and_gateway_identity(
         assert sock.headers["User-Agent"] == build_headers(token)["User-Agent"]
         identify = sock.identify()
         assert identify == await _client_identify(token)
+        # The client's connect order, and op 40 heartbeats only.
+        ops = [m["op"] for m in sock.sent]
+        assert ops[:4] == [2, 4, 41, 40] and 1 not in ops
+        assert sock.sent[3]["d"]["qos"]["active"] is True
         d = identify["d"]
         assert d["properties"] == gateway_properties(token)
         assert d["properties"]["browser"] == "Chrome" and d["properties"]["os"] == "Windows"
@@ -444,7 +448,7 @@ def test_debug_recorder_masks_and_folds_reconnects():
     identify = json.dumps({"op": 2, "d": {"token": token, "properties": {"os": "Windows"}}})
     for _ in range(3):
         rec.gateway_connect(token, 0, "wss://gw", headers, proxy=PROXY_URLS[0])
-        rec.gateway_sent(token, 0, json.dumps({"op": 1, "d": None}))
+        rec.gateway_sent(token, 0, json.dumps({"op": 40, "d": {"seq": None}}))
         rec.gateway_sent(token, 0, identify)
     rec.gateway_connect(token, 0, "wss://gw", headers, proxy=PROXY_URLS[0])  # never identified
     # A URL or error that quotes a secret is scrubbed too.

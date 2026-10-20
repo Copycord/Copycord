@@ -63,6 +63,41 @@ class TestFingerprintShape:
         assert "Electron" not in h["User-Agent"]
         assert "discord/" not in h["User-Agent"]
 
+    def test_super_props_key_order_matches_chrome(self):
+        _, props = _props("token-order")
+        assert list(props) == [
+            "os",
+            "browser",
+            "device",
+            "device_model_name",
+            "system_locale",
+            "has_client_mods",
+            "browser_user_agent",
+            "browser_version",
+            "os_version",
+            "referrer",
+            "referring_domain",
+            "referrer_current",
+            "referring_domain_current",
+            "release_channel",
+            "client_build_number",
+            "client_event_source",
+            "client_launch_id",
+            "launch_signature",
+            "client_app_state",
+            "client_heartbeat_session_id",
+        ]
+        assert props["device_model_name"] == ""
+
+    def test_heartbeat_session_id_keeps_its_place(self):
+        sh.set_heartbeat_session_id("token-order-hb", "hb-1")
+        try:
+            _, props = _props("token-order-hb")
+        finally:
+            sh.set_heartbeat_session_id("token-order-hb", None)
+        assert list(props)[-1] == "client_heartbeat_session_id"
+        assert props["client_heartbeat_session_id"] == "hb-1"
+
     def test_sends_the_client_hints_a_browser_sends(self):
         h = sh.build_headers("token-abc", referer="https://discord.com/channels/1/2")
         assert h["Sec-CH-UA-Platform"] == '"Windows"'
@@ -148,16 +183,19 @@ class TestGatewayProperties:
         assert (
             g["installation_id"] == sh.build_headers("token-abc")["X-Installation-Id"]
         )
-        assert g["is_fast_connect"] is True
+        assert g["is_fast_connect"] is False
+        assert g["gateway_connect_reasons"] == "AppSkeleton"
+        assert g["qos_token"] == "CgIIAQ=="
 
     def test_gateway_props_omit_the_rest_only_fields(self):
         g = sh.gateway_properties("token-abc")
-        for key in (
-            "launch_signature",
-            "client_app_state",
-            "client_heartbeat_session_id",
-        ):
-            assert key not in g, key
+        assert "client_heartbeat_session_id" not in g
+
+    def test_gateway_props_share_the_rest_launch_signature(self):
+        _, rest = _props("token-abc")
+        g = sh.gateway_properties("token-abc")
+        assert g["launch_signature"] == rest["launch_signature"]
+        assert g["client_app_state"] == rest["client_app_state"] == "focused"
 
     def test_both_describe_the_same_device(self):
 
