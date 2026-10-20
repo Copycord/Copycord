@@ -105,6 +105,10 @@ for lib in (
     logging.getLogger(lib).setLevel(logging.WARNING)
 for lib in ("selfclient.state", "selfclient.client"):
     logging.getLogger(lib).setLevel(logging.ERROR)
+# LOG_LEVEL=DEBUG shows each gateway frame sent and each science post.
+if LEVEL <= logging.DEBUG:
+    for lib in ("selfclient.gateway", "selfclient.science"):
+        logging.getLogger(lib).setLevel(logging.DEBUG)
 
 def _is_proxy_exception(exc: BaseException | None) -> bool:
     """Is this failure the proxy's fault, so another route is worth trying?
