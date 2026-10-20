@@ -981,19 +981,17 @@ class StandaloneScraper:
         refill_threshold = max(64, total_concurrency * 6)
         refill_step = min(10 + (num_tokens - 1) * 3, 20)
 
-        in_flight: set[str] = set()
-        nonce_to_query: dict[str, str] = {}
-        nonce_seq = 0
+        # The web client's op 8 has no nonce, so a session keeps one query in flight
+        # and takes the guild's GUILD_MEMBERS_CHUNKs as its answer.
+        in_flight: Optional[str] = None
+        in_flight_got = 0
+        in_flight_at = 0.0
+        QUERY_TIMEOUT = 15.0
         queries_total = 0
         last_growth_at = time.time()
         last_progress_push = 0.0
         logged_99_pct = False
         NO_GROWTH_TIMEOUT = 60.0
-
-        def mk_nonce(q: str) -> str:
-            nonlocal nonce_seq
-            nonce_seq += 1
-            return f"s{session_index}-n{nonce_seq}:{q}"
 
         # The selfclient's gateway client for this token, used only for what it would send
         # on connecting: its upgrade headers and its IDENTIFY. Sessions of the same token
@@ -1085,30 +1083,44 @@ class StandaloneScraper:
                     ready = False
 
                     async def send_query(q: str):
-                        nonlocal queries_total
-                        n = mk_nonce(q)
+                        nonlocal queries_total, in_flight, in_flight_got, in_flight_at
+                        # The web client's search shape; the planner's saturation
+                        # check depends on the limit of 100.
                         await ws.send(
                             json.dumps(
                                 {
                                     "op": 8,
                                     "d": {
-                                        "guild_id": str(guild_id),
+                                        "guild_id": [str(guild_id)],
                                         "query": q,
                                         "limit": 100,
-                                        "presences": False,
-                                        "nonce": n,
+                                        "presences": True,
                                     },
                                 }
                             )
                         )
-                        in_flight.add(n)
-                        nonce_to_query[n] = q
+                        in_flight = q
+                        in_flight_got = 0
+                        in_flight_at = time.time()
                         queries_total += 1
+
+                    async def expire_query():
+                        """Requeue a query whose chunks never came."""
+                        nonlocal in_flight
+                        if in_flight is None or time.time() - in_flight_at < QUERY_TIMEOUT:
+                            return
+                        q, in_flight = in_flight, None
+                        self._debug(
+                            f"[S{session_index}] No chunk for query {q!r} in {QUERY_TIMEOUT:.0f}s, requeued",
+                            "warn",
+                        )
+                        await planner.requeue(q)
+                        await pump_queries()
 
                     async def pump_queries():
                         if self._stop_event.is_set():
                             return
-                        slots = parallel - len(in_flight)
+                        slots = 1 if in_flight is None else 0
                         if slots <= 0:
                             return
                         await planner.refill_if_starving(
@@ -1160,8 +1172,9 @@ class StandaloneScraper:
                         try:
                             data = await next_frame(MSG_TIMEOUT)
                         except asyncio.TimeoutError:
+                            await expire_query()
 
-                            if not in_flight and not await planner.has_work():
+                            if in_flight is None and not await planner.has_work():
 
                                 if await planner.all_leaves_exhausted():
                                     total = len(self._members)
@@ -1207,13 +1220,18 @@ class StandaloneScraper:
                                 await pump_queries()
 
                             elif op == 0 and t == "GUILD_MEMBERS_CHUNK":
-                                nonce = (d or {}).get("nonce")
                                 got = (d or {}).get("members") or []
 
-                                q_for_nonce = None
-                                if nonce and nonce in in_flight:
-                                    in_flight.discard(nonce)
-                                    q_for_nonce = nonce_to_query.pop(nonce, None)
+                                # The in-flight query is answered by its last chunk.
+                                q_done = None
+                                if in_flight is not None and str(
+                                    (d or {}).get("guild_id")
+                                ) == str(guild_id):
+                                    in_flight_got += len(got)
+                                    chunk_index = int((d or {}).get("chunk_index") or 0)
+                                    chunk_count = int((d or {}).get("chunk_count") or 1)
+                                    if chunk_index >= chunk_count - 1:
+                                        q_done, in_flight = in_flight, None
 
                                 added = 0
                                 if got:
@@ -1262,12 +1280,12 @@ class StandaloneScraper:
                                         usernames
                                     )
 
-                                if q_for_nonce is not None:
-                                    size = len(got)
+                                if q_done is not None:
+                                    size = in_flight_got
 
                                     expand_step = min(10 + (num_tokens - 1) * 4, 26)
                                     await planner.on_chunk_result_and_expand(
-                                        q_for_nonce, size, expand_step=expand_step
+                                        q_done, size, expand_step=expand_step
                                     )
 
                                 total = len(self._members)
@@ -1295,7 +1313,7 @@ class StandaloneScraper:
 
                                 await pump_queries()
 
-                                if not in_flight and not await planner.has_work():
+                                if in_flight is None and not await planner.has_work():
 
                                     swept = (
                                         await planner.sweep_full_children_for_saturated()
@@ -1332,9 +1350,11 @@ class StandaloneScraper:
                                 )
                                 break
 
+                        await expire_query()
+
                         if (
                             time.time() - stall_start > STALL_TIMEOUT
-                            and not in_flight
+                            and in_flight is None
                         ):
                             self._debug(
                                 f"[S{session_index}] Stall detected, breaking",
@@ -1345,7 +1365,7 @@ class StandaloneScraper:
                     pq_len = await planner.queue_len()
                     self._debug(
                         f"[S{session_index}] WS loop exited "
-                        f"in_flight={len(in_flight)} pq={pq_len} total={len(self._members):,} "
+                        f"in_flight={int(in_flight is not None)} pq={pq_len} total={len(self._members):,} "
                         f"productive={connection_productive}"
                     )
 
@@ -1372,11 +1392,9 @@ class StandaloneScraper:
             else:
                 attempt += 1
 
-            for n in list(in_flight):
-                q = nonce_to_query.pop(n, None)
-                in_flight.discard(n)
-                if q:
-                    await planner.requeue(q)
+            if in_flight is not None:
+                q, in_flight = in_flight, None
+                await planner.requeue(q)
 
             if self._stop_event.is_set():
                 return
