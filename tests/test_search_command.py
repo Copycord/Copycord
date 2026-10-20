@@ -316,9 +316,13 @@ def _commands_module():
 
 def test_search_command_registered_with_options():
     mod = _commands_module()
-    cmd = vars(mod.CloneCommands)["search"]
+    # Cog.__new__ copies the commands onto the instance and binds them, which drops self and ctx
+    cog = mod.CloneCommands.__new__(mod.CloneCommands)
+    cmd = next(c for c in cog.get_commands() if c.name == "search")
     assert isinstance(cmd, discord.SlashCommand)
     opts = {o.name: o for o in cmd.options}
+    block = next(c for c in cog.get_commands() if c.name == "block_add")
+    assert [o.name for o in block.options] == ["keyword"]
     assert list(opts) == ["author", "channel", "after", "before", "has"]
     assert not any(o.required for o in opts.values())
     assert opts["author"].autocomplete is not None
