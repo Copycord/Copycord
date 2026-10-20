@@ -5,6 +5,7 @@ intervals are tens of milliseconds so those paths run in real time.
 """
 import asyncio
 import json
+import logging
 import zlib
 from urllib.parse import parse_qs, urlsplit
 
@@ -741,3 +742,110 @@ class TestDispatch:
             ("user_ids", ["7", "8"]),
             ("presences", False),
         ]
+
+
+# debug log of sent frames
+
+
+def _sent_lines(caplog):
+    return [
+        r.getMessage()[len("sent "):]
+        for r in caplog.records
+        if r.name == "selfclient.gateway" and r.getMessage().startswith("sent ")
+    ]
+
+
+class TestSentFrameLog:
+    def test_summaries_name_the_op_and_its_fields(self):
+        summary = sc_gateway.frame_summary
+        assert summary({"op": 3, "d": {"status": "online", "afk": True, "activities": []}}) == (
+            "op 3 presence status=online afk=True activities=0"
+        )
+        assert summary({"op": 4, "d": dict(sc_gateway.IDLE_VOICE_STATE)}) == (
+            "op 4 voice guild=None channel=None flags=2"
+        )
+        assert summary(
+            {"op": 8, "d": {"guild_id": ["1"], "query": "ab", "limit": 10, "presences": True}}
+        ) == "op 8 members guilds=1 query='ab' limit=10 presences=True"
+        assert summary(
+            {"op": 8, "d": {"guild_id": ["1"], "user_ids": ["7", "8"], "presences": False}}
+        ) == "op 8 members guilds=1 user_ids=2 presences=False"
+        assert summary(build_subscription_frames(["1", "2", "3"])[0]) == "op 37 subscribe guilds=3"
+        assert summary(
+            {"op": 40, "d": {"seq": 7, "qos": {"active": False, "ver": 31, "reasons": []}}}
+        ) == "op 40 heartbeat seq=7 active=False"
+        assert summary({"op": 41, "d": {"session_id": "hs-1"}}) == "op 41 time spent session=hs-1"
+        assert summary({"op": 99}) == "op 99"
+
+    def test_identify_and_resume_summaries_leave_out_the_token(self):
+        identify = {
+            "op": 2,
+            "d": {
+                "token": TOKEN,
+                "capabilities": CAPABILITIES,
+                "properties": {
+                    "os": "Windows",
+                    "browser_user_agent": "Mozilla/5.0 secret-ua",
+                    "client_build_number": 123,
+                    "os_version": "10",
+                    "client_heartbeat_session_id": "hs-1",
+                },
+            },
+        }
+        line = sc_gateway.frame_summary(identify)
+        assert line == "op 2 IDENTIFY build=123 os=10 heartbeat_session=hs-1"
+        resume = {"op": 6, "d": {"token": TOKEN, "session_id": "s", "seq": 4}}
+        assert sc_gateway.frame_summary(resume) == "op 6 RESUME session=s seq=4"
+        assert TOKEN not in line + sc_gateway.frame_summary(resume)
+
+    @pytest.mark.asyncio
+    async def test_every_sent_frame_logs_once_in_order(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="selfclient.gateway")
+        ws = FakeWS([hello(), ready(guilds=("1", "2", "3"))])
+        client, _ = make_client(ws)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(37))
+        await client.request_guild_members("1", query="a", limit=10)
+        await wait_until(lambda: ws.frames(8))
+        await stop(client, task)
+
+        lines = _sent_lines(caplog)
+        assert [int(line.split()[1]) for line in lines] == ws.ops()
+        assert lines == [sc_gateway.frame_summary(m) for m in ws.sent]
+        assert ws.ops()[:4] == [2, 4, 41, 40]
+        assert lines[3] == "op 40 heartbeat seq=None active=True"
+        assert "op 37 subscribe guilds=3" in lines
+        assert "op 8 members guilds=1 query='a' limit=10 presences=False" in lines
+        text = "\n".join(r.getMessage() for r in caplog.records)
+        assert TOKEN not in text
+        assert "browser_user_agent" not in text
+        for old in ("heartbeat sent", "sending IDENTIFY", "sending RESUME", "sending OP 41"):
+            assert old not in text
+
+    @pytest.mark.asyncio
+    async def test_resume_logs_session_and_seq(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="selfclient.gateway")
+        ws = FakeWS([hello()])
+        client, _ = make_client(ws)
+        client.session_id, client.sequence = "sess-9", 12
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(6))
+        await stop(client, task)
+        assert _sent_lines(caplog)[0] == "op 6 RESUME session=sess-9 seq=12"
+        assert TOKEN not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_a_send_on_a_closed_socket_logs_no_sent_line(self, caplog):
+        caplog.set_level(logging.DEBUG, logger="selfclient.gateway")
+
+        class ClosedWS(FakeWS):
+            async def send(self, data):
+                raise sc_gateway._WSClosed.__new__(sc_gateway._WSClosed)
+
+        client, _ = make_client()
+        client._ws = ClosedWS()
+        await client._send({"op": 3, "d": {}})
+        await client._send_bypass(client._heartbeat_payload())
+        assert _sent_lines(caplog) == []
+        assert "tried to send on a closed socket" in caplog.text
+        assert "tried to send heartbeat on closed socket" in caplog.text

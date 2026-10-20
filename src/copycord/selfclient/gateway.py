@@ -156,6 +156,48 @@ def build_subscription_frames(guild_ids: Iterable[Any]) -> List[Dict[str, Any]]:
     return frames
 
 
+def frame_summary(payload: Dict[str, Any]) -> str:
+    """One line describing an outgoing frame, for debug logs. Never the token."""
+    op = payload.get("op")
+    d = payload.get("d")
+    d = d if isinstance(d, dict) else {}
+    if op == GatewayOp.IDENTIFY:
+        props = d.get("properties") or {}
+        return (
+            f"op 2 IDENTIFY build={props.get('client_build_number')}"
+            f" os={props.get('os_version')}"
+            f" heartbeat_session={props.get('client_heartbeat_session_id')}"
+        )
+    if op == GatewayOp.PRESENCE_UPDATE:
+        return (
+            f"op 3 presence status={d.get('status')} afk={d.get('afk')}"
+            f" activities={len(d.get('activities') or [])}"
+        )
+    if op == GatewayOp.VOICE_STATE_UPDATE:
+        return (
+            f"op 4 voice guild={d.get('guild_id')} channel={d.get('channel_id')}"
+            f" flags={d.get('flags')}"
+        )
+    if op == GatewayOp.RESUME:
+        return f"op 6 RESUME session={d.get('session_id')} seq={d.get('seq')}"
+    if op == GatewayOp.REQUEST_GUILD_MEMBERS:
+        guilds = d.get("guild_id")
+        count = len(guilds) if isinstance(guilds, list) else int(guilds is not None)
+        if "user_ids" in d:
+            target = f"user_ids={len(d.get('user_ids') or [])}"
+        else:
+            target = f"query={str(d.get('query', ''))[:32]!r} limit={d.get('limit')}"
+        return f"op 8 members guilds={count} {target} presences={d.get('presences')}"
+    if op == GatewayOp.BULK_GUILD_SUBSCRIBE:
+        return f"op 37 subscribe guilds={len(d.get('subscriptions') or {})}"
+    if op == GatewayOp.QOS_HEARTBEAT:
+        qos = d.get("qos") or {}
+        return f"op 40 heartbeat seq={d.get('seq')} active={qos.get('active')}"
+    if op == GatewayOp.UPDATE_TIME_SPENT_SESSION_ID:
+        return f"op 41 time spent session={d.get('session_id')}"
+    return f"op {op}"
+
+
 class ZlibStreamInflater:
     """One socket's zlib-stream context; the whole connection is one deflate stream."""
 
@@ -517,13 +559,9 @@ class GatewayClient:
         frames = build_subscription_frames(ids)
         if not frames:
             return
-        subscribed = 0
         for frame in frames:
             await self._send(frame)
-            gids = frame["d"]["subscriptions"].keys()
-            self._subscribed_guilds.update(gids)
-            subscribed += len(gids)
-        log.debug("subscribed to %d guild(s) in %d frame(s)", subscribed, len(frames))
+            self._subscribed_guilds.update(frame["d"]["subscriptions"].keys())
 
     async def request_guild_members(
         self,
@@ -803,7 +841,6 @@ class GatewayClient:
 
     async def _send_heartbeat(self) -> None:
         self._last_heartbeat = time.monotonic()
-        log.debug("heartbeat sent (seq=%s)", self.sequence)
         await self._send_bypass(self._heartbeat_payload())
 
     # IDENTIFY / RESUME
@@ -814,12 +851,6 @@ class GatewayClient:
     async def _send_identify(self) -> None:
         props = self._gateway_properties()
         self.identify_properties = dict(props)
-        log.debug(
-            "sending IDENTIFY (build=%s, os=%s, heartbeat_session=%s)",
-            props.get("client_build_number"),
-            props.get("os_version"),
-            self.heartbeat_session_id,
-        )
         payload = {
             "op": GatewayOp.IDENTIFY,
             "d": {
@@ -846,7 +877,6 @@ class GatewayClient:
         await self._send({"op": GatewayOp.VOICE_STATE_UPDATE, "d": dict(IDLE_VOICE_STATE)})
 
     async def _send_resume(self) -> None:
-        log.debug("sending RESUME (session=%s, seq=%s)", self.session_id, self.sequence)
         await self._send(
             {
                 "op": GatewayOp.RESUME,
@@ -883,7 +913,6 @@ class GatewayClient:
 
     async def _send_time_spent(self) -> None:
         """op 41, then the op 40 the web client always sends with it."""
-        log.debug("sending OP 41 (time spent session)")
         await self._send(
             {
                 "op": GatewayOp.UPDATE_TIME_SPENT_SESSION_ID,
@@ -1020,6 +1049,8 @@ class GatewayClient:
             await ws.send(json.dumps(payload))
         except _WSClosed:
             log.warning("tried to send on a closed socket")
+            return
+        self._log_sent(payload)
 
     async def _send_bypass(self, payload: Dict[str, Any]) -> None:
         """Send without the ratelimiter, for heartbeats."""
@@ -1030,6 +1061,13 @@ class GatewayClient:
             await ws.send(json.dumps(payload))
         except _WSClosed:
             log.warning("tried to send heartbeat on closed socket")
+            return
+        self._log_sent(payload)
+
+    @staticmethod
+    def _log_sent(payload: Dict[str, Any]) -> None:
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("sent %s", frame_summary(payload))
 
 
 __all__ = [
@@ -1044,6 +1082,7 @@ __all__ = [
     "ProxyTunnelError",
     "ZlibStreamInflater",
     "build_subscription_frames",
+    "frame_summary",
     "gateway_url",
     "mask_proxy",
     "open_proxy_tunnel",
