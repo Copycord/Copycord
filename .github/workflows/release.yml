@@ -2,9 +2,13 @@ name: Release assets
 
 # A published GitHub release tagged v* builds the frontend, the sdist and the
 # wheel, and uploads them as assets of that release. install.sh, install.ps1
-# and `copycord update` install the wheel asset: pre-release tags (v4.0.0b1,
-# marked as pre-release on GitHub) feed the beta channel, final releases the
-# stable channel.
+# and `copycord update` install the wheel asset.
+#
+# Every release gets a fourth number that only goes up (v4.0.0.1, v4.0.0.2,
+# ...), and CURRENT_VERSION must equal the tag. Whether a release is a beta is
+# decided only by its Pre-release checkbox on GitHub: pre-releases feed the
+# beta channel, full releases the stable channel. The version carries no
+# beta suffix.
 
 on:
   release:

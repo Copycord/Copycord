@@ -46,7 +46,7 @@ To check the install, run `docker compose version`.
    ```yaml title="docker-compose.yml"
    services:
      copycord:
-       image: ghcr.io/copycord/copycord:latest # or a release tag, such as v4.0.0
+       image: ghcr.io/copycord/copycord:latest # or a release tag, such as v4.0.0.1
        container_name: copycord
        environment:
          - PASSWORD=  # required

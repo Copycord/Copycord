@@ -34,7 +34,7 @@ To pass flags on Linux and macOS, add them after `sh -s --`. On Windows, run the
 
 | `install.sh` | `install.ps1` | Environment variable | Description |
 |--------------|---------------|----------------------|-------------|
-| `--version <value>` | `-Version <value>` (alias `-Tag`) | `COPYCORD_VERSION` | A release version (`4.0.0`, `v4.0.0`, `4.0.0b1`) installs that release. Any other value (a branch, tag or commit) [builds from git](#branches). |
+| `--version <value>` | `-Version <value>` (alias `-Tag`) | `COPYCORD_VERSION` | A release version (`4.0.0.1` or `v4.0.0.1`) installs that release. Any other value (a branch, tag or commit) [builds from git](#branches). |
 | `--beta` | `-Beta` | `COPYCORD_BETA=1` or `COPYCORD_CHANNEL=beta` | Installs the newest release, pre-releases included, and saves `beta` as the update channel. |
 | `--home <path>` | `-CopycordHome <path>` (alias `-Home`) | `COPYCORD_HOME` | The [Copycord home](#home). Must be an absolute path. |
 | `--repo owner/name` | `-Repo owner/name` | `COPYCORD_REPO` | Repository to install from. Default `Copycord/Copycord`. |
@@ -70,7 +70,7 @@ Examples:
 curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --beta
 
 # one exact release, checked afterwards
-curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --version 4.0.0 --verify
+curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --version 4.0.0.1 --verify
 
 # only show what it would do
 curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --dry-run
@@ -84,13 +84,13 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1))) -Beta
 
 # one exact release, checked afterwards
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1))) -Version 4.0.0 -Verify
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1))) -Version 4.0.0.1 -Verify
 ```
 
 </TabItem>
 <TabItem value="docker" label="Docker">
 
-To pin a release, use its image tag, for example `ghcr.io/copycord/copycord:v4.0.0`.
+To pin a release, use its image tag, for example `ghcr.io/copycord/copycord:v4.0.0.1`. `latest` follows full releases and `beta` follows pre-releases.
 
 </TabItem>
 </Tabs>

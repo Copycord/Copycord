@@ -110,8 +110,10 @@ Every pull request against `main` or `v4-dev` (and every push to `main`) runs th
 
 Other workflows:
 
-- **Release assets** (`release.yml`): when a GitHub release tagged `v*` is published, builds the wheel and sdist and attaches them to the release. The install scripts and `copycord update` install that wheel. Pre-releases feed the beta [update channel](/docs/cli#update-channels).
-- **Build & publish Copycord container** (`build_containers.yml`): publishes the Docker image for `v*.*.*` tags. A pre-release tag such as `v4.1.0b1` is published only under its own tag and never moves `latest`.
+- **Release assets** (`release.yml`): when a GitHub release tagged `v*` is published, checks that `CURRENT_VERSION` in `src/copycord/common/config.py` equals the tag, builds the wheel and sdist and attaches them to the release. The install scripts and `copycord update` install that wheel. Pre-releases feed the beta [update channel](/docs/cli#update-channels).
+- **Build & publish Copycord container** (`build_containers.yml`): when a GitHub release is published, builds the Docker image from its tag and pushes it as `:<tag>`, plus `:beta` for a pre-release or `:latest` for a full release. Pushing a tag alone builds nothing. Run it by hand with a release tag to rebuild that release, for example after promoting a pre-release so `latest` picks it up.
+
+Release versions have four numbers, and the last one goes up with every release: `v4.0.0.1`, `v4.0.0.2`, `v4.0.0.3`. Tick **Set as a pre-release** on the GitHub release to make it a beta; the version itself never carries a beta suffix. To cut a release, set `CURRENT_VERSION` to the new version, merge it, then publish a GitHub release tagged with exactly that version.
 - **Deploy Docs to GitHub Pages** (`deploy-docs.yml`): rebuilds this site when `website/` changes on `main`.
 - **Docker build smoke test**, **testing containers** and the weekly **Dependency audit** run on demand or on a schedule.
 

@@ -1,9 +1,22 @@
 name: Build & publish Copycord container
 
+# A published GitHub release builds the image from its tag. Every release is
+# pushed as :<tag> (v4.0.0.1, v4.0.0.2, ...). The release's Pre-release
+# checkbox alone decides the moving tag: pre-releases push :beta, full
+# releases push :latest, so Docker users on :latest stay on stable. Pushing a
+# tag on its own builds nothing; only the release does.
+#
+# Run it by hand with a release tag to rebuild that release, for example after
+# promoting a pre-release to a full release so :latest picks it up.
+
 on:
-  push:
-    tags: ['v*.*.*']
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the GitHub release to build (for example v4.0.0.1)
+        required: true
 
 permissions:
   contents: read
@@ -11,10 +24,36 @@ permissions:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
 
     steps:
+      - name: Resolve the release
+        id: rel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ "$EVENT" = "release" ]; then
+            pre="$PRERELEASE"
+          else
+            info=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease \
+              --jq '"\(.isDraft) \(.isPrerelease)"') || { echo "::error::no GitHub release tagged '$TAG'"; exit 1; }
+            if [ "${info% *}" = "true" ]; then
+              echo "::error::release $TAG is a draft; publish it first"
+              exit 1
+            fi
+            pre="${info#* }"
+          fi
+          echo "release $TAG, pre-release $pre"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.rel.outputs.tag }}
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -29,18 +68,19 @@ jobs:
         id: vars
         run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      # Pre-release tags (v4.0.0b1, v4.0.0rc1) never move :latest, so Docker users
-      # on :latest stay on the stable release. Same suffixes as update.py accepts.
       - name: Image tags
         id: tags
         env:
           IMAGE: ghcr.io/${{ steps.vars.outputs.owner }}/copycord
-          REF: ${{ github.ref_name }}
+          TAG: ${{ steps.rel.outputs.tag }}
+          PRERELEASE: ${{ steps.rel.outputs.prerelease }}
         run: |
           {
             echo "list<<EOF"
-            echo "$IMAGE:$REF"
-            if ! echo "$REF" | grep -Eiq '[0-9](a|alpha|b|beta|c|rc|pre|preview)[-_.]?[0-9]*$|[0-9][-_.](a|alpha|b|beta|c|rc|pre|preview)[-_.]?[0-9]*$'; then
+            echo "$IMAGE:$TAG"
+            if [ "$PRERELEASE" = "true" ]; then
+              echo "$IMAGE:beta"
+            else
               echo "$IMAGE:latest"
             fi
             echo "EOF"

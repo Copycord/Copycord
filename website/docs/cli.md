@@ -148,18 +148,18 @@ With any address other than `127.0.0.1`, `copycord run` does not start while `PA
 
 ```bash
 $ copycord --version
-Copycord v4.0.0 · stable channel
+Copycord v4.0.0.1 · stable channel
 ```
 
 In a pipe or a script it prints two plain lines:
 
 ```bash
 $ copycord --version | cat
-4.0.0
+4.0.0.1
 stable channel
 ```
 
-A dev install shows the commit and the ref, for example `4.0.0 (1a2b3c4)` and `dev channel · v4-dev`.
+A dev install shows the commit and the ref, for example `4.0.0.1 (1a2b3c4)` and `dev channel · v4-dev`.
 
 ## copycord doctor {#copycord-doctor}
 
@@ -465,13 +465,13 @@ Updates a Copycord installed with the install script (or with `pipx`) to the lat
 ```bash
 copycord update                        # update to the latest version
 copycord update status                 # only show what is installed and what is available
-copycord update --tag 4.0.0            # install exactly this release, once
+copycord update --tag 4.0.0.1          # install exactly this release, once
 ```
 
 | Option | What it does |
 |--------|--------------|
 | `status` | Prints the installed version, the channel, the install method and the newest version on that channel, then exits without installing. Network errors are printed as `WARN`. |
-| `--tag VERSION` | Installs this exact release (`4.0.0` or `v4.0.0`). One-off: the saved channel does not change. Cannot be combined with the [advanced](#update-advanced) `--channel`, `--repo` or `--ref`. |
+| `--tag VERSION` | Installs this exact release (`4.0.0.1` or `v4.0.0.1`). One-off: the saved channel does not change. Cannot be combined with the [advanced](#update-advanced) `--channel`, `--repo` or `--ref`. |
 | `--no-backup` | Skips the [database backup](#downgrade) made before the install |
 | `--yes`, `-y` | Updates without [asking first](#update-confirm), and installs an [older version](#downgrade) without asking |
 | `--data-dir PATH` | Reads and saves the channel in this data directory |
@@ -494,7 +494,7 @@ It does not ask with `--yes` (`-y`), without a terminal (scripts and services), 
 
 ### Downgrading and backups {#downgrade}
 
-Before it installs anything, every `copycord update` (any channel, `--tag`, dev refs, upgrades and downgrades alike) copies the database with SQLite's online backup to `data-pre-update-<version>-<UTC timestamp>.db` in the backups directory (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)), for example `data-pre-update-4.0.0-20261012T091500Z.db`. It prints the path. The newest 5 are kept; the daily backups have their own retention. With no database yet it says so and goes on. If the backup fails, the update stops and nothing is installed; `--no-backup` skips the backup.
+Before it installs anything, every `copycord update` (any channel, `--tag`, dev refs, upgrades and downgrades alike) copies the database with SQLite's online backup to `data-pre-update-<version>-<UTC timestamp>.db` in the backups directory (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)), for example `data-pre-update-4.0.0.1-20261012T091500Z.db`. It prints the path. The newest 5 are kept; the daily backups have their own retention. With no database yet it says so and goes on. If the backup fails, the update stops and nothing is installed; `--no-backup` skips the backup.
 
 When the version to install is older than the installed one (a `--tag` below it, or `--channel stable` or `beta` whose newest release is older), `copycord update` first asks `Downgrade from vX to vY? Your data is backed up first; a newer database schema will block the older version until you restore the backup. (y/N)`; `--yes` (`-y`) skips the question, and without a terminal it exits with status 1 unless you add `--yes`. Dev refs have no comparable version and are never treated as a downgrade.
 
@@ -512,7 +512,7 @@ and exits with status 1, naming the newest pre-update backup when there is one. 
 When `copycord run` starts, and when `copycord --version` runs in a terminal, Copycord checks the saved [channel](#update-channels): the newest release for `stable` and `beta`, the branch head against the installed commit for `dev`. If there is something newer it prints one line and nothing else happens:
 
 ```
-Update available: v4.0.1 (you have v4.0.0). Run copycord update
+Update available: v4.0.0.2 (you have v4.0.0.1). Run copycord update
 ```
 
 The check never delays or fails startup (it times out after a few seconds and ignores network errors), and its answer is cached for 24 hours in `update-check.json` in the [data directory](#data-dir). It never installs anything.
@@ -559,8 +559,10 @@ copycord update --channel beta --no-install
 | Channel | Installs |
 |---------|----------|
 | `stable` (default) | The newest [GitHub release](https://github.com/Copycord/Copycord/releases) that is not a pre-release |
-| `beta` | The newest GitHub release, pre-releases included (for example `v4.1.0b1`) |
+| `beta` | The newest GitHub release, pre-releases included |
 | `dev` | A git ref of a GitHub repository, by default `main` of `Copycord/Copycord`. It runs `uv tool install --force git+https://github.com/<repo>@<ref>`, which builds the dashboard from source, so it needs Node.js (`npm`). Without `npm` on your `PATH` it reuses or downloads the official Node build (SHA-256 checked) into `<home>/node`, the same one the installer uses, so a release install can switch to a branch with no manual steps. |
+
+Release versions have four numbers, and the last one goes up with every release (`v4.0.0.1`, `v4.0.0.2`, ...), so a higher number is always newer. A release is a pre-release only when it is marked as one on GitHub; the version does not say.
 
 Stable and beta install the wheel attached to the release. Once you switch, plain `copycord update` keeps using the saved channel, repository and ref; `--ref` or `--repo` alone changes them while you are on dev.
 
