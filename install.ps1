@@ -340,7 +340,8 @@ Test a branch, no release needed:
         try {
             if ($version) { return Invoke-RestMethod -Uri "$api/tags/v$version" -Headers $hdr -TimeoutSec 30 }
             if ($channel -ne 'beta') { return Invoke-RestMethod -Uri "$api/latest" -Headers $hdr -TimeoutSec 30 }
-            $list = @(Invoke-RestMethod -Uri "${api}?per_page=100" -Headers $hdr -TimeoutSec 30)
+            # Windows PowerShell 5.1 emits a JSON array as one object; ForEach-Object unrolls it.
+            $list = @(Invoke-RestMethod -Uri "${api}?per_page=100" -Headers $hdr -TimeoutSec 30 | ForEach-Object { $_ })
         } catch {
             $status = $null
             try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = $null }
