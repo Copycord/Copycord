@@ -595,10 +595,11 @@ class TestSubscriptionFrames:
             assert frame["op"] == 37
             for gid, features in frame["d"]["subscriptions"].items():
                 seen.append(gid)
-                assert features["typing"] is True
-                assert features["threads"] is True
-                assert features["activities"] is True
-                assert features["member_updates"] is True
+                assert list(features.items()) == [
+                    ("typing", True),
+                    ("activities", True),
+                    ("threads", True),
+                ]
         assert sorted(seen) == sorted(ids)
         assert len(seen) == len(set(seen)), "a guild must appear in exactly one frame"
 
@@ -723,13 +724,20 @@ class TestDispatch:
         client, _ = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
         await wait_until(lambda: client.session_id)
-        await client.request_guild_members("1", query="ab", limit=100, nonce="n1")
-        await wait_until(lambda: ws.frames(8))
+        await client.request_guild_members("1", query="a", limit=10, presences=True)
+        await client.request_guild_members("1", user_ids=["7", "8"])
+        await wait_until(lambda: len(ws.frames(8)) == 2)
         await stop(client, task)
-        assert ws.frames(8)[0]["d"] == {
-            "guild_id": "1",
-            "limit": 100,
-            "presences": False,
-            "query": "ab",
-            "nonce": "n1",
-        }
+        search, by_ids = (frame["d"] for frame in ws.frames(8))
+        # Chrome's two op 8 shapes, key order included, never a nonce.
+        assert list(search.items()) == [
+            ("guild_id", ["1"]),
+            ("query", "a"),
+            ("limit", 10),
+            ("presences", True),
+        ]
+        assert list(by_ids.items()) == [
+            ("guild_id", ["1"]),
+            ("user_ids", ["7", "8"]),
+            ("presences", False),
+        ]
