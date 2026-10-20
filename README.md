@@ -21,7 +21,7 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 <br>
 
 > [!IMPORTANT]
-> **🚀 Copycord v4 beta is here!** Install with one command, enjoy a brand-new dashboard and run powerful Discord automations likes channel message histroy cloning, scrapes, and exports from the new Tasks page.
+> **🚀 Copycord v4 beta is here!** Install with one command, enjoy a brand-new dashboard, and run powerful Discord automations like channel message histroy cloning, scrapes, and exports from the new Tasks page.
 >
 > <details>
 > <summary><b>How to join the beta</b></summary>
