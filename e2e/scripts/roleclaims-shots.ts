@@ -1,7 +1,7 @@
 // Screenshots of the Redeem code modal in each state, both /api/redeem routes mocked.
 // Usage: E2E_BASE_URL=http://127.0.0.1:18182 node --experimental-strip-types scripts/roleclaims-shots.ts [out-dir]
-// States: idle, waiting, result-claimed, result-already, result-invalid, result-server-down; written as
-// roleclaims-<state>.png at 1900x1000. result-claimed catches the gift animation mid-play. waiting holds the start
+// States: menu-hover, idle, waiting, result-claimed, result-already, result-invalid, result-server-down; written as
+// roleclaims-<state>.png at 1900x1000. menu-hover is the open side menu with the pointer on the gold Redeem code entry. result-claimed catches the gift animation mid-play. waiting holds the start
 // POST unanswered so the spinner stays up.
 
 import fs from "node:fs";
@@ -75,10 +75,18 @@ async function shot(page: Page, name: string, settle = 400) {
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const browser = await chromium.launch();
+  let page: Page;
   try {
     const state = await login(browser);
 
-    let page = await openModal(browser, state, { config: CONFIG });
+    const menu = await browser.newContext({ baseURL: BASE_URL, viewport: VIEWPORT, storageState: state });
+    page = await menu.newPage();
+    await page.goto("/");
+    await page.locator("#menu-toggle").click();
+    await page.locator("[data-role-claims]").hover();
+    await shot(page, "menu-hover");
+
+    page = await openModal(browser, state, { config: CONFIG });
     await shot(page, "idle");
 
     page = await openModal(browser, state, { config: CONFIG, start: "hold" });

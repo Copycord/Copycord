@@ -2,7 +2,7 @@
 // member gets from the /redeem slash command in the Copycord Discord. Redeem (or pasting a full code) posts it to
 // /api/redeem/start (contract in src/copycord/admin/role_claims.py) and the modal cross-fades to a spinner and
 // "Verifying..." while it is out; the helper grants the role there and then, so there is no login window. The answer
-// cross-fades to a result view: claimed (the gift), already claimed, or an error with Try again.
+// cross-fades to a result view: claimed (the gift), already claimed, or an error with an arrow Back to the form.
 // Nothing here says what a code redeems. The code lives in this component's state only: never logged, never stored.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -55,7 +55,7 @@ export interface Result {
   detail?: string;
 }
 
-/** Done closes the modal after a claim; every other outcome offers Try again. */
+/** Done closes the modal after a claim; every other outcome offers Back. */
 const isDone = (r: Result) => r.tone === "good" || r.tone === "info";
 
 const TONE_TEXT: Record<ResultTone, string> = {
@@ -74,6 +74,27 @@ const TONE_PATH: Record<ResultTone, string> = {
   danger:
     "M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12Zm8.036-4.024a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042L10.939 12l-2.963 2.963a.749.749 0 0 0 .326 1.275.749.749 0 0 0 .734-.215L12 13.06l2.963 2.964a.75.75 0 0 0 1.061-1.06L13.061 12l2.963-2.964a.749.749 0 0 0-.326-1.275.749.749 0 0 0-.734.215L12 10.939Z",
 };
+
+/** Octicons arrow-left 16 px (MIT, primer/octicons) on Back; it nudges left on hover (not under reduced motion). */
+const ARROW_LEFT =
+  "M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L4.81 7h7.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06Z";
+
+function BackArrow() {
+  return (
+    <svg
+      data-role-claims-back-arrow
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+      className="transition-transform duration-150 ease-out group-hover:-translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+    >
+      <path d={ARROW_LEFT} />
+    </svg>
+  );
+}
 
 function ToneIcon({ tone }: { tone: ResultTone }) {
   return (
@@ -143,7 +164,7 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
   const [flow, setFlow] = useState<Flow>({ kind: "idle" });
   const [code, setCode] = useState("");
   const [invalid, setInvalid] = useState(false);
-  /** The last outcome; kept after Try again so the result view fades out with its content. */
+  /** The last outcome; kept after Back so the result view fades out with its content. */
   const [result, setResult] = useState<Result | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const waitingRef = useRef<HTMLDivElement | null>(null);
@@ -204,8 +225,8 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
     wasAway.current = flow.kind !== "idle";
   }, [flow.kind, waiting, showing]);
 
-  // Try again goes back to the form, the code kept.
-  const tryAgain = () => {
+  // Back goes to the form, the code kept.
+  const back = () => {
     flowRef.current = { kind: "idle" };
     setFlow({ kind: "idle" });
   };
@@ -384,10 +405,17 @@ export function RoleClaimsModal({ open, onClose }: { open: boolean; onClose: () 
               <Button
                 ref={actionRef}
                 variant={isDone(result) ? "primary" : "secondary"}
-                className={`mt-5 w-full max-w-[240px] ${ROW}`}
-                onClick={isDone(result) ? () => onCloseRef.current() : tryAgain}
+                className={`group mt-5 w-full max-w-[240px] ${ROW}`}
+                onClick={isDone(result) ? () => onCloseRef.current() : back}
               >
-                {isDone(result) ? "Done" : "Try again"}
+                {isDone(result) ? (
+                  "Done"
+                ) : (
+                  <>
+                    <BackArrow />
+                    Back
+                  </>
+                )}
               </Button>
             </>
           ) : null}

@@ -294,7 +294,8 @@ describe("RoleClaimsModal", () => {
     expect(lottie.destroy).not.toHaveBeenCalled();
     const done = within(result).getByRole("button", { name: "Done" });
     await waitFor(() => expect(done).toHaveFocus());
-    expect(within(result).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(within(result).queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+    expect(done.querySelector("svg")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     await user.click(done);
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -353,13 +354,13 @@ describe("RoleClaimsModal", () => {
     expect(result.querySelector("[data-role-claims-icon]")).toHaveClass("text-info");
     expect(result.querySelector("[data-gift-animation]")).not.toBeInTheDocument();
     expect(lottie.loadAnimation).not.toHaveBeenCalled();
-    expect(within(result).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(within(result).queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     await user.click(within(result).getByRole("button", { name: "Done" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("an invalid code: the error view with the detail, and Try again goes back to the form with the code", async () => {
+  it("an invalid code: the error view with the detail, and the arrow Back goes to the form with the code", async () => {
     mockApi(CONFIG, () => json({ detail: "Invalid code" }, 400));
     lottie.loadAnimation.mockClear();
     const { user, onClose } = await submitCode("WRONG");
@@ -368,10 +369,16 @@ describe("RoleClaimsModal", () => {
     expect(within(result).getByRole("alert")).toHaveTextContent("Invalid code");
     expect(lottie.loadAnimation).not.toHaveBeenCalled();
     expect(within(result).queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
-    const again = within(result).getByRole("button", { name: "Try again" });
-    await waitFor(() => expect(again).toHaveFocus());
+    const back = within(result).getByRole("button", { name: "Back" });
+    expect(back).toHaveTextContent(/^Back$/);
+    expect(back).toHaveClass("group");
+    const arrow = back.querySelector("svg[data-role-claims-back-arrow]")!;
+    expect(arrow).toHaveAttribute("aria-hidden", "true");
+    expect(arrow).toHaveClass("group-hover:-translate-x-0.5", "motion-reduce:group-hover:translate-x-0");
+    expect(back.firstElementChild).toBe(arrow);
+    await waitFor(() => expect(back).toHaveFocus());
     expect(onClose).not.toHaveBeenCalled();
-    await user.click(again);
+    await user.click(back);
     expect(screen.getByPlaceholderText("Enter code")).toHaveValue("WRON-G");
     expect(submitButton()).toBeEnabled();
     expect(view("form")).toHaveClass("opacity-100");
@@ -385,13 +392,14 @@ describe("RoleClaimsModal", () => {
     ["a failed role add", 502, "Could not add the role, try again later"],
     ["a down server", 502, "Server is down"],
     ["rate limiting", 429, "Too many attempts, try again later"],
-  ])("%s: the error view with the detail and Try again", async (_case, status, detail) => {
+  ])("%s: the error view with the detail and the arrow Back", async (_case, status, detail) => {
     mockApi(CONFIG, () => json({ detail }, status));
     const { user, onClose } = await submitCode("ABCD");
     const result = await resultView(detail, "danger");
     expect(within(result).getByRole("alert")).toHaveTextContent(detail);
     expect(within(result).queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
-    await user.click(within(result).getByRole("button", { name: "Try again" }));
+    expect(within(result).queryByRole("button", { name: /Try again/ })).not.toBeInTheDocument();
+    await user.click(within(result).getByRole("button", { name: "Back" }));
     expect(screen.getByPlaceholderText("Enter code")).toHaveValue("ABCD");
     expect(onClose).not.toHaveBeenCalled();
   });
