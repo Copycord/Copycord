@@ -107,12 +107,18 @@ class TestFingerprintShape:
         assert h["Sec-GPC"] == "1"
         assert h["Content-Type"] == "application/json"
 
-        chrome_major = h["User-Agent"].split("Chrome/")[1].split(".")[0]
-        assert h["Sec-CH-UA"] == (
-            f'"Not=A?Brand";v="99", "Google Chrome";v="{chrome_major}", '
-            f'"Chromium";v="{chrome_major}"'
-        )
+        assert h["Sec-CH-UA"] == sh._sec_ch_ua(h["User-Agent"])
         assert "Google Chrome" in h["Sec-CH-UA"]
+
+    def test_sec_ch_ua_is_chromes_greased_brand_list(self):
+        # 155 is the exact value Chrome 155 sent in the 2026-10-20 capture;
+        # 150 follows from the same Chromium algorithm.
+        assert sh._sec_ch_ua("Mozilla/5.0 Chrome/155.0.0.0 Safari/537.36") == (
+            '"Google Chrome";v="155", "Chromium";v="155", "Not(A:Brand";v="24"'
+        )
+        assert sh._sec_ch_ua("Mozilla/5.0 Chrome/150.0.0.0 Safari/537.36") == (
+            '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
+        )
 
     def test_header_order_matches_chrome(self):
 

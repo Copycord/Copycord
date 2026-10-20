@@ -372,13 +372,38 @@ def _installation_id(rng: random.Random) -> str:
     return f"{snowflake}.{suffix}"
 
 
+# Chromium components/embedder_support/user_agent_utils.cc,
+# GetGreasedUserAgentBrandVersion and GetRandomOrder: the filler brand, its
+# version and the brand order are all seeded by the Chrome major version.
+_GREASE_CHARS = (" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_")
+_GREASE_VERSIONS = ("8", "99", "24")
+_BRAND_ORDERS = (
+    (0, 1, 2),
+    (0, 2, 1),
+    (1, 0, 2),
+    (1, 2, 0),
+    (2, 0, 1),
+    (2, 1, 0),
+)
+
+
 def _sec_ch_ua(user_agent: str) -> str:
     """Chrome's Sec-CH-UA brand list for the Chrome major in ``user_agent``."""
     m = re.search(r"Chrome/(\d+)", user_agent or "")
-    major = m.group(1) if m else "150"
-    return (
-        f'"Not=A?Brand";v="99", "Google Chrome";v="{major}", ' f'"Chromium";v="{major}"'
+    major = int(m.group(1)) if m else 150
+    grease = (
+        f"Not{_GREASE_CHARS[major % len(_GREASE_CHARS)]}A"
+        f"{_GREASE_CHARS[(major + 1) % len(_GREASE_CHARS)]}Brand"
     )
+    brands = [
+        (grease, _GREASE_VERSIONS[major % len(_GREASE_VERSIONS)]),
+        ("Chromium", str(major)),
+        ("Google Chrome", str(major)),
+    ]
+    ordered: list = [None] * len(brands)
+    for source, target in enumerate(_BRAND_ORDERS[major % len(_BRAND_ORDERS)]):
+        ordered[target] = brands[source]
+    return ", ".join(f'"{brand}";v="{version}"' for brand, version in ordered)
 
 
 SUPPRESSED_PROFILE_HEADERS = {
