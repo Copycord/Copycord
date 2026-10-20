@@ -18,7 +18,7 @@ from copycord.common import ports
 from copycord.common.paths import db_path
 
 logger = logging.getLogger("common.config")
-CURRENT_VERSION = "v4.0.0b1"
+CURRENT_VERSION = "v4.0.0.1"
 
 
 def _peer_host(_compose_name: str) -> str:
@@ -161,26 +161,14 @@ class Config:
         await receiver.bot.wait_until_ready()
         db = receiver.db
 
-        import re
+        from copycord.update import parse_version
 
-        def _norm_version(tag: str) -> str:
-            if not tag:
-                return "0.0.0"
-            tag = tag.strip()
-            if tag.lower().startswith("v"):
-                tag = tag[1:]
-            tag = re.sub(r"[^0-9.]", "", tag)
-            parts = [p for p in tag.split(".") if p.isdigit()]
-            while len(parts) < 3:
-                parts.append("0")
-            return ".".join(parts[:3])
-
-        def _ver_tuple(tag: str) -> tuple[int, int, int]:
-            a, b, c = _norm_version(tag).split(".")
-            return int(a), int(b), int(c)
+        def _ver_key(tag: str):
+            # All four numbers count (v4.0.0.2 > v4.0.0.1); no version sorts lowest.
+            return parse_version((tag or "").strip()) or ((0,),)
 
         def _cmp_versions(a: str, b: str) -> int:
-            ta, tb = _ver_tuple(a), _ver_tuple(b)
+            ta, tb = _ver_key(a), _ver_key(b)
             return (ta > tb) - (ta < tb)
 
         async def _maybe_update_status(text: str):
@@ -274,7 +262,7 @@ class Config:
 
                 cmp_remote_local = _cmp_versions(latest_tag, running_ver)
 
-                is_new_to_us = _norm_version(latest_tag) != _norm_version(last_seen)
+                is_new_to_us = _ver_key(latest_tag) != _ver_key(last_seen)
 
                 if cmp_remote_local > 0:
                     self.logger.info(

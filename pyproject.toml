@@ -37,7 +37,7 @@ copycord = "copycord.__main__:main"
 [project.gui-scripts]
 copycordw = "copycord.__main__:main"
 
-# Single source: CURRENT_VERSION in src/copycord/common/config.py ("v3.28.0" -> 3.28.0).
+# Single source: CURRENT_VERSION in src/copycord/common/config.py ("v4.0.0.1" -> 4.0.0.1).
 [tool.hatch.version]
 path = "src/copycord/common/config.py"
 pattern = 'CURRENT_VERSION = "v?(?P<version>[^"]+)"'

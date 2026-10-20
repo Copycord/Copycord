@@ -4553,27 +4553,15 @@ def get_version():
     latest = db.get_config("latest_tag", "")
     url = db.get_config("latest_url", "")
 
-    def norm(v: str):
-        import re
-
-        v = (v or "").strip()
-        if v.lower().startswith("v"):
-            v = v[1:]
-        v = re.sub(r"[^0-9.]", "", v)
-        parts = [p for p in v.split(".") if p.isdigit()]
-        while len(parts) < 3:
-            parts.append("0")
-        return ".".join(parts[:3])
-
-    ca = tuple(int(x) for x in norm(current).split("."))
-    lb = tuple(int(x) for x in norm(latest).split(".")) if latest else (0, 0, 0)
+    from copycord.update import is_older
 
     return {
         "current": current,
         "latest": latest or current,
         "url": url
         or f"https://github.com/Copycord/Copycord/releases/tag/{latest or current}",
-        "update_available": bool(latest) and (lb > ca),
+        # All four numbers count: v4.0.0.2 is newer than v4.0.0.1.
+        "update_available": bool(latest) and is_older((current or "").strip(), latest.strip()),
     }
 
 

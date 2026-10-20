@@ -228,7 +228,10 @@ def current_version() -> str:
     return CURRENT_VERSION.lstrip("v")
 
 
-# PEP 440 subset: 4.0.0, 4.0.0b1, 4.0.0rc2, 4.0.0.post1, 4.0.0.dev3, 4.0.0+local
+# PEP 440 subset: 4.0.0.1 (releases carry a build number that only goes up),
+# plus older forms: 4.0.0, 4.0.0b1, 4.0.0rc2, 4.0.0.post1, 4.0.0.dev3, 4.0.0+local.
+# Whether a release is a beta comes from its GitHub pre-release flag, never
+# from the version.
 _VERSION_RE = re.compile(
     r"^\s*v?(?P<release>\d+(?:\.\d+)*)"
     r"(?:[-_.]?(?P<pre>a|alpha|b|beta|c|rc|pre|preview)[-_.]?(?P<pre_n>\d*))?"
@@ -259,11 +262,6 @@ def parse_version(v: str):
     post = (0, int(m["post"] or 0)) if has_post else (-1,)
     dev = (0, int(m["dev"] or 0)) if has_dev else (1,)
     return (tuple(release), pre, post, dev)
-
-
-def is_prerelease(v: str) -> bool:
-    m = _VERSION_RE.match(v)
-    return bool(m) and (m["pre"] is not None or m["dev"] is not None)
 
 
 def is_older(target: str, current: str) -> bool:
@@ -321,7 +319,8 @@ def _release(data: dict) -> Release:
 
 
 def latest_from_releases(data: list, prerelease: bool) -> Release:
-    """The highest-versioned release, skipping drafts and, unless prerelease, pre-releases."""
+    """The highest-versioned release, skipping drafts and, unless prerelease,
+    releases GitHub marks as pre-release (the flag decides, not the tag)."""
     best = None
     for item in data or []:
         if not isinstance(item, dict) or item.get("draft"):

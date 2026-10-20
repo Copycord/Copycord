@@ -675,7 +675,11 @@ def test_version_ordering():
         "4.0.0rc1",
         "4.0.0",
         "4.0.0.post1",
+        "4.0.0.1",
+        "4.0.0.2",
+        "4.0.0.10",
         "4.0.1",
+        "4.0.1.1",
         "4.10.0",
     ]
     for lower, higher in zip(ordered, ordered[1:]):
@@ -683,12 +687,22 @@ def test_version_ordering():
         assert not update.is_newer(lower, higher), (lower, higher)
 
 
-def test_is_prerelease():
-    assert update.is_prerelease("4.0.0b1")
-    assert update.is_prerelease("4.0.0rc1")
-    assert update.is_prerelease("4.0.0.dev2")
-    assert not update.is_prerelease("4.0.0")
-    assert not update.is_prerelease("4.0.0.post1")
+def test_build_number_versions():
+    assert update.parse_version("v4.0.0.1") == update.parse_version("4.0.0.1")
+    assert not update.is_newer("4.0.0.0", "4.0.0")
+    assert not update.is_newer("4.0.0", "4.0.0.0")
+    # A v4.0.0b1 install moves up to the first build-number release.
+    assert update.is_newer("4.0.0.1", "4.0.0b1")
+    assert update.is_older("4.0.0b1", "4.0.0.1")
+
+
+def test_beta_is_the_prerelease_flag_not_the_tag():
+    data = [release("v4.0.0.3", prerelease=True), release("v4.0.0.2"), release("v4.0.0b1")]
+    assert update.latest_from_releases(data, prerelease=False).tag == "v4.0.0.2"
+    beta = update.latest_from_releases(data, prerelease=True)
+    assert beta.tag == "v4.0.0.3" and beta.prerelease
+    # A b1 tag published as a full release counts as stable.
+    assert update.latest_from_releases([release("v4.0.0b1")], prerelease=False).tag == "v4.0.0b1"
 
 
 # installed_commit
