@@ -85,7 +85,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install test dependencies
-        run: pip install pytest
+        run: |
+          pip install -r tests/requirements-test.txt
+          COPYCORD_SKIP_FRONTEND=1 pip install -e .
 
       - name: Run DB tests
         env:
