@@ -244,7 +244,6 @@ class Client:
                 # Registered with on(), so it sees READY before the cache does.
                 on_event("READY", science.on_ready)
                 on_event("RESUMED", science.on_resumed)
-                science.start()
                 self.science = science
             except Exception as exc:  # science must never stop the gateway
                 log.debug("science reporter not attached: %r", exc)

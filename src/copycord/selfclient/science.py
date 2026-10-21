@@ -11,10 +11,11 @@
 
 The web client queues events from page load and flushes them once READY gives
 it an ``analytics_token``. Copycord sends what a browser tab that loaded
-unfocused sends on its own from startup through READY: session_start_client,
-gateway_connected and ready_payload_received; and gateway_connected and
-connection_resumed together after a RESUME. Such a tab makes no heartbeat
-session id, so there is no client_heartbeat and no event carries
+unfocused sends on its own: gateway_connected on every new socket (the
+overnight capture sent it on all 8 of its sockets), ready_payload_received
+after READY, and connection_resumed with the socket's gateway_connected after
+a RESUME. Such a tab makes no heartbeat session id, so there is no
+client_heartbeat, no session_start_client, and no event carries
 client_heartbeat_session_id. Shapes and key orders follow Mac's
 Chrome 155 capture (2026-10-20). Events tracked before READY carry no
 client_uuid, as in that capture: the browser's generator needs the user id.
@@ -235,7 +236,6 @@ class ScienceReporter:
         self._tasks: set = set()
         self._delayed_pending = False
         self._closed = False
-        self._session_started = False
         self._ready_count = 0
         # Socket timing, for gateway_connected and ready_payload_received.
         self._first_attempt_ms: Optional[int] = None
@@ -245,15 +245,6 @@ class ScienceReporter:
         self._connections = 0
 
     # what the browser tracks
-
-    def start(self) -> None:
-        """Page load: the session start."""
-        try:
-            if not self._session_started:
-                self._session_started = True
-                self.track("session_start_client", {})
-        except Exception as exc:
-            log.debug("science start failed: %r", exc)
 
     def connect_attempt(self) -> None:
         now = _now_ms()

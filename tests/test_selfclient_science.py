@@ -34,12 +34,6 @@ COMMON_TAIL = [
 
 # Without client_heartbeat_session_id: a tab that loaded unfocused has none.
 CAPTURE_KEYS = {
-    "session_start_client": [
-        "client_track_timestamp",
-        "event_sequence_number",
-        *COMMON_TAIL,
-        "client_send_timestamp",
-    ],
     "gateway_connected": [
         "client_track_timestamp",
         "event_sequence_number",
@@ -305,15 +299,15 @@ class TestFirstBatch:
         assert list(body) == ["token", "events"]
         assert body["token"] == ANALYTICS_TOKEN
         events = body["events"]
+        # No client_heartbeat and no session_start_client: an unfocused tab sends neither.
         assert [e["type"] for e in events] == [
-            "session_start_client",
             "gateway_connected",
             "ready_payload_received",
         ]
         for event in events:
             assert list(event) == ["type", "properties"]
             assert list(event["properties"]) == CAPTURE_KEYS[event["type"]], event["type"]
-        assert [e["properties"]["event_sequence_number"] for e in events] == [1, 2, 3]
+        assert [e["properties"]["event_sequence_number"] for e in events] == [1, 2]
         for event in events:
             props = event["properties"]
             assert "client_heartbeat_session_id" not in props
@@ -332,7 +326,7 @@ class TestFirstBatch:
         await stop(client, task)
         events = {e["type"]: e["properties"] for e in session.science_posts()[0][2]["json"]["events"]}
 
-        assert "client_heartbeat" not in events
+        assert "client_heartbeat" not in events and "session_start_client" not in events
         for event_type, props in events.items():
             assert not HEARTBEAT_KEYS & set(props), event_type
 
@@ -367,8 +361,8 @@ class TestFirstBatch:
         events = session.science_posts()[0][2]["json"]["events"]
 
         # As in the capture: the events tracked before READY carry none.
-        assert ["client_uuid" in e["properties"] for e in events] == [False, False, True]
-        words = struct.unpack("<6I", base64.b64decode(events[2]["properties"]["client_uuid"]))
+        assert ["client_uuid" in e["properties"] for e in events] == [False, True]
+        words = struct.unpack("<6I", base64.b64decode(events[1]["properties"]["client_uuid"]))
         assert words[0] | (words[1] << 32) == int(USER_ID)
         assert words[3] | (words[4] << 32) == client.science.started_ms
         assert words[5] == 0
@@ -419,9 +413,7 @@ class TestFirstBatch:
         await stop(client, task)
 
         assert session.science_posts() == []
-        assert [e["type"] for e in science.queue] == [
-            "session_start_client", "gateway_connected",
-        ]
+        assert [e["type"] for e in science.queue] == ["gateway_connected"]
 
 
 # resume
@@ -459,7 +451,7 @@ class TestResume:
         assert body["token"] == ANALYTICS_TOKEN
         events = body["events"]
         assert [e["type"] for e in events] == ["gateway_connected", "connection_resumed"]
-        assert [e["properties"]["event_sequence_number"] for e in events] == [4, 5]
+        assert [e["properties"]["event_sequence_number"] for e in events] == [3, 4]
         connected, resumed = (e["properties"] for e in events)
         assert list(connected) == CAPTURE_KEYS["gateway_connected"][:-1] + [
             "client_uuid", "client_send_timestamp",
@@ -474,6 +466,58 @@ class TestResume:
             "client_uuid",
             "client_send_timestamp",
         ]
+
+    @pytest.mark.asyncio
+    async def test_gateway_connected_on_every_socket(self, token):
+        """The overnight capture: one session, 8 sockets, gateway_connected on each."""
+        session = FakeSession()
+        resumed = {"op": 0, "t": "RESUMED", "s": 2, "d": {}}
+        sockets = [
+            FakeWS([hello(), ready_frame()]),
+            FakeWS([hello(), resumed]),
+            FakeWS([hello(), resumed]),
+        ]
+        live = []
+
+        async def connector(url, headers, proxy):
+            live.append(sockets.pop(0))
+            return live[-1]
+
+        client = Client(http=HTTPClient(token, session=session), connector=connector, refresh_build=False)
+        await client.login(token)
+        task = asyncio.ensure_future(client.connect())
+        await wait_until(lambda: session.science_posts())
+        client.gateway.base_reconnect_delay = 0.001
+        client.gateway.max_reconnect_delay = 0.01
+        client.science.flush_delay = 0.01
+        for count in (2, 3):
+            # op 7 on the live socket: reconnect and RESUME.
+            live[-1].queue.put_nowait(json.dumps({"op": 7, "d": None}))
+            await wait_until(lambda: len(session.science_posts()) >= count)
+        await asyncio.sleep(0.1)
+        await stop(client, task)
+
+        assert [ws.sent[0]["op"] for ws in live] == [2, 6, 6]
+        events = [e for post in session.science_posts() for e in post[2]["json"]["events"]]
+        assert [e["type"] for e in events] == [
+            "gateway_connected",
+            "ready_payload_received",
+            "gateway_connected",
+            "connection_resumed",
+            "gateway_connected",
+            "connection_resumed",
+        ]
+        connected = [e["properties"] for e in events if e["type"] == "gateway_connected"]
+        assert [p["is_reconnect"] for p in connected] == [False, True, True]
+        assert [p["gateway_url"] for p in connected] == [
+            "wss://gateway.discord.gg",
+            "wss://gateway-us-east1-b.discord.gg",
+            "wss://gateway-us-east1-b.discord.gg",
+        ]
+        types = {e["type"] for e in events}
+        assert not types & {"client_heartbeat", "session_start_client"}
+        for e in events:
+            assert not HEARTBEAT_KEYS & set(e["properties"]), e["type"]
 
     @pytest.mark.asyncio
     async def test_a_fresh_connect_does_not_hold_gateway_connected(self):
@@ -575,14 +619,14 @@ class TestReporter:
         caplog.set_level(logging.DEBUG, logger="selfclient.science")
         session = FakeSession(science_status=204)
         r = sc.ScienceReporter("tok", StubHTTP(session), StubGateway())
-        r.track("session_start_client", {})
+        r.connected("wss://gateway.discord.gg/?v=9")
         await r.on_ready({"user": {"id": USER_ID}, "analytics_token": ANALYTICS_TOKEN})
         await r.wait_idle()
         sent = [rec for rec in caplog.records if rec.name == "selfclient.science"]
         assert [(rec.levelno, rec.getMessage()) for rec in sent] == [
             (
                 logging.DEBUG,
-                "science POST sent 2 event(s) [session_start_client, ready_payload_received]: HTTP 204",
+                "science POST sent 2 event(s) [gateway_connected, ready_payload_received]: HTTP 204",
             )
         ]
         assert ANALYTICS_TOKEN not in caplog.text
