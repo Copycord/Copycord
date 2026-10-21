@@ -4,6 +4,7 @@ Each role runs on its own loop and thread, so every delivery crosses threads.
 """
 import asyncio
 import json
+import logging
 import threading
 import time
 
@@ -226,6 +227,74 @@ def test_closed_loop_endpoint_is_dropped(reg):
     assert not reg.has(URL)
     with pytest.raises(inprocess.EndpointUnavailable):
         reg.dispatch(URL, {"type": "x"})
+
+
+# Startup ordering: a send that beats the peer's registration
+
+
+def _ws_records(caplog, name):
+    return [r for r in caplog.records if r.name == name and "error attempt" in r.getMessage()]
+
+
+def _warnings(caplog, name):
+    return [r for r in caplog.records if r.name == name and r.levelno >= logging.WARNING]
+
+
+def test_send_before_endpoint_registers_waits_for_it(reg, loops, caplog):
+    srv, cli = loops("srv-loop"), loops("cli-loop")
+    caplog.set_level(logging.DEBUG, logger="test.ws.early")
+    got = threading.Event()
+
+    async def handler(msg):
+        if msg["type"] == "backfill_jobs_reset":
+            got.set()
+
+    mgr = WebsocketManager(send_url=URL, logger=logging.getLogger("test.ws.early"))
+    # A 30 s backoff: only the registration wake-up delivers within the test.
+    sending = cli.spawn(mgr.send({"type": "backfill_jobs_reset", "data": {}}, base_backoff=30.0))
+    _wait_for(lambda: reg._waiters)
+    t0 = time.monotonic()
+    _serve(srv, handler)
+    assert got.wait(3)
+    sending.result(3)
+    assert time.monotonic() - t0 < 3
+    recs = _ws_records(caplog, "test.ws.early")
+    assert recs and all(r.levelno == logging.DEBUG for r in recs)
+    assert not _warnings(caplog, "test.ws.early")
+    assert not reg._waiters
+
+
+def test_send_without_endpoint_retries_at_debug_until_last(reg, loops, caplog):
+    cli = loops("cli-loop")
+    caplog.set_level(logging.DEBUG, logger="test.ws.absent")
+    mgr = WebsocketManager(send_url=URL, logger=logging.getLogger("test.ws.absent"))
+    cli.run(mgr.send({"type": "backfill_jobs_reset"}, max_attempts=3, base_backoff=0.01))
+    levels = [r.levelno for r in _ws_records(caplog, "test.ws.absent")]
+    assert levels == [logging.DEBUG, logging.DEBUG, logging.INFO]
+    assert any("give-up" in r.getMessage() for r in caplog.records)
+    assert not _warnings(caplog, "test.ws.absent")
+    assert not reg._waiters
+
+
+def test_request_before_endpoint_registers_waits_for_it(reg, loops, caplog):
+    srv, cli = loops("srv-loop"), loops("cli-loop")
+    caplog.set_level(logging.DEBUG, logger="test.ws.req")
+
+    async def handler(msg):
+        return {"pong": msg["type"]}
+
+    mgr = WebsocketManager(send_url=URL, logger=logging.getLogger("test.ws.req"))
+    asking = cli.spawn(mgr.request({"type": "ping"}, timeout=2.0, base_backoff=30.0))
+    _wait_for(lambda: reg._waiters)
+    _serve(srv, handler)
+    assert asking.result(3)["pong"] == "ping"
+    assert not _warnings(caplog, "test.ws.req")
+
+
+def test_wait_registered_times_out_and_forgets_the_waiter(reg, loops):
+    cli = loops("cli-loop")
+    assert cli.run(reg.wait_registered(URL, 0.05)) is False
+    assert not reg._waiters
 
 
 # AdminBus
