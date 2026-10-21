@@ -25,6 +25,7 @@ from copycord.common import traffic_capture
 
 from . import events
 from .errors import ClientException, NotFound
+from .fingerprint import share_tls_session, unshare_tls_session
 from .gateway import GatewayClient, open_websocket
 from .http import HTTPClient
 from .science import ScienceReporter
@@ -220,7 +221,14 @@ class Client:
         elif not self.http.token:
             self.http.token = token
         self._connection.http = self.http
-        data = await self.http.login()
+        # The wire probe and any other get_tls_session(token) caller get this
+        # session too, so the token has one TLS identity.
+        share_tls_session(token, self._rest_session)
+        try:
+            data = await self.http.login()
+        except BaseException:
+            unshare_tls_session(token, self._rest_session)
+            raise
         self._connection.user = User(data, self._connection)
 
     def _make_gateway(self, reconnect: bool) -> Any:
@@ -304,6 +312,8 @@ class Client:
                 log.debug("gateway close failed", exc_info=True)
         if self.science is not None:
             await self.science.close()
+        if self.token:
+            unshare_tls_session(self.token, self._rest_session)
         if self.http is not None:
             try:
                 await self.http.close()

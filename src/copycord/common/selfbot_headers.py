@@ -374,6 +374,34 @@ _TLS_SESSIONS: dict = {}
 _TLS_PRIMED: set[str] = set()
 _TLS_SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 _TLS_LAST_USED: dict[str, float] = {}
+# Tokens whose curl_cffi session has another owner (the selfclient's REST
+# client): get_tls_session hands that session out, so the token keeps one TLS
+# identity. Never closed, reaped or primed here; the owner does that.
+_TLS_SHARED: dict = {}
+
+
+def share_tls_session(token: str, provider) -> None:
+    """Have get_tls_session(token) return provider(), the owner's session."""
+    if token:
+        _TLS_SHARED[token] = provider
+
+
+def unshare_tls_session(token: str, provider=None) -> None:
+    """Stop sharing token's session; with provider, only while it is still the shared one."""
+    cur = _TLS_SHARED.get(token)
+    if cur is not None and (provider is None or cur == provider):
+        del _TLS_SHARED[token]
+
+
+def _shared_tls_session(token: str):
+    provider = _TLS_SHARED.get(token)
+    if provider is None:
+        return None
+    try:
+        return provider()
+    except Exception as e:
+        logger.debug("shared TLS session unavailable for token=%s: %r", _token_log_id(token), e)
+        return None
 
 
 def _tls_session_lock(token: str) -> asyncio.Lock:
@@ -386,6 +414,9 @@ def _tls_session_lock(token: str) -> asyncio.Lock:
 
 async def get_tls_session(token: str, *, use_proxy: bool = False):
     """Return a curl_cffi ``AsyncSession`` dedicated to this token."""
+    shared = _shared_tls_session(token)
+    if shared is not None:
+        return shared
     if _CurlAsyncSession is None:
         raise RuntimeError("curl_cffi is not installed")
 
