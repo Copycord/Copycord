@@ -43,7 +43,7 @@ from copycord.common.ports import (
 )
 from copycord.common.websockets import INTERNAL_TOKEN_ENV
 from copycord import ui
-from copycord.logging_setup import setup_logging
+from copycord.logging_setup import apply_level, setup_logging
 
 logger = logging.getLogger("copycord.supervisor")
 
@@ -328,8 +328,27 @@ class Supervisor:
 # --------------------------------------------------------------------------
 
 
+def _apply_db_log_level() -> None:
+    """Let the DB LOG_LEVEL win over .env before logging is installed."""
+    try:
+        from copycord.common.db import DBManager
+
+        db = DBManager(os.environ["DB_PATH"])
+        try:
+            level = (db.get_all_config() or {}).get("LOG_LEVEL")
+        finally:
+            db.close()
+    except Exception:
+        return
+    if level:
+        os.environ["LOG_LEVEL"] = str(level)
+
+
 def _apply_db_config() -> None:
-    """Copy the allowed app config keys into os.environ before a role starts."""
+    """Copy the allowed app config keys into os.environ before a role starts.
+
+    The DB LOG_LEVEL (the dashboard's Log Level) also re-levels the loggers.
+    """
     try:
         from copycord.common.db import DBManager
 
@@ -346,6 +365,7 @@ def _apply_db_config() -> None:
     for k, v in cfg.items():
         if k in ALLOWED_ENV and v is not None:
             os.environ[k] = str(v)
+    apply_level()
 
 
 class ThreadedRole:
@@ -604,6 +624,7 @@ async def _auto_update() -> None:
 
 async def run() -> None:
     _set_runtime_env()
+    _apply_db_log_level()
     setup_logging()
     # The role banners are INFO on role threads, so only this one reaches the console.
     logger.info("Starting Copycord %s", CURRENT_VERSION)

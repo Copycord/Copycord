@@ -51,6 +51,7 @@ from copycord.common.websockets import WebsocketManager, AdminBus
 from copycord.common.db import DBManager
 from copycord.common.http_session import close_shared_session
 from copycord.common.paths import data_dir
+from copycord.logging_setup import apply_level
 from copycord.server.rate_limiter import RateLimitManager, ActionType
 from copycord.server.token_sender import (
     UserTokenSender,
@@ -91,16 +92,12 @@ DATA_DIR = os.getenv("DATA_DIR")
 LOG_DIR = os.getenv("LOG_DIR") or (DATA_DIR if DATA_DIR else str(data_dir()))
 os.makedirs(LOG_DIR, exist_ok=True)
 
-LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
-LEVEL = getattr(logging, LEVEL_NAME, logging.INFO)
-
 formatter = logging.Formatter(
     "%(asctime)s | %(levelname)-5s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
 root = logging.getLogger()
-root.setLevel(LEVEL)
 
 # Skip when the supervisor (or the other role module) already installed the
 # console handler, otherwise every record prints once per handler.
@@ -108,14 +105,7 @@ if not any(getattr(h, "_copycord_console", False) for h in root.handlers):
     ch = logging.StreamHandler()
     ch._copycord_console = True
     ch.setFormatter(formatter)
-    ch.setLevel(LEVEL)
     root.addHandler(ch)
-
-
-
-
-# websockets logs every frame at DEBUG, which buries our own output on a debug run.
-logging.getLogger("websockets").setLevel(logging.WARNING)
 
 
 # Keep asyncio's slow-callback warnings and real errors only.
@@ -130,6 +120,8 @@ for lib in (
 ):
     logging.getLogger(lib).setLevel(logging.WARNING)
 logging.getLogger("discord.client").setLevel(logging.ERROR)
+# Root, handler and websockets levels follow LOG_LEVEL (the dashboard value).
+apply_level()
 
 logger = logging.getLogger("server")
 
@@ -168,8 +160,6 @@ class _GuildPrefixFilter(logging.Filter):
 
 
 logger.addFilter(_GuildPrefixFilter())
-
-logger.setLevel(LEVEL)
 
 
 class ServerReceiver:

@@ -235,6 +235,34 @@ def _quiet_libraries(level: int) -> None:
     logging.getLogger("websockets").setLevel(
         logging.DEBUG if level <= logging.DEBUG else logging.WARNING
     )
+    # LOG_LEVEL=DEBUG shows each gateway frame sent and each science post.
+    debug = level <= logging.DEBUG
+    logging.getLogger("selfclient.gateway").setLevel(
+        logging.DEBUG if debug else logging.WARNING
+    )
+    logging.getLogger("selfclient.science").setLevel(
+        logging.DEBUG if debug else logging.NOTSET
+    )
+
+
+def apply_level(level_name: Optional[str] = None) -> int:
+    """Re-level root, the console and the role file handlers; idempotent, any thread.
+
+    Without an argument it reads LOG_LEVEL from os.environ. Returns the level.
+    """
+    if level_name is None:
+        level = _level()
+    else:
+        level = getattr(logging, str(level_name).strip().upper(), logging.INFO)
+        if not isinstance(level, int):
+            level = logging.INFO
+    root = logging.getLogger()
+    root.setLevel(level)
+    for h in list(root.handlers):
+        if getattr(h, CONSOLE_MARK, False) or getattr(h, "_copycord_role", None):
+            h.setLevel(level)
+    _quiet_libraries(level)
+    return level
 
 
 class TruncateSafeRotatingFileHandler(RotatingFileHandler):
