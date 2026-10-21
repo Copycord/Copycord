@@ -90,7 +90,8 @@ def test_debug_level_leaves_out_asyncio_selector_line(installed):
         # A real loop logs "Using selector: ..." at DEBUG as it is made.
         asyncio.new_event_loop().close()
         logging.getLogger("asyncio").warning("asyncio-warning-kept")
-        logging.getLogger("copycord.test").debug("own-debug-kept")
+        # Outside the copycord tree, which other test modules re-level.
+        logging.getLogger("test_log_level.own").debug("own-debug-kept")
 
     t = threading.Thread(target=go, name="copycord-client")
     t.start()
