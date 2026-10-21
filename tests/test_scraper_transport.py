@@ -14,7 +14,12 @@ import pytest
 from copycord.admin import standalone_scraper as ss
 from copycord.admin.standalone_scraper import ScraperConfig, StandaloneScraper
 from copycord.common.selfbot_headers import TLS_IMPERSONATE, build_headers, gateway_properties
-from copycord.selfclient.gateway import GatewayClient, gateway_url
+from copycord.selfclient.gateway import (
+    IDLE_VOICE_STATE,
+    RESUME_CLOSE_CODE,
+    GatewayClient,
+    gateway_url,
+)
 
 PASSWORD = "s3cretpw"
 PROXIES = [f"host{i}.example:800{i}:user{i}:{PASSWORD}" for i in range(3)]
@@ -100,8 +105,9 @@ class FakeSocket:
             self.push({"op": 0, "t": "GUILD_MEMBERS_CHUNK", "s": 2,
                        "d": {"nonce": d["nonce"], "members": MEMBERS.get(d["query"], [])}})
 
-    async def close(self):
+    async def close(self, code=1000):
         self.closed = True
+        self.close_sent = code
         self.inbox.put_nowait(ConnectionError("closed"))
 
     def identify(self):
@@ -462,3 +468,181 @@ def test_debug_recorder_masks_and_folds_reconnects():
     assert [g["connects"] for g in gw] == [3, 1]
     assert gw[0]["identify"] == {"op": 2, "d": {"properties": {"os": "Windows"}}}
     assert gw[1]["identify"] is None
+
+
+# A server op 1, and RESUME after a drop, as the selfclient does them.
+
+RESUME_HOST = "wss://gateway-resume.example.gg"
+
+
+class ScriptedSocket(FakeSocket):
+    """A socket that follows ``plan`` once its session is up (READY or RESUMED):
+    "reconnect" sends op 7, "invalid" answers op 6 with op 9 false, 4007 or 4009 closes
+    with that code, "op1" sends a server op 1; None just serves member chunks. HELLO's
+    interval is long enough that no timed op 40 falls inside a test."""
+
+    def __init__(self, url, headers, proxy, plan):
+        super().__init__(url, headers, proxy, hello=False)
+        self.plan = plan
+        self.seq = 0
+        self.close_code = None
+        self.close_reason = ""
+        self.close_sent = None
+        # len(sent) when the server op 1 was handed over.
+        self.op1_at = None
+        self.push({"op": 10, "d": {"heartbeat_interval": 10_000_000}})
+
+    async def recv(self):
+        item = await self.inbox.get()
+        if isinstance(item, BaseException):
+            raise item
+        if isinstance(item, tuple):
+            self.op1_at = len(self.sent)
+            return item[1]
+        return item
+
+    def _session_up(self):
+        if self.plan == "reconnect":
+            self.push({"op": 7, "d": None})
+        elif self.plan == "op1":
+            data = self._z.compress(json.dumps({"op": 1, "d": None}).encode())
+            self.inbox.put_nowait(("op1", data + self._z.flush(zlib.Z_SYNC_FLUSH)))
+        elif self.plan in (4007, 4009):
+            self.close_code = self.plan
+            self.inbox.put_nowait(ConnectionError(f"closed {self.plan}"))
+
+    async def send(self, text):
+        msg = json.loads(text)
+        self.sent.append(msg)
+        op, d = msg["op"], msg["d"]
+        if op == 2:
+            self.seq += 1
+            self.push({"op": 0, "t": "READY", "s": self.seq,
+                       "d": {"session_id": "sess-1", "resume_gateway_url": RESUME_HOST}})
+            self._session_up()
+        elif op == 6:
+            if self.plan == "invalid":
+                self.push({"op": 9, "d": False})
+                return
+            self.seq = d["seq"] + 1
+            self.push({"op": 0, "t": "RESUMED", "s": self.seq, "d": {}})
+            self._session_up()
+        elif op == 8:
+            self.seq += 1
+            self.push({"op": 0, "t": "GUILD_MEMBERS_CHUNK", "s": self.seq,
+                       "d": {"nonce": d["nonce"], "members": MEMBERS.get(d["query"], [])}})
+
+    async def close(self, code=1000):
+        if self.close_sent is None:
+            self.close_sent = code
+        self.closed = True
+        self.inbox.put_nowait(ConnectionError("closed"))
+
+
+def _scripted_scraper(monkeypatch, plans):
+    """One token, no proxies; socket i follows plans[i], later ones serve chunks."""
+    sockets = []
+
+    async def open_ws(url, headers, proxy=None, **kwargs):
+        plan = plans[len(sockets)] if len(sockets) < len(plans) else None
+        sockets.append(ScriptedSocket(url, headers, proxy, plan))
+        return sockets[-1]
+
+    class NoWaitGatewayClient(GatewayClient):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._invalid_session_delay = (0.0, 0.0)
+
+    monkeypatch.setattr(ss, "open_websocket", open_ws)
+    monkeypatch.setattr(ss, "GatewayClient", NoWaitGatewayClient)
+    s = StandaloneScraper(ScraperConfig(guild_id=1, tokens=["tok-a"], sessions_per_token=1))
+
+    async def pause(seconds):
+        await asyncio.sleep(0)
+        return s._stop_event.is_set()
+
+    s._pause = pause
+    return s, sockets
+
+
+def _ops(sock):
+    return [m["op"] for m in sock.sent]
+
+
+@pytest.mark.asyncio
+async def test_a_server_op_1_is_answered_at_once_with_the_clients_op_40(fakes, monkeypatch):
+    s, sockets = _scripted_scraper(monkeypatch, ["op1"])
+    result = await asyncio.wait_for(s.scrape(), timeout=30)
+    assert result.success, result.error
+
+    sock = sockets[0]
+    assert sock.op1_at is not None
+    # The next frame after op 1 arrived is op 40, in the main client's qos shape.
+    beat = sock.sent[sock.op1_at]
+    assert beat == {"op": 40, "d": {"seq": 1, "qos": {"active": False, "ver": 31, "reasons": []}}}
+    assert list(beat["d"]) == ["seq", "qos"]
+    ref = GatewayClient("tok-a", reconnect=False)
+    ref.sequence = 1
+    assert beat == ref._heartbeat_payload()
+    assert 1 not in _ops(sock)
+
+
+@pytest.mark.asyncio
+async def test_after_op_7_the_session_resumes_on_the_resume_url(fakes, monkeypatch):
+    s, sockets = _scripted_scraper(monkeypatch, ["reconnect"])
+    result = await asyncio.wait_for(s.scrape(), timeout=30)
+    assert result.success, result.error
+
+    assert len(sockets) == 2
+    first, second = sockets
+    assert _ops(first)[:2] == [2, 4]
+    # A 4000-range close keeps the session resumable.
+    assert first.close_sent == RESUME_CLOSE_CODE
+
+    assert second.url == gateway_url(RESUME_HOST, zlib_stream=True)
+    ops = _ops(second)
+    assert ops[:3] == [6, 3, 4] and 2 not in ops
+    resume = second.sent[0]["d"]
+    assert list(resume) == ["token", "session_id", "seq"]
+    assert resume == {"token": "tok-a", "session_id": "sess-1", "seq": 1}
+    assert second.sent[1]["d"] == {"status": "online", "since": 0, "activities": [], "afk": True}
+    assert second.sent[2]["d"] == IDLE_VOICE_STATE
+
+    # Exactly what the main client sends when it resumes the same session.
+    ref = GatewayClient("tok-a", reconnect=False)
+    ref._ws = _Capture()
+    ref.session_id, ref.sequence = "sess-1", 1
+    assert await ref.send_connect_frames() is True
+    assert second.sent[:3] == ref._ws.sent
+
+    # The finished session ends with 1000.
+    assert second.close_sent == 1000
+
+
+@pytest.mark.asyncio
+async def test_op_9_false_on_resume_falls_back_to_identify(fakes, monkeypatch):
+    s, sockets = _scripted_scraper(monkeypatch, ["reconnect", "invalid"])
+    result = await asyncio.wait_for(s.scrape(), timeout=30)
+    assert result.success, result.error
+
+    assert len(sockets) == 3
+    _first, refused, fresh = sockets
+    assert _ops(refused)[0] == 6
+    # A session Discord refused is ended, not kept.
+    assert refused.close_sent == 1000
+    assert fresh.url == gateway_url(zlib_stream=True)
+    assert _ops(fresh)[:2] == [2, 4] and 6 not in _ops(fresh)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", [4007, 4009])
+async def test_a_close_that_cannot_resume_falls_back_to_identify(fakes, monkeypatch, code):
+    s, sockets = _scripted_scraper(monkeypatch, [code])
+    result = await asyncio.wait_for(s.scrape(), timeout=30)
+    assert result.success, result.error
+
+    assert len(sockets) == 2
+    dropped, fresh = sockets
+    assert _ops(dropped)[:2] == [2, 4]
+    assert fresh.url == gateway_url(zlib_stream=True)
+    assert _ops(fresh)[:2] == [2, 4] and 6 not in _ops(fresh)
