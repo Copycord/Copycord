@@ -544,6 +544,34 @@ class TestResume:
         assert not first.frames(41) and not second.frames(41), "no op 41, fresh or RESUME"
 
     @pytest.mark.asyncio
+    async def test_resume_order_with_the_current_presence_then_op40(self):
+        first = FakeWS([hello(), ready(guilds=("10", "20"))])
+        second = FakeWS([hello(50), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}], auto_ack=True)
+        client, _ = make_client(first, second)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: first.frames(37))
+        await client.change_presence(status="dnd", custom_status="away")
+        first.feed({"op": 7, "d": None})
+        await wait_until(lambda: second.frames(40) and client.is_connected)
+        await stop(client, task)
+
+        assert second.ops()[:5] == [6, 3, 4, 37, 40]
+        assert list(second.sent[1]["d"].items()) == [
+            ("status", "dnd"),
+            ("since", 0),
+            ("activities", [{"type": 4, "state": "away", "name": "Custom Status", "id": "custom"}]),
+            ("afk", True),
+        ]
+        assert second.sent[2]["d"] == sc_gateway.IDLE_VOICE_STATE
+        assert set(second.sent[3]["d"]["subscriptions"]) == {"10", "20"}
+        assert second.sent[4]["d"]["qos"]["active"] is False
+        # No heartbeat session id anywhere, fresh or resumed.
+        assert not first.frames(41) and not second.frames(41)
+        assert "client_heartbeat_session_id" not in first.frames(2)[0]["d"]["properties"]
+        assert "client_heartbeat_session_id" not in rest_super_props()
+        assert "idle" not in {f["d"]["status"] for f in first.frames(3) + second.frames(3)}
+
+    @pytest.mark.asyncio
     async def test_resume_op37_has_the_full_shape(self):
         first = FakeWS([hello(), ready(guilds=("10", "20", "30")), {"op": 7, "d": None}])
         second = FakeWS([hello(), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}])
