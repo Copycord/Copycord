@@ -107,6 +107,11 @@ RESUME_SUBSCRIPTION_FEATURES = {
 # Discord drops oversized op 37 frames, so batches are split to stay under this.
 MAX_SUBSCRIPTION_PAYLOAD = 15360
 
+# Dispatches worth a DEBUG line; the rest are content traffic.
+SESSION_DISPATCHES = frozenset(
+    {"READY", "READY_SUPPLEMENTAL", "RESUMED", "SESSIONS_REPLACE"}
+)
+
 # op 40 `qos.ver` the web client sends.
 QOS_VERSION = 31
 
@@ -997,7 +1002,10 @@ class GatewayClient:
     async def _handle_dispatch(self, event: Optional[str], data: Any) -> None:
         if event is None:
             return
-        log.debug("DISPATCH %s", event)
+        # Only session events: message, typing and member traffic would bury the
+        # sent-frame lines DEBUG exists for.
+        if event in SESSION_DISPATCHES:
+            log.debug("DISPATCH %s", event)
         data_dict = data if isinstance(data, dict) else {}
 
         if event in ("READY", "RESUMED"):
