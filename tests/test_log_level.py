@@ -1,4 +1,5 @@
 """The dashboard's Log Level re-levels root, the console and the role file handlers."""
+import asyncio
 import logging
 import os
 import tempfile
@@ -14,7 +15,7 @@ os.environ.setdefault("DB_PATH", os.path.join(_tmpdir, "test.db"))
 from copycord import logging_setup, supervisor  # noqa: E402
 from httpx import AsyncClient, ASGITransport  # noqa: E402
 
-_LOGGERS = ("websockets", "selfclient.gateway", "selfclient.science")
+_LOGGERS = ("websockets", "selfclient.gateway", "selfclient.science", "asyncio")
 
 
 @pytest.fixture()
@@ -77,6 +78,29 @@ def test_apply_level_debug_then_info(installed):
     for h in handlers.values():
         h.flush()
     assert "gateway-frame-after" not in (tmp / "client.out").read_text(encoding="utf-8")
+
+
+def test_debug_level_leaves_out_asyncio_selector_line(installed):
+    tmp, handlers = installed
+    logging.getLogger("asyncio").setLevel(logging.NOTSET)
+    logging_setup.apply_level("DEBUG")
+    assert logging.getLogger("asyncio").level == logging.WARNING
+
+    def go():
+        # A real loop logs "Using selector: ..." at DEBUG as it is made.
+        asyncio.new_event_loop().close()
+        logging.getLogger("asyncio").warning("asyncio-warning-kept")
+        logging.getLogger("copycord.test").debug("own-debug-kept")
+
+    t = threading.Thread(target=go, name="copycord-client")
+    t.start()
+    t.join()
+    for h in handlers.values():
+        h.flush()
+    out = (tmp / "client.out").read_text(encoding="utf-8")
+    assert "Using selector" not in out
+    assert "asyncio-warning-kept" in out
+    assert "own-debug-kept" in out
 
 
 def test_apply_level_is_idempotent_and_reads_env(installed, monkeypatch):

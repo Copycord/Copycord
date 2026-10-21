@@ -172,17 +172,13 @@ class Config:
             return (ta > tb) - (ta < tb)
 
         async def _maybe_update_status(text: str):
-            """Only the server has update_status."""
+            """Only the server has update_status; the client skips it silently."""
             fn = getattr(receiver, "update_status", None)
             if callable(fn):
                 try:
                     await fn(text)
                 except Exception:
                     self.logger.debug("update_status failed", exc_info=True)
-            else:
-                self.logger.debug(
-                    "Skipping status update (receiver has no update_status)"
-                )
 
         async def _notify_all_guild_owners(latest_tag: str, latest_url: str) -> bool:
             """DM each unique guild owner once. Returns True if at least one DM was sent."""

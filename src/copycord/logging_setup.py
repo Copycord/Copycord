@@ -232,6 +232,9 @@ def _quiet_libraries(level: int) -> None:
     # repeating the supervisor's own line; uvicorn has its own access log.
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         logging.getLogger(name).setLevel(logging.WARNING)
+    # asyncio's DEBUG is "Using selector: ..." for every role loop; keep its
+    # slow-callback warnings and real errors.
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
     logging.getLogger("websockets").setLevel(
         logging.DEBUG if level <= logging.DEBUG else logging.WARNING
     )
