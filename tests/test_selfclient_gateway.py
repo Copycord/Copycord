@@ -296,20 +296,77 @@ class TestHandshake:
         rest = sc_gateway.fingerprint.selfbot_headers._fingerprint(TOKEN)["super_props"]
         assert props["launch_signature"] == rest["launch_signature"]
 
+
+# presence
+
+
+class TestPresence:
+    def test_online_after_90_seconds_by_default(self):
+        client = GatewayClient(TOKEN)
+        assert client.status == "online"
+        assert client.presence_delay == sc_gateway.PRESENCE_DELAY == 90.0
+
     @pytest.mark.asyncio
-    async def test_ready_presence_has_the_browser_shape(self):
+    async def test_one_op3_a_while_after_ready(self):
         ws = FakeWS([hello(), ready()])
-        client, _ = make_client(ws)
+        client, _ = make_client(ws, presence_delay=0.2)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
         task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(37))
+        assert not ws.frames(3), "no op 3 on READY"
         await wait_until(lambda: ws.frames(3))
+        assert loop.time() - started >= 0.2
+        await asyncio.sleep(0.3)
         await stop(client, task)
 
+        assert len(ws.frames(3)) == 1, "op 3 goes out once"
+        assert ws.ops()[:3] == [2, 4, 37]
         assert list(ws.frames(3)[0]["d"].items()) == [
             ("status", "online"),
             ("since", 0),
             ("activities", []),
             ("afk", True),
         ]
+
+    @pytest.mark.asyncio
+    async def test_the_configured_status_and_activities_never_idle(self):
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws, presence_delay=0.01, status="dnd", custom_status="hi")
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(3))
+        await stop(client, task)
+
+        (d,) = (f["d"] for f in ws.frames(3))
+        assert d["status"] == "dnd" and d["since"] == 0 and d["afk"] is True
+        assert d["activities"] == [
+            {"type": 4, "state": "hi", "name": "Custom Status", "id": "custom"}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_socket_gone_before_the_delay_sends_none(self):
+        first = FakeWS([hello(), ready(), {"op": 7, "d": None}])
+        second = FakeWS([hello(), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}])
+        client, _ = make_client(first, second, presence_delay=0.1)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: second.frames(37) and client.is_connected)
+        await asyncio.sleep(0.25)
+        await stop(client, task)
+
+        assert not first.frames(3)
+        # Only the RESUME's own op 3, right after op 6.
+        assert len(second.frames(3)) == 1 and second.ops()[1] == 3
+
+    @pytest.mark.asyncio
+    async def test_no_op3_on_a_closed_client(self):
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws, presence_delay=0.1)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(37))
+        await stop(client, task)
+        await asyncio.sleep(0.2)
+        assert not ws.frames(3)
+        assert client._presence_task is None
 
 
 # heartbeat

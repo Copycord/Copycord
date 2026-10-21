@@ -319,7 +319,6 @@ class TestGateway:
             "ws_sent",
             "ws_recv",
             "ws_sent",
-            "ws_sent",
             "ws_recv",
             "ws_closed",
         ]
@@ -330,10 +329,11 @@ class TestGateway:
         assert events[2]["headers"]["Origin"] == "https://discord.com"
         assert "Chrome/" in events[2]["headers"]["User-Agent"]
         sent = [e for e in events if e["type"] == "ws_sent"]
-        assert [e["op"] for e in sent] == ws.ops() == [2, 4, 3, 37]
+        # op 3 waits 90 s after READY, so this short session sends none.
+        assert [e["op"] for e in sent] == ws.ops() == [2, 4, 37]
         assert sent[0]["d"]["properties"] == ws.sent[0]["d"]["properties"]
         assert list(sent[0]["d"]) == list(ws.sent[0]["d"])
-        assert sent[3]["d"] == ws.sent[3]["d"]
+        assert sent[2]["d"] == ws.sent[2]["d"]
 
     @pytest.mark.asyncio
     async def test_received_frames_keep_what_discord_capture_keeps(self, dev):
@@ -483,7 +483,9 @@ async def test_fixture_session(dev):
         http=HTTPClient(TOKEN, session=session),
         connector=dialer,
         refresh_build=False,
-        gateway_factory=functools.partial(GatewayClient, base_reconnect_delay=0.01, max_reconnect_delay=0.02),
+        gateway_factory=functools.partial(
+            GatewayClient, base_reconnect_delay=0.01, max_reconnect_delay=0.02, presence_delay=0.05
+        ),
     )
     await client.login(TOKEN)
     task = asyncio.ensure_future(client.connect())
@@ -521,7 +523,7 @@ async def test_fixture_session(dev):
         assert needed in seen
     sent_ops = [e["op"] for e in events if e["type"] == "ws_sent"]
     assert sent_ops[:2] == [2, 4] and 41 not in sent_ops
-    assert 40 in sent_ops and 6 in sent_ops and 37 in sent_ops
+    assert 40 in sent_ops and 3 in sent_ops and 6 in sent_ops and 37 in sent_ops
     text = capture_files(dev)[0].read_text(encoding="utf-8")
     assert TOKEN not in text and ANALYTICS_TOKEN not in text
 

@@ -109,6 +109,10 @@ QOS_VERSION = 31
 # capture; undocumented.
 QOS_TOKEN = "CgIIAQ=="
 
+# Seconds after READY on a fresh connect before the one op 3 an unfocused tab
+# sends (the overnight capture: IDENTIFY 02:05:19, op 3 02:06:49).
+PRESENCE_DELAY = 90.0
+
 # op 4 the web client sends right after IDENTIFY: in no voice channel.
 IDLE_VOICE_STATE = {
     "guild_id": None,
@@ -425,8 +429,10 @@ class GatewayClient:
         proxy: Optional[str] = None,
         proxy_pool: Any = None,
         connector: Optional[Connector] = None,
+        presence_delay: float = PRESENCE_DELAY,
     ) -> None:
         self.token = token
+        # Online by default and never idle: Copycord never goes idle on its own.
         self.status = status
         self.custom_status = custom_status
         self.activity = activity
@@ -441,6 +447,7 @@ class GatewayClient:
         self.proxy = proxy
         self.proxy_pool = proxy_pool
         self._connector = connector
+        self.presence_delay = presence_delay
 
         self._guild_ids: List[str] = []
         self._subscribed_guilds: set = set()
@@ -466,6 +473,8 @@ class GatewayClient:
         # The first op 40 on each socket reports the client as foregrounded.
         self._qos_foregrounded: bool = True
         self._heartbeat_task: Optional[asyncio.Task] = None
+        # The op 3 a fresh connect sends presence_delay after READY.
+        self._presence_task: Optional[asyncio.Task] = None
         self._stopped: bool = False
         self._invalid_session_delay: Tuple[float, float] = (1.0, 5.0)
         # (code, reason) of a close no reconnect can fix.
@@ -529,6 +538,7 @@ class GatewayClient:
                 delay = min(delay * 2, self.max_reconnect_delay)
         finally:
             await self._cancel_task("_heartbeat_task")
+            await self._cancel_task("_presence_task")
 
         if self.fatal_close is not None:
             code, reason = self.fatal_close
@@ -540,6 +550,7 @@ class GatewayClient:
         """Stop for good, closing with 1000 so the session is not resumable."""
         self._stopped = True
         await self._cancel_task("_heartbeat_task")
+        await self._cancel_task("_presence_task")
         ws = self._ws
         if ws is not None:
             try:
@@ -687,6 +698,8 @@ class GatewayClient:
             if self.disconnected_since is None:
                 self.disconnected_since = time.time()
             await self._cancel_task("_heartbeat_task")
+            # A RESUME on the next socket sends op 3 itself.
+            await self._cancel_task("_presence_task")
             try:
                 await ws.close(code=RESUME_CLOSE_CODE)
             except Exception:
@@ -815,9 +828,10 @@ class GatewayClient:
         # makes a heartbeat session id: no op 41, on connect or after.
         ws = self._ws
         if self.session_id and self.sequence is not None:
-            # The web client's order: op 6, op 3, op 4, then op 40 a while
-            # later. op 37 for every subscribed guild goes before op 40; the
-            # browser resubscribes only the guild it has open.
+            # The web client's order: op 6, op 3 (the current presence), op 4,
+            # then op 40 a while later. op 37 for every subscribed guild goes
+            # before op 40, a deliberate difference: the browser resubscribes
+            # only the guild it has open, and Copycord needs them all.
             # A headless client is a background tab, so even the first beat
             # reports inactive.
             self._qos_foregrounded = False
@@ -952,7 +966,11 @@ class GatewayClient:
                 self.session_id,
                 self.resume_url,
             )
-            await self._send_presence_update()
+            # An unfocused tab's one op 3 comes about 90 s after READY.
+            await self._cancel_task("_presence_task")
+            self._presence_task = asyncio.create_task(
+                self._delayed_presence(self._ws, self.presence_delay)
+            )
             # A new session keeps no subscriptions from the old one.
             self._subscribed_guilds.clear()
             await self.subscribe_guilds(self._guild_ids, force=True)
@@ -989,6 +1007,12 @@ class GatewayClient:
 
     # Presence update (op 3)
 
+    async def _delayed_presence(self, ws: Any, delay: float) -> None:
+        """op 3 once, ``delay`` seconds on, if this socket is still the live one."""
+        await asyncio.sleep(delay)
+        if self._ws is ws:
+            await self._send_presence_update()
+
     async def _send_presence_update(self) -> None:
         activities: List[Dict[str, Any]] = []
         if self.custom_status:
@@ -1002,7 +1026,8 @@ class GatewayClient:
             )
         if self.activity:
             activities.append(self.activity)
-        # The web client's shape; it reports afk once the tab is unfocused.
+        # The web client's shape; an unfocused tab reports afk. The status is
+        # the configured one (online by default), never a switch to idle.
         await self._send(
             {
                 "op": GatewayOp.PRESENCE_UPDATE,
@@ -1069,6 +1094,7 @@ __all__ = [
     "SUBSCRIPTION_FEATURES",
     "RESUME_SUBSCRIPTION_FEATURES",
     "MAX_SUBSCRIPTION_PAYLOAD",
+    "PRESENCE_DELAY",
     "RESUME_CLOSE_CODE",
     "ZLIB_SUFFIX",
     "GatewayClient",
