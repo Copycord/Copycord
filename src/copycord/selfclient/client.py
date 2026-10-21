@@ -249,6 +249,13 @@ class Client:
                 log.debug("science reporter not attached: %r", exc)
         return gateway
 
+    def _rest_session(self) -> Any:
+        """The HTTP client's curl_cffi session, or None to let the socket make its own."""
+        try:
+            return getattr(self.http, "session", None)
+        except Exception:
+            return None
+
     async def _tracked_connector(self, url: str, headers: Dict[str, str], proxy: Optional[str]) -> Any:
         science = self.science
         if science is not None:
@@ -257,7 +264,8 @@ class Client:
             if self._connector is not None:
                 ws = await self._connector(url, headers, proxy)
             else:
-                ws = await open_websocket(url, headers, proxy)
+                # REST's curl_cffi session, so both carry one TLS identity.
+                ws = await open_websocket(url, headers, proxy, session=self._rest_session())
         except BaseException:
             if science is not None:
                 science.connect_failed()

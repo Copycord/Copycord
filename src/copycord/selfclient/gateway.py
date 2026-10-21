@@ -7,26 +7,24 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""User-token gateway over raw websockets.
+"""User-token gateway over a curl_cffi websocket.
 
-Handlers get raw dispatch payloads. The proxy tunnel is opened here because
-websockets 11 has no ``proxy=`` argument. A failed dial rotates the proxy
-lease; a close from Discord does not.
+Handlers get raw dispatch payloads. The socket is dialed through curl_cffi with
+the same Chrome impersonation as REST, so its TLS handshake is Chrome's, not
+Python's. A failed dial rotates the proxy lease; a close from Discord does not.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import copy
 import json
 import logging
 import random
-import socket
 import time
 import zlib
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
@@ -36,32 +34,39 @@ from .enums import API_VERSION, FATAL_CLOSE_CODES, Capabilities, CloseCode, Gate
 from .errors import ConnectionClosed, LoginFailure
 
 try:
-    import websockets
-    from websockets.exceptions import ConnectionClosed as _WSClosed
+    from curl_cffi.const import CurlWsFlag as _CurlWsFlag
+    from curl_cffi.curl import CurlError as _CurlError
+    from curl_cffi.requests import AsyncSession as _CurlAsyncSession
 
-    _WS_MAJOR = int(str(getattr(websockets, "__version__", "11")).split(".")[0])
+    _WS_TEXT = int(_CurlWsFlag.TEXT)
+    _WS_BINARY = int(_CurlWsFlag.BINARY)
+    _WS_CLOSE = int(_CurlWsFlag.CLOSE)
 except ImportError:  # the tests drive a fake socket and do not need it
-    websockets = None
-    _WS_MAJOR = 0
+    _CurlAsyncSession = None
+    _WS_TEXT, _WS_BINARY, _WS_CLOSE = 1, 2, 8
+
+    class _CurlError(Exception):  # type: ignore[no-redef]
+        code = 0
+
+
+try:
+    # A connector may still hand over a socket from the websockets library.
+    from websockets.exceptions import ConnectionClosed as _WSClosed
+except ImportError:
 
     class _WSClosed(Exception):  # type: ignore[no-redef]
         rcvd = None
         sent = None
 
 
-try:
-    from python_socks.async_.asyncio import Proxy as _SocksProxy
-except ImportError:  # only needed for socks4/socks5 proxies
-    _SocksProxy = None
-
 log = logging.getLogger("selfclient.gateway")
 
 GATEWAY_HOST = "wss://gateway.discord.gg/"
 
-# websockets 14 replaced the legacy client and renamed its header argument.
-_HEADERS_KWARG = "additional_headers" if _WS_MAJOR >= 14 else "extra_headers"
-
-MAX_FRAME_SIZE = 10 * 1024 * 1024
+# The largest single message curl_cffi will take (its default is 4 MiB). READY
+# decoded to 9.5 MB in captures; zlib-stream frames are smaller, but a socket
+# that fell back to plain JSON gets READY in one piece.
+MAX_FRAME_SIZE = 16 * 1024 * 1024
 OPEN_TIMEOUT = 20.0
 
 # Discord ends each zlib-stream message with this Z_SYNC_FLUSH trailer.
@@ -277,86 +282,131 @@ def mask_proxy(proxy: Optional[str]) -> str:
     return proxy
 
 
-async def _http_connect_tunnel(
-    proxy: str, host: str, port: int, *, timeout: float
-) -> socket.socket:
-    """Open a CONNECT tunnel to host:port through an HTTP proxy.
+def curl_proxy_url(proxy: Optional[str]) -> Optional[str]:
+    """``proxy`` as curl should dial it, keeping what the old tunnel did with it.
 
-    ``https://`` proxies are dialed the same way, as plain CONNECT proxies.
+    ``https://`` proxies were plain CONNECT proxies, so they become ``http://``
+    (to curl, https:// means TLS to the proxy itself). ``socks5://`` resolved the
+    host at the proxy, which curl calls ``socks5h://``. Raises ProxyTunnelError
+    for a scheme neither supports.
     """
+    if not proxy:
+        return None
     parts = urlsplit(proxy)
+    scheme = (parts.scheme or "").lower()
     if not parts.hostname:
         raise ProxyTunnelError(f"unparsable proxy url {mask_proxy(proxy)}")
-    loop = asyncio.get_running_loop()
-    infos = await loop.getaddrinfo(
-        parts.hostname, parts.port or 8080, type=socket.SOCK_STREAM
-    )
-    sock: Optional[socket.socket] = None
-    last_exc: Optional[BaseException] = None
-    for family, type_, proto, _, addr in infos:
-        candidate = socket.socket(family, type_, proto)
-        candidate.setblocking(False)
+    renamed = {"https": "http", "socks5": "socks5h"}.get(scheme, scheme)
+    if renamed not in ("http", "socks4", "socks4a", "socks5h"):
+        raise ProxyTunnelError(f"unsupported proxy scheme {scheme!r}")
+    if renamed == scheme:
+        return proxy
+    return urlunsplit(parts._replace(scheme=renamed))
+
+
+class SocketClosed(Exception):
+    """The gateway socket closed or broke. ``code`` is the close code, if known."""
+
+    rcvd = None
+
+    def __init__(self, message: str = "", code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# What the receive loop and the senders treat as "this socket is gone".
+_CLOSED_ERRORS = (_WSClosed, SocketClosed)
+
+
+def _consume_result(task: "asyncio.Future[Any]") -> None:
+    """Mark a finished receive as retrieved, so an unread error is not logged."""
+    if not task.cancelled():
+        task.exception()
+
+
+class CurlWebSocket:
+    """A curl_cffi AsyncWebSocket behind the interface the gateway loop uses:
+    ``send(text)``, ``recv()``, ``async for``, ``close(code)``, ``close_code``
+    and ``close_reason``. curl_cffi's errors come out as SocketClosed.
+
+    A ``recv()`` cancelled by a timeout keeps its read pending, and the next
+    ``recv()`` returns it: dropping one frame would break the zlib stream.
+    """
+
+    def __init__(self, ws: Any, owned_session: Any = None) -> None:
+        self._ws = ws
+        # The session open_websocket made for this socket alone; closed with it.
+        self._owned_session = owned_session
+        self._pending: Optional["asyncio.Future[Any]"] = None
+        self._error_code: Optional[int] = None
+
+    @property
+    def close_code(self) -> Optional[int]:
+        """The code Discord closed with, else the one curl_cffi reported."""
+        code = getattr(self._ws, "close_code", None)
+        return int(code) if code is not None else self._error_code
+
+    @property
+    def close_reason(self) -> str:
+        return str(getattr(self._ws, "close_reason", None) or "")
+
+    def _closed(self, exc: BaseException) -> SocketClosed:
+        code = getattr(exc, "code", None)
+        # curl_cffi puts either a close code or a libcurl error number here.
+        if isinstance(code, int) and 1000 <= code < 5000 and self._error_code is None:
+            self._error_code = int(code)
+        return SocketClosed(str(exc) or type(exc).__name__, self.close_code)
+
+    async def send(self, data: Any) -> None:
+        flags = _WS_TEXT if isinstance(data, str) else _WS_BINARY
         try:
-            await asyncio.wait_for(loop.sock_connect(candidate, addr), timeout)
-        except (OSError, asyncio.TimeoutError) as exc:
-            candidate.close()
-            last_exc = exc
-            continue
-        sock = candidate
-        break
-    if sock is None:
-        raise ProxyTunnelError(f"could not reach proxy {mask_proxy(proxy)}: {last_exc!r}")
+            await self._ws.send(data, flags)
+        except _CurlError as exc:
+            raise self._closed(exc) from exc
 
-    try:
-        lines = [f"CONNECT {host}:{port} HTTP/1.1", f"Host: {host}:{port}"]
-        if parts.username is not None:
-            creds = f"{unquote(parts.username)}:{unquote(parts.password or '')}"
-            token = base64.b64encode(creds.encode()).decode()
-            lines.append(f"Proxy-Authorization: Basic {token}")
-        request = ("\r\n".join(lines) + "\r\n\r\n").encode()
-        await asyncio.wait_for(loop.sock_sendall(sock, request), timeout)
+    async def recv(self) -> Any:
+        """The next message: ``str`` for a text frame, ``bytes`` for binary."""
+        task = self._pending
+        if task is None:
+            task = self._pending = asyncio.ensure_future(self._ws.recv())
+            task.add_done_callback(_consume_result)
+        try:
+            payload, flags = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.cancelled():
+                self._pending = None
+            raise
+        except _CurlError as exc:
+            self._pending = None
+            raise self._closed(exc) from exc
+        self._pending = None
+        if flags & _WS_CLOSE:
+            raise SocketClosed("close frame", self.close_code)
+        if flags & _WS_TEXT:
+            return bytes(payload).decode("utf-8", errors="replace")
+        return payload
 
-        response = b""
-        while b"\r\n\r\n" not in response:
-            chunk = await asyncio.wait_for(loop.sock_recv(sock, 4096), timeout)
-            if not chunk:
-                raise ProxyTunnelError("proxy closed the connection during CONNECT")
-            response += chunk
-            if len(response) > 65536:
-                raise ProxyTunnelError("oversized CONNECT response")
-        head, _, rest = response.partition(b"\r\n\r\n")
-        status_line = head.split(b"\r\n", 1)[0].decode("latin-1")
-        fields = status_line.split()
-        if len(fields) < 2 or fields[1] != "200":
-            raise ProxyTunnelError(f"proxy CONNECT refused: {status_line!r}")
-        # The client speaks first in TLS, so nothing may follow the 200 yet.
-        if rest:
-            raise ProxyTunnelError("unexpected bytes after CONNECT response")
-        return sock
-    except BaseException:
-        sock.close()
-        raise
+    def __aiter__(self) -> "CurlWebSocket":
+        return self
 
+    async def __anext__(self) -> Any:
+        try:
+            return await self.recv()
+        except SocketClosed:
+            raise StopAsyncIteration from None
 
-async def open_proxy_tunnel(
-    proxy: str, host: str, port: int, *, timeout: float = OPEN_TIMEOUT
-) -> socket.socket:
-    """A connected socket to host:port through ``proxy``, ready for TLS."""
-    scheme = (urlsplit(proxy).scheme or "http").lower()
-    try:
-        if scheme in ("http", "https"):
-            return await _http_connect_tunnel(proxy, host, port, timeout=timeout)
-        if scheme.startswith("socks"):
-            if _SocksProxy is None:
-                raise ProxyTunnelError("SOCKS proxy requires the python-socks package")
-            return await _SocksProxy.from_url(proxy).connect(
-                dest_host=host, dest_port=port, timeout=timeout
-            )
-    except GatewayDialError:
-        raise
-    except Exception as exc:
-        raise ProxyTunnelError(f"proxy {mask_proxy(proxy)} failed: {exc!r}") from exc
-    raise ProxyTunnelError(f"unsupported proxy scheme {scheme!r}")
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        try:
+            await self._ws.close(code, reason)
+        except _CurlError:
+            pass
+        finally:
+            session, self._owned_session = self._owned_session, None
+            if session is not None:
+                try:
+                    await session.close()
+                except Exception:
+                    pass
 
 
 async def open_websocket(
@@ -364,37 +414,42 @@ async def open_websocket(
     headers: Dict[str, str],
     proxy: Optional[str] = None,
     *,
+    session: Any = None,
     max_size: int = MAX_FRAME_SIZE,
     open_timeout: float = OPEN_TIMEOUT,
-) -> Any:
-    """Open the gateway socket, through ``proxy`` when one is given."""
-    if websockets is None:
-        raise GatewayDialError("the websockets package is not installed")
-    kwargs: Dict[str, Any] = {
-        _HEADERS_KWARG: headers,
-        "max_size": max_size,
-        "open_timeout": open_timeout,
-    }
-    if _WS_MAJOR >= 15:
-        # 15+ would otherwise pick up a proxy from the environment.
-        kwargs["proxy"] = None
-    sock = None
-    if proxy:
-        parts = urlsplit(url)
-        secure = parts.scheme == "wss"
-        host = parts.hostname or ""
-        port = parts.port or (443 if secure else 80)
-        sock = await open_proxy_tunnel(proxy, host, port, timeout=open_timeout)
-        kwargs["sock"] = sock
-        if secure:
-            kwargs["ssl"] = True
-            kwargs["server_hostname"] = host
+) -> CurlWebSocket:
+    """Open the gateway socket through curl_cffi, via ``proxy`` when one is given.
+
+    The TLS handshake impersonates TLS_IMPERSONATE, as REST does. ``session`` is
+    the token's REST session, so both share one TLS identity; without one, a
+    session is made for this socket and closed with it. Only ``headers`` go on
+    the upgrade request, not curl_cffi's navigation defaults.
+    """
+    dial_proxy = curl_proxy_url(proxy)
+    owned = None
+    if session is None:
+        if _CurlAsyncSession is None:
+            raise GatewayDialError("the curl_cffi package is not installed")
+        session = owned = _CurlAsyncSession(impersonate=fingerprint.TLS_IMPERSONATE)
     try:
-        return await websockets.connect(url, **kwargs)
+        ws = await session.ws_connect(
+            url,
+            headers=dict(headers),
+            proxy=dial_proxy,
+            impersonate=fingerprint.TLS_IMPERSONATE,
+            default_headers=False,
+            accept_encoding=None,
+            timeout=open_timeout,
+            max_message_size=max_size,
+        )
     except BaseException:
-        if sock is not None:
-            sock.close()
+        if owned is not None:
+            try:
+                await owned.close()
+            except Exception:
+                pass
         raise
+    return CurlWebSocket(ws, owned)
 
 
 def _close_info(ws: Any, exc: Optional[BaseException]) -> Tuple[Optional[int], str]:
@@ -669,7 +724,7 @@ class GatewayClient:
     async def _connect(self) -> None:
         use_zlib = self.zlib_stream
         url = gateway_url(self.resume_url or self.host, zlib_stream=use_zlib)
-        resuming = bool(self.session_id and self.sequence is not None)
+        resuming = self.can_resume
         proxy = await self._current_proxy()
         log.debug(
             "connecting [%s]%s%s",
@@ -688,7 +743,7 @@ class GatewayClient:
         closed_exc: Optional[BaseException] = None
         try:
             await self._event_loop(ws, inflater)
-        except _WSClosed as exc:
+        except _CLOSED_ERRORS as exc:
             closed_exc = exc
         finally:
             self._ws = None
@@ -821,10 +876,24 @@ class GatewayClient:
 
         await self._cancel_task("_heartbeat_task")
 
+        ws = self._ws
+        await self.send_connect_frames()
+        if self._ws is ws:
+            # The first beat is jittered, as the gateway docs ask.
+            self._heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(ws, self.heartbeat_interval * random.random())
+            )
+
+    @property
+    def can_resume(self) -> bool:
+        return bool(self.session_id and self.sequence is not None)
+
+    async def send_connect_frames(self) -> bool:
+        """What the web client sends on HELLO, before its first op 40: RESUME
+        when the session can resume, else IDENTIFY. True when it resumed."""
         # Copycord is a tab that loaded unfocused and stays so. Such a tab never
         # makes a heartbeat session id: no op 41, on connect or after.
-        ws = self._ws
-        if self.session_id and self.sequence is not None:
+        if self.can_resume:
             # The web client's order: op 6, op 3 (the current presence), op 4,
             # then op 40 a while later. op 37 for every subscribed guild goes
             # before op 40, a deliberate difference: the browser resubscribes
@@ -833,15 +902,11 @@ class GatewayClient:
             await self._send_presence_update()
             await self._send_voice_state()
             await self._send_resume_subscriptions()
-        else:
-            # The web client's order: op 2, op 4, then op 40 a while later.
-            await self._send_identify()
-            await self._send_voice_state()
-        if self._ws is ws:
-            # The first beat is jittered, as the gateway docs ask.
-            self._heartbeat_task = asyncio.create_task(
-                self._heartbeat_loop(ws, self.heartbeat_interval * random.random())
-            )
+            return True
+        # The web client's order: op 2, op 4, then op 40 a while later.
+        await self._send_identify()
+        await self._send_voice_state()
+        return False
 
     async def _heartbeat_loop(self, ws: Any, first_delay: float) -> None:
         await asyncio.sleep(first_delay)
@@ -1052,7 +1117,7 @@ class GatewayClient:
         text = json.dumps(payload)
         try:
             await ws.send(text)
-        except _WSClosed:
+        except _CLOSED_ERRORS:
             log.warning("tried to send on a closed socket")
             return
         self._log_sent(payload, text)
@@ -1065,7 +1130,7 @@ class GatewayClient:
         text = json.dumps(payload)
         try:
             await ws.send(text)
-        except _WSClosed:
+        except _CLOSED_ERRORS:
             log.warning("tried to send heartbeat on closed socket")
             return
         self._log_sent(payload, text)
@@ -1086,14 +1151,16 @@ __all__ = [
     "PRESENCE_DELAY",
     "RESUME_CLOSE_CODE",
     "ZLIB_SUFFIX",
+    "CurlWebSocket",
     "GatewayClient",
     "GatewayDialError",
     "ProxyTunnelError",
+    "SocketClosed",
     "ZlibStreamInflater",
     "build_subscription_frames",
+    "curl_proxy_url",
     "frame_summary",
     "gateway_url",
     "mask_proxy",
-    "open_proxy_tunnel",
     "open_websocket",
 ]

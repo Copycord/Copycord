@@ -936,7 +936,10 @@ class StandaloneScraper:
                 slot=session_slot,
                 proxy=proxy,
             )
-        ws = await open_websocket(url, headers, proxy)
+        # The slot's REST session, so its REST and gateway carry one TLS identity.
+        ws = await open_websocket(
+            url, headers, proxy, session=self._http(identity.token, session_slot)
+        )
         identity._ws = (
             ws
             if rec is None
