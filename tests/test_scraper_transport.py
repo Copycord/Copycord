@@ -210,6 +210,8 @@ async def test_scrape_uses_each_tokens_own_session_headers_and_gateway_identity(
         # The client's connect order, op 40 heartbeats only, and no op 41.
         ops = [m["op"] for m in sock.sent]
         assert ops[:2] == [2, 4] and 1 not in ops and 41 not in ops
+        for beat in (m for m in sock.sent if m["op"] == 40):
+            assert beat["d"]["qos"]["active"] is False
         d = identify["d"]
         assert d["properties"] == gateway_properties(token)
         assert d["properties"]["browser"] == "Chrome" and d["properties"]["os"] == "Windows"

@@ -470,8 +470,6 @@ class GatewayClient:
         self.latency: float = float("inf")
         self._last_ack: float = time.monotonic()
         self._last_heartbeat: float = 0.0
-        # The first op 40 on each socket reports the client as foregrounded.
-        self._qos_foregrounded: bool = True
         self._heartbeat_task: Optional[asyncio.Task] = None
         # The op 3 a fresh connect sends presence_delay after READY.
         self._presence_task: Optional[asyncio.Task] = None
@@ -686,8 +684,7 @@ class GatewayClient:
         self._ws = ws
         self._last_ack = time.monotonic()
         self._last_heartbeat = 0.0
-        self._qos_foregrounded = True
-        inflater = ZlibStreamInflater() if use_zlib else None
+        inflater =ZlibStreamInflater() if use_zlib else None
         closed_exc: Optional[BaseException] = None
         try:
             await self._event_loop(ws, inflater)
@@ -832,9 +829,6 @@ class GatewayClient:
             # then op 40 a while later. op 37 for every subscribed guild goes
             # before op 40, a deliberate difference: the browser resubscribes
             # only the guild it has open, and Copycord needs them all.
-            # A headless client is a background tab, so even the first beat
-            # reports inactive.
-            self._qos_foregrounded = False
             await self._send_resume()
             await self._send_presence_update()
             await self._send_voice_state()
@@ -861,18 +855,13 @@ class GatewayClient:
             await asyncio.sleep(self.heartbeat_interval)
 
     def _heartbeat_payload(self) -> Dict[str, Any]:
-        """op 40; the client reads as backgrounded after the first one."""
-        active = self._qos_foregrounded
-        self._qos_foregrounded = False
+        """op 40, always inactive: an unfocused tab is never foregrounded (the
+        overnight capture had qos.active false on every beat until focus)."""
         return {
             "op": GatewayOp.QOS_HEARTBEAT,
             "d": {
                 "seq": self.sequence,
-                "qos": {
-                    "active": active,
-                    "ver": QOS_VERSION,
-                    "reasons": ["foregrounded"] if active else [],
-                },
+                "qos": {"active": False, "ver": QOS_VERSION, "reasons": []},
             },
         }
 

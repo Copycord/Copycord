@@ -389,21 +389,22 @@ class TestHeartbeat:
         assert client.latency != float("inf")
 
     @pytest.mark.asyncio
-    async def test_qos_heartbeat_foregrounded_first_then_backgrounded(self):
+    async def test_qos_heartbeat_is_never_foregrounded(self):
+        # An unfocused tab: qos.active false on every beat, the first included.
         ws = FakeWS([hello(20)], auto_ack=True)
         client, _ = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
         await wait_until(lambda: len(ws.frames(40)) >= 3)
         await stop(client, task)
 
-        first, *later = ws.frames(40)
+        first = ws.frames(40)[0]
         assert first == {
             "op": 40,
-            "d": {"seq": None, "qos": {"active": True, "ver": 31, "reasons": ["foregrounded"]}},
+            "d": {"seq": None, "qos": {"active": False, "ver": 31, "reasons": []}},
         }
         assert list(first["d"]) == ["seq", "qos"]
         assert list(first["d"]["qos"]) == ["active", "ver", "reasons"]
-        for beat in later:
+        for beat in ws.frames(40):
             assert beat["d"]["qos"] == {"active": False, "ver": 31, "reasons": []}
 
     @pytest.mark.asyncio
@@ -487,7 +488,7 @@ class TestHeartbeat:
         assert first.closed and first.close_code == RESUME_CLOSE_CODE
         assert len(first.frames(40)) >= 2
         assert len(dialer.urls) >= 2
-        assert second.frames(40)[0]["d"]["qos"]["active"] is True, "each socket starts foregrounded"
+        assert second.frames(40)[0]["d"]["qos"]["active"] is False, "no socket is foregrounded"
 
 
 # resume

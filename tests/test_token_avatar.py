@@ -321,6 +321,8 @@ class TestAvatarGatewaySession:
         ops = [m["op"] for m in ws.sent]
         assert ops[:3] == [2, 4, 40]
         assert set(ops[2:]) == {40}
+        for beat in ws.sent[2:]:
+            assert beat["d"]["qos"] == {"active": False, "ver": 31, "reasons": []}
         assert ws.sent[1]["d"] == {
             "guild_id": None,
             "channel_id": None,

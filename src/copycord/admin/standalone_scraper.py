@@ -1049,9 +1049,8 @@ class StandaloneScraper:
                     hb_interval = hello["d"]["heartbeat_interval"] / 1000.0
 
                     hb_stop = asyncio.Event()
-                    # The client's op 40 heartbeats: a new socket starts foregrounded.
+                    # The client's op 40 heartbeats, from a fresh sequence.
                     identity.sequence = None
-                    identity._qos_foregrounded = True
 
                     async def heartbeater():
                         # The first beat is jittered, as the gateway docs ask.

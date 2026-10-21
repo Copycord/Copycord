@@ -140,7 +140,6 @@ class GatewaySession:
         self._buf = bytearray()
         self.fatal = False
         self._seq: Optional[int] = None
-        self._qos_foregrounded = True
         # Dev mode's traffic record (traffic_capture.py) and this socket's id in it.
         self._capture = None
         self._capture_ws: Optional[str] = None
@@ -286,19 +285,13 @@ class GatewaySession:
         self._capture_ws = None
 
     async def _send_heartbeat(self) -> None:
-        """op 40, the web client's heartbeat; only the first one is foregrounded."""
-        active = self._qos_foregrounded
-        self._qos_foregrounded = False
+        """op 40, the web client's heartbeat; an unfocused tab is never foregrounded."""
         await self._send_json(
             {
                 "op": _OP_QOS_HEARTBEAT,
                 "d": {
                     "seq": self._seq,
-                    "qos": {
-                        "active": active,
-                        "ver": QOS_VERSION,
-                        "reasons": ["foregrounded"] if active else [],
-                    },
+                    "qos": {"active": False, "ver": QOS_VERSION, "reasons": []},
                 },
             }
         )
