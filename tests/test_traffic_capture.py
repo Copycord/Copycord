@@ -43,7 +43,6 @@ def data(tmp_path, monkeypatch):
     tc.forget_all()
     yield tmp_path
     tc.forget_all()
-    selfbot_headers.set_heartbeat_session_id(TOKEN, None)
 
 
 @pytest.fixture
@@ -318,8 +317,6 @@ class TestGateway:
             "ws_recv",
             "ws_sent",
             "ws_sent",
-            "ws_sent",
-            "ws_sent",
             "ws_recv",
             "ws_sent",
             "ws_sent",
@@ -333,7 +330,7 @@ class TestGateway:
         assert events[2]["headers"]["Origin"] == "https://discord.com"
         assert "Chrome/" in events[2]["headers"]["User-Agent"]
         sent = [e for e in events if e["type"] == "ws_sent"]
-        assert [e["op"] for e in sent] == ws.ops() == [2, 4, 41, 40, 3, 37]
+        assert [e["op"] for e in sent] == ws.ops() == [2, 4, 3, 37]
         assert sent[0]["d"]["properties"] == ws.sent[0]["d"]["properties"]
         assert list(sent[0]["d"]) == list(ws.sent[0]["d"])
         assert sent[3]["d"] == ws.sent[3]["d"]
@@ -523,7 +520,8 @@ async def test_fixture_session(dev):
                    "ws_created", "ws_handshake_request", "ws_sent", "ws_recv", "ws_closed"):
         assert needed in seen
     sent_ops = [e["op"] for e in events if e["type"] == "ws_sent"]
-    assert sent_ops[:4] == [2, 4, 41, 40] and 6 in sent_ops and 37 in sent_ops
+    assert sent_ops[:2] == [2, 4] and 41 not in sent_ops
+    assert 40 in sent_ops and 6 in sent_ops and 37 in sent_ops
     text = capture_files(dev)[0].read_text(encoding="utf-8")
     assert TOKEN not in text and ANALYTICS_TOKEN not in text
 

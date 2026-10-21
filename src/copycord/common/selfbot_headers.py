@@ -211,9 +211,9 @@ def make_fingerprint(token: str) -> dict:
         "client_event_source": None,
         "client_launch_id": launch_id,
         "launch_signature": launch_signature,
-        "client_app_state": "focused",
-        # client_heartbeat_session_id is absent until the gateway produces one;
-        # _sent_super_props then adds it last, where the browser puts it.
+        # A tab that loaded unfocused and stays so. Such a tab never makes a
+        # heartbeat session id, so client_heartbeat_session_id never follows.
+        "client_app_state": "unfocused",
     }
 
     gateway_props = {
@@ -229,7 +229,7 @@ def make_fingerprint(token: str) -> dict:
         "client_event_source": None,
         "client_launch_id": launch_id,
         "launch_signature": launch_signature,
-        "client_app_state": "focused",
+        "client_app_state": "unfocused",
         "is_fast_connect": False,
         "gateway_connect_reasons": "AppSkeleton",
         "installation_id": install_id,
@@ -329,35 +329,9 @@ def _fingerprint(token: str) -> dict:
     return fp
 
 
-_HEARTBEAT_SESSIONS: dict[str, str] = {}
-
-
-def set_heartbeat_session_id(token: str, session_id: str | None) -> None:
-    """Record the heartbeat session id a gateway connection just produced."""
-    if session_id:
-        _HEARTBEAT_SESSIONS[token] = str(session_id)
-    else:
-        _HEARTBEAT_SESSIONS.pop(token, None)
-
-
-def _sent_super_props(token: str) -> dict:
-    """The super properties build_headers sends: the base fingerprint plus the heartbeat id."""
-    props = dict(_fingerprint(token)["super_props"])
-    heartbeat_id = _HEARTBEAT_SESSIONS.get(token)
-    if heartbeat_id:
-        props["client_heartbeat_session_id"] = heartbeat_id
-    return props
-
-
 def build_headers(token: str, *, referer: str | None = None) -> dict:
     """Full header dict for a user-token REST request."""
     fp = _fingerprint(token)
-
-    if _HEARTBEAT_SESSIONS.get(token):
-        super_props_b64 = _b64_props(_sent_super_props(token))
-    else:
-        super_props_b64 = fp["super_props_b64"]
-
     h = fp["headers"]
     return {
         "Accept": h["Accept"],
@@ -379,7 +353,7 @@ def build_headers(token: str, *, referer: str | None = None) -> dict:
         "X-Discord-Locale": h["X-Discord-Locale"],
         "X-Discord-Timezone": _timezone_for(token),
         "X-Installation-Id": h["X-Installation-Id"],
-        "X-Super-Properties": super_props_b64,
+        "X-Super-Properties": fp["super_props_b64"],
     }
 
 
@@ -479,7 +453,6 @@ async def close_tls_session(token: str, reason: str = "unspecified") -> None:
         sess = _TLS_SESSIONS.pop(token, None)
         _TLS_PRIMED.discard(token)
         _TLS_LAST_USED.pop(token, None)
-        _HEARTBEAT_SESSIONS.pop(token, None)
         _forget_exit_timezone(token)
         if sess is not None:
             try:

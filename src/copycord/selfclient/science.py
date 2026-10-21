@@ -10,12 +10,12 @@
 """POST /science the way Chrome on discord.com does after it connects.
 
 The web client queues events from page load and flushes them once READY gives
-it an ``analytics_token``. Copycord sends the four a browser sends on its own
-from startup through READY: client_heartbeat, session_start_client,
-gateway_connected and ready_payload_received; gateway_connected and
-connection_resumed together after a RESUME; and client_heartbeat again
-when a fresh IDENTIFY makes a new heartbeat session id (the id does not
-rotate on a timer). Shapes and key orders follow Mac's
+it an ``analytics_token``. Copycord sends what a browser tab that loaded
+unfocused sends on its own from startup through READY: session_start_client,
+gateway_connected and ready_payload_received; and gateway_connected and
+connection_resumed together after a RESUME. Such a tab makes no heartbeat
+session id, so there is no client_heartbeat and no event carries
+client_heartbeat_session_id. Shapes and key orders follow Mac's
 Chrome 155 capture (2026-10-20). Events tracked before READY carry no
 client_uuid, as in that capture: the browser's generator needs the user id.
 
@@ -44,9 +44,6 @@ from .http import API_BASE
 log = logging.getLogger("selfclient.science")
 
 SCIENCE_PATH = "/science"
-
-# client_heartbeat's `client_heartbeat_version` in the capture.
-HEARTBEAT_VERSION = 31
 
 # The constants every post-login event in the capture carries.
 ACCESSIBILITY_FEATURES = 524546
@@ -218,8 +215,8 @@ class ScienceReporter:
     """One per gateway client: one event_sequence_number and one client_uuid scheme.
 
     ``http`` is the account's HTTPClient; the POST goes through its headers,
-    session and proxy. ``gateway`` is read for the heartbeat session, the
-    IDENTIFY sizes and the last frame's stats.
+    session and proxy. ``gateway`` is read for the session, the IDENTIFY
+    sizes and the last frame's stats.
     """
 
     def __init__(self, token: str, http: Any, gateway: Any, *, flush_delay: float = FLUSH_DELAY):
@@ -250,38 +247,13 @@ class ScienceReporter:
     # what the browser tracks
 
     def start(self) -> None:
-        """Page load: the first heartbeat session and the session start."""
+        """Page load: the session start."""
         try:
-            self.track_heartbeat()
             if not self._session_started:
                 self._session_started = True
                 self.track("session_start_client", {})
         except Exception as exc:
             log.debug("science start failed: %r", exc)
-
-    def track_heartbeat(self) -> None:
-        """client_heartbeat for the gateway's current heartbeat session id."""
-        started = int(getattr(self.gateway, "heartbeat_session_started", 0) or _now_ms())
-        self.track(
-            "client_heartbeat",
-            {
-                "client_heartbeat_initialization_timestamp": started,
-                "client_heartbeat_version": HEARTBEAT_VERSION,
-                "is_idle": False,
-                # The browser's: milliseconds since a last activity it never recorded.
-                "idle_duration_ms": started,
-                "is_afk": False,
-                "is_system_suspended": False,
-                "is_system_locked": False,
-            },
-        )
-
-    def on_heartbeat_session(self) -> None:
-        """A fresh IDENTIFY made a new heartbeat session id."""
-        try:
-            self.track_heartbeat()
-        except Exception as exc:
-            log.debug("science heartbeat failed: %r", exc)
 
     def connect_attempt(self) -> None:
         now = _now_ms()
@@ -418,7 +390,7 @@ class ScienceReporter:
             "uptime_app": max(0, (_now_ms() - self.started_ms) // 1000),
             "launch_signature": props.get("launch_signature"),
             "client_rtc_state": CLIENT_RTC_STATE,
-            "client_app_state": props.get("client_app_state", "focused"),
+            "client_app_state": props.get("client_app_state", "unfocused"),
             "client_viewport_width": width,
             "client_viewport_height": height,
         }
@@ -429,11 +401,10 @@ class ScienceReporter:
         """Queue one event; it goes out with the next flush. ``hold`` schedules
         none, for an event that waits for a later one."""
         self.sequence += 1
-        props: Dict[str, Any] = {"client_track_timestamp": _now_ms()}
-        heartbeat_id = getattr(self.gateway, "heartbeat_session_id", None)
-        if heartbeat_id:
-            props["client_heartbeat_session_id"] = heartbeat_id
-        props["event_sequence_number"] = self.sequence
+        props: Dict[str, Any] = {
+            "client_track_timestamp": _now_ms(),
+            "event_sequence_number": self.sequence,
+        }
         props.update(properties)
         props.update(self._common())
         if self.user_id:
@@ -545,7 +516,6 @@ class ScienceReporter:
 
 __all__ = [
     "ACCESSIBILITY_FEATURES",
-    "HEARTBEAT_VERSION",
     "SCIENCE_PATH",
     "ClientUUID",
     "ScienceReporter",

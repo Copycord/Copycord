@@ -12,7 +12,6 @@ import struct
 
 import pytest
 
-from copycord.common import selfbot_headers
 from copycord.selfclient import Client
 from copycord.selfclient import science as sc
 from copycord.selfclient.fingerprint import SUPPRESSED_PROFILE_HEADERS, build_headers, gateway_properties
@@ -33,31 +32,16 @@ COMMON_TAIL = [
     "client_viewport_height",
 ]
 
+# Without client_heartbeat_session_id: a tab that loaded unfocused has none.
 CAPTURE_KEYS = {
-    "client_heartbeat": [
-        "client_track_timestamp",
-        "client_heartbeat_session_id",
-        "event_sequence_number",
-        "client_heartbeat_initialization_timestamp",
-        "client_heartbeat_version",
-        "is_idle",
-        "idle_duration_ms",
-        "is_afk",
-        "is_system_suspended",
-        "is_system_locked",
-        *COMMON_TAIL,
-        "client_send_timestamp",
-    ],
     "session_start_client": [
         "client_track_timestamp",
-        "client_heartbeat_session_id",
         "event_sequence_number",
         *COMMON_TAIL,
         "client_send_timestamp",
     ],
     "gateway_connected": [
         "client_track_timestamp",
-        "client_heartbeat_session_id",
         "event_sequence_number",
         "num_failed_connect_attempts",
         "gateway_url",
@@ -70,7 +54,6 @@ CAPTURE_KEYS = {
     ],
     "ready_payload_received": [
         "client_track_timestamp",
-        "client_heartbeat_session_id",
         "event_sequence_number",
         "compressed_byte_size",
         "uncompressed_byte_size",
@@ -119,8 +102,9 @@ CAPTURE_KEYS = {
     ],
 }
 
-# The client_heartbeat keys Chrome sends that no other event here carries.
-HEARTBEAT_ONLY = {
+# client_heartbeat's keys: no event carries them, since there is no client_heartbeat.
+HEARTBEAT_KEYS = {
+    "client_heartbeat_session_id",
     "client_heartbeat_initialization_timestamp",
     "client_heartbeat_version",
     "is_afk",
@@ -269,9 +253,7 @@ def super_props(headers):
 
 @pytest.fixture
 def token(request):
-    tok = f"science-token-{request.node.name}"
-    yield tok
-    selfbot_headers.set_heartbeat_session_id(tok, None)
+    return f"science-token-{request.node.name}"
 
 
 async def run_client(token, session, frames):
@@ -310,10 +292,9 @@ def ready_frame():
 
 class TestFirstBatch:
     @pytest.mark.asyncio
-    async def test_one_post_with_chromes_four_events(self, token):
+    async def test_one_post_with_an_unfocused_tabs_events(self, token):
         session = FakeSession()
         client, task, _ = await run_client(token, session, [hello(), ready_frame()])
-        gateway = client.gateway
         await stop(client, task)
 
         posts = session.science_posts()
@@ -325,7 +306,6 @@ class TestFirstBatch:
         assert body["token"] == ANALYTICS_TOKEN
         events = body["events"]
         assert [e["type"] for e in events] == [
-            "client_heartbeat",
             "session_start_client",
             "gateway_connected",
             "ready_payload_received",
@@ -333,12 +313,12 @@ class TestFirstBatch:
         for event in events:
             assert list(event) == ["type", "properties"]
             assert list(event["properties"]) == CAPTURE_KEYS[event["type"]], event["type"]
-        assert [e["properties"]["event_sequence_number"] for e in events] == [1, 2, 3, 4]
+        assert [e["properties"]["event_sequence_number"] for e in events] == [1, 2, 3]
         for event in events:
             props = event["properties"]
-            assert props["client_heartbeat_session_id"] == gateway.heartbeat_session_id
+            assert "client_heartbeat_session_id" not in props
             assert props["launch_signature"] == gateway_properties(token)["launch_signature"]
-            assert props["client_app_state"] == "focused"
+            assert props["client_app_state"] == "unfocused"
             assert props["rendered_locale"] == "en-US"
             assert props["accessibility_features"] == sc.ACCESSIBILITY_FEATURES
             assert props["client_rtc_state"] == "DISCONNECTED"
@@ -349,20 +329,12 @@ class TestFirstBatch:
     async def test_event_values(self, token):
         session = FakeSession()
         client, task, ws = await run_client(token, session, [hello(), ready_frame()])
-        gateway = client.gateway
         await stop(client, task)
         events = {e["type"]: e["properties"] for e in session.science_posts()[0][2]["json"]["events"]}
 
-        beat = events["client_heartbeat"]
-        assert beat["client_heartbeat_initialization_timestamp"] == gateway.heartbeat_session_started
-        assert beat["idle_duration_ms"] == gateway.heartbeat_session_started
-        assert beat["client_heartbeat_version"] == 31
-        assert [beat[k] for k in ("is_idle", "is_afk", "is_system_suspended", "is_system_locked")] == [
-            False, False, False, False,
-        ]
+        assert "client_heartbeat" not in events
         for event_type, props in events.items():
-            if event_type != "client_heartbeat":
-                assert not HEARTBEAT_ONLY & set(props), event_type
+            assert not HEARTBEAT_KEYS & set(props), event_type
 
         connected = events["gateway_connected"]
         assert connected["gateway_url"] == "wss://gateway.discord.gg"
@@ -394,9 +366,9 @@ class TestFirstBatch:
         await stop(client, task)
         events = session.science_posts()[0][2]["json"]["events"]
 
-        # As in the capture: the three events tracked before READY carry none.
-        assert ["client_uuid" in e["properties"] for e in events] == [False, False, False, True]
-        words = struct.unpack("<6I", base64.b64decode(events[3]["properties"]["client_uuid"]))
+        # As in the capture: the events tracked before READY carry none.
+        assert ["client_uuid" in e["properties"] for e in events] == [False, False, True]
+        words = struct.unpack("<6I", base64.b64decode(events[2]["properties"]["client_uuid"]))
         assert words[0] | (words[1] << 32) == int(USER_ID)
         assert words[3] | (words[4] << 32) == client.science.started_ms
         assert words[5] == 0
@@ -405,7 +377,6 @@ class TestFirstBatch:
     async def test_posts_with_the_rest_post_headers(self, token):
         session = FakeSession()
         client, task, _ = await run_client(token, session, [hello(), ready_frame()])
-        gateway = client.gateway
         await stop(client, task)
         headers = session.science_posts()[0][2]["headers"]
 
@@ -415,19 +386,22 @@ class TestFirstBatch:
         assert headers["Origin"] == "https://discord.com"
         assert headers["Content-Type"] == "application/json"
         assert headers["Authorization"] == token
-        assert super_props(headers)["client_heartbeat_session_id"] == gateway.heartbeat_session_id
-        assert list(super_props(headers))[-1] == "client_heartbeat_session_id"
+        assert "client_heartbeat_session_id" not in super_props(headers)
+        assert list(super_props(headers))[-1] == "client_app_state"
+        assert super_props(headers)["client_app_state"] == "unfocused"
 
     @pytest.mark.asyncio
-    async def test_no_heartbeat_session_id_before_the_gateway(self, token):
+    async def test_no_heartbeat_session_id_before_or_after_the_gateway(self, token):
         session = FakeSession()
         assert "client_heartbeat_session_id" not in super_props(build_headers(token))
         client, task, _ = await run_client(token, session, [hello(), ready_frame()])
         await stop(client, task)
 
         login = next(c for c in session.calls if c[1].endswith("/users/@me"))
-        assert "client_heartbeat_session_id" not in super_props(login[2]["headers"])
         assert "Origin" not in login[2]["headers"] and "Content-Type" not in login[2]["headers"]
+        for _, _, kwargs in session.calls:
+            assert "client_heartbeat_session_id" not in super_props(kwargs["headers"])
+        assert "client_heartbeat_session_id" not in super_props(build_headers(token))
 
     @pytest.mark.asyncio
     async def test_nothing_is_posted_before_ready(self, token):
@@ -440,45 +414,14 @@ class TestFirstBatch:
         client = Client(http=HTTPClient(token, session=session), connector=connector, refresh_build=False)
         await client.login(token)
         task = asyncio.ensure_future(client.connect(reconnect=False))
-        await wait_until(lambda: any(m["op"] == 41 for m in ws.sent))
+        await wait_until(lambda: any(m["op"] == 4 for m in ws.sent))
         science = client.science
         await stop(client, task)
 
         assert session.science_posts() == []
         assert [e["type"] for e in science.queue] == [
-            "client_heartbeat", "session_start_client", "gateway_connected",
+            "session_start_client", "gateway_connected",
         ]
-
-
-# a new heartbeat session
-
-
-class TestNewHeartbeatSession:
-    @pytest.mark.asyncio
-    async def test_a_new_id_sends_client_heartbeat_again(self, token):
-        session = FakeSession()
-        client, task, _ = await run_client(token, session, [hello(), ready_frame()])
-        client.science.flush_delay = 0.01
-        gateway = client.gateway
-        first_id = gateway.heartbeat_session_id
-        # What a fresh IDENTIFY after the first does.
-        gateway._new_heartbeat_session()
-        await wait_until(lambda: len(session.science_posts()) == 2)
-        await stop(client, task)
-
-        _, _, kwargs = session.science_posts()[1]
-        assert kwargs["json"]["token"] == ANALYTICS_TOKEN
-        (event,) = kwargs["json"]["events"]
-        props = event["properties"]
-        assert event["type"] == "client_heartbeat"
-        assert props["client_heartbeat_session_id"] == gateway.heartbeat_session_id != first_id
-        assert props["client_heartbeat_initialization_timestamp"] == gateway.heartbeat_session_started
-        assert props["event_sequence_number"] == 5
-        # The user is known by now, so it carries the next uuid in the sequence.
-        assert list(props) == CAPTURE_KEYS["client_heartbeat"][:-1] + ["client_uuid", "client_send_timestamp"]
-        words = struct.unpack("<6I", base64.b64decode(props["client_uuid"]))
-        assert words[5] == 1
-        assert super_props(kwargs["headers"])["client_heartbeat_session_id"] == gateway.heartbeat_session_id
 
 
 # resume
@@ -503,7 +446,6 @@ class TestResume:
         gateway.base_reconnect_delay = 0.001
         gateway.max_reconnect_delay = 0.01
         client.science.flush_delay = 0.01
-        first_id = gateway.heartbeat_session_id
         # op 7: reconnect and RESUME.
         first.queue.put_nowait(json.dumps({"op": 7, "d": None}))
         await wait_until(lambda: len(session.science_posts()) >= 2)
@@ -517,7 +459,7 @@ class TestResume:
         assert body["token"] == ANALYTICS_TOKEN
         events = body["events"]
         assert [e["type"] for e in events] == ["gateway_connected", "connection_resumed"]
-        assert [e["properties"]["event_sequence_number"] for e in events] == [5, 6]
+        assert [e["properties"]["event_sequence_number"] for e in events] == [4, 5]
         connected, resumed = (e["properties"] for e in events)
         assert list(connected) == CAPTURE_KEYS["gateway_connected"][:-1] + [
             "client_uuid", "client_send_timestamp",
@@ -527,14 +469,11 @@ class TestResume:
         # Inferred: no capture has connection_resumed's keys, so only the common ones.
         assert list(resumed) == [
             "client_track_timestamp",
-            "client_heartbeat_session_id",
             "event_sequence_number",
             *COMMON_TAIL,
             "client_uuid",
             "client_send_timestamp",
         ]
-        for props in (connected, resumed):
-            assert props["client_heartbeat_session_id"] == first_id == gateway.heartbeat_session_id
 
     @pytest.mark.asyncio
     async def test_a_fresh_connect_does_not_hold_gateway_connected(self):
@@ -562,8 +501,6 @@ class TestResume:
 
 
 class StubGateway:
-    heartbeat_session_id = "hb-stub"
-    heartbeat_session_started = 1792515344050
     zlib_stream = True
     last_frame_stats = None
     identify_sizes = None
@@ -638,14 +575,14 @@ class TestReporter:
         caplog.set_level(logging.DEBUG, logger="selfclient.science")
         session = FakeSession(science_status=204)
         r = sc.ScienceReporter("tok", StubHTTP(session), StubGateway())
-        r.track("client_heartbeat", {})
+        r.track("session_start_client", {})
         await r.on_ready({"user": {"id": USER_ID}, "analytics_token": ANALYTICS_TOKEN})
         await r.wait_idle()
         sent = [rec for rec in caplog.records if rec.name == "selfclient.science"]
         assert [(rec.levelno, rec.getMessage()) for rec in sent] == [
             (
                 logging.DEBUG,
-                "science POST sent 2 event(s) [client_heartbeat, ready_payload_received]: HTTP 204",
+                "science POST sent 2 event(s) [session_start_client, ready_payload_received]: HTTP 204",
             )
         ]
         assert ANALYTICS_TOKEN not in caplog.text

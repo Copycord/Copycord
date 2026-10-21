@@ -20,7 +20,6 @@ import logging
 import os
 import random
 import time
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
@@ -39,7 +38,6 @@ from copycord.common.selfbot_headers import (
     TLS_IMPERSONATE,
     _mask_proxy_for_log,
     build_headers,
-    set_heartbeat_session_id,
 )
 from copycord.selfclient.gateway import (
     GatewayClient,
@@ -560,7 +558,6 @@ class StandaloneScraper:
         self._slot_proxies: Dict[tuple, Optional[str]] = {}
         self._http_sessions: Dict[tuple, Any] = {}
         self._bio_failures: Dict[str, int] = {}
-        self._heartbeat_ids: Dict[str, str] = {}
         self._recorder: Optional[DebugRecorder] = (
             DebugRecorder(
                 config.tokens,
@@ -999,7 +996,6 @@ class StandaloneScraper:
         # on connecting: its upgrade headers and its IDENTIFY. Sessions of the same token
         # share the token's fingerprint, as the client's do.
         identity = GatewayClient(token, reconnect=False)
-        identity.heartbeat_session_id = self._heartbeat_ids.get(token, identity.heartbeat_session_id)
 
         max_reconnects = 5
         max_total_reconnects = 999
@@ -1058,9 +1054,11 @@ class StandaloneScraper:
                     identity._qos_foregrounded = True
 
                     async def heartbeater():
-                        # The op 40 paired with op 41 below is the first beat.
+                        # The first beat is jittered, as the gateway docs ask.
                         try:
-                            await asyncio.wait_for(hb_stop.wait(), timeout=hb_interval)
+                            await asyncio.wait_for(
+                                hb_stop.wait(), timeout=hb_interval * random.random()
+                            )
                         except asyncio.TimeoutError:
                             pass
                         while not hb_stop.is_set():
@@ -1077,10 +1075,10 @@ class StandaloneScraper:
 
                     hb_task = asyncio.create_task(heartbeater())
 
-                    # The client's own connect: IDENTIFY, op 4, then op 41 and its op 40.
+                    # The client's own connect: IDENTIFY and op 4; op 40 follows. No
+                    # op 41: an unfocused tab makes no heartbeat session id.
                     await identity._send_identify()
                     await identity._send_voice_state()
-                    await identity._send_time_spent()
 
                     ready = False
 
@@ -1417,11 +1415,6 @@ class StandaloneScraper:
         self._bio_failures = {}
         bio_tasks: List[asyncio.Task] = []
         self._plan_proxies(self.config.tokens)
-        # One heartbeat session id per token for the whole run, shared by REST and the
-        # gateway, as a launched web client keeps one per launch.
-        self._heartbeat_ids = {t: str(uuid.uuid4()) for t in self.config.tokens}
-        for t, hb in self._heartbeat_ids.items():
-            set_heartbeat_session_id(t, hb)
         # X-Discord-Timezone comes from the exit IP of each token's REST proxy, as elsewhere.
         await asyncio.gather(
             *(note_token_proxy(t, self._proxy_for(t, 0)) for t in self.config.tokens)

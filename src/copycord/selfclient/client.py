@@ -239,12 +239,11 @@ class Client:
         self.science = None
         if self.http is not None:
             try:
-                on_event, on_new_session = gateway.on, gateway.on_heartbeat_session
+                on_event = gateway.on
                 science = ScienceReporter(self.token, self.http, gateway)
                 # Registered with on(), so it sees READY before the cache does.
                 on_event("READY", science.on_ready)
                 on_event("RESUMED", science.on_resumed)
-                on_new_session(science.on_heartbeat_session)
                 science.start()
                 self.science = science
             except Exception as exc:  # science must never stop the gateway

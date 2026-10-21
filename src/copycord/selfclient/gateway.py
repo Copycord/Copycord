@@ -24,7 +24,6 @@ import logging
 import random
 import socket
 import time
-import uuid
 import zlib
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
@@ -183,7 +182,7 @@ def frame_summary(payload: Dict[str, Any]) -> str:
         return (
             f"op 2 IDENTIFY build={props.get('client_build_number')}"
             f" os={props.get('os_version')}"
-            f" heartbeat_session={props.get('client_heartbeat_session_id')}"
+            f" app_state={props.get('client_app_state')}"
         )
     if op == GatewayOp.PRESENCE_UPDATE:
         return (
@@ -210,8 +209,6 @@ def frame_summary(payload: Dict[str, Any]) -> str:
     if op == GatewayOp.QOS_HEARTBEAT:
         qos = d.get("qos") or {}
         return f"op 40 heartbeat seq={d.get('seq')} active={qos.get('active')}"
-    if op == GatewayOp.UPDATE_TIME_SPENT_SESSION_ID:
-        return f"op 41 time spent session={d.get('session_id')}"
     return f"op {op}"
 
 
@@ -445,15 +442,6 @@ class GatewayClient:
         self.proxy_pool = proxy_pool
         self._connector = connector
 
-        # Per gateway session, not per socket: a fresh IDENTIFY after the first
-        # makes a new one, RESUME keeps it, and nothing rotates it on a timer
-        # (a 32-minute Chrome capture kept one id throughout). Shared with the
-        # REST super-properties on READY.
-        self.heartbeat_session_id = str(uuid.uuid4())
-        # When the id was made: op 41's initialization_timestamp.
-        self.heartbeat_session_started = int(time.time() * 1000)
-        self._identified: bool = False
-
         self._guild_ids: List[str] = []
         self._subscribed_guilds: set = set()
         self._ws: Any = None
@@ -490,7 +478,6 @@ class GatewayClient:
 
         self._handlers: Dict[str, List[EventHandler]] = {}
         self._dispatch_handlers: List[DispatchHandler] = []
-        self._heartbeat_session_handlers: List[Callable[[], Any]] = []
 
     # Public API
 
@@ -501,11 +488,6 @@ class GatewayClient:
     def on_dispatch(self, handler: DispatchHandler) -> None:
         """Call ``handler(event, d)`` for every dispatch."""
         self._dispatch_handlers.append(handler)
-
-    def on_heartbeat_session(self, handler: Callable[[], Any]) -> None:
-        """Call ``handler()`` when a fresh IDENTIFY after the first makes a new
-        heartbeat session id."""
-        self._heartbeat_session_handlers.append(handler)
 
     @property
     def is_connected(self) -> bool:
@@ -829,34 +811,29 @@ class GatewayClient:
 
         await self._cancel_task("_heartbeat_task")
 
+        # Copycord is a tab that loaded unfocused and stays so. Such a tab never
+        # makes a heartbeat session id: no op 41, on connect or after.
+        ws = self._ws
         if self.session_id and self.sequence is not None:
-            # The web client's order: op 6, op 3, op 4, op 37, then op 40 a
-            # while later. No op 41: the heartbeat session id carries over.
+            # The web client's order: op 6, op 3, op 4, then op 40 a while
+            # later. op 37 for every subscribed guild goes before op 40; the
+            # browser resubscribes only the guild it has open.
             # A headless client is a background tab, so even the first beat
             # reports inactive.
             self._qos_foregrounded = False
-            ws = self._ws
             await self._send_resume()
             await self._send_presence_update()
             await self._send_voice_state()
             await self._send_resume_subscriptions()
-            if self._ws is ws:
-                # The first beat is jittered, as the gateway docs ask.
-                self._heartbeat_task = asyncio.create_task(
-                    self._heartbeat_loop(ws, self.heartbeat_interval * random.random())
-                )
         else:
-            # The web client's order: op 2, op 4, op 41, op 40. The op 40
-            # paired with op 41 is the first beat, so the loop waits a full interval.
-            if self._identified:
-                self._new_heartbeat_session()
-            self._identified = True
-            self._heartbeat_task = asyncio.create_task(
-                self._heartbeat_loop(self._ws, self.heartbeat_interval)
-            )
+            # The web client's order: op 2, op 4, then op 40 a while later.
             await self._send_identify()
             await self._send_voice_state()
-            await self._send_time_spent()
+        if self._ws is ws:
+            # The first beat is jittered, as the gateway docs ask.
+            self._heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(ws, self.heartbeat_interval * random.random())
+            )
 
     async def _heartbeat_loop(self, ws: Any, first_delay: float) -> None:
         await asyncio.sleep(first_delay)
@@ -942,38 +919,6 @@ class GatewayClient:
         for frame in build_subscription_frames(ids, RESUME_SUBSCRIPTION_FEATURES):
             await self._send(frame)
 
-    # OP 41: UPDATE_TIME_SPENT_SESSION_ID
-
-    # Sent once per fresh IDENTIFY. The browser repeats op 41 only while
-    # focused or in a call; Copycord is neither, and RESUME sends none.
-
-    def _new_heartbeat_session(self) -> None:
-        self.heartbeat_session_id = str(uuid.uuid4())
-        self.heartbeat_session_started = int(time.time() * 1000)
-        try:
-            fingerprint.set_heartbeat_session_id(self.token, self.heartbeat_session_id)
-        except Exception as e:  # the REST headers keep the old id
-            log.debug("heartbeat session id update failed: %r", e)
-        for handler in self._heartbeat_session_handlers:
-            try:
-                handler()
-            except Exception as e:  # a listener must not stop the IDENTIFY
-                log.debug("heartbeat session handler failed: %r", e)
-
-    async def _send_time_spent(self) -> None:
-        """op 41, then the op 40 the web client always sends with it."""
-        await self._send(
-            {
-                "op": GatewayOp.UPDATE_TIME_SPENT_SESSION_ID,
-                "d": {
-                    "initialization_timestamp": self.heartbeat_session_started,
-                    "session_id": self.heartbeat_session_id,
-                    "client_launch_id": self._gateway_properties().get("client_launch_id"),
-                },
-            }
-        )
-        await self._send_heartbeat()
-
     # Dispatch
 
     def _remember_guild(self, gid: Any) -> None:
@@ -1007,10 +952,6 @@ class GatewayClient:
                 self.session_id,
                 self.resume_url,
             )
-            try:
-                fingerprint.set_heartbeat_session_id(self.token, self.heartbeat_session_id)
-            except Exception:
-                pass
             await self._send_presence_update()
             # A new session keeps no subscriptions from the old one.
             self._subscribed_guilds.clear()

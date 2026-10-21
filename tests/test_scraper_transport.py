@@ -207,10 +207,9 @@ async def test_scrape_uses_each_tokens_own_session_headers_and_gateway_identity(
         assert sock.headers["User-Agent"] == build_headers(token)["User-Agent"]
         identify = sock.identify()
         assert identify == await _client_identify(token)
-        # The client's connect order, and op 40 heartbeats only.
+        # The client's connect order, op 40 heartbeats only, and no op 41.
         ops = [m["op"] for m in sock.sent]
-        assert ops[:4] == [2, 4, 41, 40] and 1 not in ops
-        assert sock.sent[3]["d"]["qos"]["active"] is True
+        assert ops[:2] == [2, 4] and 1 not in ops and 41 not in ops
         d = identify["d"]
         assert d["properties"] == gateway_properties(token)
         assert d["properties"]["browser"] == "Chrome" and d["properties"]["os"] == "Windows"
@@ -220,7 +219,8 @@ async def test_scrape_uses_each_tokens_own_session_headers_and_gateway_identity(
         # REST and gateway carry one fingerprint per token.
         super_props = json.loads(base64.b64decode(build_headers(token)["X-Super-Properties"]))
         assert super_props["client_launch_id"] == d["properties"]["client_launch_id"]
-        assert super_props["client_heartbeat_session_id"]
+        assert "client_heartbeat_session_id" not in super_props
+        assert super_props["client_app_state"] == d["properties"]["client_app_state"] == "unfocused"
     assert sockets[0].identify()["d"]["properties"]["installation_id"] != \
         sockets[1].identify()["d"]["properties"]["installation_id"]
 

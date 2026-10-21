@@ -11,9 +11,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import random
 import re
-import time
-import uuid
 import zlib
 from typing import Optional
 
@@ -25,7 +24,6 @@ from copycord.common.selfbot_headers import (
     build_headers,
     gateway_properties,
     get_tls_session,
-    set_heartbeat_session_id,
 )
 from copycord.selfclient.gateway import IDLE_VOICE_STATE, QOS_TOKEN, QOS_VERSION
 
@@ -40,7 +38,6 @@ _OP_VOICE_STATE_UPDATE = 4
 _OP_HELLO = 10
 _OP_INVALID_SESSION = 9
 _OP_QOS_HEARTBEAT = 40
-_OP_UPDATE_TIME_SPENT_SESSION_ID = 41
 
 
 _CAPABILITIES = 1734653
@@ -141,7 +138,6 @@ class GatewaySession:
         self._heartbeat: Optional[asyncio.Task] = None
         self._inflator = None
         self._buf = bytearray()
-        self.heartbeat_session_id: Optional[str] = None
         self.fatal = False
         self._seq: Optional[int] = None
         self._qos_foregrounded = True
@@ -185,26 +181,11 @@ class GatewaySession:
                 return False
             interval = float(hello["d"]["heartbeat_interval"]) / 1000.0
 
-            # The client mints this when it opens the session and then quotes
-            # it on every REST call for the session's lifetime.
-            self.heartbeat_session_id = str(uuid.uuid4())
-
-            # The web client's order: op 2, op 4, op 41, op 40.
+            # The order of a web client tab that loaded unfocused: op 2, op 4,
+            # then op 40 a while later. Such a tab makes no heartbeat session
+            # id, so no op 41.
             await self._send_json(await _identify_payload(self._token))
             await self._send_json({"op": _OP_VOICE_STATE_UPDATE, "d": dict(IDLE_VOICE_STATE)})
-            await self._send_json(
-                {
-                    "op": _OP_UPDATE_TIME_SPENT_SESSION_ID,
-                    "d": {
-                        "initialization_timestamp": int(time.time() * 1000),
-                        "session_id": self.heartbeat_session_id,
-                        "client_launch_id": gateway_properties(self._token).get(
-                            "client_launch_id"
-                        ),
-                    },
-                }
-            )
-            await self._send_heartbeat()
             self._heartbeat = asyncio.create_task(self._heartbeat_loop(interval))
 
             deadline = asyncio.get_running_loop().time() + _READY_TIMEOUT
@@ -216,7 +197,6 @@ class GatewaySession:
                 if frame.get("s") is not None:
                     self._seq = frame["s"]
                 if op == _OP_DISPATCH and frame.get("t") == "READY":
-                    set_heartbeat_session_id(self._token, self.heartbeat_session_id)
                     return True
                 if op == _OP_INVALID_SESSION:
                     # d=True means resumable, so the token itself is fine.
@@ -326,20 +306,20 @@ class GatewaySession:
     async def _heartbeat_loop(self, interval: float) -> None:
         """Keep the session alive while we hold it.
 
-        The first beat went out with op 41, so the loop starts a full interval later.
+        The first beat is jittered, as the gateway docs ask.
         """
         try:
+            delay = interval * random.random()
             while True:
-                await asyncio.sleep(interval)
+                await asyncio.sleep(delay)
                 await self._send_heartbeat()
+                delay = interval
         except asyncio.CancelledError:
             raise
         except Exception:
             return
 
     async def close(self) -> None:
-        set_heartbeat_session_id(self._token, None)
-        self.heartbeat_session_id = None
         if self._heartbeat is not None:
             self._heartbeat.cancel()
             try:

@@ -295,7 +295,7 @@ class TestAvatarGatewaySession:
         monkeypatch.setenv("DATA_DIR", str(tmp_path))
         ws = _FakeGatewayWS(
             [
-                {"op": 10, "d": {"heartbeat_interval": 41250}},
+                {"op": 10, "d": {"heartbeat_interval": 20}},
                 {"op": 0, "t": "READY", "s": 1, "d": {}},
             ]
         )
@@ -313,11 +313,14 @@ class TestAvatarGatewaySession:
         gw = token_avatar.GatewaySession("avatar-token", _logging.getLogger("t"))
         try:
             assert await gw.connect() is True
-            session_id = gw.heartbeat_session_id
+            await asyncio.sleep(0.1)
         finally:
             await gw.close()
 
-        assert [m["op"] for m in ws.sent] == [2, 4, 41, 40]
+        # An unfocused tab: op 2, op 4, then op 40 heartbeats; never op 41.
+        ops = [m["op"] for m in ws.sent]
+        assert ops[:3] == [2, 4, 40]
+        assert set(ops[2:]) == {40}
         assert ws.sent[1]["d"] == {
             "guild_id": None,
             "channel_id": None,
@@ -326,10 +329,7 @@ class TestAvatarGatewaySession:
             "self_video": False,
             "flags": 2,
         }
-        op41 = ws.sent[2]["d"]
-        assert list(op41) == ["initialization_timestamp", "session_id", "client_launch_id"]
-        assert op41["session_id"] == session_id
-        assert ws.sent[3]["d"] == {
-            "seq": None,
-            "qos": {"active": True, "ver": 31, "reasons": ["foregrounded"]},
-        }
+        assert not hasattr(gw, "heartbeat_session_id")
+        props = ws.sent[0]["d"]["properties"]
+        assert props["client_app_state"] == "unfocused"
+        assert "client_heartbeat_session_id" not in props

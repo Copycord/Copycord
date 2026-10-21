@@ -87,15 +87,7 @@ class TestFingerprintShape:
             "client_app_state",
         ]
         assert props["device_model_name"] == ""
-
-    def test_heartbeat_session_id_keeps_its_place(self):
-        sh.set_heartbeat_session_id("token-order-hb", "hb-1")
-        try:
-            _, props = _props("token-order-hb")
-        finally:
-            sh.set_heartbeat_session_id("token-order-hb", None)
-        assert list(props)[-2:] == ["client_app_state", "client_heartbeat_session_id"]
-        assert props["client_heartbeat_session_id"] == "hb-1"
+        assert props["client_app_state"] == "unfocused"
 
     def test_sends_the_client_hints_a_browser_sends(self):
         h = sh.build_headers("token-abc", referer="https://discord.com/channels/1/2")
@@ -206,7 +198,7 @@ class TestGatewayProperties:
         _, rest = _props("token-abc")
         g = sh.gateway_properties("token-abc")
         assert g["launch_signature"] == rest["launch_signature"]
-        assert g["client_app_state"] == rest["client_app_state"] == "focused"
+        assert g["client_app_state"] == rest["client_app_state"] == "unfocused"
 
     def test_both_describe_the_same_device(self):
 
@@ -225,26 +217,17 @@ class TestGatewayProperties:
 
 
 class TestHeartbeatSessionId:
-    def test_absent_until_a_gateway_session_reports_one(self):
-        sh.set_heartbeat_session_id("hb-token", None)
-        _, props = _props("hb-token")
+    """A tab that loaded unfocused never makes a heartbeat session id."""
 
+    def test_never_in_the_super_properties(self):
+        _, props = _props("hb-token")
         assert "client_heartbeat_session_id" not in props
         assert "client_heartbeat_session_id" not in sh.make_fingerprint("hb-token")["super_props"]
 
-    def test_absent_again_once_the_id_is_cleared(self):
-        sh.set_heartbeat_session_id("hb-token", "sess-1")
-        sh.set_heartbeat_session_id("hb-token", None)
-        _, props = _props("hb-token")
-        assert "client_heartbeat_session_id" not in props
+    def test_there_is_no_way_to_set_one(self):
+        assert not hasattr(sh, "set_heartbeat_session_id")
+        assert not hasattr(sh, "_HEARTBEAT_SESSIONS")
 
-    def test_carried_on_every_request_once_known(self):
-        sh.set_heartbeat_session_id("hb-token", "sess-42")
-        try:
-            _, props = _props("hb-token")
-            assert props["client_heartbeat_session_id"] == "sess-42"
-        finally:
-            sh.set_heartbeat_session_id("hb-token", None)
 
 class _FakeResp:
     def __init__(self, text):
@@ -329,11 +312,7 @@ class TestNoBuildFile:
     async def test_nothing_is_written(self, tmp_path):
         await sh.refresh_build_info(_ScrapeSession(build=610001))
         sh.build_headers(self.TOKEN)
-        try:
-            sh.set_heartbeat_session_id(self.TOKEN, "hb-123")
-            assert list(tmp_path.iterdir()) == []
-        finally:
-            sh.set_heartbeat_session_id(self.TOKEN, None)
+        assert list(tmp_path.iterdir()) == []
 
     @pytest.mark.asyncio
     async def test_a_leftover_file_is_not_read(self, tmp_path):
@@ -350,13 +329,7 @@ class TestNoBuildFile:
         out = await sh.refresh_build_info(_ScrapeSession(asset_body="nothing useful here"))
         assert out["client_build_number"] == 650000
 
-    def test_a_heartbeat_id_reaches_the_headers(self):
-        sh.set_heartbeat_session_id(self.TOKEN, "hb-1")
-        try:
-            _, props = _props(self.TOKEN)
-            assert props["client_heartbeat_session_id"] == "hb-1"
-        finally:
-            sh.set_heartbeat_session_id(self.TOKEN, None)
+    def test_no_heartbeat_id_reaches_the_headers(self):
         _, props = _props(self.TOKEN)
         assert "client_heartbeat_session_id" not in props
 
