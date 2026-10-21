@@ -450,13 +450,30 @@ class TestHeartbeat:
         assert "client_heartbeat_session_id" not in rest_super_props()
 
     @pytest.mark.asyncio
-    async def test_server_heartbeat_request_is_answered(self):
-        ws = FakeWS([hello(), {"op": 1, "d": None}])
+    async def test_server_heartbeat_request_is_answered_with_op40(self, monkeypatch):
+        # The first scheduled beat is a whole 45 s interval away, so any op 40
+        # here is the answer to the server's op 1.
+        monkeypatch.setattr(sc_gateway.random, "random", lambda: 1.0)
+        ws = FakeWS(
+            [
+                hello(),
+                {"op": 0, "t": "SOMETHING", "s": 7, "d": {}},
+                {"op": 1, "d": None},
+                {"op": 0, "t": "SOMETHING", "s": 8, "d": {}},
+                {"op": 1, "d": 8},
+            ]
+        )
         client, _ = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: ws.frames(40))
+        await wait_until(lambda: len(ws.frames(40)) >= 2)
+        await asyncio.sleep(0.05)
         await stop(client, task)
-        assert not ws.frames(1)
+
+        assert not ws.frames(1), "the web client answers with op 40, never op 1"
+        assert ws.ops() == [2, 4, 40, 40]
+        assert [beat["d"]["seq"] for beat in ws.frames(40)] == [7, 8], "the current seq"
+        for beat in ws.frames(40):
+            assert list(beat["d"]) == ["seq", "qos"]
 
     @pytest.mark.asyncio
     async def test_zombie_reconnects_when_no_ack(self):
