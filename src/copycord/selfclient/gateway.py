@@ -883,7 +883,7 @@ class GatewayClient:
                 "token": self.token,
                 "capabilities": self.capabilities,
                 "properties": props,
-                # The web client's; the real status follows in op 3 on READY.
+                # The web client's; the real status follows in op 3 about 90 s after READY.
                 "presence": {
                     "status": "unknown",
                     "since": 0,
