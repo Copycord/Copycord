@@ -173,7 +173,7 @@ def identify_timings(trace: Any) -> Tuple[int, int, int]:
             api = int(calls.get("start_session", 0) / 1000)
             guilds = int(calls.get("guilds_connect", 0) / 1000)
     except Exception as exc:
-        log.debug("READY trace unreadable: %r", exc)
+        log.debug("READY trace unreadable: %r", exc, exc_info=True)
     return total, api, guilds
 
 
@@ -287,7 +287,7 @@ class ScienceReporter:
             self._failed_attempts = 0
             self._first_attempt_ms = None
         except Exception as exc:
-            log.debug("science gateway_connected failed: %r", exc)
+            log.debug("science gateway_connected failed: %r", exc, exc_info=True)
 
     async def on_resumed(self, data: Any) -> None:
         """RESUMED: connection_resumed, then flush it with the held gateway_connected."""
@@ -297,7 +297,7 @@ class ScienceReporter:
             self.track("connection_resumed", {}, hold=True)
             self.flush_soon(0.0)
         except Exception as exc:
-            log.debug("science RESUMED handling failed: %r", exc)
+            log.debug("science RESUMED handling failed: %r", exc, exc_info=True)
 
     async def on_ready(self, data: Any) -> None:
         """READY: ready_payload_received, then flush with its analytics token.
@@ -315,7 +315,7 @@ class ScienceReporter:
             self._ready_count += 1
             self.flush_soon(0.0)
         except Exception as exc:
-            log.debug("science READY handling failed: %r", exc)
+            log.debug("science READY handling failed: %r", exc, exc_info=True)
 
     def _perf_now(self) -> float:
         """The browser's performance.now(): ms since page load, 0.1 ms steps."""
@@ -372,6 +372,7 @@ class ScienceReporter:
         try:
             props = fingerprint.gateway_properties(self.token)
         except Exception:
+            log.debug("science gateway properties unavailable", exc_info=True)
             props = {}
         width, height = self.viewport
         return {
@@ -456,7 +457,7 @@ class ScienceReporter:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.debug("science POST failed: %r", exc)
+            log.debug("science POST failed: %r", exc, exc_info=True)
             return False
 
     async def _post(self, body: Dict[str, Any]) -> bool:

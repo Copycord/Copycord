@@ -286,6 +286,7 @@ def _decode_super_properties(value: Any) -> Optional[Any]:
     try:
         return json.loads(base64.b64decode(value))
     except Exception:
+        logger.debug("super properties undecodable", exc_info=True)
         return None
 
 
@@ -338,6 +339,7 @@ class TrafficRecorder:
 
             fields["version"] = CURRENT_VERSION
         except Exception:
+            logger.debug("traffic capture version unavailable", exc_info=True)
             fields["version"] = None
         try:
             from copycord.common import selfbot_headers as sh
@@ -345,12 +347,14 @@ class TrafficRecorder:
             fields["impersonate"] = sh.TLS_IMPERSONATE
             fields["userAgent"] = sh.get_build_info().get("browser_user_agent")
         except Exception:
+            logger.debug("traffic capture impersonate unavailable", exc_info=True)
             fields["impersonate"] = None
         try:
             import curl_cffi
 
             fields["curl_cffi"] = getattr(curl_cffi, "__version__", None)
         except Exception:
+            logger.debug("traffic capture curl_cffi unavailable", exc_info=True)
             fields["curl_cffi"] = None
         # report.mjs prints this as the browser.
         fields["browser"] = (
@@ -374,7 +378,7 @@ class TrafficRecorder:
                 self._file.write(line)
                 self._file.flush()
         except Exception as e:
-            logger.debug("traffic capture write failed for %s: %r", self.id, e)
+            logger.debug("traffic capture write failed for %s: %r", self.id, e, exc_info=True)
 
     # HTTP
 
@@ -441,7 +445,7 @@ class TrafficRecorder:
                     self._emit("request_body", {"requestId": rid, "unavailable": True}, ts)
             return rid
         except Exception as e:
-            logger.debug("traffic capture request failed for %s: %r", self.id, e)
+            logger.debug("traffic capture request failed for %s: %r", self.id, e, exc_info=True)
             return None
 
     def response(self, rid: Optional[str], status: Any) -> None:
@@ -450,7 +454,7 @@ class TrafficRecorder:
         try:
             self._emit("response", {"requestId": rid, "status": int(status or 0)})
         except Exception as e:
-            logger.debug("traffic capture response failed for %s: %r", self.id, e)
+            logger.debug("traffic capture response failed for %s: %r", self.id, e, exc_info=True)
 
     def failed(self, rid: Optional[str], error: Any) -> None:
         if rid is None:
@@ -479,7 +483,7 @@ class TrafficRecorder:
             self._emit("ws_handshake_request", {"requestId": wid, "headers": redact_headers(headers)})
             return wid
         except Exception as e:
-            logger.debug("traffic capture ws_open failed for %s: %r", self.id, e)
+            logger.debug("traffic capture ws_open failed for %s: %r", self.id, e, exc_info=True)
             return None
 
     def ws_sent(self, wid: Optional[str], payload: Any, text: Optional[str] = None) -> None:
@@ -500,7 +504,7 @@ class TrafficRecorder:
             self.counts["wsSent"] += 1
             self._emit("ws_sent", fields)
         except Exception as e:
-            logger.debug("traffic capture ws_sent failed for %s: %r", self.id, e)
+            logger.debug("traffic capture ws_sent failed for %s: %r", self.id, e, exc_info=True)
 
     def ws_recv(
         self, wid: Optional[str], msg: Any, *, size: int, decoded_size: Optional[int] = None, binary: bool = True
@@ -527,7 +531,7 @@ class TrafficRecorder:
             self.counts["wsRecv"] += 1
             self._emit("ws_recv", fields)
         except Exception as e:
-            logger.debug("traffic capture ws_recv failed for %s: %r", self.id, e)
+            logger.debug("traffic capture ws_recv failed for %s: %r", self.id, e, exc_info=True)
 
     def ws_closed(self, wid: Optional[str], code: Any = None, reason: Any = None, *, error: Any = None) -> None:
         """The close frame received (opcode 8, where report.mjs reads close codes),
@@ -554,7 +558,7 @@ class TrafficRecorder:
                 {"requestId": wid, "closeCode": int(code) if code is not None else None, "closeReason": reason},
             )
         except Exception as e:
-            logger.debug("traffic capture ws_closed failed for %s: %r", self.id, e)
+            logger.debug("traffic capture ws_closed failed for %s: %r", self.id, e, exc_info=True)
 
     # what arrived at the echo service (wire_probe.py)
 
@@ -564,7 +568,7 @@ class TrafficRecorder:
         try:
             self._emit("wire_probe", {"event": event, **(result or {})})
         except Exception as e:
-            logger.debug("traffic capture wire_probe failed for %s: %r", self.id, e)
+            logger.debug("traffic capture wire_probe failed for %s: %r", self.id, e, exc_info=True)
 
     # lifecycle
 
@@ -578,7 +582,7 @@ class TrafficRecorder:
                     self._file.close()
                     self._file = None
         except Exception as e:
-            logger.debug("traffic capture stop failed for %s: %r", self.id, e)
+            logger.debug("traffic capture stop failed for %s: %r", self.id, e, exc_info=True)
 
 
 # entry points
@@ -607,7 +611,7 @@ def recorder_for(token: Optional[str]) -> Optional[TrafficRecorder]:
                 rec.stopped = False
         return rec
     except Exception as e:
-        logger.debug("traffic capture unavailable: %r", e)
+        logger.debug("traffic capture unavailable: %r", e, exc_info=True)
         return None
 
 
@@ -620,7 +624,7 @@ def stop(token: Optional[str], reason: str = "client closed") -> None:
         if rec is not None and not rec.stopped:
             rec.stop(reason)
     except Exception as e:
-        logger.debug("traffic capture stop failed: %r", e)
+        logger.debug("traffic capture stop failed: %r", e, exc_info=True)
 
 
 def stop_all(reason: str = "process exit") -> None:
