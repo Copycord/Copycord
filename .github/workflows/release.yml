@@ -5,7 +5,8 @@ name: Release assets
 # and `copycord update` install the wheel asset.
 #
 # Every release gets a fourth number that only goes up (v4.0.0.1, v4.0.0.2,
-# ...), and CURRENT_VERSION must equal the tag. Whether a release is a beta is
+# ...). The tag is the version: the build takes it from the tag, and the
+# wheel and sdist must carry exactly that version. Whether a release is a beta is
 # decided only by its Pre-release checkbox on GitHub: pre-releases feed the
 # beta channel, full releases the stable channel. The version carries no
 # beta suffix.
@@ -31,17 +32,6 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
 
-      - name: CURRENT_VERSION must match the tag
-        env:
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          current=$(sed -n 's/^CURRENT_VERSION = "\(.*\)"/\1/p' src/copycord/common/config.py)
-          echo "tag $TAG, CURRENT_VERSION $current"
-          if [ "${current#v}" != "${TAG#v}" ]; then
-            echo "::error::CURRENT_VERSION in src/copycord/common/config.py is '$current' but the release tag is '$TAG'; bump CURRENT_VERSION and tag again"
-            exit 1
-          fi
-
       - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
@@ -66,13 +56,16 @@ jobs:
         run: SETUPTOOLS_SCM_PRETEND_VERSION="${TAG#v}" pipx run build --sdist --wheel --outdir dist/
 
       - name: Check the artifacts
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           ls -l dist/
-          ls dist/copycord-*.tar.gz
+          # Both file names carry the version: copycord-4.0.0.3.tar.gz, copycord-4.0.0.3-py3-none-any.whl.
+          ls "dist/copycord-${TAG#v}.tar.gz"
           wheel=$(ls dist/copycord-*-py3-none-any.whl)
-          python - "$wheel" <<'EOF'
+          python - "$wheel" "${TAG#v}" <<'EOF'
           import sys, zipfile
-          wheel = sys.argv[1]
+          wheel, expected = sys.argv[1], sys.argv[2]
           names = zipfile.ZipFile(wheel).namelist()
           if "copycord/admin/web_static/index.html" not in names:
               sys.exit(f"{wheel} has no copycord/admin/web_static/index.html (dashboard missing)")
@@ -82,7 +75,9 @@ jobs:
           text = zipfile.ZipFile(wheel).read(meta[0]).decode()
           found = next(line.split(":", 1)[1].strip() for line in text.splitlines()
                        if line.startswith("Version:"))
-          print(f"wheel version {found}")
+          print(f"wheel version {found}, release tag version {expected}")
+          if found != expected:
+              sys.exit(f"{wheel} is version {found}, but the release tag says {expected}")
           EOF
           pipx run twine check dist/*
 
