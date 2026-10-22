@@ -169,6 +169,17 @@ def fetch(channel: update.Channel, timeout: float = CHECK_TIMEOUT, now: Optional
     return Result(update.is_newer(release.version, current), current, release.version, now)
 
 
+DEV_BUILD_NOTE = "dev build, updates disabled"
+
+
+def dev_build_on_release_channel(channel: update.Channel) -> bool:
+    """A dev build on stable or beta: never offered a release unless asked
+    (copycord update). The dev channel compares commits, so it still checks."""
+    from copycord.version import is_dev_build
+
+    return channel.channel != update.DEV and is_dev_build(update.current_version())
+
+
 def check_cached(channel: Optional[update.Channel] = None, force: bool = False,
                  timeout: float = CHECK_TIMEOUT) -> Result:
     """The cached answer if under 24 hours old, else a fresh one."""
@@ -206,7 +217,11 @@ def start(stream=None, wait: float = 0.0) -> Optional[threading.Thread]:
 
     def work() -> None:
         try:
-            result = check_cached()
+            channel = update.load_channel()
+            if dev_build_on_release_channel(channel):
+                logger.info("update check: %s", DEV_BUILD_NOTE)
+                return
+            result = check_cached(channel)
             logger.info("update check: %s", "update available" if result.available else "up to date")
             print_hint(result, stream)
         except Exception as e:
@@ -258,6 +273,9 @@ def auto_update_once() -> bool:
                        stopped.get("from", "?"), stopped.get("to", "?"))
         return False
     channel = update.load_channel()
+    if dev_build_on_release_channel(channel):
+        logger.info("auto-update: skipped, %s", DEV_BUILD_NOTE)
+        return False
     if channel.channel != update.STABLE and not any_channel_enabled():
         logger.info("auto-update: skipped on the %s; set %s=true to auto-update it too",
                     channel.describe(), KEY_AUTO_UPDATE_ANY)

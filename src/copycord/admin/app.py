@@ -68,6 +68,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from copycord.common.config import CURRENT_VERSION
+from copycord.version import is_dev_build
 from copycord.common.db import DBManager, backups_dir
 from copycord.common.paths import data_dir, out_candidates, out_dir
 from copycord.common.http_session import close_shared_session, shared_session
@@ -4562,8 +4563,9 @@ def get_version():
         "latest": latest or current,
         "url": url
         or f"https://github.com/Copycord/Copycord/releases/tag/{latest or current}",
-        # All four numbers count: v4.0.0.2 is newer than v4.0.0.1.
-        "update_available": bool(latest) and is_older((current or "").strip(), latest.strip()),
+        # All four numbers count: v4.0.0.2 is newer than v4.0.0.1. A dev build is never offered a release.
+        "update_available": not is_dev_build() and bool(latest)
+        and is_older((current or "").strip(), latest.strip()),
     }
 
 
@@ -4601,14 +4603,16 @@ async def _release_watch_loop():
     async with aiohttp.ClientSession() as session:
         while not shutdown_event.is_set():
             try:
-                try:
-                    recorded_ver = db.get_version()
-                    if recorded_ver != CURRENT_VERSION:
-                        db.set_version(CURRENT_VERSION)
-                except AttributeError:
-                    recorded_ver = db.get_config("current_version", "")
-                    if recorded_ver != CURRENT_VERSION:
-                        db.set_config("current_version", CURRENT_VERSION)
+                # Only a release records its version; a dev build leaves the DB stamp alone.
+                if not is_dev_build():
+                    try:
+                        recorded_ver = db.get_version()
+                        if recorded_ver != CURRENT_VERSION:
+                            db.set_version(CURRENT_VERSION)
+                    except AttributeError:
+                        recorded_ver = db.get_config("current_version", "")
+                        if recorded_ver != CURRENT_VERSION:
+                            db.set_config("current_version", CURRENT_VERSION)
 
                 rel = await _fetch_latest_release(session)
                 if rel:
