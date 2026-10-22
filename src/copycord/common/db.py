@@ -1470,6 +1470,34 @@ class DBManager:
             ],
         )
 
+        # The last qos_token READY gave each account, sent back on its next fresh IDENTIFY (selfclient/qos.py)
+        self._ensure_table(
+            name="gateway_qos_tokens",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    token_hash   TEXT PRIMARY KEY,
+                    qos_token    TEXT NOT NULL,
+                    user_id      TEXT,
+                    expires_at   INTEGER,
+                    updated_at   INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+                );
+            """,
+            required_columns={
+                "token_hash",
+                "qos_token",
+                "user_id",
+                "expires_at",
+                "updated_at",
+            },
+            copy_map={
+                "token_hash": "token_hash",
+                "qos_token": "qos_token",
+                "user_id": "user_id",
+                "expires_at": "expires_at",
+                "updated_at": "updated_at",
+            },
+        )
+
         # Tasks framework: one row per run of any task type; the short log rides in progress_json, the result in report_json
         self._migrate_task_run_ids()
         self._ensure_table(**self._task_runs_schema())
@@ -5558,6 +5586,46 @@ class DBManager:
                 (str(mapping_id),),
             )
             return cur.rowcount
+
+    # gateway_qos_tokens CRUD
+
+    @_in_tx
+    def set_gateway_qos_token(
+        self,
+        token_hash: str,
+        qos_token: str,
+        user_id: str | None,
+        expires_at: int | None,
+    ) -> None:
+        """Store an account's newest READY qos_token, replacing the last one."""
+        with self.lock:
+            self.conn.execute(
+                """
+                INSERT INTO gateway_qos_tokens (token_hash, qos_token, user_id, expires_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(token_hash) DO UPDATE SET
+                    qos_token = excluded.qos_token,
+                    user_id = excluded.user_id,
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    str(token_hash),
+                    str(qos_token),
+                    str(user_id) if user_id else None,
+                    int(expires_at) if expires_at is not None else None,
+                    int(time.time()),
+                ),
+            )
+
+    def get_gateway_qos_token(self, token_hash: str) -> dict | None:
+        """An account's stored READY qos_token row, or None."""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT * FROM gateway_qos_tokens WHERE token_hash = ?",
+                (str(token_hash),),
+            ).fetchone()
+            return dict(row) if row else None
 
     # event_logs CRUD
 
