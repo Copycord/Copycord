@@ -35,6 +35,10 @@
   --color-progress: #a78bfa;
   --color-control: #181822;
   --color-rail-hover: rgba(255, 255, 255, 0.05);
+  /* A dropdown menu item under the pointer or keyboard focus: the same faint white wash
+     (wash-6) the token and provider menus use, visible on the #181822 menu surface.
+     Danger items take danger-a10 instead. */
+  --color-menu-item-hover: rgba(255, 255, 255, 0.06);
   --color-rail-active: rgba(139, 92, 246, 0.16);
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
