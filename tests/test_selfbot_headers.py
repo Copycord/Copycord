@@ -96,7 +96,8 @@ class TestFingerprintShape:
         assert h["Origin"] == "https://discord.com"
         assert h["Referer"] == "https://discord.com/channels/1/2"
         assert h["X-Debug-Options"] == "bugReporterEnabled"
-        assert h["Sec-GPC"] == "1"
+        # Chrome sends Sec-GPC only with Global Privacy Control turned on.
+        assert "Sec-GPC" not in h
         assert h["Content-Type"] == "application/json"
 
         assert h["Sec-CH-UA"] == sh._sec_ch_ua(h["User-Agent"])

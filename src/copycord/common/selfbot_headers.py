@@ -251,7 +251,6 @@ def make_fingerprint(token: str) -> dict:
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
-        "Sec-GPC": "1",
         "Origin": "https://discord.com",
         "Priority": "u=1, i",
     }
@@ -347,7 +346,6 @@ def build_headers(token: str, *, referer: str | None = None) -> dict:
         "Sec-Fetch-Dest": h["Sec-Fetch-Dest"],
         "Sec-Fetch-Mode": h["Sec-Fetch-Mode"],
         "Sec-Fetch-Site": h["Sec-Fetch-Site"],
-        "Sec-GPC": h["Sec-GPC"],
         "User-Agent": h["User-Agent"],
         "X-Debug-Options": h["X-Debug-Options"],
         "X-Discord-Locale": h["X-Discord-Locale"],
@@ -536,7 +534,6 @@ REAL_CLIENT_HEADERS = {
     "sec-fetch-site": "same-origin",
     "sec-fetch-mode": "cors",
     "sec-fetch-dest": "empty",
-    "sec-gpc": "1",
     "origin": "https://discord.com",
     "referer": None,
     "x-installation-id": None,
