@@ -4569,70 +4569,68 @@ def get_version():
     }
 
 
-async def _fetch_latest_release(session: aiohttp.ClientSession) -> dict | None:
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "copycord-app",
+def _lookup_latest_release() -> dict | None:
+    """The newest release for the saved channel, the same lookup the CLI uses:
+    beta includes pre-releases, stable does not. Read on every poll, so
+    copycord update --beta/--stable shows up on the next one. One request per
+    poll (every RELEASE_POLL_SECONDS), well inside GitHub's unauthenticated limit."""
+    from copycord import update
+
+    channel = update.load_channel()
+    release = update.fetch_latest_release(
+        prerelease=channel.channel == update.BETA, timeout=20
+    )
+    return {
+        "tag": release.tag,
+        "url": f"https://github.com/{update.DEFAULT_REPO}/releases/tag/{release.tag}",
     }
 
-    etag = db.get_config("gh_releases_etag", "")
-    if etag:
-        headers["If-None-Match"] = etag
 
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-    async with session.get(url, headers=headers, timeout=20) as r:
-        if r.status == 304:
+async def _fetch_latest_release() -> dict | None:
+    try:
+        return await asyncio.to_thread(_lookup_latest_release)
+    except Exception as e:
+        from copycord import update
+
+        # A repo with no matching release yet is not an error worth a traceback.
+        if isinstance(e, update.ReleaseError):
+            LOGGER.debug("release watcher: %s", e)
             return None
-        r.raise_for_status()
-        data = await r.json()
-        new_etag = r.headers.get("ETag") or ""
-        if new_etag and new_etag != etag:
-            db.set_config("gh_releases_etag", new_etag)
+        raise
 
-    tag = data.get("tag_name")
-    html_url = data.get("html_url")
-    published_at = data.get("published_at")
-    if not tag or not html_url:
-        return None
-    return {"tag": tag, "url": html_url, "published_at": published_at}
+
+async def _poll_release() -> None:
+    rel = await _fetch_latest_release()
+    if rel and rel["tag"] != db.get_config("latest_tag", ""):
+        db.set_config("latest_tag", rel["tag"])
+        db.set_config("latest_url", rel["url"])
+        LOGGER.info("Detected new release: %s", rel["tag"])
 
 
 async def _release_watch_loop():
     await asyncio.sleep(2)
     LOGGER.debug("Starting GitHub release watcher for %s", GITHUB_REPO)
-    async with aiohttp.ClientSession() as session:
-        while not shutdown_event.is_set():
-            try:
-                # Only a release records its version; a dev build leaves the DB stamp alone.
-                if not is_dev_build():
-                    try:
-                        recorded_ver = db.get_version()
-                        if recorded_ver != CURRENT_VERSION:
-                            db.set_version(CURRENT_VERSION)
-                    except AttributeError:
-                        recorded_ver = db.get_config("current_version", "")
-                        if recorded_ver != CURRENT_VERSION:
-                            db.set_config("current_version", CURRENT_VERSION)
+    while not shutdown_event.is_set():
+        try:
+            # Only a release records its version; a dev build leaves the DB stamp alone.
+            if not is_dev_build():
+                try:
+                    recorded_ver = db.get_version()
+                    if recorded_ver != CURRENT_VERSION:
+                        db.set_version(CURRENT_VERSION)
+                except AttributeError:
+                    recorded_ver = db.get_config("current_version", "")
+                    if recorded_ver != CURRENT_VERSION:
+                        db.set_config("current_version", CURRENT_VERSION)
 
-                rel = await _fetch_latest_release(session)
-                if rel:
-                    prev = db.get_config("latest_tag", "")
-                    if rel["tag"] != prev:
-                        db.set_config("latest_tag", rel["tag"])
-                        db.set_config("latest_url", rel["url"])
-                        if rel.get("published_at"):
-                            db.set_config("latest_published_at", rel["published_at"])
+            await _poll_release()
+        except Exception:
+            LOGGER.exception("release watcher error")
 
-                        LOGGER.info("Detected new release: %s", rel["tag"])
-            except Exception:
-                LOGGER.exception("release watcher error")
-
-            try:
-                await asyncio.wait_for(
-                    shutdown_event.wait(), timeout=RELEASE_POLL_SECONDS
-                )
-            except asyncio.TimeoutError:
-                pass
+        try:
+            await asyncio.wait_for(shutdown_event.wait(), timeout=RELEASE_POLL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
 
 
 @app.get("/api/guild-mappings", response_class=JSONResponse)
