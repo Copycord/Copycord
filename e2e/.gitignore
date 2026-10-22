@@ -1,9 +1,0 @@
-node_modules/
-.auth/
-.run/
-test-results/
-playwright-report/
-compare-out/
-baseline/new/
-uicmp/
-elemdiff/
