@@ -847,6 +847,7 @@ class ServerReceiver:
             ratelimit=self.ratelimit,
             get_protected_channel_ids=self._protected_channel_ids,
             action_type_delete_channel=ActionType.DELETE_CHANNEL,
+            unlink_channel=self.unlink_channel_to_orphan,
             logger=logger,
         )
         self.verify.start()
@@ -1916,6 +1917,64 @@ class ServerReceiver:
             removed += 1
 
         return removed
+
+    async def unlink_channel_to_orphan(
+        self, original_channel_id: int, cloned_guild_id: int
+    ) -> dict:
+        """Convert to orphan (Channels page): unlink one cloned channel from its source in this
+        clone guild and leave the channel as it is. The next sitemap sync clones the source again
+        as a new channel with a new webhook.
+
+        Runs under the clone guild's sync lock so a sync in progress cannot re-adopt the channel.
+        Returns {ok, id, cloned_channel_id, name} or {ok: False, id, reason} with reason one of
+        guild_not_found, not_mapped, not_found, backfilling.
+        """
+        orig, gid = int(original_channel_id), int(cloned_guild_id)
+        out: dict = {"ok": False, "id": str(orig)}
+        guild = self.bot.get_guild(gid)
+        if guild is None:
+            return {**out, "reason": "guild_not_found"}
+
+        async with self._get_sync_lock(gid):
+            row = self.db.get_channel_mapping_by_original_and_clone(orig, gid)
+            clone_id = int((row["cloned_channel_id"] if row else 0) or 0)
+            if not clone_id:
+                return {**out, "reason": "not_mapped"}
+            ch = guild.get_channel(clone_id)
+            if ch is None:
+                return {**out, "reason": "not_found", "cloned_channel_id": str(clone_id)}
+            backfill = getattr(self, "backfill", None)
+            if backfill is not None and backfill.is_backfilling(orig):
+                return {**out, "reason": "backfilling", "cloned_channel_id": str(clone_id)}
+
+            removed = self.db.unlink_channel_mapping(orig, gid)
+            if removed is None:
+                return {**out, "reason": "not_mapped"}
+
+            # a queued webhook create would write the mapping back with the old channel id
+            pending = self._pending_webhook_channels.get(gid)
+            if pending:
+                self._pending_webhook_channels[gid] = [
+                    e for e in pending if int(e.get("cloned_channel_id") or 0) != clone_id
+                ]
+            self._wh_meta.pop(orig, None)
+            self._wh_identity_state.pop(orig, None)
+            if backfill is not None:
+                with contextlib.suppress(Exception):
+                    backfill.invalidate_rotation(clone_id)
+            self._load_mappings()
+
+        name = getattr(ch, "name", None) or removed.get("original_channel_name") or str(clone_id)
+        logger.info(
+            "[🔓] Converted #%s (%d) to an orphan in clone_g=%s; source %s is cloned again on the next sync (threads=%d messages=%d)",
+            name,
+            clone_id,
+            gid,
+            orig,
+            removed["threads_removed"],
+            removed["messages_removed"],
+        )
+        return {"ok": True, "id": str(orig), "cloned_channel_id": str(clone_id), "name": name}
 
     async def sync_structure(self, task_id: int, sitemap: Dict) -> str:
         """Synchronize a clone's structure from the provided sitemap."""
@@ -6085,6 +6144,16 @@ class ServerReceiver:
                 self._wh_meta.clear()
             return webhook
 
+    def _still_mapped(self, original_id: int, clone_gid: int, cloned_channel_id: int) -> bool:
+        """True while the (source, clone guild) mapping row still points at this cloned channel."""
+        try:
+            row = self.db.get_channel_mapping_by_original_and_clone(
+                int(original_id), int(clone_gid)
+            )
+        except Exception:
+            return False
+        return bool(row) and int(row["cloned_channel_id"] or 0) == int(cloned_channel_id)
+
     async def _create_pending_webhooks(self, pending: list[dict]):
         """Background task creating webhooks for channels synced without one, so structure sync is not blocked."""
         if not pending:
@@ -6105,6 +6174,10 @@ class ServerReceiver:
                 ch = guild.get_channel(entry["cloned_channel_id"])
                 if not ch:
                     continue
+                if not self._still_mapped(
+                    entry["original_id"], clone_gid, entry["cloned_channel_id"]
+                ):
+                    continue
 
                 wh = await self._create_webhook_safely(
                     ch, "Copycord", await self._get_default_avatar_bytes()
@@ -6113,6 +6186,12 @@ class ServerReceiver:
                     continue
 
                 url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
+
+                # unlinked (Convert to orphan) while the webhook was being made: do not map it again
+                if not self._still_mapped(
+                    entry["original_id"], clone_gid, entry["cloned_channel_id"]
+                ):
+                    continue
 
                 self.db.upsert_channel_mapping(
                     entry["original_id"],

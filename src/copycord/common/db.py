@@ -4345,6 +4345,58 @@ class DBManager:
                 (int(original_channel_id), int(cloned_guild_id)),
             )
 
+    def unlink_channel_mapping(
+        self, original_channel_id: int, cloned_guild_id: int
+    ) -> dict | None:
+        """Turn one cloned channel into an orphan: drop its mapping row in this clone guild, the
+        thread rows under it, and the message rows of the channel and those threads, so no later
+        edit, delete or thread post reaches it. The channel itself is left alone.
+
+        Returns the removed mapping row plus thread and message counts, or None when unmapped.
+        """
+        ocid, cg = int(original_channel_id), int(cloned_guild_id)
+        with self._tx():
+            row = self.conn.execute(
+                "SELECT * FROM channel_mappings WHERE original_channel_id=? AND cloned_guild_id=? LIMIT 1",
+                (ocid, cg),
+            ).fetchone()
+            if row is None:
+                return None
+            out = dict(row)
+            clone_id = out.get("cloned_channel_id")
+
+            # threads point at the parent by its clone id and by its source id
+            thread_ids = [
+                int(r[0])
+                for r in self.conn.execute(
+                    "SELECT cloned_thread_id FROM threads WHERE cloned_guild_id=? "
+                    "AND (forum_original_id=? OR forum_cloned_id=?) AND cloned_thread_id IS NOT NULL",
+                    (cg, ocid, clone_id),
+                ).fetchall()
+            ]
+            targets = [int(clone_id)] if clone_id is not None else []
+            targets += thread_ids
+
+            messages = 0
+            if targets:
+                marks = ",".join("?" * len(targets))
+                messages = self.conn.execute(
+                    f"DELETE FROM messages WHERE cloned_guild_id=? AND cloned_channel_id IN ({marks})",
+                    (cg, *targets),
+                ).rowcount
+            threads = self.conn.execute(
+                "DELETE FROM threads WHERE cloned_guild_id=? AND (forum_original_id=? OR forum_cloned_id=?)",
+                (cg, ocid, clone_id),
+            ).rowcount
+            self.conn.execute(
+                "DELETE FROM channel_mappings WHERE original_channel_id=? AND cloned_guild_id=?",
+                (ocid, cg),
+            )
+        out["thread_ids"] = thread_ids
+        out["threads_removed"] = int(threads or 0)
+        out["messages_removed"] = int(messages or 0)
+        return out
+
     def get_thread_mappings_for_original(self, original_thread_id: int) -> list[dict]:
         cur = self.conn.execute(
             """

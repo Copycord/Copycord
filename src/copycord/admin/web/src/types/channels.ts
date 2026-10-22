@@ -104,11 +104,24 @@ export interface CategoryIds {
   clonedGuildId: string | null;
 }
 
-/** Message sent on /ws/in to delete orphans (envelope kind "verify"). */
+/** Message sent on /ws/in to delete orphans or convert a channel to one (envelope kind "verify"). */
 export type OrphanDeletePayload =
   | { action: "delete_one"; kind: "channel" | "category"; id: string }
   | { action: "delete_all"; ids: string[] }
+  | { action: "unlink_channel"; original_channel_id: string }
   | { action: "list" };
+
+/** The "unlinked" verify event on /ws/out: the reply to Convert to orphan (VerifyController._unlink_one). */
+export interface UnlinkedEvent {
+  type: "unlinked";
+  mapping_id?: string | number;
+  /** Original channel id of the unlinked mapping. */
+  id?: string | number;
+  cloned_channel_id?: string | number;
+  name?: string;
+  ok?: boolean;
+  reason?: string;
+}
 
 /** One entry of the "deleted" verify event on /ws/out. */
 export interface DeletedResult {

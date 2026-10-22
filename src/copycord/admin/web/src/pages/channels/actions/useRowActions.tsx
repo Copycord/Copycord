@@ -1,5 +1,6 @@
 // Row actions of the Channels page: the channel and category menus, the
-// customize dialogs, blacklist, id copy, and orphan delete (one and all).
+// customize dialogs, blacklist, id copy, Convert to orphan, and orphan delete
+// (one and all).
 // The result plugs into the ChannelTree slots and the #orph-delall button.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,11 +17,13 @@ import type {
   DeletedResult,
   Orphans,
   OrphanDeletePayload,
+  UnlinkedEvent,
 } from "../../../types/channels";
 import type { CategoryPins, TreeChannel, TreeSection } from "../model";
 import { CustomizeModal } from "./CustomizeModal";
 import {
   blacklistBody,
+  canConvertToOrphan,
   customizeCategoryBody,
   customizeChannelBody,
   deleteAllPayload,
@@ -29,6 +32,8 @@ import {
   orphanIds,
   resolveCategoryIds,
   resultId,
+  unlinkFailureText,
+  unlinkPayload,
   verifyEnvelope,
   wasDeleted,
   withoutDeleted,
@@ -66,6 +71,11 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
   const pending = useRef(new Set<string>());
+  // Convert to orphan: original channel id -> card name, until the "unlinked" reply.
+  const unlinks = useRef(new Map<string, string>());
+  const [unlinking, setUnlinking] = useState(0);
+  // Frames that wait for /ws/out to connect, so the reply is not missed.
+  const queued = useRef<OrphanDeletePayload[]>([]);
   const sock = useRef<WebSocket | null>(null);
 
   useEffect(() => () => sock.current?.close(), []);
@@ -85,7 +95,7 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
   );
 
   const total = orphans.categories.length + orphans.channels.length;
-  useWsMessages(
+  const out = useWsMessages(
     "/ws/out",
     (msg: BusMessage) => {
       const p = (msg.payload ?? msg) as {
@@ -93,9 +103,21 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
         mapping_id?: string | number;
         results?: DeletedResult[];
         ids?: Array<string | number>;
-      };
-      if (p.type !== "deleted") return;
+      } & Omit<Partial<UnlinkedEvent>, "type">;
+      if (p.type !== "deleted" && p.type !== "unlinked") return;
       if (p.mapping_id != null && String(p.mapping_id) !== mappingId) return;
+      if (p.type === "unlinked") {
+        const id = p.id != null ? String(p.id) : "";
+        const name = unlinks.current.get(id);
+        if (name === undefined) return;
+        unlinks.current.delete(id);
+        setUnlinking(unlinks.current.size);
+        if (p.ok) toast.show(`Converted "${name}" to an orphan.`, { kind: "success" });
+        else toast.show(unlinkFailureText(name, p.reason), { kind: "error" });
+        reload();
+        sendVerify({ action: "list" });
+        return;
+      }
       let deleted: string[] = [];
       if (Array.isArray(p.results)) {
         for (const r of p.results) {
@@ -119,8 +141,13 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
       setBusy(false);
       sendVerify({ action: "list" });
     },
-    { types: ["verify"], enabled: total > 0 || pending.current.size > 0 },
+    { types: ["verify"], enabled: total > 0 || pending.current.size > 0 || unlinking > 0 },
   );
+
+  useEffect(() => {
+    if (!out.connected) return;
+    for (const frame of queued.current.splice(0)) sendVerify(frame);
+  }, [out.connected, unlinking, sendVerify]);
 
   const copy = useCallback(
     async (text: string, done: string, fail: string) => {
@@ -182,6 +209,28 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
     [confirm, sendVerify],
   );
 
+  const convertToOrphan = useCallback(
+    async (row: ChannelRow, name: string) => {
+      const ok = await confirm({
+        title: "Convert to orphan?",
+        body: (
+          <>
+            <b>#{name}</b> is unlinked and kept as an orphan. The next sync clones it again.
+          </>
+        ),
+        confirmLabel: "Convert to orphan",
+        danger: true,
+      });
+      if (!ok) return;
+      const id = String(row.original_channel_id);
+      if (unlinks.current.has(id)) return;
+      unlinks.current.set(id, name);
+      queued.current.push(unlinkPayload(row));
+      setUnlinking(unlinks.current.size);
+    },
+    [confirm],
+  );
+
   const channelActions = useCallback(
     (c: TreeChannel): ReactNode => {
       const items: MenuItem[] = [];
@@ -190,6 +239,9 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
         items.push({ act: "delete-orphan", label: "Delete orphan", danger: true, onSelect: () => void deleteOrphan("channel", c.id, c.displayName) });
       } else if (row) {
         if (row.cloned_channel_id) items.push({ act: "customize", label: "Customize", onSelect: () => setDialog({ kind: "channel", row }) });
+        if (canConvertToOrphan(row)) {
+          items.push({ act: "convert-orphan", label: "Convert to orphan", onSelect: () => void convertToOrphan(row, c.displayName) });
+        }
         items.push({
           act: "bl-channel",
           label: "Add channel to blacklist",
@@ -211,7 +263,7 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
       }
       return <RowMenu kind="channel" items={items} />;
     },
-    [blacklist, copy, deleteOrphan],
+    [blacklist, convertToOrphan, copy, deleteOrphan],
   );
 
   const categoryActions = useCallback(

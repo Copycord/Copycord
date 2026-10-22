@@ -86,6 +86,32 @@ export function deleteAllPayload(o: Orphans): OrphanDeletePayload {
   return { action: "delete_all", ids: orphanIds(o) };
 }
 
+export function unlinkPayload(row: ChannelRow): OrphanDeletePayload {
+  return { action: "unlink_channel", original_channel_id: String(row.original_channel_id) };
+}
+
+/** Convert to orphan is offered on a cloned channel that is still mapped, never on a thread. */
+export function canConvertToOrphan(row: ChannelRow | null | undefined): row is ChannelRow {
+  return !!row && !row.is_thread && !!str(row.cloned_channel_id) && !!str(row.cloned_guild_id);
+}
+
+/** The toast text of a Convert to orphan that did not go through. */
+export function unlinkFailureText(name: string, reason: string | undefined): string {
+  switch (reason) {
+    case "not_mapped":
+      return `"${name}" is not linked to a source channel any more.`;
+    case "not_found":
+      return `"${name}" was not found in the clone server.`;
+    case "backfilling":
+      return `"${name}" is being cloned by a task. Try again when it ends.`;
+    case "guild_not_found":
+    case "no_mapping":
+      return "The clone server of this mapping is not available.";
+    default:
+      return `Failed to convert "${name}" to an orphan.`;
+  }
+}
+
 /** The /ws/in frame for an orphan delete. */
 export function verifyEnvelope(mappingId: string, payload: OrphanDeletePayload) {
   return { kind: "verify", role: "ui", payload: { mapping_id: mappingId, ...payload } };
