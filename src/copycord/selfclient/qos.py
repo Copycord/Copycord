@@ -15,9 +15,10 @@ f2 a 32-byte signature, f3 varint 1. Chrome keeps the newest one and its next
 fresh IDENTIFY carries {f1: empty, f2: <the READY token bytes>}; with nothing
 stored it sends NO_TOKEN. RESUME carries none.
 
-Stored per account (the short token hash) in the DB's gateway_qos_tokens
-table. Not an auth secret, but never logged: debug lines give its expiry and a
-short hash of it.
+Kept per account (the short token hash) in memory only, never on disk: a
+restart has nothing stored and sends NO_TOKEN like a fresh login, while a
+reconnect in the same process reuses the latest READY token. Not an auth
+secret, but never logged: debug lines give its expiry and a short hash of it.
 """
 
 from __future__ import annotations
@@ -25,7 +26,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -195,66 +195,33 @@ def choose(
 
 
 class QosTokenStore:
-    """The last READY qos_token per account, keyed by the short token hash: in
-    the DB when one is given and reachable, else in memory."""
+    """The last READY qos_token per account, keyed by the short token hash.
+    Memory only: nothing is written to disk, so a new process starts empty."""
 
-    def __init__(self, db: Any = None) -> None:
-        self.db = db
+    def __init__(self) -> None:
         self._memory: Dict[str, Tuple[str, Optional[str]]] = {}
 
     def load(self, token: str) -> Tuple[Optional[str], Optional[str]]:
         """(READY qos_token, the user id that READY named) last stored for token."""
-        key = _token_log_id(token)
-        if self.db is not None:
-            try:
-                row = self.db.get_gateway_qos_token(key)
-            except sqlite3.Error as exc:
-                log.debug("qos_token read failed: %r", exc)
-            else:
-                if row:
-                    return row["qos_token"], row["user_id"]
-        return self._memory.get(key, (None, None))
+        return self._memory.get(_token_log_id(token), (None, None))
 
-    def save(
-        self, token: str, value: str, user_id: Optional[str], expires_ms: Optional[int]
-    ) -> None:
-        key = _token_log_id(token)
-        self._memory[key] = (value, user_id)
-        if self.db is not None:
-            try:
-                self.db.set_gateway_qos_token(key, value, user_id, expires_ms)
-            except sqlite3.Error as exc:
-                log.debug("qos_token write failed: %r", exc)
+    def save(self, token: str, value: str, user_id: Optional[str]) -> None:
+        self._memory[_token_log_id(token)] = (value, user_id)
 
 
 _store: Optional[QosTokenStore] = None
 
 
-def _open_db() -> Any:
-    """The data dir's DB, or None when it does not exist yet or will not open."""
-    from copycord.common.db import DBManager
-    from copycord.common.paths import db_path
-
-    path = db_path()
-    if not path.exists():
-        return None
-    try:
-        return DBManager(str(path))
-    except Exception as exc:
-        log.debug("qos_token store has no DB: %r", exc)
-        return None
-
-
 def store() -> QosTokenStore:
-    """The process's store, on the data dir's DB from its first use."""
+    """The process's store, empty at its start."""
     global _store
     if _store is None:
-        _store = QosTokenStore(_open_db())
+        _store = QosTokenStore()
     return _store
 
 
 def set_store(new: Optional[QosTokenStore]) -> None:
-    """Use ``new`` from now on; None reopens the data dir's DB on next use."""
+    """Use ``new`` from now on; None starts a new empty one on next use."""
     global _store
     _store = new
 
@@ -271,12 +238,7 @@ def remember_ready(token: str, ready: Any) -> Optional[ReadyToken]:
     user = d.get("user")
     user_id = user.get("id") if isinstance(user, dict) else None
     decoded = decode_ready_token(value)
-    store().save(
-        token,
-        value,
-        str(user_id) if user_id else None,
-        decoded.expires_ms if decoded is not None else None,
-    )
+    store().save(token, value, str(user_id) if user_id else None)
     if decoded is None:
         log.debug("READY qos_token does not parse; IDENTIFY will send the default")
     else:

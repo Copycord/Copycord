@@ -1,5 +1,6 @@
-"""selfclient.qos: READY's qos_token decoded, stored per account, and sent
-back wrapped on the next fresh IDENTIFY, never on RESUME.
+"""selfclient.qos: READY's qos_token decoded, kept per account in memory only,
+and sent back wrapped on the next fresh IDENTIFY in the same process, never on
+RESUME. A restart sends the default.
 
 The tokens are real captures with the user id replaced by SYN_USER.
 """
@@ -10,8 +11,6 @@ import logging
 import pytest
 
 from copycord.common import traffic_capture
-from copycord.common.db import DBManager
-from copycord.common.selfbot_headers import _token_log_id
 from copycord.selfclient import qos
 from copycord.selfclient.gateway import GatewayClient
 
@@ -182,31 +181,16 @@ class TestStore:
         assert qos.identify_token(TOKEN, "222") == qos.NO_TOKEN
         assert qos.identify_token(TOKEN, str(SYN_USER)) == READY_WRAPPED
 
-    def test_persists_in_the_db_across_stores(self, tmp_db_path):
-        qos.set_store(qos.QosTokenStore(DBManager(tmp_db_path, init_schema=True)))
+    def test_new_store_after_a_restart_starts_empty(self):
         remember()
-
-        db = DBManager(tmp_db_path)
-        row = db.get_gateway_qos_token(_token_log_id(TOKEN))
-        assert row["qos_token"] == READY_TOKEN
-        assert row["user_id"] == str(SYN_USER)
-        assert row["expires_at"] == EXPIRES
-        assert TOKEN not in str(row)
-
-        qos.set_store(qos.QosTokenStore(db))
         assert qos.identify_token(TOKEN) == READY_WRAPPED
+        qos.set_store(qos.QosTokenStore())
+        assert qos.identify_token(TOKEN) == qos.NO_TOKEN
 
-    def test_default_store_uses_the_data_dir_db(self, tmp_db_path, monkeypatch):
-        DBManager(tmp_db_path, init_schema=True)
-        monkeypatch.setenv("DB_PATH", tmp_db_path)
+    def test_default_store_is_one_per_process(self):
         qos.set_store(None)
         remember()
-        row = DBManager(tmp_db_path).get_gateway_qos_token(_token_log_id(TOKEN))
-        assert row["qos_token"] == READY_TOKEN
-
-    def test_db_without_the_table_keeps_it_in_memory(self, tmp_db_path):
-        qos.set_store(qos.QosTokenStore(DBManager(tmp_db_path)))
-        remember()
+        assert qos.store() is qos.store()
         assert qos.identify_token(TOKEN) == READY_WRAPPED
 
     def test_logs_never_carry_the_token(self, caplog):
@@ -264,23 +248,23 @@ class TestGateway:
         assert all("qos_token" not in (m.get("d") or {}) for m in second.sent)
 
     @pytest.mark.asyncio
-    async def test_token_persists_for_a_new_client(self, tmp_db_path):
-        qos.set_store(qos.QosTokenStore(DBManager(tmp_db_path, init_schema=True)))
+    async def test_restart_sends_the_default_token(self):
         ws = FakeWS([hello(), ready_frame()])
         client, _ = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
         await wait_until(lambda: ws.frames(37))
         await stop(client, task)
+        assert qos.identify_token(TOKEN) == READY_WRAPPED
 
-        # A restart: a new store on the same DB and a new client.
-        qos.set_store(qos.QosTokenStore(DBManager(tmp_db_path)))
+        # A restart: a new process has a new, empty store and a new client.
+        qos.set_store(qos.QosTokenStore())
         ws2 = FakeWS([hello()])
         client2, _ = make_client(ws2)
         assert client2 is not client
         task2 = asyncio.create_task(client2.run(refresh_build=False))
         await wait_until(lambda: ws2.frames(2))
         await stop(client2, task2)
-        assert ws2.frames(2)[0]["d"]["qos_token"] == READY_WRAPPED
+        assert ws2.frames(2)[0]["d"]["qos_token"] == qos.NO_TOKEN
 
     @pytest.mark.asyncio
     async def test_another_users_token_is_not_sent(self):
