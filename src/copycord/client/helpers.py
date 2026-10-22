@@ -70,8 +70,6 @@ class ClientUiController:
             return
         self.log.debug("ClientUiController stopping | task=%s", self._task.get_name())
         self._task.cancel()
-        with asyncio.CancelledError.__enter__ if False else None:
-            pass
         try:
             await self._task
         except asyncio.CancelledError:
