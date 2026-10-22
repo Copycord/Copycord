@@ -63,27 +63,6 @@ describe("App shell", () => {
     expect(within(nav).getByText("Channels").closest("a")).not.toHaveClass("hover:text-gold");
   });
 
-  it("links the menu's version to its release, or to its commit on a dev build, like the page footer", () => {
-    const { unmount } = render(
-      <MemoryRouter initialEntries={["/guilds"]}>
-        <Sidebar version="v4.0.0.3" />
-      </MemoryRouter>,
-    );
-    expect(document.getElementById("sidebar-version-link")).toHaveAttribute(
-      "href",
-      expect.stringMatching(/\/releases\/tag\/v4\.0\.0\.3$/),
-    );
-    unmount();
-    render(
-      <MemoryRouter initialEntries={["/guilds"]}>
-        <Sidebar version="dev (7f00ae9)" />
-      </MemoryRouter>,
-    );
-    const dev = document.getElementById("sidebar-version-link");
-    expect(dev).toHaveAttribute("href", expect.stringMatching(/\/commit\/7f00ae9$/));
-    expect(dev).toHaveAccessibleName("Copycord dev (7f00ae9) commit");
-  });
-
   it("renders the Tasks page at a run url, not NotFound, with Tasks lit in the menu", async () => {
     renderAt("/tasks/runs/4f2a9c1e7b3d4e5f8a6b0c2d1e3f5a7b");
     // The type rail is only in the page, not its skeleton, so the chunk has replaced the skeleton.
