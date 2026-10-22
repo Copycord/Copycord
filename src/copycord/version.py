@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import re
 import subprocess
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger("copycord.version")
 
 DIST_NAME = "copycord"
 # What a build without git history or a version reports.
@@ -115,6 +118,7 @@ def _build_json_commit() -> Optional[str]:
         raw = (resources.files("copycord") / "_build.json").read_text(encoding="utf-8")
         commit = json.loads(raw).get("commit", "")
     except Exception:
+        logger.debug("build stamp unreadable", exc_info=True)
         return None
     return commit if re.fullmatch(r"[0-9a-f]{40}", commit or "") else None
 
