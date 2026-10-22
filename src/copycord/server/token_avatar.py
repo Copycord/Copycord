@@ -25,7 +25,8 @@ from copycord.common.selfbot_headers import (
     gateway_properties,
     get_tls_session,
 )
-from copycord.selfclient.gateway import IDLE_VOICE_STATE, QOS_TOKEN, QOS_VERSION
+from copycord.selfclient import qos
+from copycord.selfclient.gateway import IDLE_VOICE_STATE, QOS_VERSION
 
 DISCORD_API_BASE = "https://discord.com/api/v9"
 GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json&compress=zlib-stream"
@@ -118,7 +119,7 @@ async def _identify_payload(token: str) -> dict:
             "client_state": {
                 "guild_versions": {},
             },
-            "qos_token": QOS_TOKEN,
+            "qos_token": qos.identify_token(token),
         },
     }
 
@@ -196,6 +197,7 @@ class GatewaySession:
                 if frame.get("s") is not None:
                     self._seq = frame["s"]
                 if op == _OP_DISPATCH and frame.get("t") == "READY":
+                    qos.remember_ready(self._token, frame.get("d"))
                     return True
                 if op == _OP_INVALID_SESSION:
                     # d=True means resumable, so the token itself is fine.

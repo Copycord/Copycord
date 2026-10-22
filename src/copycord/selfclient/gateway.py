@@ -29,7 +29,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
 
-from . import fingerprint
+from . import fingerprint, qos
 from .enums import API_VERSION, FATAL_CLOSE_CODES, Capabilities, CloseCode, GatewayOp
 from .errors import ConnectionClosed, LoginFailure
 
@@ -114,10 +114,6 @@ SESSION_DISPATCHES = frozenset(
 
 # op 40 `qos.ver` the web client sends.
 QOS_VERSION = 31
-
-# IDENTIFY's top-level `qos_token`, last in `d`. Constant in every browser
-# capture; undocumented.
-QOS_TOKEN = "CgIIAQ=="
 
 # Seconds after READY on a fresh connect before the one op 3 an unfocused tab
 # sends (the overnight capture: IDENTIFY 02:05:19, op 3 02:06:49).
@@ -515,6 +511,8 @@ class GatewayClient:
         self._proxy_in_use: Optional[str] = None
         self.session_id: Optional[str] = None
         self.resume_url: Optional[str] = None
+        # The account's user id, from the last READY.
+        self.user_id: Optional[str] = None
         # The properties the last IDENTIFY sent.
         self.identify_properties: Optional[Dict[str, Any]] = None
         # For science's ready_payload_received: (json bytes, zlib bytes) of the last
@@ -963,7 +961,8 @@ class GatewayClient:
                 # Payload compression; transport compression is the URL's `compress`.
                 "compress": False,
                 "client_state": {"guild_versions": {}},
-                "qos_token": QOS_TOKEN,
+                # Last in `d`: the last READY's qos_token, wrapped (qos.py).
+                "qos_token": qos.identify_token(self.token, self.user_id),
             },
         }
         raw = json.dumps(payload).encode("utf-8")
@@ -1020,6 +1019,10 @@ class GatewayClient:
                 if isinstance(g, dict) and g.get("id"):
                     self._remember_guild(g["id"])
             user = data_dict.get("user") or {}
+            if user.get("id"):
+                self.user_id = str(user["id"])
+            # The next fresh IDENTIFY sends it back.
+            qos.remember_ready(self.token, data_dict)
             log.debug(
                 "READY user=%s id=%s guilds=%d session=%s resume=%s",
                 user.get("username"),

@@ -39,6 +39,7 @@ from copycord.common.selfbot_headers import (
     _mask_proxy_for_log,
     build_headers,
 )
+from copycord.selfclient import qos
 from copycord.selfclient.gateway import (
     RESUME_CLOSE_CODE,
     GatewayClient,
@@ -1217,6 +1218,8 @@ class StandaloneScraper:
                                 ready = True
                                 identity.session_id = (d or {}).get("session_id")
                                 identity.resume_url = (d or {}).get("resume_gateway_url")
+                                # Its next fresh IDENTIFY sends READY's qos_token back.
+                                qos.remember_ready(identity.token, d)
                                 self._sessions_ready += 1
                                 self._log(
                                     f"🟢 Session {session_index + 1} connected",
