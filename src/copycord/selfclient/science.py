@@ -16,7 +16,7 @@ overnight capture sent it on all 8 of its sockets), ready_payload_received
 after READY, and connection_resumed with the socket's gateway_connected after
 a RESUME. Such a tab makes no heartbeat session id, so there is no
 client_heartbeat, no session_start_client, and no event carries
-client_heartbeat_session_id. Shapes and key orders follow Mac's
+client_heartbeat_session_id. Shapes and key orders follow a
 Chrome 155 capture (2026-10-20). Events tracked before READY carry no
 client_uuid, as in that capture: the browser's generator needs the user id.
 

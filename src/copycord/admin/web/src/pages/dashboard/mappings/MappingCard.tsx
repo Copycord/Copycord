@@ -1,6 +1,6 @@
 // One mapping card (.guild-card): icon, name, host server, and the
 // Settings, Filters, status, Clone and Delete buttons. Class names are kept
-// for the e2e helpers.
+// stable; tests select by them.
 
 import type { ReactNode } from "react";
 import { cx } from "../../../components/ui";

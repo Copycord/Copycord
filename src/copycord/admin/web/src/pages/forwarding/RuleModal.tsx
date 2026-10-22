@@ -1,4 +1,4 @@
-// The rule create/edit modal (#fwdModal). The e2e specs need its ids and the
+// The rule create/edit modal (#fwdModal). Tests select by its ids and the
 // "show" class on #fwdModal, so it carries its own shell instead of
 // components/Modal (which takes no id): the same focus trap, Escape and
 // overlay close, and focus back to the opener.

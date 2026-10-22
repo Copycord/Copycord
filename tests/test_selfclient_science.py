@@ -1,6 +1,6 @@
 """selfclient.science: the /api/v9/science POST Chrome sends after READY.
 
-The key lists below are the ones in Mac's Chrome 155 capture (2026-10-20, the
+The key lists below are the ones in a Chrome 155 capture (2026-10-20, the
 post-login batch at 16:55:47). A real GatewayClient runs on a fake socket and
 a real HTTPClient on a fake session, so nothing reaches Discord.
 """

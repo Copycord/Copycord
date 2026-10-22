@@ -1,7 +1,7 @@
 // The log modal: live tail of /logs/stream/{which} over SSE,
 // a search box that filters lines, Clear logs (asks first, then POSTs
 // /logs/clear/{which}) and close by X, backdrop or Escape. Lines render as
-// plain text. The e2e specs rely on its ids and the .show class.
+// plain text. Its ids and the .show class are stable; tests select by them.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";

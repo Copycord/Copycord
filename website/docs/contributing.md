@@ -84,8 +84,6 @@ COPYCORD_SKIP_FRONTEND=1 pip install -e .
 python -m pytest tests/ -v
 ```
 
-The Playwright end-to-end tests for the dashboard live in `e2e/`; its `README.md` explains how to run them.
-
 Run a single file while you work, for example `python -m pytest tests/test_cli.py -v`.
 
 Lint and syntax checks, as CI runs them:
@@ -155,7 +153,6 @@ copycord/
 │           ├── paths.py     # Data directory per OS
 │           └── websockets.py # Communication between the parts
 ├── tests/               # pytest suite
-├── e2e/                 # Playwright tests for the dashboard
 ├── install.sh           # Install script for Linux and macOS
 ├── install.ps1          # Install script for Windows
 ├── pyproject.toml       # Package definition and dependencies
