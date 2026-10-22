@@ -215,12 +215,11 @@ export function useRowActions({ mappingId, rows, pins, orphans, setOrphans, relo
         title: "Convert to orphan?",
         body: (
           <>
-            <b>#{name}</b> <span className="text-muted">({row.cloned_channel_id})</span> stays in the clone server as it is,
-            but it is no longer linked to its source channel: Copycord stops posting, editing and deleting in it. On the next
-            sync the source channel is cloned again as a new channel.
+            <b>#{name}</b> is unlinked and kept as an orphan. The next sync clones it again.
           </>
         ),
         confirmLabel: "Convert to orphan",
+        danger: true,
       });
       if (!ok) return;
       const id = String(row.original_channel_id);
