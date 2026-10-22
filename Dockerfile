@@ -25,14 +25,27 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venvs/copycord \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
+# hatch-vcs runs git to compute the version from the checkout.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /src
 COPY pyproject.toml uv.lock hatch_build.py README.md LICENSE ./
+
+# The locked dependencies first, so a new commit does not reinstall them.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked,id=uv-copycord-${TARGETPLATFORM} \
+    uv sync --frozen --no-dev --no-editable --no-install-project
+
 COPY src/ ./src/
 COPY --from=webbuild /web/dist/ ./src/copycord/admin/web/dist/
+# The git metadata, for a local build. The glob copies nothing when the context
+# has no .git (a zip download). This stage is not in the final image.
+COPY .gi[t] ./.git/
 
-# The build context has no .git, so the version comes in as a build arg: the
-# release tag without the v (4.0.0.3) or a dev version (4.0.0.4.dev5+g1a2b3c4).
-# Without it the image reports version 0+unknown.
+# The version: the COPYCORD_VERSION build arg when set (CI passes the release
+# tag without the v, 4.0.0.3, or a dev version, 4.0.0.4.dev5+g1a2b3c4), else
+# computed from .git, else 0+unknown. A clone without tags is 0.1.dev0+g<sha>.
 ARG COPYCORD_VERSION=
 
 # One venv for admin, server and client, installed from uv.lock (the same
