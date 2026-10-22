@@ -217,8 +217,8 @@ def frame_summary(payload: Dict[str, Any]) -> str:
     if op == GatewayOp.BULK_GUILD_SUBSCRIBE:
         return f"op 37 subscribe guilds={len(d.get('subscriptions') or {})}"
     if op == GatewayOp.QOS_HEARTBEAT:
-        qos = d.get("qos") or {}
-        return f"op 40 heartbeat seq={d.get('seq')} active={qos.get('active')}"
+        state = d.get("qos") or {}
+        return f"op 40 heartbeat seq={d.get('seq')} active={state.get('active')}"
     return f"op {op}"
 
 
