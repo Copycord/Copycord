@@ -18,7 +18,7 @@ import random
 import hashlib
 from discord.ext import commands
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 import uuid
 import discord
 
@@ -161,6 +161,7 @@ class VerifyController:
         ratelimit,
         get_protected_channel_ids: Callable[[discord.Guild], Iterable[int]],
         action_type_delete_channel,
+        unlink_channel: Optional[Callable[[int, int], Awaitable[dict]]] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.bus = bus
@@ -172,6 +173,8 @@ class VerifyController:
         self.ratelimit = ratelimit
         self._get_protected = get_protected_channel_ids
         self._AT_DELETE = action_type_delete_channel
+        # ServerReceiver.unlink_channel_to_orphan: it owns the mapping caches the unlink must refresh
+        self._unlink_channel = unlink_channel
         self.log = logger or logging.getLogger("VerifyController")
         self._task: Optional[asyncio.Task] = None
         self._stopping = False
@@ -312,6 +315,10 @@ class VerifyController:
                             cg,
                         )
 
+        if act == "unlink_channel":
+            await self._unlink_one(payload, target_guild_id, mapping_id, req_id=req_id)
+            return
+
         if target_guild_id is None:
             target_guild_id = self.guild_id
 
@@ -431,6 +438,54 @@ class VerifyController:
             act,
             _safe_preview(payload),
         )
+
+    async def _unlink_one(
+        self,
+        payload: dict,
+        cloned_guild_id: Optional[int],
+        mapping_id: str,
+        *,
+        req_id: str,
+    ) -> None:
+        """Convert to orphan: unlink one cloned channel, scoped to the mapping's clone guild (never
+        the fallback guild). Replies with an "unlinked" event; reason is one of no_mapping,
+        bad_id, unsupported, guild_not_found, not_mapped, not_found, backfilling, error."""
+        raw = str(payload.get("original_channel_id") or "").strip()
+        reply: dict = {
+            "type": "unlinked",
+            "req_id": req_id,
+            "mapping_id": mapping_id,
+            "id": raw,
+            "ok": False,
+        }
+        if cloned_guild_id is None:
+            reply["reason"] = "no_mapping"
+        elif not raw.isdigit():
+            reply["reason"] = "bad_id"
+        elif self._unlink_channel is None:
+            reply["reason"] = "unsupported"
+        else:
+            try:
+                res = await self._unlink_channel(int(raw), int(cloned_guild_id))
+                reply.update(res or {})
+            except Exception as e:
+                self.log.exception(
+                    "Unlink failed | req_id=%s guild=%s orig=%s err=%s",
+                    req_id,
+                    cloned_guild_id,
+                    raw,
+                    e,
+                )
+                reply["reason"] = "error"
+        self.log.debug(
+            "Unlink requested | req_id=%s guild=%s orig=%s ok=%s reason=%s",
+            req_id,
+            cloned_guild_id,
+            raw,
+            reply.get("ok"),
+            reply.get("reason"),
+        )
+        await self._publish(reply)
 
     def _compute_orphans(self, guild: discord.Guild) -> tuple[list[dict], list[dict]]:
 
