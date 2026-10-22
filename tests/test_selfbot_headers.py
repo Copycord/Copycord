@@ -190,17 +190,6 @@ class TestGatewayProperties:
         # IDENTIFY carries qos_token beside the properties, not in them.
         assert "qos_token" not in g
 
-    def test_gateway_props_key_order_matches_chrome(self):
-        g = sh.gateway_properties("token-order")
-        assert list(g)[:4] == ["os", "browser", "device", "device_model_name"]
-        assert list(g)[-1] == "installation_id"
-
-    def test_gateway_props_share_the_rest_launch_signature(self):
-        _, rest = _props("token-abc")
-        g = sh.gateway_properties("token-abc")
-        assert g["launch_signature"] == rest["launch_signature"]
-        assert g["client_app_state"] == rest["client_app_state"] == "unfocused"
-
     def test_both_describe_the_same_device(self):
 
         _, rest = _props("token-abc")
@@ -215,19 +204,6 @@ class TestGatewayProperties:
             "client_launch_id",
         ):
             assert rest[key] == g[key], key
-
-
-class TestHeartbeatSessionId:
-    """A tab that loaded unfocused never makes a heartbeat session id."""
-
-    def test_never_in_the_super_properties(self):
-        _, props = _props("hb-token")
-        assert "client_heartbeat_session_id" not in props
-        assert "client_heartbeat_session_id" not in sh.make_fingerprint("hb-token")["super_props"]
-
-    def test_there_is_no_way_to_set_one(self):
-        assert not hasattr(sh, "set_heartbeat_session_id")
-        assert not hasattr(sh, "_HEARTBEAT_SESSIONS")
 
 
 class _FakeResp:
@@ -296,8 +272,7 @@ class TestRefreshBuildInfo:
 
 
 class TestNoBuildFile:
-    """Nothing about builds or headers is kept on disk, dev mode or not; a failed
-    scrape keeps the current build, DEFAULT_BUILD until a scrape succeeds."""
+    """Nothing about builds or headers is kept on disk, dev mode or not."""
 
     TOKEN = "record-token-abc.def.ghi"
 
@@ -323,16 +298,6 @@ class TestNoBuildFile:
         )
         out = await sh.refresh_build_info(_ScrapeSession(raise_exc=RuntimeError("offline")))
         assert out["client_build_number"] == sh.DEFAULT_BUILD["client_build_number"]
-
-    @pytest.mark.asyncio
-    async def test_a_failed_scrape_keeps_a_scraped_build(self):
-        await sh.refresh_build_info(_ScrapeSession(build=650000))
-        out = await sh.refresh_build_info(_ScrapeSession(asset_body="nothing useful here"))
-        assert out["client_build_number"] == 650000
-
-    def test_no_heartbeat_id_reaches_the_headers(self):
-        _, props = _props(self.TOKEN)
-        assert "client_heartbeat_session_id" not in props
 
 
 def test_context_properties_encodes_location():

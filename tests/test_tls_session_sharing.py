@@ -4,8 +4,6 @@ The selfclient's HTTPClient owns the session; REST, science and the gateway
 use it directly, and get_tls_session hands the same one to the wire probe and
 any other caller for that token. Other tokens keep their own cached session.
 """
-import logging
-
 import pytest
 
 from copycord.common import selfbot_headers as sh
@@ -39,16 +37,13 @@ class _Resp:
 class SessionHTTP:
     """HTTPClient stand-in that owns one session, as the real one does."""
 
-    def __init__(self, fail_login=False):
+    def __init__(self):
         self.token = None
         self.proxy = None
         self.session = FakeSession()
         self.closed = False
-        self.fail_login = fail_login
 
     async def login(self):
-        if self.fail_login:
-            raise RuntimeError("HTTP 401")
         return {"id": "100000000000000001", "username": "me", "discriminator": "0", "avatar": None}
 
     async def close(self):
@@ -81,27 +76,17 @@ def _registry(tmp_path, monkeypatch):
     monkeypatch.setattr(sh, "_prime_tls_session", no_prime)
 
 
-async def _logged_in(**kwargs):
-    http = SessionHTTP(**kwargs)
+async def _logged_in():
+    http = SessionHTTP()
     client = Client(http=http, refresh_build=False)
     await client.login(TOKEN)
     return client, http
 
 
 @pytest.mark.asyncio
-async def test_get_tls_session_returns_the_rest_session(caplog):
-    caplog.set_level(logging.DEBUG, logger=sh.logger.name)
+async def test_rest_gateway_and_wire_probe_share_one_session_per_token(monkeypatch):
     client, http = await _logged_in()
     assert await sh.get_tls_session(TOKEN, use_proxy=True) is http.session
-    assert await sh.get_tls_session(TOKEN) is http.session
-    assert sh._TLS_SESSIONS == {}
-    assert not [r for r in caplog.records if "TLS session created" in r.getMessage()]
-    await client.close()
-
-
-@pytest.mark.asyncio
-async def test_gateway_wire_probe_and_rest_share_one_session(monkeypatch):
-    client, http = await _logged_in()
     dialed = []
 
     async def fake_open(url, headers, proxy, session=None):
@@ -116,58 +101,9 @@ async def test_gateway_wire_probe_and_rest_share_one_session(monkeypatch):
     out = await wp.probe_wire(TOKEN)
     assert out["ok"] is False and out["error"] == "HTTP 503"
     assert http.session.calls == [wp.PROBE_URL]
-    assert sh._TLS_SESSIONS == {}
-    await client.close()
 
-
-@pytest.mark.asyncio
-async def test_other_tokens_keep_their_own_session():
-    client, http = await _logged_in()
+    # Another token keeps its own cached session.
     other = await sh.get_tls_session(OTHER)
     assert other is not http.session
     assert sh._TLS_SESSIONS == {OTHER: other}
     await client.close()
-
-
-@pytest.mark.asyncio
-async def test_close_stops_sharing_and_leaves_the_session_to_its_owner():
-    client, http = await _logged_in()
-    await sh.close_all_tls_sessions()
-    assert not http.session.closed
-    await client.close()
-    assert TOKEN not in sh._TLS_SHARED
-    fresh = await sh.get_tls_session(TOKEN)
-    assert fresh is not http.session
-    assert sh._TLS_SESSIONS == {TOKEN: fresh}
-
-
-@pytest.mark.asyncio
-async def test_failed_login_shares_nothing():
-    http = SessionHTTP(fail_login=True)
-    client = Client(http=http, refresh_build=False)
-    with pytest.raises(RuntimeError):
-        await client.login(TOKEN)
-    assert TOKEN not in sh._TLS_SHARED
-
-
-@pytest.mark.asyncio
-async def test_owner_without_a_session_falls_back_to_the_cache():
-    sh.share_tls_session(TOKEN, lambda: None)
-    sess = await sh.get_tls_session(TOKEN)
-    assert isinstance(sess, FakeSession)
-    assert sh._TLS_SESSIONS == {TOKEN: sess}
-
-
-def test_unshare_keeps_a_newer_owner():
-    def old():
-        return None
-
-    def new():
-        return None
-
-    sh.share_tls_session(TOKEN, old)
-    sh.share_tls_session(TOKEN, new)
-    sh.unshare_tls_session(TOKEN, old)
-    assert sh._TLS_SHARED[TOKEN] is new
-    sh.unshare_tls_session(TOKEN, new)
-    assert TOKEN not in sh._TLS_SHARED

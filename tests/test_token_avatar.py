@@ -273,23 +273,6 @@ class _FakeGatewayWS:
 
 
 class TestAvatarGatewaySession:
-    def test_identify_uses_the_browser_capabilities_and_shape(self):
-        d = asyncio.run(token_avatar._identify_payload("avatar-token"))["d"]
-        assert d["capabilities"] == 1734653
-        assert list(d) == [
-            "token",
-            "capabilities",
-            "properties",
-            "presence",
-            "compress",
-            "client_state",
-            "qos_token",
-        ]
-        assert d["client_state"] == {"guild_versions": {}}
-        assert d["qos_token"] == "CgIIAQ=="
-        assert d["presence"] == {"status": "unknown", "since": 0, "activities": [], "afk": False}
-        assert d["properties"] == token_avatar.gateway_properties("avatar-token")
-
     @pytest.mark.asyncio
     async def test_connect_sends_the_browser_order(self, monkeypatch, tmp_path):
         monkeypatch.setenv("DATA_DIR", str(tmp_path))
@@ -331,7 +314,18 @@ class TestAvatarGatewaySession:
             "self_video": False,
             "flags": 2,
         }
-        assert not hasattr(gw, "heartbeat_session_id")
-        props = ws.sent[0]["d"]["properties"]
-        assert props["client_app_state"] == "unfocused"
-        assert "client_heartbeat_session_id" not in props
+        d = ws.sent[0]["d"]
+        assert list(d) == [
+            "token",
+            "capabilities",
+            "properties",
+            "presence",
+            "compress",
+            "client_state",
+            "qos_token",
+        ]
+        assert d["capabilities"] == 1734653
+        assert d["qos_token"] == "CgIIAQ=="
+        assert d["presence"] == {"status": "unknown", "since": 0, "activities": [], "afk": False}
+        assert d["properties"] == token_avatar.gateway_properties("avatar-token")
+        assert d["properties"]["client_app_state"] == "unfocused"

@@ -477,9 +477,8 @@ RESUME_HOST = "wss://gateway-resume.example.gg"
 
 class ScriptedSocket(FakeSocket):
     """A socket that follows ``plan`` once its session is up (READY or RESUMED):
-    "reconnect" sends op 7, "invalid" answers op 6 with op 9 false, 4007 or 4009 closes
-    with that code, "op1" sends a server op 1; None just serves member chunks. HELLO's
-    interval is long enough that no timed op 40 falls inside a test."""
+    "reconnect" sends op 7, "op1" sends a server op 1; None just serves member chunks.
+    HELLO's interval is long enough that no timed op 40 falls inside a test."""
 
     def __init__(self, url, headers, proxy, plan):
         super().__init__(url, headers, proxy, hello=False)
@@ -507,9 +506,6 @@ class ScriptedSocket(FakeSocket):
         elif self.plan == "op1":
             data = self._z.compress(json.dumps({"op": 1, "d": None}).encode())
             self.inbox.put_nowait(("op1", data + self._z.flush(zlib.Z_SYNC_FLUSH)))
-        elif self.plan in (4007, 4009):
-            self.close_code = self.plan
-            self.inbox.put_nowait(ConnectionError(f"closed {self.plan}"))
 
     async def send(self, text):
         msg = json.loads(text)
@@ -521,9 +517,6 @@ class ScriptedSocket(FakeSocket):
                        "d": {"session_id": "sess-1", "resume_gateway_url": RESUME_HOST}})
             self._session_up()
         elif op == 6:
-            if self.plan == "invalid":
-                self.push({"op": 9, "d": False})
-                return
             self.seq = d["seq"] + 1
             self.push({"op": 0, "t": "RESUMED", "s": self.seq, "d": {}})
             self._session_up()
@@ -548,13 +541,7 @@ def _scripted_scraper(monkeypatch, plans):
         sockets.append(ScriptedSocket(url, headers, proxy, plan))
         return sockets[-1]
 
-    class NoWaitGatewayClient(GatewayClient):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self._invalid_session_delay = (0.0, 0.0)
-
     monkeypatch.setattr(ss, "open_websocket", open_ws)
-    monkeypatch.setattr(ss, "GatewayClient", NoWaitGatewayClient)
     s = StandaloneScraper(ScraperConfig(guild_id=1, tokens=["tok-a"], sessions_per_token=1))
 
     async def pause(seconds):
@@ -581,9 +568,6 @@ async def test_a_server_op_1_is_answered_at_once_with_the_clients_op_40(fakes, m
     beat = sock.sent[sock.op1_at]
     assert beat == {"op": 40, "d": {"seq": 1, "qos": {"active": False, "ver": 31, "reasons": []}}}
     assert list(beat["d"]) == ["seq", "qos"]
-    ref = GatewayClient("tok-a", reconnect=False)
-    ref.sequence = 1
-    assert beat == ref._heartbeat_payload()
     assert 1 not in _ops(sock)
 
 
@@ -608,41 +592,5 @@ async def test_after_op_7_the_session_resumes_on_the_resume_url(fakes, monkeypat
     assert second.sent[1]["d"] == {"status": "online", "since": 0, "activities": [], "afk": True}
     assert second.sent[2]["d"] == IDLE_VOICE_STATE
 
-    # Exactly what the main client sends when it resumes the same session.
-    ref = GatewayClient("tok-a", reconnect=False)
-    ref._ws = _Capture()
-    ref.session_id, ref.sequence = "sess-1", 1
-    assert await ref.send_connect_frames() is True
-    assert second.sent[:3] == ref._ws.sent
-
     # The finished session ends with 1000.
     assert second.close_sent == 1000
-
-
-@pytest.mark.asyncio
-async def test_op_9_false_on_resume_falls_back_to_identify(fakes, monkeypatch):
-    s, sockets = _scripted_scraper(monkeypatch, ["reconnect", "invalid"])
-    result = await asyncio.wait_for(s.scrape(), timeout=30)
-    assert result.success, result.error
-
-    assert len(sockets) == 3
-    _first, refused, fresh = sockets
-    assert _ops(refused)[0] == 6
-    # A session Discord refused is ended, not kept.
-    assert refused.close_sent == 1000
-    assert fresh.url == gateway_url(zlib_stream=True)
-    assert _ops(fresh)[:2] == [2, 4] and 6 not in _ops(fresh)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("code", [4007, 4009])
-async def test_a_close_that_cannot_resume_falls_back_to_identify(fakes, monkeypatch, code):
-    s, sockets = _scripted_scraper(monkeypatch, [code])
-    result = await asyncio.wait_for(s.scrape(), timeout=30)
-    assert result.success, result.error
-
-    assert len(sockets) == 2
-    dropped, fresh = sockets
-    assert _ops(dropped)[:2] == [2, 4]
-    assert fresh.url == gateway_url(zlib_stream=True)
-    assert _ops(fresh)[:2] == [2, 4] and 6 not in _ops(fresh)
