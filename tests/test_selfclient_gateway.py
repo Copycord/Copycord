@@ -1,4 +1,4 @@
-"""selfclient.gateway: handshake, heartbeat, resume, close codes, op 37, zlib-stream.
+"""selfclient.gateway: handshake, op 40 heartbeat, resume, close codes, op 37, zlib-stream.
 
 A fake websocket replays canned frames through the connector. Heartbeat
 intervals are tens of milliseconds so those paths run in real time.
@@ -51,7 +51,7 @@ class FakeWS:
     async def send(self, data):
         msg = json.loads(data)
         self.sent.append(msg)
-        if self.auto_ack and msg.get("op") == 1:
+        if self.auto_ack and msg.get("op") == 40:
             self.feed({"op": 11})
 
     async def close(self, code=1000, reason=""):
@@ -150,12 +150,6 @@ def ready(session="sess-1", resume="wss://resume.example.gg", guilds=("1", "2"),
     }
 
 
-@pytest.fixture
-def no_jitter(monkeypatch):
-    """First heartbeat right away instead of at interval * random()."""
-    monkeypatch.setattr(sc_gateway.random, "random", lambda: 0.0)
-
-
 # url
 
 
@@ -200,21 +194,119 @@ class TestHandshake:
         assert q == {"encoding": ["json"], "v": ["9"], "compress": ["zlib-stream"]}
 
     @pytest.mark.asyncio
-    async def test_ready_subscribes_and_sends_time_spent(self):
+    async def test_ready_subscribes_and_sends_no_time_spent(self):
         ws = FakeWS([hello(), ready(guilds=("1", "2", "3"))])
         client, _ = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: ws.frames(37) and ws.frames(41))
+        await wait_until(lambda: ws.frames(37))
         await stop(client, task)
 
         subs = {}
         for frame in ws.frames(37):
             subs.update(frame["d"]["subscriptions"])
         assert set(subs) == {"1", "2", "3"}
-        op41 = ws.frames(41)[0]["d"]
-        assert op41["session_id"] == client.heartbeat_session_id
-        assert op41["client_launch_id"]
+        assert not ws.frames(41), "an unfocused tab sends no op 41"
         assert client.session_id == "sess-1"
+
+    @pytest.mark.asyncio
+    async def test_fresh_connect_sends_the_browser_order_and_identify(self):
+        ws = FakeWS([hello(20)], auto_ack=True)
+        client, _ = make_client(ws)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: len(ws.frames(40)) >= 2)
+        await stop(client, task)
+
+        ops = ws.ops()
+        assert ops[:3] == [2, 4, 40], "op 2, op 4, then op 40; no op 41"
+        assert set(ops[2:]) == {40}
+        op4 = ws.frames(4)[0]["d"]
+        assert list(op4.items()) == [
+            ("guild_id", None),
+            ("channel_id", None),
+            ("self_mute", True),
+            ("self_deaf", False),
+            ("self_video", False),
+            ("flags", 2),
+        ]
+
+        d = ws.frames(2)[0]["d"]
+        assert list(d) == [
+            "token",
+            "capabilities",
+            "properties",
+            "presence",
+            "compress",
+            "client_state",
+            "qos_token",
+        ]
+        assert d["client_state"] == {"guild_versions": {}}
+        assert d["qos_token"] == "CgIIAQ=="
+        assert list(d["presence"].items()) == [
+            ("status", "unknown"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", False),
+        ]
+        props = d["properties"]
+        assert list(props) == [
+            "os",
+            "browser",
+            "device",
+            "device_model_name",
+            "system_locale",
+            "has_client_mods",
+            "browser_user_agent",
+            "browser_version",
+            "os_version",
+            "referrer",
+            "referring_domain",
+            "referrer_current",
+            "referring_domain_current",
+            "release_channel",
+            "client_build_number",
+            "client_event_source",
+            "client_launch_id",
+            "launch_signature",
+            "client_app_state",
+            "is_fast_connect",
+            "gateway_connect_reasons",
+            "installation_id",
+        ]
+        assert props["device_model_name"] == ""
+        assert props["client_app_state"] == "unfocused"
+        assert "client_heartbeat_session_id" not in props
+        assert props["is_fast_connect"] is False
+        assert props["gateway_connect_reasons"] == "AppSkeleton"
+        rest = sc_gateway.fingerprint.selfbot_headers._fingerprint(TOKEN)["super_props"]
+        assert props["launch_signature"] == rest["launch_signature"]
+
+
+# presence
+
+
+class TestPresence:
+    @pytest.mark.asyncio
+    async def test_one_op3_a_while_after_ready(self):
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws, presence_delay=0.2)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(37))
+        assert not ws.frames(3), "no op 3 on READY"
+        await wait_until(lambda: ws.frames(3))
+        assert loop.time() - started >= 0.2
+        await asyncio.sleep(0.3)
+        await stop(client, task)
+
+        assert len(ws.frames(3)) == 1, "op 3 goes out once"
+        assert ws.ops()[:3] == [2, 4, 37]
+        assert list(ws.frames(3)[0]["d"].items()) == [
+            ("status", "online"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", True),
+        ]
 
 
 # heartbeat
@@ -222,38 +314,59 @@ class TestHandshake:
 
 class TestHeartbeat:
     @pytest.mark.asyncio
-    async def test_heartbeat_sent_on_interval(self, no_jitter):
+    async def test_heartbeat_sent_on_interval(self):
         ws = FakeWS(
             [hello(20), {"op": 0, "t": "SOMETHING", "s": 5, "d": {}}], auto_ack=True
         )
         client, dialer = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: len(ws.frames(1)) >= 3)
+        await wait_until(lambda: len(ws.frames(40)) >= 3)
         await stop(client, task)
 
-        assert ws.frames(1)[-1]["d"] == 5, "heartbeat carries the last sequence"
+        assert ws.frames(40)[-1]["d"]["seq"] == 5, "heartbeat carries the last sequence"
+        assert not ws.frames(1), "the web client sends no op 1"
         assert len(dialer.urls) == 1, "an acked connection must not reconnect"
         assert client.latency != float("inf")
 
     @pytest.mark.asyncio
-    async def test_server_heartbeat_request_is_answered(self):
-        ws = FakeWS([hello(), {"op": 1, "d": None}])
+    async def test_server_heartbeat_request_is_answered_with_op40(self, monkeypatch):
+        # The first scheduled beat is a whole 45 s interval away, so any op 40
+        # here is the answer to the server's op 1.
+        monkeypatch.setattr(sc_gateway.random, "random", lambda: 1.0)
+        ws = FakeWS(
+            [
+                hello(),
+                {"op": 0, "t": "SOMETHING", "s": 7, "d": {}},
+                {"op": 1, "d": None},
+                {"op": 0, "t": "SOMETHING", "s": 8, "d": {}},
+                {"op": 1, "d": 8},
+            ]
+        )
         client, _ = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: ws.frames(1))
+        await wait_until(lambda: len(ws.frames(40)) >= 2)
+        await asyncio.sleep(0.05)
         await stop(client, task)
 
+        assert not ws.frames(1), "the web client answers with op 40, never op 1"
+        assert ws.ops() == [2, 4, 40, 40]
+        assert [beat["d"]["seq"] for beat in ws.frames(40)] == [7, 8], "the current seq"
+        # An unfocused tab: qos.active false on every beat.
+        for beat in ws.frames(40):
+            assert list(beat["d"]) == ["seq", "qos"]
+            assert list(beat["d"]["qos"].items()) == [("active", False), ("ver", 31), ("reasons", [])]
+
     @pytest.mark.asyncio
-    async def test_zombie_reconnects_when_no_ack(self, no_jitter):
+    async def test_zombie_reconnects_when_no_ack(self):
         first = FakeWS([hello(20)])
-        second = FakeWS([hello()])
+        second = FakeWS([hello(20)])
         client, dialer = make_client(first, second)
         task = asyncio.create_task(client.run(refresh_build=False))
-        await wait_until(lambda: second.frames(2))
+        await wait_until(lambda: second.frames(40))
         await stop(client, task)
 
         assert first.closed and first.close_code == RESUME_CLOSE_CODE
-        assert len(first.frames(1)) >= 2
+        assert len(first.frames(40)) >= 2
         assert len(dialer.urls) >= 2
 
 
@@ -286,6 +399,52 @@ class TestResume:
         assert set(subs) == {"10", "20"}
         for features in subs.values():
             assert features["typing"] is True and features["threads"] is True
+
+    @pytest.mark.asyncio
+    async def test_resume_sends_the_browser_order(self):
+        first = FakeWS([hello(), ready(guilds=("10", "20")), {"op": 7, "d": None}])
+        second = FakeWS([hello(), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}])
+        client, _ = make_client(first, second)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: second.frames(37) and client.is_connected)
+        await asyncio.sleep(0.05)
+        await stop(client, task)
+
+        ops = second.ops()
+        assert ops[:4] == [6, 3, 4, 37], "op 6, op 3, op 4, op 37; op 40 waits"
+        assert set(ops[4:]) <= {40}
+        assert list(second.sent[1]["d"].items()) == [
+            ("status", "online"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", True),
+        ]
+        assert list(second.sent[2]["d"].items()) == list(sc_gateway.IDLE_VOICE_STATE.items())
+        assert not first.frames(41) and not second.frames(41), "no op 41, fresh or RESUME"
+
+    @pytest.mark.asyncio
+    async def test_resume_op37_has_the_full_shape(self):
+        first = FakeWS([hello(), ready(guilds=("10", "20", "30")), {"op": 7, "d": None}])
+        second = FakeWS([hello(), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}])
+        client, _ = make_client(first, second)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: second.frames(37) and client.is_connected)
+        await asyncio.sleep(0.05)
+        await stop(client, task)
+
+        (op37,) = second.frames(37)
+        subs = op37["d"]["subscriptions"]
+        assert list(subs) == ["10", "20", "30"]
+        for features in subs.values():
+            assert list(features.items()) == [
+                ("typing", True),
+                ("threads", True),
+                ("activities", True),
+                ("members", []),
+                ("member_updates", False),
+                ("channels", {}),
+                ("thread_member_lists", []),
+            ]
 
     @pytest.mark.asyncio
     async def test_non_resumable_invalid_session_identifies_fresh(self):
@@ -442,10 +601,11 @@ class TestSubscriptionFrames:
             assert frame["op"] == 37
             for gid, features in frame["d"]["subscriptions"].items():
                 seen.append(gid)
-                assert features["typing"] is True
-                assert features["threads"] is True
-                assert features["activities"] is True
-                assert features["member_updates"] is True
+                assert list(features.items()) == [
+                    ("typing", True),
+                    ("activities", True),
+                    ("threads", True),
+                ]
         assert sorted(seen) == sorted(ids)
         assert len(seen) == len(set(seen)), "a guild must appear in exactly one frame"
 
@@ -570,13 +730,20 @@ class TestDispatch:
         client, _ = make_client(ws)
         task = asyncio.create_task(client.run(refresh_build=False))
         await wait_until(lambda: client.session_id)
-        await client.request_guild_members("1", query="ab", limit=100, nonce="n1")
-        await wait_until(lambda: ws.frames(8))
+        await client.request_guild_members("1", query="a", limit=10, presences=True)
+        await client.request_guild_members("1", user_ids=["7", "8"])
+        await wait_until(lambda: len(ws.frames(8)) == 2)
         await stop(client, task)
-        assert ws.frames(8)[0]["d"] == {
-            "guild_id": "1",
-            "limit": 100,
-            "presences": False,
-            "query": "ab",
-            "nonce": "n1",
-        }
+        search, by_ids = (frame["d"] for frame in ws.frames(8))
+        # Chrome's two op 8 shapes, key order included, never a nonce.
+        assert list(search.items()) == [
+            ("guild_id", ["1"]),
+            ("query", "a"),
+            ("limit", 10),
+            ("presences", True),
+        ]
+        assert list(by_ids.items()) == [
+            ("guild_id", ["1"]),
+            ("user_ids", ["7", "8"]),
+            ("presences", False),
+        ]

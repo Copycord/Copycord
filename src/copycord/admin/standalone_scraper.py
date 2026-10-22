@@ -20,7 +20,6 @@ import logging
 import os
 import random
 import time
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
@@ -39,9 +38,10 @@ from copycord.common.selfbot_headers import (
     TLS_IMPERSONATE,
     _mask_proxy_for_log,
     build_headers,
-    set_heartbeat_session_id,
 )
+from copycord.selfclient import qos
 from copycord.selfclient.gateway import (
+    RESUME_CLOSE_CODE,
     GatewayClient,
     ZlibStreamInflater,
     gateway_url,
@@ -560,7 +560,6 @@ class StandaloneScraper:
         self._slot_proxies: Dict[tuple, Optional[str]] = {}
         self._http_sessions: Dict[tuple, Any] = {}
         self._bio_failures: Dict[str, int] = {}
-        self._heartbeat_ids: Dict[str, str] = {}
         self._recorder: Optional[DebugRecorder] = (
             DebugRecorder(
                 config.tokens,
@@ -923,11 +922,12 @@ class StandaloneScraper:
         session_index: int = 0,
         session_slot: int = 0,
     ):
-        """A gateway socket opened the way the client opens one: the zlib-stream URL, the
-        client's upgrade headers for this token, and the proxy's tunnel. ``identity``
-        sends on it while it is open. With the debug report on, the upgrade headers are
-        recorded as the socket is opened and the identity's frames as they are sent."""
-        url = gateway_url(zlib_stream=True)
+        """A gateway socket opened the way the client opens one: the zlib-stream URL (the
+        session's resume_gateway_url while it can resume), the client's upgrade headers
+        for this token, and the proxy. ``identity`` sends on it while it is open. With
+        the debug report on, the upgrade headers are recorded as the socket is opened
+        and the identity's frames as they are sent."""
+        url = gateway_url(identity.resume_url or identity.host, zlib_stream=True)
         headers = identity._ws_headers()
         rec = self._recorder
         if rec is not None:
@@ -939,7 +939,10 @@ class StandaloneScraper:
                 slot=session_slot,
                 proxy=proxy,
             )
-        ws = await open_websocket(url, headers, proxy)
+        # The slot's REST session, so its REST and gateway carry one TLS identity.
+        ws = await open_websocket(
+            url, headers, proxy, session=self._http(identity.token, session_slot)
+        )
         identity._ws = (
             ws
             if rec is None
@@ -953,7 +956,11 @@ class StandaloneScraper:
         finally:
             identity._ws = None
             try:
-                await asyncio.wait_for(ws.close(), timeout=0.5)
+                if identity.can_resume:
+                    # A 4000-range close keeps the session resumable for the next socket.
+                    await asyncio.wait_for(ws.close(code=RESUME_CLOSE_CODE), timeout=0.5)
+                else:
+                    await asyncio.wait_for(ws.close(), timeout=0.5)
             except Exception:
                 pass
 
@@ -999,7 +1006,6 @@ class StandaloneScraper:
         # on connecting: its upgrade headers and its IDENTIFY. Sessions of the same token
         # share the token's fingerprint, as the client's do.
         identity = GatewayClient(token, reconnect=False)
-        identity.heartbeat_session_id = self._heartbeat_ids.get(token, identity.heartbeat_session_id)
 
         max_reconnects = 5
         max_total_reconnects = 999
@@ -1053,13 +1059,22 @@ class StandaloneScraper:
                     hb_interval = hello["d"]["heartbeat_interval"] / 1000.0
 
                     hb_stop = asyncio.Event()
-                    seq_num = [None]
+                    # The client's op 40 heartbeats, from a fresh sequence unless the
+                    # session resumes.
+                    if not identity.can_resume:
+                        identity.sequence = None
 
                     async def heartbeater():
-                        await asyncio.sleep(hb_interval * random.uniform(0.1, 0.9))
+                        # The first beat is jittered, as the gateway docs ask.
+                        try:
+                            await asyncio.wait_for(
+                                hb_stop.wait(), timeout=hb_interval * random.random()
+                            )
+                        except asyncio.TimeoutError:
+                            pass
                         while not hb_stop.is_set():
                             try:
-                                await ws.send(json.dumps({"op": 1, "d": seq_num[0]}))
+                                await identity._send_heartbeat()
                             except Exception:
                                 return
                             try:
@@ -1071,11 +1086,14 @@ class StandaloneScraper:
 
                     hb_task = asyncio.create_task(heartbeater())
 
-                    # The client's own IDENTIFY: capabilities, this token's web-client
-                    # properties, presence, compress and client_state.
-                    await identity._send_identify()
+                    # The client's own connect: op 6, op 3, op 4 on a session that can
+                    # resume, else IDENTIFY and op 4; op 40 follows. No op 41: an
+                    # unfocused tab makes no heartbeat session id.
+                    await identity.send_connect_frames()
 
                     ready = False
+                    # Set when this socket ends in a way the next one can RESUME from.
+                    resumable_exit = False
 
                     async def send_query(q: str):
                         nonlocal queries_total
@@ -1179,6 +1197,13 @@ class StandaloneScraper:
                             self._debug(
                                 f"[S{session_index}] WS closed/error: {exc!r}", "warn"
                             )
+                            code = getattr(ws, "close_code", None)
+                            if code is not None:
+                                # As the client: 4007 and 4009 leave only a fresh IDENTIFY.
+                                identity._handle_close(
+                                    code, str(getattr(ws, "close_reason", "") or "")
+                                )
+                            resumable_exit = True
                             break
 
                         if isinstance(data, dict):
@@ -1187,10 +1212,14 @@ class StandaloneScraper:
                             d = data.get("d")
                             s = data.get("s")
                             if s is not None:
-                                seq_num[0] = s
+                                identity.sequence = s
 
                             if op == 0 and t == "READY":
                                 ready = True
+                                identity.session_id = (d or {}).get("session_id")
+                                identity.resume_url = (d or {}).get("resume_gateway_url")
+                                # Its next fresh IDENTIFY sends READY's qos_token back.
+                                qos.remember_ready(identity.token, d)
                                 self._sessions_ready += 1
                                 self._log(
                                     f"🟢 Session {session_index + 1} connected",
@@ -1198,6 +1227,18 @@ class StandaloneScraper:
                                 )
                                 await asyncio.sleep(0.3)
                                 await pump_queries()
+
+                            elif op == 0 and t == "RESUMED":
+                                ready = True
+                                self._log(
+                                    f"🟢 Session {session_index + 1} resumed",
+                                    "info",
+                                )
+                                await pump_queries()
+
+                            elif op == 1:
+                                # A server op 1 is answered at once, as the client does.
+                                await identity._send_heartbeat()
 
                             elif op == 0 and t == "GUILD_MEMBERS_CHUNK":
                                 nonce = (d or {}).get("nonce")
@@ -1306,13 +1347,22 @@ class StandaloneScraper:
                                 pass
                             elif op == 9:
                                 self._debug(
-                                    f"[S{session_index}] Invalid session, reconnecting...",
+                                    f"[S{session_index}] Invalid session (resumable={bool(d)}), reconnecting...",
                                     "warn",
                                 )
                                 self._log(
                                     f"🔄 Session {session_index + 1} reconnecting...",
                                     "warn",
                                 )
+                                # As the client: wait 1-5 s, then RESUME if Discord allows
+                                # it, else forget the session and IDENTIFY.
+                                await asyncio.sleep(
+                                    random.uniform(*identity._invalid_session_delay)
+                                )
+                                if d:
+                                    resumable_exit = True
+                                else:
+                                    identity._reset_session()
                                 break
                             elif op == 7:
                                 self._debug(
@@ -1323,6 +1373,7 @@ class StandaloneScraper:
                                     f"🔄 Session {session_index + 1} reconnecting...",
                                     "warn",
                                 )
+                                resumable_exit = True
                                 break
 
                         if (
@@ -1333,7 +1384,13 @@ class StandaloneScraper:
                                 f"[S{session_index}] Stall detected, breaking",
                                 "warn",
                             )
+                            resumable_exit = True
                             break
+
+                    if not resumable_exit:
+                        # Done with the session: the socket closes with 1000, which ends
+                        # it, so a later socket starts with IDENTIFY.
+                        identity._reset_session()
 
                     pq_len = await planner.queue_len()
                     self._debug(
@@ -1410,11 +1467,6 @@ class StandaloneScraper:
         self._bio_failures = {}
         bio_tasks: List[asyncio.Task] = []
         self._plan_proxies(self.config.tokens)
-        # One heartbeat session id per token for the whole run, shared by REST and the
-        # gateway, as a launched web client keeps one per launch.
-        self._heartbeat_ids = {t: str(uuid.uuid4()) for t in self.config.tokens}
-        for t, hb in self._heartbeat_ids.items():
-            set_heartbeat_session_id(t, hb)
         # X-Discord-Timezone comes from the exit IP of each token's REST proxy, as elsewhere.
         await asyncio.gather(
             *(note_token_proxy(t, self._proxy_for(t, 0)) for t in self.config.tokens)

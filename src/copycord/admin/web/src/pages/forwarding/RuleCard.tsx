@@ -1,6 +1,6 @@
 // One rule card: title, provider badge, status pill, the Edit, Enable/Disable,
 // Duplicate and Delete buttons and the per rule forwarded count. The plain
-// class names are hooks for the e2e specs.
+// class names are stable hooks that tests select by.
 
 import { CARD_HOVER, cx } from "../../components/ui";
 import type { ForwardingRule } from "../../types/forwarding";

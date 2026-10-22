@@ -7,60 +7,66 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""User-token gateway over raw websockets.
+"""User-token gateway over a curl_cffi websocket.
 
-Handlers get raw dispatch payloads. The proxy tunnel is opened here because
-websockets 11 has no ``proxy=`` argument. A failed dial rotates the proxy
-lease; a close from Discord does not.
+Handlers get raw dispatch payloads. The socket is dialed through curl_cffi with
+the same Chrome impersonation as REST, so its TLS handshake is Chrome's, not
+Python's. A failed dial rotates the proxy lease; a close from Discord does not.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
+import copy
 import json
 import logging
 import random
-import socket
 import time
-import uuid
 import zlib
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
+from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
 
-from . import fingerprint
+from . import fingerprint, qos
 from .enums import API_VERSION, FATAL_CLOSE_CODES, Capabilities, CloseCode, GatewayOp
 from .errors import ConnectionClosed, LoginFailure
 
 try:
-    import websockets
-    from websockets.exceptions import ConnectionClosed as _WSClosed
+    from curl_cffi.const import CurlWsFlag as _CurlWsFlag
+    from curl_cffi.curl import CurlError as _CurlError
+    from curl_cffi.requests import AsyncSession as _CurlAsyncSession
 
-    _WS_MAJOR = int(str(getattr(websockets, "__version__", "11")).split(".")[0])
+    _WS_TEXT = int(_CurlWsFlag.TEXT)
+    _WS_BINARY = int(_CurlWsFlag.BINARY)
+    _WS_CLOSE = int(_CurlWsFlag.CLOSE)
 except ImportError:  # the tests drive a fake socket and do not need it
-    websockets = None
-    _WS_MAJOR = 0
+    _CurlAsyncSession = None
+    _WS_TEXT, _WS_BINARY, _WS_CLOSE = 1, 2, 8
+
+    class _CurlError(Exception):  # type: ignore[no-redef]
+        code = 0
+
+
+try:
+    # A connector may still hand over a socket from the websockets library.
+    from websockets.exceptions import ConnectionClosed as _WSClosed
+except ImportError:
 
     class _WSClosed(Exception):  # type: ignore[no-redef]
         rcvd = None
         sent = None
 
 
-try:
-    from python_socks.async_.asyncio import Proxy as _SocksProxy
-except ImportError:  # only needed for socks4/socks5 proxies
-    _SocksProxy = None
-
 log = logging.getLogger("selfclient.gateway")
 
 GATEWAY_HOST = "wss://gateway.discord.gg/"
 
-# websockets 14 replaced the legacy client and renamed its header argument.
-_HEADERS_KWARG = "additional_headers" if _WS_MAJOR >= 14 else "extra_headers"
-
-MAX_FRAME_SIZE = 10 * 1024 * 1024
+# The largest single message curl_cffi will take (its default is 4 MiB). READY
+# decoded to 9.5 MB in captures; zlib-stream frames are smaller, but a socket
+# that fell back to plain JSON gets READY in one piece.
+MAX_FRAME_SIZE = 16 * 1024 * 1024
 OPEN_TIMEOUT = 20.0
 
 # Discord ends each zlib-stream message with this Z_SYNC_FLUSH trailer.
@@ -82,16 +88,46 @@ CAPABILITIES = Capabilities.DEFAULT  # 1734653
 # once subscribed via `typing`, adding `threads` later sends no THREAD_LIST_SYNC.
 SUBSCRIPTION_FEATURES = {
     "typing": True,
+    "activities": True,
+    "threads": True,
+}
+
+# What op 37 carries per guild right after a RESUME: the full shape, in the
+# browser's key order (notes2.har). Opening a guild uses the short one above.
+RESUME_SUBSCRIPTION_FEATURES = {
+    "typing": True,
     "threads": True,
     "activities": True,
-    "member_updates": True,
+    "members": [],
+    "member_updates": False,
+    "channels": {},
+    "thread_member_lists": [],
 }
 
 # Discord drops oversized op 37 frames, so batches are split to stay under this.
 MAX_SUBSCRIPTION_PAYLOAD = 15360
 
-# op 41 cadence, the web client's.
-TIME_SPENT_INTERVAL = 30 * 60
+# Dispatches worth a DEBUG line; the rest are content traffic.
+SESSION_DISPATCHES = frozenset(
+    {"READY", "READY_SUPPLEMENTAL", "RESUMED", "SESSIONS_REPLACE"}
+)
+
+# op 40 `qos.ver` the web client sends.
+QOS_VERSION = 31
+
+# Seconds after READY on a fresh connect before the one op 3 an unfocused tab
+# sends (the overnight capture: IDENTIFY 02:05:19, op 3 02:06:49).
+PRESENCE_DELAY = 90.0
+
+# op 4 the web client sends right after IDENTIFY: in no voice channel.
+IDLE_VOICE_STATE = {
+    "guild_id": None,
+    "channel_id": None,
+    "self_mute": True,
+    "self_deaf": False,
+    "self_video": False,
+    "flags": 2,
+}
 
 EventHandler = Callable[[Any], Awaitable[Any]]
 DispatchHandler = Callable[[str, Any], Awaitable[Any]]
@@ -112,10 +148,12 @@ def gateway_url(host: str = GATEWAY_HOST, *, zlib_stream: bool = False) -> str:
     return urlunsplit(parts._replace(path=path, query=urlencode(params)))
 
 
-def build_subscription_frames(guild_ids: Iterable[Any]) -> List[Dict[str, Any]]:
+def build_subscription_frames(
+    guild_ids: Iterable[Any], features: Dict[str, Any] = SUBSCRIPTION_FEATURES
+) -> List[Dict[str, Any]]:
     """Batch guild ids into as few op 37 frames as the size cap allows."""
     frames: List[Dict[str, Any]] = []
-    batch: Dict[str, Dict[str, bool]] = {}
+    batch: Dict[str, Dict[str, Any]] = {}
     seen: set = set()
 
     def flush() -> None:
@@ -132,16 +170,56 @@ def build_subscription_frames(guild_ids: Iterable[Any]) -> List[Dict[str, Any]]:
         if gid in seen:
             continue
         seen.add(gid)
-        batch[gid] = dict(SUBSCRIPTION_FEATURES)
+        batch[gid] = copy.deepcopy(features)
         if (
             len(batch) > 1
             and len(json.dumps({"subscriptions": batch})) > MAX_SUBSCRIPTION_PAYLOAD
         ):
             del batch[gid]
             flush()
-            batch[gid] = dict(SUBSCRIPTION_FEATURES)
+            batch[gid] = copy.deepcopy(features)
     flush()
     return frames
+
+
+def frame_summary(payload: Dict[str, Any]) -> str:
+    """One line describing an outgoing frame, for debug logs. Never the token."""
+    op = payload.get("op")
+    d = payload.get("d")
+    d = d if isinstance(d, dict) else {}
+    if op == GatewayOp.IDENTIFY:
+        props = d.get("properties") or {}
+        return (
+            f"op 2 IDENTIFY build={props.get('client_build_number')}"
+            f" os={props.get('os_version')}"
+            f" app_state={props.get('client_app_state')}"
+        )
+    if op == GatewayOp.PRESENCE_UPDATE:
+        return (
+            f"op 3 presence status={d.get('status')} afk={d.get('afk')}"
+            f" activities={len(d.get('activities') or [])}"
+        )
+    if op == GatewayOp.VOICE_STATE_UPDATE:
+        return (
+            f"op 4 voice guild={d.get('guild_id')} channel={d.get('channel_id')}"
+            f" flags={d.get('flags')}"
+        )
+    if op == GatewayOp.RESUME:
+        return f"op 6 RESUME session={d.get('session_id')} seq={d.get('seq')}"
+    if op == GatewayOp.REQUEST_GUILD_MEMBERS:
+        guilds = d.get("guild_id")
+        count = len(guilds) if isinstance(guilds, list) else int(guilds is not None)
+        if "user_ids" in d:
+            target = f"user_ids={len(d.get('user_ids') or [])}"
+        else:
+            target = f"query={str(d.get('query', ''))[:32]!r} limit={d.get('limit')}"
+        return f"op 8 members guilds={count} {target} presences={d.get('presences')}"
+    if op == GatewayOp.BULK_GUILD_SUBSCRIBE:
+        return f"op 37 subscribe guilds={len(d.get('subscriptions') or {})}"
+    if op == GatewayOp.QOS_HEARTBEAT:
+        state = d.get("qos") or {}
+        return f"op 40 heartbeat seq={d.get('seq')} active={state.get('active')}"
+    return f"op {op}"
 
 
 class ZlibStreamInflater:
@@ -205,86 +283,136 @@ def mask_proxy(proxy: Optional[str]) -> str:
     return proxy
 
 
-async def _http_connect_tunnel(
-    proxy: str, host: str, port: int, *, timeout: float
-) -> socket.socket:
-    """Open a CONNECT tunnel to host:port through an HTTP proxy.
+def curl_proxy_url(proxy: Optional[str]) -> Optional[str]:
+    """``proxy`` as curl should dial it, keeping what the old tunnel did with it.
 
-    ``https://`` proxies are dialed the same way, as plain CONNECT proxies.
+    ``https://`` proxies were plain CONNECT proxies, so they become ``http://``
+    (to curl, https:// means TLS to the proxy itself). ``socks5://`` resolved the
+    host at the proxy, which curl calls ``socks5h://``. Raises ProxyTunnelError
+    for a scheme neither supports.
     """
+    if not proxy:
+        return None
     parts = urlsplit(proxy)
+    scheme = (parts.scheme or "").lower()
     if not parts.hostname:
         raise ProxyTunnelError(f"unparsable proxy url {mask_proxy(proxy)}")
-    loop = asyncio.get_running_loop()
-    infos = await loop.getaddrinfo(
-        parts.hostname, parts.port or 8080, type=socket.SOCK_STREAM
-    )
-    sock: Optional[socket.socket] = None
-    last_exc: Optional[BaseException] = None
-    for family, type_, proto, _, addr in infos:
-        candidate = socket.socket(family, type_, proto)
-        candidate.setblocking(False)
+    renamed = {"https": "http", "socks5": "socks5h"}.get(scheme, scheme)
+    if renamed not in ("http", "socks4", "socks4a", "socks5h"):
+        raise ProxyTunnelError(f"unsupported proxy scheme {scheme!r}")
+    if renamed == scheme:
+        return proxy
+    return urlunsplit(parts._replace(scheme=renamed))
+
+
+class SocketClosed(Exception):
+    """The gateway socket closed or broke. ``code`` is the close code, if known."""
+
+    rcvd = None
+
+    def __init__(self, message: str = "", code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# What the receive loop and the senders treat as "this socket is gone".
+_CLOSED_ERRORS = (_WSClosed, SocketClosed)
+
+
+def _consume_result(task: "asyncio.Future[Any]") -> None:
+    """Mark a finished receive as retrieved, so an unread error is not logged."""
+    if not task.cancelled():
+        task.exception()
+
+
+class CurlWebSocket:
+    """A curl_cffi AsyncWebSocket behind the interface the gateway loop uses:
+    ``send(text)``, ``recv()``, ``async for``, ``close(code)``, ``close_code``
+    and ``close_reason``. curl_cffi's errors come out as SocketClosed.
+
+    A ``recv()`` cancelled by a timeout keeps its read pending, and the next
+    ``recv()`` returns it: dropping one frame would break the zlib stream.
+    """
+
+    def __init__(self, ws: Any, owned_session: Any = None) -> None:
+        self._ws = ws
+        # The session open_websocket made for this socket alone; closed with it.
+        self._owned_session = owned_session
+        self._pending: Optional["asyncio.Future[Any]"] = None
+        self._error_code: Optional[int] = None
+        self._sent_code: Optional[int] = None
+
+    @property
+    def close_code(self) -> Optional[int]:
+        """The code Discord closed with, else the one curl_cffi reported, else the one we sent."""
+        code = getattr(self._ws, "close_code", None)
+        if code is not None:
+            return int(code)
+        return self._error_code if self._error_code is not None else self._sent_code
+
+    @property
+    def close_reason(self) -> str:
+        return str(getattr(self._ws, "close_reason", None) or "")
+
+    def _closed(self, exc: BaseException) -> SocketClosed:
+        code = getattr(exc, "code", None)
+        # curl_cffi puts either a close code or a libcurl error number here.
+        if isinstance(code, int) and 1000 <= code < 5000 and self._error_code is None:
+            self._error_code = int(code)
+        return SocketClosed(str(exc) or type(exc).__name__, self.close_code)
+
+    async def send(self, data: Any) -> None:
+        flags = _WS_TEXT if isinstance(data, str) else _WS_BINARY
         try:
-            await asyncio.wait_for(loop.sock_connect(candidate, addr), timeout)
-        except (OSError, asyncio.TimeoutError) as exc:
-            candidate.close()
-            last_exc = exc
-            continue
-        sock = candidate
-        break
-    if sock is None:
-        raise ProxyTunnelError(f"could not reach proxy {mask_proxy(proxy)}: {last_exc!r}")
+            await self._ws.send(data, flags)
+        except _CurlError as exc:
+            raise self._closed(exc) from exc
 
-    try:
-        lines = [f"CONNECT {host}:{port} HTTP/1.1", f"Host: {host}:{port}"]
-        if parts.username is not None:
-            creds = f"{unquote(parts.username)}:{unquote(parts.password or '')}"
-            token = base64.b64encode(creds.encode()).decode()
-            lines.append(f"Proxy-Authorization: Basic {token}")
-        request = ("\r\n".join(lines) + "\r\n\r\n").encode()
-        await asyncio.wait_for(loop.sock_sendall(sock, request), timeout)
+    async def recv(self) -> Any:
+        """The next message: ``str`` for a text frame, ``bytes`` for binary."""
+        task = self._pending
+        if task is None:
+            task = self._pending = asyncio.ensure_future(self._ws.recv())
+            task.add_done_callback(_consume_result)
+        try:
+            payload, flags = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.cancelled():
+                self._pending = None
+            raise
+        except _CurlError as exc:
+            self._pending = None
+            raise self._closed(exc) from exc
+        self._pending = None
+        if flags & _WS_CLOSE:
+            raise SocketClosed("close frame", self.close_code)
+        if flags & _WS_TEXT:
+            return bytes(payload).decode("utf-8", errors="replace")
+        return payload
 
-        response = b""
-        while b"\r\n\r\n" not in response:
-            chunk = await asyncio.wait_for(loop.sock_recv(sock, 4096), timeout)
-            if not chunk:
-                raise ProxyTunnelError("proxy closed the connection during CONNECT")
-            response += chunk
-            if len(response) > 65536:
-                raise ProxyTunnelError("oversized CONNECT response")
-        head, _, rest = response.partition(b"\r\n\r\n")
-        status_line = head.split(b"\r\n", 1)[0].decode("latin-1")
-        fields = status_line.split()
-        if len(fields) < 2 or fields[1] != "200":
-            raise ProxyTunnelError(f"proxy CONNECT refused: {status_line!r}")
-        # The client speaks first in TLS, so nothing may follow the 200 yet.
-        if rest:
-            raise ProxyTunnelError("unexpected bytes after CONNECT response")
-        return sock
-    except BaseException:
-        sock.close()
-        raise
+    def __aiter__(self) -> "CurlWebSocket":
+        return self
 
+    async def __anext__(self) -> Any:
+        try:
+            return await self.recv()
+        except SocketClosed:
+            raise StopAsyncIteration from None
 
-async def open_proxy_tunnel(
-    proxy: str, host: str, port: int, *, timeout: float = OPEN_TIMEOUT
-) -> socket.socket:
-    """A connected socket to host:port through ``proxy``, ready for TLS."""
-    scheme = (urlsplit(proxy).scheme or "http").lower()
-    try:
-        if scheme in ("http", "https"):
-            return await _http_connect_tunnel(proxy, host, port, timeout=timeout)
-        if scheme.startswith("socks"):
-            if _SocksProxy is None:
-                raise ProxyTunnelError("SOCKS proxy requires the python-socks package")
-            return await _SocksProxy.from_url(proxy).connect(
-                dest_host=host, dest_port=port, timeout=timeout
-            )
-    except GatewayDialError:
-        raise
-    except Exception as exc:
-        raise ProxyTunnelError(f"proxy {mask_proxy(proxy)} failed: {exc!r}") from exc
-    raise ProxyTunnelError(f"unsupported proxy scheme {scheme!r}")
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        if self._sent_code is None:
+            self._sent_code = code
+        try:
+            await self._ws.close(code, reason)
+        except _CurlError:
+            pass
+        finally:
+            session, self._owned_session = self._owned_session, None
+            if session is not None:
+                try:
+                    await session.close()
+                except Exception:
+                    pass
 
 
 async def open_websocket(
@@ -292,37 +420,42 @@ async def open_websocket(
     headers: Dict[str, str],
     proxy: Optional[str] = None,
     *,
+    session: Any = None,
     max_size: int = MAX_FRAME_SIZE,
     open_timeout: float = OPEN_TIMEOUT,
-) -> Any:
-    """Open the gateway socket, through ``proxy`` when one is given."""
-    if websockets is None:
-        raise GatewayDialError("the websockets package is not installed")
-    kwargs: Dict[str, Any] = {
-        _HEADERS_KWARG: headers,
-        "max_size": max_size,
-        "open_timeout": open_timeout,
-    }
-    if _WS_MAJOR >= 15:
-        # 15+ would otherwise pick up a proxy from the environment.
-        kwargs["proxy"] = None
-    sock = None
-    if proxy:
-        parts = urlsplit(url)
-        secure = parts.scheme == "wss"
-        host = parts.hostname or ""
-        port = parts.port or (443 if secure else 80)
-        sock = await open_proxy_tunnel(proxy, host, port, timeout=open_timeout)
-        kwargs["sock"] = sock
-        if secure:
-            kwargs["ssl"] = True
-            kwargs["server_hostname"] = host
+) -> CurlWebSocket:
+    """Open the gateway socket through curl_cffi, via ``proxy`` when one is given.
+
+    The TLS handshake impersonates TLS_IMPERSONATE, as REST does. ``session`` is
+    the token's REST session, so both share one TLS identity; without one, a
+    session is made for this socket and closed with it. Only ``headers`` go on
+    the upgrade request, not curl_cffi's navigation defaults.
+    """
+    dial_proxy = curl_proxy_url(proxy)
+    owned = None
+    if session is None:
+        if _CurlAsyncSession is None:
+            raise GatewayDialError("the curl_cffi package is not installed")
+        session = owned = _CurlAsyncSession(impersonate=fingerprint.TLS_IMPERSONATE)
     try:
-        return await websockets.connect(url, **kwargs)
+        ws = await session.ws_connect(
+            url,
+            headers=dict(headers),
+            proxy=dial_proxy,
+            impersonate=fingerprint.TLS_IMPERSONATE,
+            default_headers=False,
+            accept_encoding=None,
+            timeout=open_timeout,
+            max_message_size=max_size,
+        )
     except BaseException:
-        if sock is not None:
-            sock.close()
+        if owned is not None:
+            try:
+                await owned.close()
+            except Exception:
+                pass
         raise
+    return CurlWebSocket(ws, owned)
 
 
 def _close_info(ws: Any, exc: Optional[BaseException]) -> Tuple[Optional[int], str]:
@@ -357,8 +490,10 @@ class GatewayClient:
         proxy: Optional[str] = None,
         proxy_pool: Any = None,
         connector: Optional[Connector] = None,
+        presence_delay: float = PRESENCE_DELAY,
     ) -> None:
         self.token = token
+        # Online by default and never idle: Copycord never goes idle on its own.
         self.status = status
         self.custom_status = custom_status
         self.activity = activity
@@ -373,9 +508,7 @@ class GatewayClient:
         self.proxy = proxy
         self.proxy_pool = proxy_pool
         self._connector = connector
-
-        # Per client, not per socket. Shared with the REST super-properties on READY.
-        self.heartbeat_session_id = str(uuid.uuid4())
+        self.presence_delay = presence_delay
 
         self._guild_ids: List[str] = []
         self._subscribed_guilds: set = set()
@@ -383,16 +516,26 @@ class GatewayClient:
         self._proxy_in_use: Optional[str] = None
         self.session_id: Optional[str] = None
         self.resume_url: Optional[str] = None
-        # What the last connection used, for the connect record (wire_probe.py).
-        self.connected_url: Optional[str] = None
+        # The account's user id, from the last READY.
+        self.user_id: Optional[str] = None
+        # The properties the last IDENTIFY sent.
         self.identify_properties: Optional[Dict[str, Any]] = None
+        # For science's ready_payload_received: (json bytes, zlib bytes) of the last
+        # IDENTIFY, and (bytes received, json chars, unpack ms, received at ms) of
+        # the last frame read.
+        self.identify_sizes: Optional[Tuple[int, int]] = None
+        self.last_frame_stats: Optional[Tuple[int, int, float, int]] = None
+        # Dev mode's traffic record (traffic_capture.py) and the current socket's id in it.
+        self._capture: Any = None
+        self._capture_ws: Optional[str] = None
         self.sequence: Optional[int] = None
         self.heartbeat_interval: float = 41.25
         self.latency: float = float("inf")
         self._last_ack: float = time.monotonic()
         self._last_heartbeat: float = 0.0
         self._heartbeat_task: Optional[asyncio.Task] = None
-        self._time_spent_task: Optional[asyncio.Task] = None
+        # The op 3 a fresh connect sends presence_delay after READY.
+        self._presence_task: Optional[asyncio.Task] = None
         self._stopped: bool = False
         self._invalid_session_delay: Tuple[float, float] = (1.0, 5.0)
         # (code, reason) of a close no reconnect can fix.
@@ -456,7 +599,7 @@ class GatewayClient:
                 delay = min(delay * 2, self.max_reconnect_delay)
         finally:
             await self._cancel_task("_heartbeat_task")
-            await self._cancel_task("_time_spent_task")
+            await self._cancel_task("_presence_task")
 
         if self.fatal_close is not None:
             code, reason = self.fatal_close
@@ -468,7 +611,7 @@ class GatewayClient:
         """Stop for good, closing with 1000 so the session is not resumable."""
         self._stopped = True
         await self._cancel_task("_heartbeat_task")
-        await self._cancel_task("_time_spent_task")
+        await self._cancel_task("_presence_task")
         ws = self._ws
         if ws is not None:
             try:
@@ -491,13 +634,9 @@ class GatewayClient:
         frames = build_subscription_frames(ids)
         if not frames:
             return
-        subscribed = 0
         for frame in frames:
             await self._send(frame)
-            gids = frame["d"]["subscriptions"].keys()
-            self._subscribed_guilds.update(gids)
-            subscribed += len(gids)
-        log.debug("subscribed to %d guild(s) in %d frame(s)", subscribed, len(frames))
+            self._subscribed_guilds.update(frame["d"]["subscriptions"].keys())
 
     async def request_guild_members(
         self,
@@ -507,20 +646,18 @@ class GatewayClient:
         limit: int = 0,
         presences: bool = False,
         user_ids: Optional[Iterable[Any]] = None,
-        nonce: Optional[str] = None,
     ) -> None:
-        """Send op 8; the answer arrives as GUILD_MEMBERS_CHUNK."""
-        d: Dict[str, Any] = {
-            "guild_id": str(guild_id),
-            "limit": int(limit),
-            "presences": bool(presences),
-        }
+        """Send op 8 in one of the web client's two shapes, without a nonce.
+
+        The answer arrives as GUILD_MEMBERS_CHUNK; callers match it by guild.
+        """
+        d: Dict[str, Any] = {"guild_id": [str(guild_id)]}
         if user_ids is not None:
             d["user_ids"] = [str(u) for u in user_ids]
         else:
             d["query"] = query
-        if nonce is not None:
-            d["nonce"] = nonce
+            d["limit"] = int(limit)
+        d["presences"] = bool(presences)
         await self._send({"op": GatewayOp.REQUEST_GUILD_MEMBERS, "d": d})
 
     async def change_presence(
@@ -579,19 +716,23 @@ class GatewayClient:
 
     async def _open(self, url: str, proxy: Optional[str]) -> Any:
         headers = self._ws_headers()
+        capture = self._capture = traffic_capture.recorder_for(self.token)
+        self._capture_ws = capture.ws_open(url, headers) if capture is not None else None
         try:
             if self._connector is not None:
                 return await self._connector(url, headers, proxy)
             return await open_websocket(url, headers, proxy)
-        except GatewayDialError:
-            raise
         except Exception as exc:
+            if capture is not None:
+                capture.ws_closed(self._capture_ws, error=exc)
+            if isinstance(exc, GatewayDialError):
+                raise
             raise GatewayDialError(f"{type(exc).__name__}: {exc}") from exc
 
     async def _connect(self) -> None:
         use_zlib = self.zlib_stream
         url = gateway_url(self.resume_url or self.host, zlib_stream=use_zlib)
-        resuming = bool(self.session_id and self.sequence is not None)
+        resuming = self.can_resume
         proxy = await self._current_proxy()
         log.debug(
             "connecting [%s]%s%s",
@@ -601,29 +742,33 @@ class GatewayClient:
         )
 
         self.connect_count += 1
-        self.connected_url = url
         ws = await self._open(url, proxy)
         self._proxy_in_use = proxy
         self._ws = ws
         self._last_ack = time.monotonic()
         self._last_heartbeat = 0.0
-        inflater = ZlibStreamInflater() if use_zlib else None
+        inflater =ZlibStreamInflater() if use_zlib else None
         closed_exc: Optional[BaseException] = None
         try:
             await self._event_loop(ws, inflater)
-        except _WSClosed as exc:
+        except _CLOSED_ERRORS as exc:
             closed_exc = exc
         finally:
             self._ws = None
             if self.disconnected_since is None:
                 self.disconnected_since = time.time()
             await self._cancel_task("_heartbeat_task")
+            # A RESUME on the next socket sends op 3 itself.
+            await self._cancel_task("_presence_task")
+            # Read before our own close below, so a code we sent is not taken for Discord's.
+            code, reason = _close_info(ws, closed_exc)
             try:
                 await ws.close(code=RESUME_CLOSE_CODE)
             except Exception:
                 pass
 
-        code, reason = _close_info(ws, closed_exc)
+        if self._capture is not None:
+            self._capture.ws_closed(self._capture_ws, code, reason)
         self._handle_close(code, reason)
 
     def _handle_close(self, code: Optional[int], reason: str) -> None:
@@ -636,6 +781,8 @@ class GatewayClient:
             log.error("fatal gateway close code=%s reason=%s, stopping", code, reason)
             self.fatal_close = (code, reason)
             self._stopped = True
+        elif self._stopped and code == 1000:
+            log.debug("gateway closed by client (code=%s)", code)
         else:
             log.info("websocket closed (code=%s reason=%r)", code, reason)
 
@@ -645,8 +792,11 @@ class GatewayClient:
         self.sequence = None
 
     async def _event_loop(self, ws: Any, inflater: Optional[ZlibStreamInflater]) -> None:
+        compressed = 0
         async for raw in ws:
+            started = time.perf_counter()
             if isinstance(raw, (bytes, bytearray, memoryview)):
+                compressed += len(raw)
                 if inflater is None:
                     text: Optional[str] = bytes(raw).decode("utf-8", errors="replace")
                 else:
@@ -663,11 +813,29 @@ class GatewayClient:
                         continue
             else:
                 text = raw
+                compressed = len(raw)
             try:
                 msg = json.loads(text)
             except (TypeError, ValueError):
                 log.warning("non-JSON frame received")
+                compressed = 0
                 continue
+            self.last_frame_stats = (
+                compressed,
+                len(text),
+                (time.perf_counter() - started) * 1000,
+                int(time.time() * 1000),
+            )
+            if self._capture is not None:
+                binary = isinstance(raw, (bytes, bytearray, memoryview))
+                self._capture.ws_recv(
+                    self._capture_ws,
+                    msg,
+                    size=compressed,
+                    decoded_size=len(text.encode("utf-8")) if binary else None,
+                    binary=binary,
+                )
+            compressed = 0
             if not isinstance(msg, dict):
                 continue
             if await self._handle_frame(ws, msg):
@@ -718,16 +886,41 @@ class GatewayClient:
         log.debug("hello, heartbeat interval %.2fs", self.heartbeat_interval)
 
         await self._cancel_task("_heartbeat_task")
-        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(self._ws))
 
-        if self.session_id and self.sequence is not None:
+        ws = self._ws
+        await self.send_connect_frames()
+        if self._ws is ws:
+            # The first beat is jittered, as the gateway docs ask.
+            self._heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(ws, self.heartbeat_interval * random.random())
+            )
+
+    @property
+    def can_resume(self) -> bool:
+        return bool(self.session_id and self.sequence is not None)
+
+    async def send_connect_frames(self) -> bool:
+        """What the web client sends on HELLO, before its first op 40: RESUME
+        when the session can resume, else IDENTIFY. True when it resumed."""
+        # Copycord is a tab that loaded unfocused and stays so. Such a tab never
+        # makes a heartbeat session id: no op 41, on connect or after.
+        if self.can_resume:
+            # The web client's order: op 6, op 3 (the current presence), op 4,
+            # then op 40 a while later. op 37 for every subscribed guild goes
+            # before op 40, a deliberate difference: the browser resubscribes
+            # only the guild it has open, and Copycord needs them all.
             await self._send_resume()
-        else:
-            await self._send_identify()
+            await self._send_presence_update()
+            await self._send_voice_state()
+            await self._send_resume_subscriptions()
+            return True
+        # The web client's order: op 2, op 4, then op 40 a while later.
+        await self._send_identify()
+        await self._send_voice_state()
+        return False
 
-    async def _heartbeat_loop(self, ws: Any) -> None:
-        # The first beat is jittered, as the gateway docs ask.
-        await asyncio.sleep(self.heartbeat_interval * random.random())
+    async def _heartbeat_loop(self, ws: Any, first_delay: float) -> None:
+        await asyncio.sleep(first_delay)
         while self._ws is ws:
             await self._send_heartbeat()
             if time.monotonic() - self._last_ack > self.heartbeat_interval * 2:
@@ -737,10 +930,20 @@ class GatewayClient:
                 return
             await asyncio.sleep(self.heartbeat_interval)
 
+    def _heartbeat_payload(self) -> Dict[str, Any]:
+        """op 40, always inactive: an unfocused tab is never foregrounded (the
+        overnight capture had qos.active false on every beat until focus)."""
+        return {
+            "op": GatewayOp.QOS_HEARTBEAT,
+            "d": {
+                "seq": self.sequence,
+                "qos": {"active": False, "ver": QOS_VERSION, "reasons": []},
+            },
+        }
+
     async def _send_heartbeat(self) -> None:
         self._last_heartbeat = time.monotonic()
-        log.debug("heartbeat sent (seq=%s)", self.sequence)
-        await self._send_bypass({"op": GatewayOp.HEARTBEAT, "d": self.sequence})
+        await self._send_bypass(self._heartbeat_payload())
 
     # IDENTIFY / RESUME
 
@@ -750,42 +953,34 @@ class GatewayClient:
     async def _send_identify(self) -> None:
         props = self._gateway_properties()
         self.identify_properties = dict(props)
-        log.debug(
-            "sending IDENTIFY (build=%s, os=%s, heartbeat_session=%s)",
-            props.get("client_build_number"),
-            props.get("os_version"),
-            self.heartbeat_session_id,
-        )
-        await self._send(
-            {
-                "op": GatewayOp.IDENTIFY,
-                "d": {
-                    "token": self.token,
-                    "capabilities": self.capabilities,
-                    "properties": props,
-                    "presence": {
-                        "status": self.status,
-                        "activities": [self.activity] if self.activity else [],
-                        "since": 0,
-                        "afk": False,
-                    },
-                    # Payload compression; transport compression is the URL's `compress`.
-                    "compress": False,
-                    "client_state": {
-                        "guild_versions": {},
-                        "highest_last_message_id": "0",
-                        "read_state_version": 0,
-                        "user_guild_settings_version": -1,
-                        "user_settings_version": -1,
-                        "private_channels_version": "0",
-                        "api_code_version": 0,
-                    },
+        payload = {
+            "op": GatewayOp.IDENTIFY,
+            "d": {
+                "token": self.token,
+                "capabilities": self.capabilities,
+                "properties": props,
+                # The web client's; the real status follows in op 3 about 90 s after READY.
+                "presence": {
+                    "status": "unknown",
+                    "since": 0,
+                    "activities": [],
+                    "afk": False,
                 },
-            }
-        )
+                # Payload compression; transport compression is the URL's `compress`.
+                "compress": False,
+                "client_state": {"guild_versions": {}},
+                # Last in `d`: the last READY's qos_token, wrapped (qos.py).
+                "qos_token": qos.identify_token(self.token, self.user_id),
+            },
+        }
+        raw = json.dumps(payload).encode("utf-8")
+        self.identify_sizes = (len(raw), len(zlib.compress(raw)))
+        await self._send(payload)
+
+    async def _send_voice_state(self) -> None:
+        await self._send({"op": GatewayOp.VOICE_STATE_UPDATE, "d": dict(IDLE_VOICE_STATE)})
 
     async def _send_resume(self) -> None:
-        log.debug("sending RESUME (session=%s, seq=%s)", self.session_id, self.sequence)
         await self._send(
             {
                 "op": GatewayOp.RESUME,
@@ -797,26 +992,12 @@ class GatewayClient:
             }
         )
 
-    # OP 41: UPDATE_TIME_SPENT_SESSION_ID
-
-    async def _time_spent_loop(self) -> None:
-        await self._send_time_spent()
-        while True:
-            await asyncio.sleep(TIME_SPENT_INTERVAL)
-            await self._send_time_spent()
-
-    async def _send_time_spent(self) -> None:
-        log.debug("sending OP 41 (time spent session)")
-        await self._send(
-            {
-                "op": GatewayOp.UPDATE_TIME_SPENT_SESSION_ID,
-                "d": {
-                    "initialization_timestamp": int(time.time() * 1000),
-                    "session_id": self.heartbeat_session_id,
-                    "client_launch_id": self._gateway_properties().get("client_launch_id"),
-                },
-            }
-        )
+    async def _send_resume_subscriptions(self) -> None:
+        """op 37 in the full shape for every guild the session was subscribed to."""
+        ids = [g for g in self._guild_ids if g in self._subscribed_guilds]
+        ids += sorted(self._subscribed_guilds.difference(ids))
+        for frame in build_subscription_frames(ids, RESUME_SUBSCRIPTION_FEATURES):
+            await self._send(frame)
 
     # Dispatch
 
@@ -828,7 +1009,10 @@ class GatewayClient:
     async def _handle_dispatch(self, event: Optional[str], data: Any) -> None:
         if event is None:
             return
-        log.debug("DISPATCH %s", event)
+        # Only session events: message, typing and member traffic would bury the
+        # sent-frame lines DEBUG exists for.
+        if event in SESSION_DISPATCHES:
+            log.debug("DISPATCH %s", event)
         data_dict = data if isinstance(data, dict) else {}
 
         if event in ("READY", "RESUMED"):
@@ -843,6 +1027,10 @@ class GatewayClient:
                 if isinstance(g, dict) and g.get("id"):
                     self._remember_guild(g["id"])
             user = data_dict.get("user") or {}
+            if user.get("id"):
+                self.user_id = str(user["id"])
+            # The next fresh IDENTIFY sends it back.
+            qos.remember_ready(self.token, data_dict)
             log.debug(
                 "READY user=%s id=%s guilds=%d session=%s resume=%s",
                 user.get("username"),
@@ -851,21 +1039,18 @@ class GatewayClient:
                 self.session_id,
                 self.resume_url,
             )
-            try:
-                fingerprint.set_heartbeat_session_id(self.token, self.heartbeat_session_id)
-            except Exception:
-                pass
-            await self._send_presence_update()
+            # An unfocused tab's one op 3 comes about 90 s after READY.
+            await self._cancel_task("_presence_task")
+            self._presence_task = asyncio.create_task(
+                self._delayed_presence(self._ws, self.presence_delay)
+            )
             # A new session keeps no subscriptions from the old one.
             self._subscribed_guilds.clear()
             await self.subscribe_guilds(self._guild_ids, force=True)
 
-            await self._cancel_task("_time_spent_task")
-            self._time_spent_task = asyncio.create_task(self._time_spent_loop())
-
         elif event == "RESUMED":
+            # op 37 already went out right after op 6.
             log.info("RESUMED session=%s seq=%s", self.session_id, self.sequence)
-            await self.subscribe_guilds(self._guild_ids, force=True)
 
         elif event == "GUILD_CREATE":
             gid = data_dict.get("id")
@@ -895,6 +1080,12 @@ class GatewayClient:
 
     # Presence update (op 3)
 
+    async def _delayed_presence(self, ws: Any, delay: float) -> None:
+        """op 3 once, ``delay`` seconds on, if this socket is still the live one."""
+        await asyncio.sleep(delay)
+        if self._ws is ws:
+            await self._send_presence_update()
+
     async def _send_presence_update(self) -> None:
         activities: List[Dict[str, Any]] = []
         if self.custom_status:
@@ -908,14 +1099,16 @@ class GatewayClient:
             )
         if self.activity:
             activities.append(self.activity)
+        # The web client's shape; an unfocused tab reports afk. The status is
+        # the configured one (online by default), never a switch to idle.
         await self._send(
             {
                 "op": GatewayOp.PRESENCE_UPDATE,
                 "d": {
                     "status": self.status,
-                    "activities": activities,
                     "since": 0,
-                    "afk": False,
+                    "activities": activities,
+                    "afk": True,
                 },
             }
         )
@@ -940,36 +1133,53 @@ class GatewayClient:
         ws = self._ws
         if ws is None:
             return
+        text = json.dumps(payload)
         try:
-            await ws.send(json.dumps(payload))
-        except _WSClosed:
+            await ws.send(text)
+        except _CLOSED_ERRORS:
             log.warning("tried to send on a closed socket")
+            return
+        self._log_sent(payload, text)
 
     async def _send_bypass(self, payload: Dict[str, Any]) -> None:
         """Send without the ratelimiter, for heartbeats."""
         ws = self._ws
         if ws is None:
             return
+        text = json.dumps(payload)
         try:
-            await ws.send(json.dumps(payload))
-        except _WSClosed:
+            await ws.send(text)
+        except _CLOSED_ERRORS:
             log.warning("tried to send heartbeat on closed socket")
+            return
+        self._log_sent(payload, text)
+
+    def _log_sent(self, payload: Dict[str, Any], text: str) -> None:
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("sent %s", frame_summary(payload))
+        if self._capture is not None:
+            self._capture.ws_sent(self._capture_ws, payload, text)
 
 
 __all__ = [
     "GATEWAY_HOST",
     "CAPABILITIES",
     "SUBSCRIPTION_FEATURES",
+    "RESUME_SUBSCRIPTION_FEATURES",
     "MAX_SUBSCRIPTION_PAYLOAD",
+    "PRESENCE_DELAY",
     "RESUME_CLOSE_CODE",
     "ZLIB_SUFFIX",
+    "CurlWebSocket",
     "GatewayClient",
     "GatewayDialError",
     "ProxyTunnelError",
+    "SocketClosed",
     "ZlibStreamInflater",
     "build_subscription_frames",
+    "curl_proxy_url",
+    "frame_summary",
     "gateway_url",
     "mask_proxy",
-    "open_proxy_tunnel",
     "open_websocket",
 ]

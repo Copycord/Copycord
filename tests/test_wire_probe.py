@@ -1,6 +1,7 @@
-"""The connect record: what Discord sees from a user token's requests, kept in
-<data dir>/client_headers.json. The session is faked with a saved tls.peet.ws
-response (tests/fixtures/peet_api_all.json); no network."""
+"""The connect record: what Discord sees from a user token's requests, written
+as a "wire_probe" record in the account's dev traffic capture (events.jsonl).
+The session is faked with a saved tls.peet.ws response
+(tests/fixtures/peet_api_all.json); no network."""
 import asyncio
 import json
 import types
@@ -10,6 +11,7 @@ import pytest
 
 import copycord.client.client as cc
 from copycord.common import selfbot_headers as sh
+from copycord.common import traffic_capture as tc
 from copycord.common import wire_probe as wp
 
 TOKEN = "MTIzNDU2Nzg5MDEyMzQ1Njc4.GabcDE.wire-probe-test-token-not-real"
@@ -79,10 +81,12 @@ class _Pool:
 @pytest.fixture(autouse=True)
 def _env(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("COPYCORD_ENV", "dev")  # the file exists only in dev mode
+    monkeypatch.setenv("COPYCORD_ENV", "dev")  # the capture exists only in dev mode
+    tc.forget_all()
     original = sh.get_build_info()
     sh.set_build_info(original)  # clears the per-token fingerprint cache
     yield
+    tc.forget_all()
     sh.set_build_info(original)
 
 
@@ -95,16 +99,18 @@ def _fake(monkeypatch, session, proxy=PROXY):
     monkeypatch.setattr(wp, "_get_proxy_pool", lambda: _Pool(proxy))
 
 
-def _gateway():
-    return types.SimpleNamespace(
-        connected_url="wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream",
-        identify_properties=dict(sh.gateway_properties(TOKEN)),
-        capabilities=1734653,
-    )
+def _capture_files(tmp_path):
+    return sorted((tmp_path / tc.CAPTURE_DIR).glob(f"*/{tc.EVENTS_FILE}"))
 
 
-def _file(tmp_path):
-    return (tmp_path / sh.BUILD_CACHE_FILE).read_text()
+def _raw(tmp_path):
+    (path,) = _capture_files(tmp_path)
+    return path.read_text(encoding="utf-8")
+
+
+def _probes(tmp_path):
+    events = [json.loads(line) for line in _raw(tmp_path).splitlines()]
+    return [e for e in events if e["type"] == "wire_probe"]
 
 
 class TestParser:
@@ -184,7 +190,7 @@ class TestProbe:
     async def test_a_failure_is_ok_false(self, monkeypatch, session, error):
         _fake(monkeypatch, session)
         out = await wp.probe_wire(TOKEN)
-        assert out["ok"] is False and out["error"] == error and out["probed_at"]
+        assert out["ok"] is False and out["error"] == error and out["url"] == wp.PROBE_URL
 
     @pytest.mark.asyncio
     async def test_no_curl_cffi_is_ok_false(self, monkeypatch):
@@ -194,7 +200,7 @@ class TestProbe:
         monkeypatch.setattr(sh, "get_tls_session", missing)
         monkeypatch.setattr(wp, "_get_proxy_pool", lambda: _Pool(None))
         out = await wp.probe_wire(TOKEN)
-        assert out == {"ok": False, "error": "RuntimeError: curl_cffi is not installed", "probed_at": out["probed_at"], "proxy": None}
+        assert out == {"ok": False, "error": "RuntimeError: curl_cffi is not installed", "url": wp.PROBE_URL, "proxy": None}
 
     @pytest.mark.asyncio
     async def test_time_limit(self, monkeypatch):
@@ -206,46 +212,40 @@ class TestProbe:
 
 class TestRecord:
     @pytest.mark.asyncio
-    async def test_record_lands_beside_the_headers_without_secrets(self, monkeypatch, tmp_path):
+    async def test_record_lands_in_the_capture_without_secrets(self, monkeypatch, tmp_path):
         session = _Session()
         _fake(monkeypatch, session)
-        sh.build_headers(TOKEN)  # writes headers and super_properties
-        await wp.record_connect(TOKEN, wp.gateway_snapshot(_gateway(), "READY"))
+        await wp.record_connect(TOKEN, "READY")
 
-        raw = _file(tmp_path)
+        raw = _raw(tmp_path)
         placeholder = session.calls[0]["headers"]["Authorization"]
         for secret in (TOKEN, TOKEN[:20], placeholder, "s3cret-pw", "alice:"):
             assert secret not in raw
 
-        entry = json.loads(raw)["accounts"][sh._token_log_id(TOKEN)]
-        assert {"headers", "super_properties", "wire", "gateway"} <= set(entry)
-        wire = entry["wire"]
-        assert {"probed_at", "ok", "exit_ip", "http_version", "headers_on_wire", "tls", "http2",
-                "diff_vs_real_client"} <= set(wire)
-        assert wire["proxy"] == "http://***@proxy.example:8080"
-        gw = entry["gateway"]
-        assert gw["event"] == "READY"
-        assert gw["query"] == {"encoding": "json", "v": "9", "compress": "zlib-stream"}
-        assert gw["properties"]["installation_id"] == sh.gateway_properties(TOKEN)["installation_id"]
-        assert "token" not in gw["properties"]
+        (rec,) = _probes(tmp_path)
+        assert {"ts", "time", "event", "url", "ok", "exit_ip", "http_version", "headers_on_wire",
+                "header_order", "tls", "http2", "diff_vs_real_client", "proxy"} <= set(rec)
+        assert rec["event"] == "READY" and rec["url"] == wp.PROBE_URL and rec["ok"] is True
+        assert rec["exit_ip"] == "203.0.113.7"
+        assert rec["headers_on_wire"]["authorization"] == "[redacted]"
+        assert rec["proxy"] == "http://***@proxy.example:8080"
+        assert _capture_files(tmp_path)[0].parent.name.endswith(sh._token_log_id(TOKEN))
+        assert not (tmp_path / "client_headers.json").exists()
 
     @pytest.mark.asyncio
     async def test_a_failed_probe_is_recorded(self, monkeypatch, tmp_path):
         _fake(monkeypatch, _Session(raise_exc=OSError("down")))
-        await wp.record_connect(TOKEN, wp.gateway_snapshot(None, "RESUMED"))
-        entry = json.loads(_file(tmp_path))["accounts"][sh._token_log_id(TOKEN)]
-        assert entry["wire"]["ok"] is False
-        assert entry["gateway"]["url"] is None and entry["gateway"]["event"] == "RESUMED"
+        await wp.record_connect(TOKEN, "RESUMED")
+        (rec,) = _probes(tmp_path)
+        assert rec["ok"] is False and rec["event"] == "RESUMED"
+        assert rec["error"] == "OSError: down"
 
     @pytest.mark.asyncio
-    async def test_a_new_fingerprint_keeps_the_connect_record(self, monkeypatch, tmp_path):
+    async def test_each_connect_adds_a_record(self, monkeypatch, tmp_path):
         _fake(monkeypatch, _Session())
-        await wp.record_connect(TOKEN, wp.gateway_snapshot(_gateway(), "READY"))
-        sh.set_build_info({"client_build_number": 655555})
-        sh.build_headers(TOKEN)
-        entry = json.loads(_file(tmp_path))["accounts"][sh._token_log_id(TOKEN)]
-        assert entry["super_properties"]["client_build_number"] == 655555
-        assert entry["wire"]["ok"] is True
+        await wp.record_connect(TOKEN, "READY")
+        await wp.record_connect(TOKEN, "RESUMED")
+        assert [r["event"] for r in _probes(tmp_path)] == ["READY", "RESUMED"]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("value", [None, "", "prod", "development"])
@@ -256,8 +256,8 @@ class TestRecord:
             monkeypatch.setenv("COPYCORD_ENV", value)
         _fake(monkeypatch, _Session())
         sh.build_headers(TOKEN)
-        await wp.record_connect(TOKEN, wp.gateway_snapshot(_gateway(), "READY"))
-        assert not (tmp_path / sh.BUILD_CACHE_FILE).exists()
+        await wp.record_connect(TOKEN, "READY")
+        assert list(tmp_path.iterdir()) == []
 
 
 class TestConnectHook:
@@ -271,12 +271,12 @@ class TestConnectHook:
 
         monkeypatch.setattr(wp, "probe_wire", slow_probe)
         monkeypatch.setenv("COPYCORD_ENV", "dev")
-        task = wp.schedule_connect_record(TOKEN, _gateway(), event="READY")
+        task = wp.schedule_connect_record(TOKEN, event="READY")
         assert task is not None and not task.done()
         assert task in wp._TASKS
         release.set()
         await task
-        assert json.loads(_file(tmp_path))["accounts"][sh._token_log_id(TOKEN)]["wire"] == {"ok": True}
+        assert [(r["event"], r["ok"]) for r in _probes(tmp_path)] == [("READY", True)]
 
     def test_no_token_or_no_loop_schedules_nothing(self, monkeypatch):
         monkeypatch.setenv("COPYCORD_ENV", "dev")
@@ -296,13 +296,10 @@ class TestConnectHook:
 
         monkeypatch.setattr(wp, "probe_wire", no_probe)
         before = len(wp._TASKS)
-        assert wp.schedule_connect_record(TOKEN, _gateway(), event="READY") is None
+        assert wp.schedule_connect_record(TOKEN, event="READY") is None
         assert len(wp._TASKS) == before
         await asyncio.sleep(0)
-        path = tmp_path / sh.BUILD_CACHE_FILE
-        data = json.loads(path.read_text()) if path.exists() else {}
-        entry = (data.get("accounts") or {}).get(sh._token_log_id(TOKEN)) or {}
-        assert "wire" not in entry and "gateway" not in entry
+        assert list(tmp_path.iterdir()) == []
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("value", ["dev", "DEV", " Dev "])
@@ -315,19 +312,19 @@ class TestConnectHook:
             return {"ok": True}
 
         monkeypatch.setattr(wp, "probe_wire", probe)
-        task = wp.schedule_connect_record(TOKEN, _gateway(), event="READY")
+        task = wp.schedule_connect_record(TOKEN, event="READY")
         assert task is not None
         await task
         assert calls == [TOKEN]
-        assert json.loads(_file(tmp_path))["accounts"][sh._token_log_id(TOKEN)]["wire"] == {"ok": True}
+        assert [(r["event"], r["ok"]) for r in _probes(tmp_path)] == [("READY", True)]
 
     def _listener(self, monkeypatch):
         calls = []
         monkeypatch.setattr(
-            wp, "schedule_connect_record", lambda token, gateway=None, *, event: calls.append((token, gateway, event))
+            wp, "schedule_connect_record", lambda token, *, event: calls.append((token, event))
         )
         listener = cc.ClientListener.__new__(cc.ClientListener)
-        listener.bot = types.SimpleNamespace(token=TOKEN, gateway=_gateway())
+        listener.bot = types.SimpleNamespace(token=TOKEN)
         listener.proxy_rotator = types.SimpleNamespace(enabled=False, _current_proxy=None)
         return listener, calls
 
@@ -341,11 +338,10 @@ class TestConnectHook:
         listener.forwarding = types.SimpleNamespace(start=boom)
         with pytest.raises(RuntimeError):
             await listener.on_ready()
-        assert [(c[0], c[2]) for c in calls] == [(TOKEN, "READY")]
-        assert calls[0][1] is listener.bot.gateway
+        assert calls == [(TOKEN, "READY")]
 
     @pytest.mark.asyncio
     async def test_resumed_schedules(self, monkeypatch):
         listener, calls = self._listener(monkeypatch)
         await listener.on_resumed()
-        assert [(c[0], c[2]) for c in calls] == [(TOKEN, "RESUMED")]
+        assert calls == [(TOKEN, "RESUMED")]

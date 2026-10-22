@@ -28,9 +28,7 @@ from copycord.common.exit_timezone import (
     note_token_proxy as _note_token_proxy,
     timezone_for as _timezone_for,
 )
-from copycord.common.env import is_dev
 from copycord.common.http_session import shared_session
-from copycord.common.paths import data_dir
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
 
 try:
@@ -140,95 +138,9 @@ async def _scrape_build_number_from_web(
     return None
 
 
-# The last build number scraped from Discord, kept across restarts so a failed
-# scrape falls back to a recent real build instead of the one baked into this
-# release. Only the number is stored: the user agent and browser version follow
-# the TLS impersonation target, which can change with a curl_cffi upgrade.
-#
-# The same file records, per account, the full REST headers the client sends
-# (Authorization left out) and the decoded X-Super-Properties, keyed by the
-# token's short hash, so what Copycord presents to Discord can be read back.
-# On each gateway connect, wire_probe.py adds what arrived at an echo service
-# ("wire": headers, TLS and HTTP/2 fingerprints, exit IP) and the IDENTIFY sent
-# ("gateway"). That part is a record only; nothing loads it back in.
-#
-# The file exists only in dev mode (COPYCORD_ENV=dev). Otherwise it is neither
-# written nor read, and a failed scrape falls back to DEFAULT_BUILD.
-BUILD_CACHE_FILE = "client_headers.json"
+# A scraped number below this is not a real build; a failed scrape keeps the
+# current build (DEFAULT_BUILD until a scrape succeeds).
 _MIN_BUILD = 400000
-
-
-def _build_cache_path():
-    return data_dir() / BUILD_CACHE_FILE
-
-
-def _read_cache() -> dict:
-    """The file's contents, or {} outside dev mode."""
-    if not is_dev():
-        return {}
-    try:
-        data = json.loads(_build_cache_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _write_cache(data: dict) -> None:
-    """Best effort and atomic; a failure only costs the record and the fallback.
-    Outside dev mode nothing is written."""
-    if not is_dev():
-        return
-    path = _build_cache_path()
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        tmp.replace(path)
-    except OSError as e:
-        logger.debug("client headers file write failed: %r", e)
-
-
-def load_cached_build_number() -> int | None:
-    """The cached build number, or None when there is no usable cache."""
-    build = _read_cache().get("build")
-    number = build.get("client_build_number") if isinstance(build, dict) else None
-    if isinstance(number, int) and not isinstance(number, bool) and number >= _MIN_BUILD:
-        return number
-    return None
-
-
-def save_cached_build_number(number: int) -> None:
-    data = _read_cache()
-    data["build"] = {"client_build_number": int(number), "fetched_at": int(time.time())}
-    _write_cache(data)
-
-
-def record_client_headers(token: str) -> None:
-    """Store the headers this account sends now, without its token."""
-    headers = {k: v for k, v in build_headers(token).items() if k.lower() != "authorization"}
-    data = _read_cache()
-    accounts = data.get("accounts") if isinstance(data.get("accounts"), dict) else {}
-    key = _token_log_id(token)
-    # Keep the connect record (wire_probe.py) that shares this entry.
-    entry = accounts.get(key) if isinstance(accounts.get(key), dict) else {}
-    entry.update(
-        {
-            "updated_at": int(time.time()),
-            "headers": headers,
-            "super_properties": _sent_super_props(token),
-        }
-    )
-    accounts[key] = entry
-    data["accounts"] = accounts
-    _write_cache(data)
-
-
-def _use_cached_build() -> None:
-    """After a failed scrape, move to the cached build when it is newer than the current one."""
-    cached = load_cached_build_number()
-    if cached and cached > int(get_build_info().get("client_build_number") or 0):
-        logger.info("Using cached Discord build: %s", cached)
-        set_build_info({"client_build_number": cached})
 
 
 async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> dict:
@@ -238,7 +150,6 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
     try:
         scraped = await _scrape_build_number_from_web(sess)
         if not scraped or scraped < _MIN_BUILD:
-            _use_cached_build()
             logger.debug(
                 "build number unresolved; keeping %s",
                 get_build_info().get("client_build_number"),
@@ -248,11 +159,9 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
         logger.info("Fetched latest Discord build: %s", scraped)
         if scraped != get_build_info().get("client_build_number"):
             set_build_info({"client_build_number": scraped})
-        save_cached_build_number(scraped)
         return get_build_info()
     except Exception as e:
         logger.debug("build-info fetch failed: %r", e)
-        _use_cached_build()
         return get_build_info()
 
 
@@ -278,10 +187,8 @@ def make_fingerprint(token: str) -> dict:
 
     user_agent = build["browser_user_agent"]
 
-    common = {
-        "os": "Windows",
-        "browser": "Chrome",
-        "device": "",
+    # Key order is the browser's: Discord sees it in the JSON.
+    browser = {
         "system_locale": LOCALE,
         "has_client_mods": False,
         "browser_user_agent": user_agent,
@@ -292,7 +199,11 @@ def make_fingerprint(token: str) -> dict:
     }
 
     super_props = {
-        **common,
+        "os": "Windows",
+        "browser": "Chrome",
+        "device": "",
+        "device_model_name": "",
+        **browser,
         "referrer_current": "https://discord.com/",
         "referring_domain_current": "discord.com",
         "release_channel": build["release_channel"],
@@ -300,20 +211,29 @@ def make_fingerprint(token: str) -> dict:
         "client_event_source": None,
         "client_launch_id": launch_id,
         "launch_signature": launch_signature,
-        "client_app_state": "focused",
-        "client_heartbeat_session_id": "",
+        # A tab that loaded unfocused and stays so. Such a tab never makes a
+        # heartbeat session id, so client_heartbeat_session_id never follows.
+        "client_app_state": "unfocused",
     }
 
     gateway_props = {
-        **common,
+        "os": "Windows",
+        "browser": "Chrome",
+        "device": "",
+        "device_model_name": "",
+        **browser,
         "referrer_current": "",
         "referring_domain_current": "",
         "release_channel": build["release_channel"],
         "client_build_number": build["client_build_number"],
         "client_event_source": None,
         "client_launch_id": launch_id,
+        "launch_signature": launch_signature,
+        "client_app_state": "unfocused",
+        "is_fast_connect": False,
+        "gateway_connect_reasons": "AppSkeleton",
         "installation_id": install_id,
-        "is_fast_connect": True,
+        # qos_token is not a property: IDENTIFY carries it at the top level.
     }
 
     headers = {
@@ -331,7 +251,6 @@ def make_fingerprint(token: str) -> dict:
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
-        "Sec-GPC": "1",
         "Origin": "https://discord.com",
         "Priority": "u=1, i",
     }
@@ -361,13 +280,38 @@ def _installation_id(rng: random.Random) -> str:
     return f"{snowflake}.{suffix}"
 
 
+# Chromium components/embedder_support/user_agent_utils.cc,
+# GetGreasedUserAgentBrandVersion and GetRandomOrder: the filler brand, its
+# version and the brand order are all seeded by the Chrome major version.
+_GREASE_CHARS = (" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_")
+_GREASE_VERSIONS = ("8", "99", "24")
+_BRAND_ORDERS = (
+    (0, 1, 2),
+    (0, 2, 1),
+    (1, 0, 2),
+    (1, 2, 0),
+    (2, 0, 1),
+    (2, 1, 0),
+)
+
+
 def _sec_ch_ua(user_agent: str) -> str:
     """Chrome's Sec-CH-UA brand list for the Chrome major in ``user_agent``."""
     m = re.search(r"Chrome/(\d+)", user_agent or "")
-    major = m.group(1) if m else "150"
-    return (
-        f'"Not=A?Brand";v="99", "Google Chrome";v="{major}", ' f'"Chromium";v="{major}"'
+    major = int(m.group(1)) if m else 150
+    grease = (
+        f"Not{_GREASE_CHARS[major % len(_GREASE_CHARS)]}A"
+        f"{_GREASE_CHARS[(major + 1) % len(_GREASE_CHARS)]}Brand"
     )
+    brands = [
+        (grease, _GREASE_VERSIONS[major % len(_GREASE_VERSIONS)]),
+        ("Chromium", str(major)),
+        ("Google Chrome", str(major)),
+    ]
+    ordered: list = [None] * len(brands)
+    for source, target in enumerate(_BRAND_ORDERS[major % len(_BRAND_ORDERS)]):
+        ordered[target] = brands[source]
+    return ", ".join(f'"{brand}";v="{version}"' for brand, version in ordered)
 
 
 SUPPRESSED_PROFILE_HEADERS = {
@@ -381,49 +325,12 @@ def _fingerprint(token: str) -> dict:
     if fp is None:
         fp = make_fingerprint(token)
         _FINGERPRINT_CACHE[token] = fp
-        try:
-            record_client_headers(token)
-        except Exception as e:  # the record must never break a request
-            logger.debug("client headers record failed for %s: %r", _token_log_id(token), e)
     return fp
-
-
-_HEARTBEAT_SESSIONS: dict[str, str] = {}
-
-
-def set_heartbeat_session_id(token: str, session_id: str | None) -> None:
-    """Record the heartbeat session id a gateway connection just produced."""
-    if session_id:
-        new_id = str(session_id)
-        changed = _HEARTBEAT_SESSIONS.get(token) != new_id
-        _HEARTBEAT_SESSIONS[token] = new_id
-        if changed:
-            try:
-                record_client_headers(token)  # show the id now being sent
-            except Exception as e:  # the record must never break the caller
-                logger.debug("client headers record failed for %s: %r", _token_log_id(token), e)
-    else:
-        _HEARTBEAT_SESSIONS.pop(token, None)
-
-
-def _sent_super_props(token: str) -> dict:
-    """The super properties build_headers sends: the base fingerprint plus the heartbeat id."""
-    props = dict(_fingerprint(token)["super_props"])
-    heartbeat_id = _HEARTBEAT_SESSIONS.get(token)
-    if heartbeat_id:
-        props["client_heartbeat_session_id"] = heartbeat_id
-    return props
 
 
 def build_headers(token: str, *, referer: str | None = None) -> dict:
     """Full header dict for a user-token REST request."""
     fp = _fingerprint(token)
-
-    if _HEARTBEAT_SESSIONS.get(token):
-        super_props_b64 = _b64_props(_sent_super_props(token))
-    else:
-        super_props_b64 = fp["super_props_b64"]
-
     h = fp["headers"]
     return {
         "Accept": h["Accept"],
@@ -439,13 +346,12 @@ def build_headers(token: str, *, referer: str | None = None) -> dict:
         "Sec-Fetch-Dest": h["Sec-Fetch-Dest"],
         "Sec-Fetch-Mode": h["Sec-Fetch-Mode"],
         "Sec-Fetch-Site": h["Sec-Fetch-Site"],
-        "Sec-GPC": h["Sec-GPC"],
         "User-Agent": h["User-Agent"],
         "X-Debug-Options": h["X-Debug-Options"],
         "X-Discord-Locale": h["X-Discord-Locale"],
         "X-Discord-Timezone": _timezone_for(token),
         "X-Installation-Id": h["X-Installation-Id"],
-        "X-Super-Properties": super_props_b64,
+        "X-Super-Properties": fp["super_props_b64"],
     }
 
 
@@ -466,6 +372,34 @@ _TLS_SESSIONS: dict = {}
 _TLS_PRIMED: set[str] = set()
 _TLS_SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 _TLS_LAST_USED: dict[str, float] = {}
+# Tokens whose curl_cffi session has another owner (the selfclient's REST
+# client): get_tls_session hands that session out, so the token keeps one TLS
+# identity. Never closed, reaped or primed here; the owner does that.
+_TLS_SHARED: dict = {}
+
+
+def share_tls_session(token: str, provider) -> None:
+    """Have get_tls_session(token) return provider(), the owner's session."""
+    if token:
+        _TLS_SHARED[token] = provider
+
+
+def unshare_tls_session(token: str, provider=None) -> None:
+    """Stop sharing token's session; with provider, only while it is still the shared one."""
+    cur = _TLS_SHARED.get(token)
+    if cur is not None and (provider is None or cur == provider):
+        del _TLS_SHARED[token]
+
+
+def _shared_tls_session(token: str):
+    provider = _TLS_SHARED.get(token)
+    if provider is None:
+        return None
+    try:
+        return provider()
+    except Exception as e:
+        logger.debug("shared TLS session unavailable for token=%s: %r", _token_log_id(token), e)
+        return None
 
 
 def _tls_session_lock(token: str) -> asyncio.Lock:
@@ -478,6 +412,9 @@ def _tls_session_lock(token: str) -> asyncio.Lock:
 
 async def get_tls_session(token: str, *, use_proxy: bool = False):
     """Return a curl_cffi ``AsyncSession`` dedicated to this token."""
+    shared = _shared_tls_session(token)
+    if shared is not None:
+        return shared
     if _CurlAsyncSession is None:
         raise RuntimeError("curl_cffi is not installed")
 
@@ -545,7 +482,6 @@ async def close_tls_session(token: str, reason: str = "unspecified") -> None:
         sess = _TLS_SESSIONS.pop(token, None)
         _TLS_PRIMED.discard(token)
         _TLS_LAST_USED.pop(token, None)
-        _HEARTBEAT_SESSIONS.pop(token, None)
         _forget_exit_timezone(token)
         if sess is not None:
             try:
@@ -598,7 +534,6 @@ REAL_CLIENT_HEADERS = {
     "sec-fetch-site": "same-origin",
     "sec-fetch-mode": "cors",
     "sec-fetch-dest": "empty",
-    "sec-gpc": "1",
     "origin": "https://discord.com",
     "referer": None,
     "x-installation-id": None,

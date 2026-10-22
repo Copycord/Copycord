@@ -779,7 +779,7 @@ def test_doctor_fix_starts_a_stopped_service(stopped_service, doctor_env, capsys
 def test_doctor_fix_rewrites_a_service_in_a_console_window(doctor_env, monkeypatch, capsys):
     from copycord import service
 
-    state = {"console": r"C:\Users\Mac\.local\bin\copycord.exe"}
+    state = {"console": r"C:\Users\alice\.local\bin\copycord.exe"}
 
     class FakeService:
         where = 'scheduled task "Copycord"'

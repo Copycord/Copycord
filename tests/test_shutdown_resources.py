@@ -244,3 +244,51 @@ def test_close_all_closes_every_open_db(monkeypatch, tmp_db_path):
     assert len(dbmod._OPEN) == 0
     assert not Path(tmp_db_path + "-wal").exists()
     assert not Path(tmp_db_path + "-shm").exists()
+
+
+@pytest.mark.asyncio
+async def test_client_shutdown_runs_once_for_the_supervisor_and_run():
+    from copycord.client.client import ClientListener
+
+    calls = []
+
+    class Quiet:
+        def begin_shutdown(self):
+            calls.append("begin")
+
+        async def stop(self):
+            calls.append("ui")
+
+        async def status(self, **kw):
+            pass
+
+        async def close(self, **kw):
+            await asyncio.sleep(0)
+            calls.append("close")
+
+    client = ClientListener.__new__(ClientListener)
+    client.ws = client.bus = client.ui_controller = client.forwarding = client.bot = Quiet()
+    await asyncio.gather(client._shutdown(), client._shutdown())
+    await client._shutdown()
+    assert calls.count("ui") == 1 and calls.count("close") == 2
+
+
+@pytest.mark.asyncio
+async def test_ui_controller_does_not_log_subscribed_after_stop(caplog):
+    from copycord.client.helpers import ClientUiController
+
+    class Bus:
+        async def subscribe(self, url, handler):
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                return  # the real subscribe() swallows the cancel too
+
+    ui = ClientUiController(
+        bus=Bus(), admin_base_url="ws://x", bot=None, listener=None
+    )
+    with caplog.at_level("DEBUG"):
+        ui.start()
+        await asyncio.sleep(0)
+        await ui.stop()
+    assert "subscribed to bus" not in caplog.text

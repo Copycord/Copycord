@@ -19,13 +19,16 @@ import asyncio
 import datetime as _dt
 import inspect
 import logging
-import uuid
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
+
+from copycord.common import traffic_capture
 
 from . import events
 from .errors import ClientException, NotFound
+from .fingerprint import share_tls_session, unshare_tls_session
 from .gateway import GatewayClient, open_websocket
 from .http import HTTPClient
+from .science import ScienceReporter
 from .models import (
     DMChannel,
     Emoji,
@@ -135,6 +138,8 @@ class Client:
         self.refresh_build = refresh_build
         self.http: Optional[HTTPClient] = http
         self.gateway: Any = None
+        # Posts /science as Chrome does; one per gateway client.
+        self.science: Optional[ScienceReporter] = None
         self._gateway_factory = gateway_factory or GatewayClient
         self._connector = connector
         self._connection = ConnectionState(max_messages=max_messages)
@@ -143,7 +148,10 @@ class Client:
         self._closed = False
         self._listeners: Dict[str, List[Coro]] = {}
         self._tasks: set = set()
-        self._chunk_requests: Dict[str, Tuple[List[Member], asyncio.Future]] = {}
+        # op 8 carries no nonce, so one request per guild is in flight at a time
+        # and its GUILD_MEMBERS_CHUNKs are matched by guild id.
+        self._chunk_requests: Dict[int, Tuple[List[Member], asyncio.Future]] = {}
+        self._chunk_locks: Dict[int, asyncio.Lock] = {}
 
     # state passthrough
 
@@ -213,7 +221,14 @@ class Client:
         elif not self.http.token:
             self.http.token = token
         self._connection.http = self.http
-        data = await self.http.login()
+        # The wire probe and any other get_tls_session(token) caller get this
+        # session too, so the token has one TLS identity.
+        share_tls_session(token, self._rest_session)
+        try:
+            data = await self.http.login()
+        except BaseException:
+            unshare_tls_session(token, self._rest_session)
+            raise
         self._connection.user = User(data, self._connection)
 
     def _make_gateway(self, reconnect: bool) -> Any:
@@ -229,13 +244,42 @@ class Client:
             connector=self._tracked_connector,
         )
         gateway.on_dispatch(self._on_gateway_dispatch)
+        self.science = None
+        if self.http is not None:
+            try:
+                on_event = gateway.on
+                science = ScienceReporter(self.token, self.http, gateway)
+                # Registered with on(), so it sees READY before the cache does.
+                on_event("READY", science.on_ready)
+                on_event("RESUMED", science.on_resumed)
+                self.science = science
+            except Exception as exc:  # science must never stop the gateway
+                log.debug("science reporter not attached: %r", exc)
         return gateway
 
+    def _rest_session(self) -> Any:
+        """The HTTP client's curl_cffi session, or None to let the socket make its own."""
+        try:
+            return getattr(self.http, "session", None)
+        except Exception:
+            return None
+
     async def _tracked_connector(self, url: str, headers: Dict[str, str], proxy: Optional[str]) -> Any:
-        if self._connector is not None:
-            ws = await self._connector(url, headers, proxy)
-        else:
-            ws = await open_websocket(url, headers, proxy)
+        science = self.science
+        if science is not None:
+            science.connect_attempt()
+        try:
+            if self._connector is not None:
+                ws = await self._connector(url, headers, proxy)
+            else:
+                # REST's curl_cffi session, so both carry one TLS identity.
+                ws = await open_websocket(url, headers, proxy, session=self._rest_session())
+        except BaseException:
+            if science is not None:
+                science.connect_failed()
+            raise
+        if science is not None:
+            science.connected(url)
         self.dispatch("connect")
         return _TrackedSocket(ws, lambda: self.dispatch("disconnect"))
 
@@ -244,6 +288,8 @@ class Client:
         if self.token is None:
             raise ClientException("login() must be called before connect()")
         self.loop = asyncio.get_running_loop()
+        if self.science is not None:
+            await self.science.close()
         self.gateway = self._make_gateway(reconnect)
         await self.gateway.run(refresh_build=self.refresh_build)
 
@@ -264,11 +310,17 @@ class Client:
                 await self.gateway.close()
             except Exception:
                 log.debug("gateway close failed", exc_info=True)
+        if self.science is not None:
+            await self.science.close()
+        if self.token:
+            unshare_tls_session(self.token, self._rest_session)
         if self.http is not None:
             try:
                 await self.http.close()
             except Exception:
                 log.debug("http close failed", exc_info=True)
+        # Dev mode's traffic record ends here on a clean shutdown.
+        traffic_capture.stop(self.token, "client closed")
         self._ready.clear()
 
     def clear(self) -> None:
@@ -498,24 +550,25 @@ class Client:
         """Members over the gateway (op 8), since user tokens cannot list them over REST."""
         if self.gateway is None:
             raise ClientException("fetch_members needs a connected gateway")
-        nonce = uuid.uuid4().hex
-        future: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._chunk_requests[nonce] = ([], future)
-        try:
-            await self.gateway.request_guild_members(
-                _snowflake(guild),
-                query=query,
-                limit=limit,
-                presences=presences,
-                user_ids=[_snowflake(u) for u in user_ids] if user_ids is not None else None,
-                nonce=nonce,
-            )
-            return await asyncio.wait_for(future, timeout)
-        finally:
-            self._chunk_requests.pop(nonce, None)
+        gid = _snowflake(guild)
+        lock = self._chunk_locks.setdefault(gid, asyncio.Lock())
+        async with lock:
+            future: asyncio.Future = asyncio.get_running_loop().create_future()
+            self._chunk_requests[gid] = ([], future)
+            try:
+                await self.gateway.request_guild_members(
+                    gid,
+                    query=query,
+                    limit=limit,
+                    presences=presences,
+                    user_ids=[_snowflake(u) for u in user_ids] if user_ids is not None else None,
+                )
+                return await asyncio.wait_for(future, timeout)
+            finally:
+                self._chunk_requests.pop(gid, None)
 
     def _resolve_chunk(self, chunk: Any) -> None:
-        entry = self._chunk_requests.get(getattr(chunk, "nonce", None) or "")
+        entry = self._chunk_requests.get(getattr(chunk, "guild_id", None) or 0)
         if entry is None:
             return
         members, future = entry

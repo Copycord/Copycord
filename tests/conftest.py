@@ -55,7 +55,26 @@ def _no_exit_ip_lookup(request, monkeypatch):
     exit_timezone.clear_cache()
 
 
-SPA_INDEX = '<!doctype html><html><head><title>Copycord</title></head><body><div id="root"></div></body></html>'
+@pytest.fixture(autouse=True)
+def _fresh_qos_tokens():
+    """Each test starts with no stored READY qos_token, kept in memory only."""
+    from copycord.selfclient import qos
+
+    qos.set_store(qos.QosTokenStore())
+    yield
+    qos.set_store(qos.QosTokenStore())
+
+
+@pytest.fixture(autouse=True)
+def _no_shared_tls_sessions():
+    """A Client a test left logged in never hands its session to a later test."""
+    from copycord.common import selfbot_headers
+
+    yield
+    selfbot_headers._TLS_SHARED.clear()
+
+
+SPA_INDEX ='<!doctype html><html><head><title>Copycord</title></head><body><div id="root"></div></body></html>'
 
 
 @pytest.fixture(autouse=True)

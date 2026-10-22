@@ -39,7 +39,8 @@ from copycord.common.selfbot_headers import (
     reap_idle_tls_sessions,
     refresh_build_info,
     set_build_info,
-    set_heartbeat_session_id,
+    share_tls_session,
+    unshare_tls_session,
 )
 
 __all__ = [
@@ -66,5 +67,6 @@ __all__ = [
     "reap_idle_tls_sessions",
     "refresh_build_info",
     "set_build_info",
-    "set_heartbeat_session_id",
+    "share_tls_session",
+    "unshare_tls_session",
 ]

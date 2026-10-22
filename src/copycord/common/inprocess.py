@@ -25,7 +25,7 @@ import time
 import uuid
 from concurrent.futures import Future as ConcurrentFuture
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 Handler = Callable[[dict], Awaitable[Optional[dict]]]
@@ -120,17 +120,56 @@ class LoopSink:
         self.closed = True
 
 
+def _wake(fut: asyncio.Future) -> None:
+    if not fut.done():
+        fut.set_result(None)
+
+
 class Registry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._endpoints: Dict[Key, _Endpoint] = {}
         self._feed: Optional[_Feed] = None
+        self._waiters: Dict[Key, List[Tuple[asyncio.AbstractEventLoop, asyncio.Future]]] = {}
 
     def register(self, key: Key, handler: Handler) -> _Endpoint:
         ep = _Endpoint(handler, asyncio.get_running_loop())
         with self._lock:
             self._endpoints[key] = ep
+            waiters = self._waiters.pop(key, [])
+        for loop, fut in waiters:
+            try:
+                loop.call_soon_threadsafe(_wake, fut)
+            except RuntimeError:
+                pass  # the waiter's loop is closed
         return ep
+
+    async def wait_registered(self, url: Optional[str], timeout: float) -> bool:
+        """Wait up to timeout for url's endpoint to register; True once it is live."""
+        key = key_for_url(url)
+        if key is None:
+            return False
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
+        entry = (loop, fut)
+        with self._lock:
+            ep = self._endpoints.get(key)
+            if ep is not None and not ep.loop.is_closed():
+                return True
+            self._waiters.setdefault(key, []).append(entry)
+        try:
+            await asyncio.wait_for(fut, max(0.0, timeout))
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            with self._lock:
+                waiting = self._waiters.get(key)
+                if waiting is not None:
+                    if entry in waiting:
+                        waiting.remove(entry)
+                    if not waiting:
+                        del self._waiters[key]
+        return self._live(key) is not None
 
     def unregister(self, key: Key, ep: Optional[_Endpoint] = None) -> None:
         with self._lock:

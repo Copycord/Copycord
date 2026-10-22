@@ -31,6 +31,7 @@ from copycord.admin import spa
 from copycord.admin.auth import init_admin_auth
 from copycord.admin.security import authorize_websocket, safe_child
 from copycord.logging_setup import (
+    apply_level,
     get_logger,
     req_id_var,
     route_var,
@@ -1746,6 +1747,7 @@ async def save(request: Request):
         import logging as _logging
 
         LOGGER.logger.setLevel(getattr(_logging, new_level, _logging.INFO))
+        apply_level(new_level)
 
         LOGGER.info("LOG_LEVEL applied", extra={"LOG_LEVEL": new_level})
     except Exception as e:

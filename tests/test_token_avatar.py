@@ -245,3 +245,87 @@ class TestFailureIsNotRetried:
         await _prepare(m, URL)
         m.clear_bad_tokens()
         assert not m._avatar_skip
+
+
+# The avatar session's gateway frames: the same as the selfclient's.
+
+import asyncio  # noqa: E402
+import json  # noqa: E402
+
+import copycord.server.token_avatar as token_avatar  # noqa: E402
+
+
+class _FakeGatewayWS:
+    def __init__(self, frames):
+        self.frames = [json.dumps(f).encode() for f in frames]
+        self.sent = []
+
+    async def recv(self):
+        if not self.frames:
+            await asyncio.sleep(3600)
+        return self.frames.pop(0), 0
+
+    async def send_json(self, payload):
+        self.sent.append(json.loads(json.dumps(payload)))
+
+    async def close(self):
+        pass
+
+
+class TestAvatarGatewaySession:
+    @pytest.mark.asyncio
+    async def test_connect_sends_the_browser_order(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        ws = _FakeGatewayWS(
+            [
+                {"op": 10, "d": {"heartbeat_interval": 20}},
+                {"op": 0, "t": "READY", "s": 1, "d": {}},
+            ]
+        )
+
+        class _Session:
+            async def ws_connect(self, url):
+                return ws
+
+        async def _tls(token, use_proxy=False):
+            return _Session()
+
+        monkeypatch.setattr(token_avatar, "get_tls_session", _tls)
+        import logging as _logging
+
+        gw = token_avatar.GatewaySession("avatar-token", _logging.getLogger("t"))
+        try:
+            assert await gw.connect() is True
+            await asyncio.sleep(0.1)
+        finally:
+            await gw.close()
+
+        # An unfocused tab: op 2, op 4, then op 40 heartbeats; never op 41.
+        ops = [m["op"] for m in ws.sent]
+        assert ops[:3] == [2, 4, 40]
+        assert set(ops[2:]) == {40}
+        for beat in ws.sent[2:]:
+            assert beat["d"]["qos"] == {"active": False, "ver": 31, "reasons": []}
+        assert ws.sent[1]["d"] == {
+            "guild_id": None,
+            "channel_id": None,
+            "self_mute": True,
+            "self_deaf": False,
+            "self_video": False,
+            "flags": 2,
+        }
+        d = ws.sent[0]["d"]
+        assert list(d) == [
+            "token",
+            "capabilities",
+            "properties",
+            "presence",
+            "compress",
+            "client_state",
+            "qos_token",
+        ]
+        assert d["capabilities"] == 1734653
+        assert d["qos_token"] == "CgIIAQ=="
+        assert d["presence"] == {"status": "unknown", "since": 0, "activities": [], "afk": False}
+        assert d["properties"] == token_avatar.gateway_properties("avatar-token")
+        assert d["properties"]["client_app_state"] == "unfocused"

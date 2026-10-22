@@ -245,6 +245,38 @@ class WebsocketManager:
         )
         await asyncio.sleep(delay)
 
+    async def _wait_endpoint(
+        self,
+        reg: "inprocess.Registry",
+        attempt: int,
+        base: float,
+        cap: float,
+        jitter: float,
+    ) -> None:
+        """The in-process backoff: the same delay as _sleep_backoff, cut short when the endpoint registers."""
+        delay = min(cap, base * (2 ** (attempt - 1)))
+        delay += random.random() * (jitter * delay)
+        self.logger.debug(
+            "[ws⏳] waiting up to %.2fs for in-process endpoint %s", delay, self.send_url
+        )
+        await reg.wait_registered(self.send_url, delay)
+
+    def _log_unavailable(
+        self, what: str, attempt: int, max_attempts: int, rid: str, ptype: str, e
+    ) -> bool:
+        """Log a missing in-process endpoint; DEBUG until the last attempt. True when it was the last."""
+        last = self._shutting_down or attempt >= max_attempts
+        (self.logger.info if last else self.logger.debug)(
+            "[WS] %s error attempt %d/%d rid=%s type=%s: %s",
+            what,
+            attempt,
+            max_attempts,
+            rid,
+            ptype,
+            e,
+        )
+        return last
+
     async def send_json(self, obj: Any) -> bool:
         """Ensure a dict is passed to `send()`; JSON strings are parsed, non-dicts wrapped."""
         try:
@@ -396,22 +428,10 @@ class WebsocketManager:
                 reg.dispatch(self.send_url, payload, self.logger)
                 return
             except inprocess.EndpointUnavailable as e:
-                lvl = (
-                    self.logger.info
-                    if (self._shutting_down or attempt >= max_attempts)
-                    else self.logger.warning
-                )
-                lvl(
-                    "[WS] send error attempt %d/%d rid=%s type=%s: %s",
-                    attempt,
-                    max_attempts,
-                    rid,
-                    ptype,
-                    e,
-                )
-                if self._shutting_down or attempt >= max_attempts:
+                # At startup the peer role may not have registered yet: wait for it.
+                if self._log_unavailable("send", attempt, max_attempts, rid, ptype, e):
                     break
-                await self._sleep_backoff(attempt, base_backoff, backoff_cap, jitter)
+                await self._wait_endpoint(reg, attempt, base_backoff, backoff_cap, jitter)
             except Exception as e:
                 self.logger.error(
                     "[⛔] WS send unexpected failure rid=%s type=%s: %s", rid, ptype, e
@@ -602,7 +622,12 @@ class WebsocketManager:
                 )
                 return None
 
-            except (asyncio.TimeoutError, inprocess.EndpointUnavailable) as e:
+            except inprocess.EndpointUnavailable as e:
+                if self._log_unavailable("request", attempt, max_attempts, rid, ptype, e):
+                    return None
+                await self._wait_endpoint(reg, attempt, base_backoff, backoff_cap, jitter)
+
+            except asyncio.TimeoutError as e:
                 lvl = (
                     self.logger.info
                     if (self._shutting_down or attempt >= max_attempts)

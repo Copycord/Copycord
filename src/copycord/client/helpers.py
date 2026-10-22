@@ -70,8 +70,6 @@ class ClientUiController:
             return
         self.log.debug("ClientUiController stopping | task=%s", self._task.get_name())
         self._task.cancel()
-        with asyncio.CancelledError.__enter__ if False else None:
-            pass
         try:
             await self._task
         except asyncio.CancelledError:
@@ -188,7 +186,9 @@ class ClientUiController:
                 "Subscribing to admin bus | url=%s path=/bus", self.admin_base_url
             )
             await self.bus.subscribe(self.admin_base_url, _handler)
-            self.log.debug("ClientUiController subscribed to bus.")
+            # subscribe() also returns when it is cancelled or closed on stop().
+            if not self._stopping:
+                self.log.debug("ClientUiController subscribed to bus.")
         except asyncio.CancelledError:
             self.log.debug("_listen_loop cancelled")
             raise

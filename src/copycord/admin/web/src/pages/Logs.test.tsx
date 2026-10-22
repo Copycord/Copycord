@@ -14,7 +14,7 @@ function entry(id: string, over: Partial<EventLog> = {}): EventLog {
     event_type: "channel_created",
     details: `Event ${id}`,
     guild_id: null,
-    guild_name: "E2E Clone",
+    guild_name: "Test Clone",
     channel_id: null,
     channel_name: null,
     category_id: null,

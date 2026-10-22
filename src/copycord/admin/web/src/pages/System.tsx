@@ -1,7 +1,7 @@
 // System page: the Database card.
 // Collapsed by default; open it to back up now, download the latest or any
 // archive, restore from an upload or an existing archive, and delete archives.
-// Restore and delete ask first. The e2e specs select by element id.
+// Restore and delete ask first. Element ids are stable; tests and integrations select by them.
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";

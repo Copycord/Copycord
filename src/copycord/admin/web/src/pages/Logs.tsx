@@ -1,6 +1,6 @@
 // Event logs page: search, type filter, clear filters, refresh, per row expand and delete,
 // clear all, and 50 logs at a time, the next 50 loading as the end of the table scrolls into view.
-// The e2e parity spec selects by element id, so keep the ids stable.
+// Element ids are stable; tests and integrations select by them.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../components/Toast";

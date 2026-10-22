@@ -157,6 +157,7 @@ class GatewayOp:
     HEARTBEAT_ACK = 11
     GUILD_SUBSCRIPTIONS = 14  # deprecated, replaced by BULK_GUILD_SUBSCRIBE
     BULK_GUILD_SUBSCRIBE = 37
+    QOS_HEARTBEAT = 40  # the web client's heartbeat; it never sends op 1
     UPDATE_TIME_SPENT_SESSION_ID = 41
 
 

@@ -338,17 +338,17 @@ def test_launchd_start_when_not_loaded_bootstraps(tmp_path, monkeypatch):
 
 # Windows: Scheduled Task
 
-WIN_EXE = [r"C:\Users\Mac Doe\.local\bin\copycord.exe"]
+WIN_EXE = [r"C:\Users\Alice Doe\.local\bin\copycord.exe"]
 
 
 def test_task_xml_runs_at_logon_with_restart_on_failure():
-    xml = service.task_xml(WIN_EXE, Path(r"C:\Users\Mac Doe\AppData\Local\Copycord"), "PC\\mac")
+    xml = service.task_xml(WIN_EXE, Path(r"C:\Users\Alice Doe\AppData\Local\Copycord"), "PC\\alice")
     assert "<LogonTrigger>" in xml
-    assert "<UserId>PC\\mac</UserId>" in xml
+    assert "<UserId>PC\\alice</UserId>" in xml
     assert "<RestartOnFailure>" in xml
     assert "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>" in xml
     assert f"<Command>{WIN_EXE[0]}</Command>" in xml
-    assert '<Arguments>run --data-dir "C:\\Users\\Mac Doe\\AppData\\Local\\Copycord"</Arguments>' in xml
+    assert '<Arguments>run --data-dir "C:\\Users\\Alice Doe\\AppData\\Local\\Copycord"</Arguments>' in xml
 
 
 def test_task_xml_python_module_fallback_keeps_module_args():
@@ -386,14 +386,14 @@ def test_scheduled_task_install_and_lifecycle(tmp_path, monkeypatch, no_processe
 
     calls = []
     monkeypatch.setattr(service, "run_cmd", fake)
-    svc = service.ScheduledTaskService(env={"USERNAME": "mac", "USERDOMAIN": "PC"})
+    svc = service.ScheduledTaskService(env={"USERNAME": "alice", "USERDOMAIN": "PC"})
     svc.install(WIN_EXE, tmp_path / "data")
     assert [c[:2] for c in calls] == [
         ["schtasks", "/Query"], ["schtasks", "/Create"], ["schtasks", "/Run"],
     ]
     create = calls[1]
     assert create[-1] == "/F"
-    assert "<UserId>PC\\mac</UserId>" in written["xml"]
+    assert "<UserId>PC\\alice</UserId>" in written["xml"]
     assert not Path(create[create.index("/XML") + 1]).exists()
 
     assert svc.state() == service.State(True, True, svc.where)
@@ -451,11 +451,11 @@ def test_windowless_command_falls_back_to_pythonw_of_this_environment(tmp_path, 
 
 
 def test_opens_window_and_task_data_dir():
-    assert service.opens_window(r"C:\Users\Mac\.local\bin\copycord.exe")
+    assert service.opens_window(r"C:\Users\alice\.local\bin\copycord.exe")
     assert service.opens_window(r'"C:\Py\python.exe"')
-    assert not service.opens_window(r"C:\Users\Mac\.local\bin\copycordw.exe")
+    assert not service.opens_window(r"C:\Users\alice\.local\bin\copycordw.exe")
     assert not service.opens_window(r"C:\Py\pythonw.exe")
-    assert service.task_data_dir('run --data-dir "C:\\Mac Doe\\data"') == Path("C:\\Mac Doe\\data")
+    assert service.task_data_dir('run --data-dir "C:\\Alice Doe\\data"') == Path("C:\\Alice Doe\\data")
     assert service.task_data_dir("-m copycord run --data-dir C:\\d") == Path("C:\\d")
     assert service.task_data_dir("run") is None
 
@@ -582,12 +582,12 @@ def test_install_writes_the_windowless_launcher(tmp_path, monkeypatch, no_proces
     bin_dir = _launchers(tmp_path, "copycord.exe", "copycordw.exe")
     task = FakeTask()
     monkeypatch.setattr(service, "run_cmd", task)
-    data = Path(r"C:\Users\Mac Doe\.copycord\data")
-    service.ScheduledTaskService(env={"USERNAME": "mac"}).install(
+    data = Path(r"C:\Users\Alice Doe\.copycord\data")
+    service.ScheduledTaskService(env={"USERNAME": "alice"}).install(
         [str(bin_dir / "copycord.exe")], data)
     xml = task.xml["text"]
     assert f"<Command>{bin_dir / 'copycordw.exe'}</Command>" in xml
-    assert '<Arguments>run --data-dir "C:\\Users\\Mac Doe\\.copycord\\data"</Arguments>' in xml
+    assert '<Arguments>run --data-dir "C:\\Users\\Alice Doe\\.copycord\\data"</Arguments>' in xml
 
 
 def test_reinstall_ends_the_running_task_first(tmp_path, monkeypatch, no_processes):
@@ -602,7 +602,7 @@ def test_reinstall_ends_the_running_task_first(tmp_path, monkeypatch, no_process
 def test_use_windowless_rewrites_a_console_task_with_its_data_dir(tmp_path, monkeypatch, no_processes):
     bin_dir = _launchers(tmp_path, "copycord.exe", "copycordw.exe")
     task = FakeTask(running=True, command=str(bin_dir / "copycord.exe"),
-                    arguments='run --data-dir "C:\\Mac Doe\\data"')
+                    arguments='run --data-dir "C:\\Alice Doe\\data"')
     monkeypatch.setattr(service, "run_cmd", task)
     monkeypatch.setattr(service, "copycord_command", lambda: [str(bin_dir / "copycord.exe")])
     svc = service.ScheduledTaskService(env={})
@@ -610,7 +610,7 @@ def test_use_windowless_rewrites_a_console_task_with_its_data_dir(tmp_path, monk
     svc.use_windowless()
     xml = task.xml["text"]
     assert f"<Command>{bin_dir / 'copycordw.exe'}</Command>" in xml
-    assert '<Arguments>run --data-dir "C:\\Mac Doe\\data"</Arguments>' in xml
+    assert '<Arguments>run --data-dir "C:\\Alice Doe\\data"</Arguments>' in xml
     assert task.running
     task.command = str(bin_dir / "copycordw.exe")
     assert svc.console_command() is None

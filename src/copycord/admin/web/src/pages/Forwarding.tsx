@@ -2,7 +2,7 @@
 // its own count, Enable/Disable and Delete (asks first). New Forward, Edit
 // and Duplicate open the rule modal (forwarding/RuleModal.tsx) through
 // openRuleEditor.
-// The e2e specs select by element id, so keep the ids stable.
+// Element ids are stable; tests and integrations select by them.
 
 import { useState } from "react";
 import { Button, PageFrame, cx, useReveal } from "../components/ui";

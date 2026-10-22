@@ -12,9 +12,11 @@
 build_headers() is only our half: curl_cffi's impersonation profile adds and
 overrides headers, and sets the TLS and HTTP/2 fingerprints. The probe sends a
 real request through the token's own session and proxy lease to an echo
-service (tls.peet.ws) and stores what arrived in client_headers.json, under
-the account's entry. The Authorization value is replaced by a placeholder
-before it leaves, and nothing written carries the token or proxy credentials.
+service (tls.peet.ws) and writes what arrived (headers, TLS and HTTP/2
+fingerprints, exit IP) as one "wire_probe" record in the account's traffic
+capture (traffic_capture.py). The gateway URL and IDENTIFY are already in that
+capture. The Authorization value is replaced by a placeholder before it
+leaves, and nothing written carries the token or proxy credentials.
 Only in dev mode (COPYCORD_ENV=dev); a normal install never sends the probe.
 """
 
@@ -22,11 +24,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 from copycord.common import selfbot_headers as sh
+from copycord.common import traffic_capture
 from copycord.common.env import is_dev
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
 
@@ -189,7 +191,6 @@ async def _probe(token: str, placeholder: str) -> tuple[dict, Optional[str]]:
 
 async def probe_wire(token: str) -> dict:
     """Send one request as this token would and report what arrived. Never raises."""
-    probed_at = int(time.time())
     placeholder = _placeholder(token)
     proxy = None
     try:
@@ -205,44 +206,18 @@ async def probe_wire(token: str) -> dict:
             proxy = _get_proxy_pool().current(token)
         except Exception:
             proxy = None
-    result["probed_at"] = probed_at
+    result["url"] = PROBE_URL
     result["proxy"] = sh._mask_proxy_for_log(proxy) if proxy else None
     return _scrub(result, _secrets(token, placeholder, proxy))
 
 
-def gateway_snapshot(gateway: Any, event: str) -> dict:
-    """The IDENTIFY properties and URL this gateway last used; no token."""
-    url = getattr(gateway, "connected_url", None)
-    props = getattr(gateway, "identify_properties", None)
-    query = {}
-    if isinstance(url, str) and url:
-        query = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(urlsplit(url).query).items()}
-    return {
-        "event": event,
-        "url": url,
-        "query": query,
-        "capabilities": getattr(gateway, "capabilities", None),
-        "properties": dict(props) if isinstance(props, dict) else None,
-    }
-
-
-def _store(token: str, wire: dict, gateway: dict) -> None:
-    data = sh._read_cache()
-    accounts = data.get("accounts") if isinstance(data.get("accounts"), dict) else {}
-    key = sh._token_log_id(token)
-    entry = accounts.get(key) if isinstance(accounts.get(key), dict) else {}
-    entry["wire"] = wire
-    entry["gateway"] = gateway
-    accounts[key] = entry
-    data["accounts"] = accounts
-    sh._write_cache(data)
-
-
-async def record_connect(token: str, gateway: dict) -> None:
-    """Probe and store the result under the account's entry. Never raises."""
+async def record_connect(token: str, event: str) -> None:
+    """Probe and write the result to the account's traffic capture. Never raises."""
     try:
         wire = await probe_wire(token)
-        _store(token, wire, _scrub(gateway, _secrets(token, _placeholder(token), None)))
+        recorder = traffic_capture.recorder_for(token)
+        if recorder is not None:
+            recorder.wire_probe(event, wire)
         logger.debug(
             "wire record for %s: ok=%s exit_ip=%s",
             sh._token_log_id(token),
@@ -254,15 +229,14 @@ async def record_connect(token: str, gateway: dict) -> None:
 
 
 def schedule_connect_record(
-    token: Optional[str], gateway: Any = None, *, event: str = "READY"
+    token: Optional[str], *, event: str = "READY"
 ) -> Optional[asyncio.Task]:
     """Start the record in the background; the connect never waits on it.
     Dev mode only (COPYCORD_ENV=dev): otherwise nothing is sent or written."""
     if not token or not is_dev():
         return None
     try:
-        snapshot = gateway_snapshot(gateway, event)
-        task = asyncio.get_running_loop().create_task(record_connect(token, snapshot))
+        task = asyncio.get_running_loop().create_task(record_connect(token, event))
     except Exception as e:
         logger.debug("wire record not scheduled: %r", e)
         return None

@@ -731,14 +731,13 @@ class TestRest:
                     break
                 await asyncio.sleep(0)
             _, kwargs = gw.member_requests[0]
-            nonce = kwargs["nonce"]
+            assert "nonce" not in kwargs, "op 8 carries no nonce, chunks match by guild"
             for index in range(2):
                 await gw.feed(
                     "GUILD_MEMBERS_CHUNK",
                     {
                         "guild_id": str(GUILD),
                         "members": [{"user": user(STRANGER + index, "m"), "roles": []}],
-                        "nonce": nonce,
                         "chunk_index": index,
                         "chunk_count": 2,
                     },

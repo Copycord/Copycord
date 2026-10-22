@@ -4,6 +4,7 @@ Each role runs on its own loop and thread, so every delivery crosses threads.
 """
 import asyncio
 import json
+import logging
 import threading
 import time
 
@@ -226,6 +227,29 @@ def test_closed_loop_endpoint_is_dropped(reg):
     assert not reg.has(URL)
     with pytest.raises(inprocess.EndpointUnavailable):
         reg.dispatch(URL, {"type": "x"})
+
+
+# Startup ordering: a send that beats the peer's registration
+
+
+def test_send_before_endpoint_registers_waits_for_it(reg, loops):
+    srv, cli = loops("srv-loop"), loops("cli-loop")
+    got = threading.Event()
+
+    async def handler(msg):
+        if msg["type"] == "backfill_jobs_reset":
+            got.set()
+
+    mgr = WebsocketManager(send_url=URL, logger=logging.getLogger("test.ws.early"))
+    # A 30 s backoff: only the registration wake-up delivers within the test.
+    sending = cli.spawn(mgr.send({"type": "backfill_jobs_reset", "data": {}}, base_backoff=30.0))
+    _wait_for(lambda: reg._waiters)
+    t0 = time.monotonic()
+    _serve(srv, handler)
+    assert got.wait(3)
+    sending.result(3)
+    assert time.monotonic() - t0 < 3
+    assert not reg._waiters
 
 
 # AdminBus

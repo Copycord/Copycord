@@ -1,6 +1,6 @@
 // The "Role claimed" gift: a Lottie animation played once in a 64 px box. lottie-web's light SVG player and the
 // animation are imported on first show, so both land in their own chunks and the main bundle stays as it was.
-// It always plays, prefers-reduced-motion included (Mac's call: the gift is the reward moment). If the import
+// It always plays, prefers-reduced-motion included (the gift is the reward moment). If the import
 // fails, `fallback` renders instead. Decorative only: the result's title carries the meaning.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";

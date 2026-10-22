@@ -41,6 +41,7 @@ from copycord.common import wire_probe
 from copycord.common.db import DBManager
 from copycord.common.http_session import close_shared_session
 from copycord.common.paths import data_dir
+from copycord.logging_setup import apply_level
 from copycord.client.sitemap import SitemapService
 from copycord.client.message_utils import (
     MessageUtils,
@@ -70,27 +71,19 @@ DATA_DIR = os.getenv("DATA_DIR")
 LOG_DIR = os.getenv("LOG_DIR") or (DATA_DIR if DATA_DIR else str(data_dir()))
 os.makedirs(LOG_DIR, exist_ok=True)
 
-LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
-LEVEL = getattr(logging, LEVEL_NAME, logging.INFO)
-
 formatter = logging.Formatter(
     "%(asctime)s | %(levelname)-5s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
 root = logging.getLogger()
-root.setLevel(LEVEL)
 
 # skip if the supervisor or the other role module already installed the console handler, or each record prints twice
 if not any(getattr(h, "_copycord_console", False) for h in root.handlers):
     ch = logging.StreamHandler()
     ch._copycord_console = True
     ch.setFormatter(formatter)
-    ch.setLevel(LEVEL)
     root.addHandler(ch)
-
-
-logging.getLogger("websockets").setLevel(logging.WARNING)
 
 
 for lib in ("asyncio", "tzlocal"):
@@ -105,6 +98,8 @@ for lib in (
     logging.getLogger(lib).setLevel(logging.WARNING)
 for lib in ("selfclient.state", "selfclient.client"):
     logging.getLogger(lib).setLevel(logging.ERROR)
+# Root, handler and gateway/science levels follow LOG_LEVEL (the dashboard value).
+apply_level()
 
 def _is_proxy_exception(exc: BaseException | None) -> bool:
     """Is this failure the proxy's fault, so another route is worth trying?
@@ -141,7 +136,6 @@ def _is_proxy_exception(exc: BaseException | None) -> bool:
 
 
 logger = logging.getLogger("client")
-logger.setLevel(LEVEL)
 
 
 GATEWAY_CONNECT_TIMEOUT_DEFAULT = 15
@@ -735,11 +729,8 @@ class ClientListener:
                 logger.debug("[status] heartbeat publish failed", exc_info=True)
 
     def _record_wire(self, event: str) -> None:
-        """Record what Discord sees from this account (client_headers.json), in the background."""
-        bot = self.bot
-        wire_probe.schedule_connect_record(
-            getattr(bot, "token", None), getattr(bot, "gateway", None), event=event
-        )
+        """Record what Discord sees from this account (dev traffic capture), in the background."""
+        wire_probe.schedule_connect_record(getattr(self.bot, "token", None), event=event)
 
     async def on_ready(self):
         self._record_wire("READY")
@@ -2317,7 +2308,13 @@ class ClientListener:
             )
 
     async def _shutdown(self):
-        """Shut down the client."""
+        """Shut down the client once; a second caller (the supervisor's stop and run()'s finally) waits for the first."""
+        task = getattr(self, "_shutdown_task", None)
+        if task is None:
+            task = self._shutdown_task = asyncio.ensure_future(self._do_shutdown())
+        await asyncio.shield(task)
+
+    async def _do_shutdown(self):
         logger.info("Shutting down client…")
         hb = getattr(self, "_status_hb_task", None)
         if hb is not None:
