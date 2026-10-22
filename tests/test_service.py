@@ -386,7 +386,7 @@ def test_scheduled_task_install_and_lifecycle(tmp_path, monkeypatch, no_processe
 
     calls = []
     monkeypatch.setattr(service, "run_cmd", fake)
-    svc = service.ScheduledTaskService(env={"USERNAME": "mac", "USERDOMAIN": "PC"})
+    svc = service.ScheduledTaskService(env={"USERNAME": "alice", "USERDOMAIN": "PC"})
     svc.install(WIN_EXE, tmp_path / "data")
     assert [c[:2] for c in calls] == [
         ["schtasks", "/Query"], ["schtasks", "/Create"], ["schtasks", "/Run"],
@@ -583,7 +583,7 @@ def test_install_writes_the_windowless_launcher(tmp_path, monkeypatch, no_proces
     task = FakeTask()
     monkeypatch.setattr(service, "run_cmd", task)
     data = Path(r"C:\Users\Alice Doe\.copycord\data")
-    service.ScheduledTaskService(env={"USERNAME": "mac"}).install(
+    service.ScheduledTaskService(env={"USERNAME": "alice"}).install(
         [str(bin_dir / "copycord.exe")], data)
     xml = task.xml["text"]
     assert f"<Command>{bin_dir / 'copycordw.exe'}</Command>" in xml
