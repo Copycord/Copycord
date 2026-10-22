@@ -5,6 +5,7 @@ import { NavLink } from "react-router";
 import { api } from "../lib/api";
 import { PROMO_LINKS } from "../pages/dashboard/config/model";
 import type { SidebarItem } from "../types/api";
+import { versionHref } from "./Footer";
 import { DISCORD_PATH, MenuIcon } from "./icons";
 import { RoleClaimsModal } from "./RoleClaimsModal";
 
@@ -148,14 +149,14 @@ export function Sidebar({ onNavigate, hide = [], footer = "version", version }: 
               GitHub
             </a>
             {version ? (
-              // Same target as the page footer's version link: the release notes for this tag.
+              // Same target as the page footer's version link: the release notes for a tag, the commit for a dev build.
               <a
                 id="sidebar-version-link"
                 className="text-text-2 tabular-nums opacity-90 transition-colors duration-200 hover:text-accent hover:opacity-100"
-                href={`${PROMO_LINKS.github}/releases/tag/${version}`}
+                href={versionHref(version)}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label={`Copycord ${version} release notes`}
+                aria-label={version.startsWith("dev") ? `Copycord ${version} commit` : `Copycord ${version} release notes`}
               >
                 {version}
               </a>
