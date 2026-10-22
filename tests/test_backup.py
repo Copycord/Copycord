@@ -171,7 +171,7 @@ def test_an_older_failure_does_not_hide_a_newer_backup(tmp_path):
 
 
 def test_backup_includes_the_key_and_a_manifest(data_dir, capsys):
-    from copycord.common.config import CURRENT_VERSION
+    from copycord.version import package_version
 
     assert cli.main(["backup"]) == 0
     [archive] = _archives(data_dir)
@@ -181,7 +181,7 @@ def test_backup_includes_the_key_and_a_manifest(data_dir, capsys):
         assert tar.extractfile("secret.key").read() == b"current-key"
         manifest = json.loads(tar.extractfile("manifest.json").read())
     assert manifest["format"] == 1
-    assert manifest["copycord_version"] == CURRENT_VERSION.lstrip("v")
+    assert manifest["copycord_version"] == package_version()
     assert manifest["schema_version"] == SCHEMA_VERSION
     assert manifest["created_at"].endswith("Z")
     assert manifest["files"] == ["data.db", "secret.key"]

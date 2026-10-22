@@ -491,10 +491,13 @@ class Rail:
 
 def brand_line(version: str, commit: str = "", stream: Optional[TextIO] = None,
                tail: str = TAGLINE) -> str:
-    """The header of a rail command: "Copycord v4.0.0 (abc1234) · tagline"."""
+    """The header of a rail command: "Copycord v4.0.0 (abc1234) · tagline",
+    or "Copycord dev (abc1234) · tagline" for a dev build."""
     stream = sys.stdout if stream is None else stream
-    version = version if version[:1] in ("v", "u") else f"v{version}"
-    sha = f" {dim('(' + commit[:7] + ')', stream)}" if commit else ""
+    dev = version.startswith("dev")
+    version = version if dev or version[:1] in ("v", "u") else f"v{version}"
+    # A dev build's version already names its commit.
+    sha = f" {dim('(' + commit[:7] + ')', stream)}" if commit and not dev else ""
     return f"{accent('Copycord', stream)} {version}{sha}{dim(dot(stream) + tail, stream)}"
 
 

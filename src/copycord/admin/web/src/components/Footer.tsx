@@ -22,7 +22,16 @@ const VERSION_BOX =
   "inline-grid h-7 items-center justify-items-center before:invisible before:col-start-1 before:row-start-1 before:content-['v0.00.0']";
 const VERSION_CELL = "col-start-1 row-start-1";
 
-/** version: the release tag, null when there is none ("dev"), undefined while it loads. */
+/** A release links its release page; a dev build ("dev (1a2b3c4)") links its commit. */
+function versionHref(version: string): string {
+  if (version === "dev" || version.startsWith("dev ")) {
+    const commit = /\(([0-9a-f]{7,40})\)/.exec(version)?.[1];
+    return commit ? `${PROMO_LINKS.github}/commit/${commit}` : PROMO_LINKS.github;
+  }
+  return `${PROMO_LINKS.github}/releases/tag/${version}`;
+}
+
+/** version: the release tag or "dev (1a2b3c4)", null when there is none ("dev"), undefined while it loads. */
 export function Footer({ version }: { version: string | null | undefined }) {
   const label = version === undefined ? "Copycord" : `Copycord version ${version ?? "dev"}`;
   const reveal = useReveal(version !== undefined);
@@ -37,7 +46,7 @@ export function Footer({ version }: { version: string | null | undefined }) {
                 <a
                   id="footer-version-link"
                   className={cx(VERSION_LINK, VERSION_CELL, reveal)}
-                  href={`${PROMO_LINKS.github}/releases/tag/${version}`}
+                  href={versionHref(version)}
                   target="_blank"
                   rel="noopener noreferrer"
                 >

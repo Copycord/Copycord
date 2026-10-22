@@ -16,9 +16,12 @@ from typing import Optional
 from copycord.common.db import DBManager
 from copycord.common import ports
 from copycord.common.paths import db_path
+from copycord.version import display_version
 
 logger = logging.getLogger("common.config")
-CURRENT_VERSION = "v4.0.0.2"
+# Comes from the release tag (see copycord.version); never edited by hand.
+# v4.0.0.3 for a release, "dev (1a2b3c4)" for a dev build.
+CURRENT_VERSION = display_version()
 
 
 def _peer_host(_compose_name: str) -> str:
