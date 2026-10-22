@@ -124,3 +124,20 @@ async def test_async_for_ends_on_discords_close_and_keeps_its_code():
     assert fake.closed_with == (g.RESUME_CLOSE_CODE, "")
     with pytest.raises(g.SocketClosed):
         await ws.send("{}")
+
+
+@pytest.mark.asyncio
+async def test_own_close_reports_its_code_and_logs_below_info(caplog):
+    ws = g.CurlWebSocket(FakeCurlWS())
+    await ws.close()
+    assert ws.close_code == 1000
+    client = g.GatewayClient("t")
+    client._stopped = True
+    with caplog.at_level("DEBUG", logger=g.log.name):
+        client._handle_close(ws.close_code, ws.close_reason)
+        client._stopped = False
+        client._handle_close(1006, "")
+    assert [(r.levelname, r.getMessage()[:22]) for r in caplog.records] == [
+        ("DEBUG", "gateway closed by clie"),
+        ("INFO", "websocket closed (code"),
+    ]

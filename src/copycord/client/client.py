@@ -2308,7 +2308,13 @@ class ClientListener:
             )
 
     async def _shutdown(self):
-        """Shut down the client."""
+        """Shut down the client once; a second caller (the supervisor's stop and run()'s finally) waits for the first."""
+        task = getattr(self, "_shutdown_task", None)
+        if task is None:
+            task = self._shutdown_task = asyncio.ensure_future(self._do_shutdown())
+        await asyncio.shield(task)
+
+    async def _do_shutdown(self):
         logger.info("Shutting down client…")
         hb = getattr(self, "_status_hb_task", None)
         if hb is not None:

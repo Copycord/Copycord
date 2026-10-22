@@ -340,12 +340,15 @@ class CurlWebSocket:
         self._owned_session = owned_session
         self._pending: Optional["asyncio.Future[Any]"] = None
         self._error_code: Optional[int] = None
+        self._sent_code: Optional[int] = None
 
     @property
     def close_code(self) -> Optional[int]:
-        """The code Discord closed with, else the one curl_cffi reported."""
+        """The code Discord closed with, else the one curl_cffi reported, else the one we sent."""
         code = getattr(self._ws, "close_code", None)
-        return int(code) if code is not None else self._error_code
+        if code is not None:
+            return int(code)
+        return self._error_code if self._error_code is not None else self._sent_code
 
     @property
     def close_reason(self) -> str:
@@ -397,6 +400,8 @@ class CurlWebSocket:
             raise StopAsyncIteration from None
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
+        if self._sent_code is None:
+            self._sent_code = code
         try:
             await self._ws.close(code, reason)
         except _CurlError:
@@ -755,12 +760,13 @@ class GatewayClient:
             await self._cancel_task("_heartbeat_task")
             # A RESUME on the next socket sends op 3 itself.
             await self._cancel_task("_presence_task")
+            # Read before our own close below, so a code we sent is not taken for Discord's.
+            code, reason = _close_info(ws, closed_exc)
             try:
                 await ws.close(code=RESUME_CLOSE_CODE)
             except Exception:
                 pass
 
-        code, reason = _close_info(ws, closed_exc)
         if self._capture is not None:
             self._capture.ws_closed(self._capture_ws, code, reason)
         self._handle_close(code, reason)
@@ -775,6 +781,8 @@ class GatewayClient:
             log.error("fatal gateway close code=%s reason=%s, stopping", code, reason)
             self.fatal_close = (code, reason)
             self._stopped = True
+        elif self._stopped and code == 1000:
+            log.debug("gateway closed by client (code=%s)", code)
         else:
             log.info("websocket closed (code=%s reason=%r)", code, reason)
 

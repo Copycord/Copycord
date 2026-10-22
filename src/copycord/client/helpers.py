@@ -188,7 +188,9 @@ class ClientUiController:
                 "Subscribing to admin bus | url=%s path=/bus", self.admin_base_url
             )
             await self.bus.subscribe(self.admin_base_url, _handler)
-            self.log.debug("ClientUiController subscribed to bus.")
+            # subscribe() also returns when it is cancelled or closed on stop().
+            if not self._stopping:
+                self.log.debug("ClientUiController subscribed to bus.")
         except asyncio.CancelledError:
             self.log.debug("_listen_loop cancelled")
             raise
