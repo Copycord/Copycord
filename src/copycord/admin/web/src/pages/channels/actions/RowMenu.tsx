@@ -125,8 +125,10 @@ export function RowMenu({ kind, items, label, disabled = false }: RowMenuProps) 
                   }}
                   className={cx(
                     // .ctxmenu-item
-                    "block w-full cursor-pointer rounded-lg border-0 bg-transparent px-2.5 py-2 text-left outline-none hover:bg-card-solid focus:bg-card-solid",
-                    it.danger ? "text-danger" : "text-text",
+                    "block w-full cursor-pointer rounded-lg border-0 bg-transparent px-2.5 py-2 text-left outline-none transition-colors duration-150",
+                    it.danger
+                      ? "text-danger hover:bg-danger-a10 focus:bg-danger-a10"
+                      : "text-text hover:bg-menu-item-hover focus:bg-menu-item-hover",
                   )}
                 >
                   {it.label}

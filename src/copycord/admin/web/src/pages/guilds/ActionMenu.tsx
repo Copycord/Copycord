@@ -101,7 +101,7 @@ export function ActionMenu({ at, anchor, items, onClose, label }: ActionMenuProp
             onClose();
             item.onSelect();
           }}
-          className="block w-full max-w-full cursor-pointer truncate rounded-lg px-3.5 py-2.5 text-left font-sans text-base text-text outline-none hover:bg-card-solid focus-visible:bg-card-solid"
+          className="block w-full max-w-full cursor-pointer truncate rounded-lg px-3.5 py-2.5 text-left font-sans text-base text-text outline-none transition-colors duration-150 hover:bg-menu-item-hover focus-visible:bg-menu-item-hover"
         >
           {item.label}
         </button>
