@@ -237,7 +237,10 @@ def redact_url(url: Any) -> str:
 
 
 def summarize_ready(d: Any) -> Any:
-    """READY reduced to its key order, its scalars and the sizes of everything else."""
+    """READY reduced to its key order, its scalars and the sizes of everything else.
+
+    qos_token is not a credential (selfclient/qos.py) and stays, as it does in IDENTIFY.
+    """
     if not isinstance(d, dict):
         return d
     out: Dict[str, Any] = {}
