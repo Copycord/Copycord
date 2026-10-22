@@ -711,9 +711,9 @@ def nothing_new(target: Channel) -> Tuple[bool, Optional[Release]]:
         _heads[(target.repo_name, target.ref)] = head
         if head.sha != installed:
             return False, None
-        from copycord.version import DEV, is_dev_build
+        from copycord.version import is_dev_build
 
-        ui.ok(f"Copycord is up to date ({DEV if is_dev_build(current) else current}, {installed[:7]})")
+        ui.ok(f"Copycord is up to date ({'dev' if is_dev_build(current) else current}, {installed[:7]})")
         return True, None
     # A git install on a release channel is replaced by the release.
     if git_source() is not None:

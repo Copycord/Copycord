@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from typing import Mapping, Optional
@@ -24,8 +25,12 @@ from urllib.parse import urlsplit
 import aiohttp
 
 from copycord.common import install_identity
-from copycord.common.config import CURRENT_VERSION
 from copycord.common.http_session import shared_session
+from copycord.version import package_version
+
+# The helper takes [0-9A-Za-z.+_-]{1,32}: v4.0.0.3, or v4.0.0.4.dev5+g1a2b3c4 for a
+# dev build (without the date or dirty mark a local build may add).
+VERSION = "v" + re.sub(r"\.(?:d\d{8}|dirty)$", "", package_version())
 
 DEFAULT_HELPER_URL = "https://copycord.xyz"
 HELPER_URL_ENV = "COPYCORD_HELPER_URL"
@@ -65,7 +70,7 @@ def signing_message(method: str, path: str, timestamp: str, nonce: str,
 
 
 def signed_headers(method: str, path: str, body: bytes = b"", *,
-                   version: str = CURRENT_VERSION, now: Optional[float] = None,
+                   version: str = VERSION, now: Optional[float] = None,
                    nonce: Optional[str] = None) -> dict[str, str]:
     timestamp = str(int(time.time() if now is None else now))
     nonce = nonce or secrets.token_urlsafe(18)
