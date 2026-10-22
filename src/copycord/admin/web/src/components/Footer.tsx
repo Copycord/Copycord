@@ -23,7 +23,7 @@ const VERSION_BOX =
 const VERSION_CELL = "col-start-1 row-start-1";
 
 /** A release links its release page; a dev build ("dev (1a2b3c4)") links its commit. */
-function versionHref(version: string): string {
+export function versionHref(version: string): string {
   if (version === "dev" || version.startsWith("dev ")) {
     const commit = /\(([0-9a-f]{7,40})\)/.exec(version)?.[1];
     return commit ? `${PROMO_LINKS.github}/commit/${commit}` : PROMO_LINKS.github;
