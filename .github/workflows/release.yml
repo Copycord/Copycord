@@ -58,8 +58,12 @@ jobs:
         with:
           python-version-file: .python-version
 
+      # The version is the tag without the v; it is set explicitly so the build
+      # never depends on the history the checkout fetched.
       - name: Build sdist and wheel
-        run: pipx run build --sdist --wheel --outdir dist/
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: SETUPTOOLS_SCM_PRETEND_VERSION="${TAG#v}" pipx run build --sdist --wheel --outdir dist/
 
       - name: Check the artifacts
         run: |

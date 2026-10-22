@@ -30,11 +30,17 @@ COPY pyproject.toml uv.lock hatch_build.py README.md LICENSE ./
 COPY src/ ./src/
 COPY --from=webbuild /web/dist/ ./src/copycord/admin/web/dist/
 
+# The build context has no .git, so the version comes in as a build arg: the
+# release tag without the v (4.0.0.3) or a dev version (4.0.0.4.dev5+g1a2b3c4).
+# Without it the image reports version 0+unknown.
+ARG COPYCORD_VERSION=
+
 # One venv for admin, server and client, installed from uv.lock (the same
 # versions CI tested). The built SPA goes where hatch_build.py picks it up
 # and ships it as admin/web_static.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked,id=uv-copycord-${TARGETPLATFORM} \
-    uv sync --frozen --no-dev --no-editable
+    if [ -n "$COPYCORD_VERSION" ]; then export SETUPTOOLS_SCM_PRETEND_VERSION="$COPYCORD_VERSION"; fi \
+    && uv sync --frozen --no-dev --no-editable --reinstall-package copycord
 
 
 # Runtime: no compiler, no uv, no sources.

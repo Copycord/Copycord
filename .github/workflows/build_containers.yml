@@ -49,6 +49,7 @@ jobs:
           fi
           echo "release $TAG, pre-release $pre"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v6
@@ -94,6 +95,9 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.list }}
+          # The build context has no .git: the image gets the release version from its tag.
+          build-args: |
+            COPYCORD_VERSION=${{ steps.rel.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
