@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from copycord.admin import app as app_module
 from copycord.common import helper_client, install_identity
-from copycord.common.config import CURRENT_VERSION
+from copycord.version import package_version
 from copycord.common.http_session import close_shared_session
 from copycord.common.install_identity import KEY_FILENAME
 
@@ -177,7 +177,8 @@ def test_signed_headers_verify_against_the_helper(tmp_path, helper_verify):
     install, version = helper_verify(method="POST", path="/api/public/redeem/start",
                                      headers=headers, body=body)
     assert install == install_identity.public_key_b64url()
-    assert version == CURRENT_VERSION
+    assert version == helper_client.VERSION
+    assert version.startswith("v" + package_version().split("+")[0])
     assert headers["X-Copycord-Timestamp"].isdigit()
 
 

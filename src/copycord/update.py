@@ -223,9 +223,21 @@ def manual_hint(kind: str) -> str:
 
 
 def current_version() -> str:
-    from copycord.common.config import CURRENT_VERSION
+    """The running PEP 440 version, without a v: 4.0.0.3 or 4.0.0.4.dev5+g1a2b3c4."""
+    from copycord.version import package_version
 
-    return CURRENT_VERSION.lstrip("v")
+    return package_version()
+
+
+def current_label() -> str:
+    """current_version() as shown: 4.0.0.3, or "dev (1a2b3c4)" for a dev build."""
+    from copycord.version import display_version, is_dev_build, package_version
+
+    current = current_version()
+    if not is_dev_build(current):
+        return current
+    # The running build can also find its commit outside the version (the wheel's stamp).
+    return display_version(None if current == package_version() else current)
 
 
 # PEP 440 subset: 4.0.0.1 (releases carry a build number that only goes up),
@@ -479,7 +491,7 @@ def _status_rows(channel: Channel):
     """The rows of check(); returns what prints after them, or None when a
     warning already said why there is no answer."""
     current = current_version()
-    _row("current", current)
+    _row("current", current_label())
     _row("channel", channel.describe(ui.dot()))
     _row("method", detect_installer())
     from copycord import update_check
@@ -660,6 +672,10 @@ CANCELLED = -1  # confirm_update: the user said no; update() exits 0
 
 
 def _installed_label() -> str:
+    from copycord.version import is_dev_build
+
+    if is_dev_build(current_version()):
+        return current_label()  # "dev (1a2b3c4)" already names the commit
     commit = installed_commit()
     return current_version() + (f" ({commit[:7]})" if commit else "")
 
@@ -695,7 +711,9 @@ def nothing_new(target: Channel) -> Tuple[bool, Optional[Release]]:
         _heads[(target.repo_name, target.ref)] = head
         if head.sha != installed:
             return False, None
-        ui.ok(f"Copycord is up to date ({current}, {installed[:7]})")
+        from copycord.version import is_dev_build
+
+        ui.ok(f"Copycord is up to date ({'dev' if is_dev_build(current) else current}, {installed[:7]})")
         return True, None
     # A git install on a release channel is replaced by the release.
     if git_source() is not None:

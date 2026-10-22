@@ -1054,6 +1054,7 @@ def test_auto_update_does_not_ask(monkeypatch):
     from copycord import update_check as uc
 
     seen = []
+    monkeypatch.setattr(update, "current_version", lambda: "4.0.0")  # a release; a dev build never auto-updates
     monkeypatch.setattr(uc, "auto_update_enabled", lambda: True)
     monkeypatch.setattr(uc.ui, "is_interactive", lambda: False)
     monkeypatch.setattr(update, "detect_installer", lambda *a, **kw: update.UV_TOOL)

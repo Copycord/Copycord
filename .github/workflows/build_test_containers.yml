@@ -18,6 +18,28 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # the tags, for the dev version below
+
+      # A test image is always a dev build: the last release tag plus one, the
+      # number of commits since it and the commit, as a build of this commit
+      # outside Docker would get (v4.0.0.3-5-g1a2b3c4 -> 4.0.0.4.dev5+g1a2b3c4).
+      - name: Dev version
+        id: version
+        shell: bash
+        run: |
+          sha=$(git rev-parse --short=7 HEAD)
+          if desc=$(git describe --tags --long --abbrev=7 --match 'v[0-9]*' 2>/dev/null); then
+            rest=${desc%-g*}
+            distance=${rest##*-}
+            base=${rest%-*}
+            base=${base#v}
+            version="${base%.*}.$(( ${base##*.} + 1 )).dev${distance}+g${sha}"
+          else
+            version="0.dev0+g${sha}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -65,6 +87,8 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ steps.vars.outputs.owner }}/copycord:${{ steps.tag.outputs.tag }}
+          build-args: |
+            COPYCORD_VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false

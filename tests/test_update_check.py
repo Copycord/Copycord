@@ -164,6 +164,22 @@ def test_dev_and_beta_need_the_opt_in(tmp_path, monkeypatch, channel):
     assert uc.auto_update_once() and len(applied) == 1
 
 
+def test_a_dev_build_on_a_release_channel_is_never_offered_a_release(tmp_path, monkeypatch, capsys):
+    applied = _auto_on(tmp_path, monkeypatch, update.Channel(update.STABLE))
+    monkeypatch.setattr(update, "current_version", lambda: "4.0.0.1.dev3+g1a2b3c4")
+    monkeypatch.setattr(update, "fetch_latest_release", lambda **kw: pytest.fail("must not ask GitHub"))
+    assert not uc.auto_update_once() and not applied
+    uc.start().join(5)
+    assert capsys.readouterr().out == ""
+
+
+def test_a_dev_build_on_the_dev_channel_still_compares_commits(tmp_path, monkeypatch):
+    set_config(tmp_path, uc.KEY_AUTO_UPDATE_ANY, "true")
+    applied = _auto_on(tmp_path, monkeypatch, update.Channel(update.DEV, "main"))
+    monkeypatch.setattr(update, "current_version", lambda: "4.0.0.1.dev3+g1a2b3c4")
+    assert uc.auto_update_once() and len(applied) == 1
+
+
 def test_auto_update_stays_off_after_a_rollback(tmp_path, monkeypatch):
     applied = _auto_on(tmp_path, monkeypatch, update.Channel(update.STABLE))
     update.stop_auto_update("the dashboard did not answer", "4.0.0", "4.0.1")

@@ -1,5 +1,6 @@
-"""Release versions carry a build number (v4.0.0.1, v4.0.0.2, ...); beta is the
-GitHub Pre-release flag only. Checks the installers and the container workflow."""
+"""Release versions carry a build number (v4.0.0.1, v4.0.0.2, ...) and come from
+the release tag; beta is the GitHub Pre-release flag only. Checks the installers
+and the container workflow."""
 import re
 import shutil
 import subprocess
@@ -9,15 +10,17 @@ import pytest
 
 from copycord import update
 from copycord.common.config import CURRENT_VERSION
+from copycord.version import display_version
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL_SH = (ROOT / "install.sh").read_text(encoding="utf-8")
 INSTALL_PS1 = (ROOT / "install.ps1").read_text(encoding="utf-8")
 
 
-def test_current_version_has_a_build_number():
-    assert re.fullmatch(r"v\d+\.\d+\.\d+\.\d+", CURRENT_VERSION), CURRENT_VERSION
-    assert update.is_newer(CURRENT_VERSION.lstrip("v"), "4.0.0b1")
+def test_current_version_comes_from_the_build():
+    # Never edited by hand: v4.0.0.3 for a release, "dev (1a2b3c4)" for a dev build.
+    assert CURRENT_VERSION == display_version()
+    assert re.fullmatch(r"v\d+(\.\d+)*|dev( \([0-9a-f]{7}\))?", CURRENT_VERSION), CURRENT_VERSION
 
 
 def test_update_available_counts_the_build_number():

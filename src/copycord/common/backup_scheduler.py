@@ -101,9 +101,9 @@ ARCHIVE_FORMAT = 1
 
 def _copycord_version() -> str:
     try:
-        from copycord.common.config import CURRENT_VERSION
+        from copycord.version import package_version
 
-        return CURRENT_VERSION.lstrip("v")
+        return package_version()
     except Exception:
         return "unknown"
 

@@ -311,7 +311,8 @@ def test_doctor_all_good(doctor_env, capsys):
     assert "✓ dependencies OK" in lines
     assert "• database created on first run" in lines
     assert "• no backups yet" in lines
-    assert any(line.startswith("✓ Copycord v") and line.endswith(" · stable channel") for line in lines)
+    assert any(line.startswith(f"✓ Copycord {CURRENT_VERSION}") and line.endswith(" · stable channel")
+               for line in lines)
     assert "ROLE" not in out
     assert str(data_dir.resolve()) not in out
     assert os.listdir(data_dir) == [".env"]
@@ -686,7 +687,7 @@ def test_doctor_fix_reinstalls_once_for_ui_and_dependencies(reinstall, doctor_en
     assert calls == [{"reinstall": True}]
     out = capsys.readouterr().out
     fixes = [x for x in out.splitlines() if x.endswith("(fixed)")]
-    assert fixes == [f"✓ Copycord reinstalled  v{CURRENT_VERSION.lstrip('v')} (fixed)"]
+    assert fixes == [f"✓ Copycord reinstalled  {CURRENT_VERSION} (fixed)"]
     assert out.splitlines()[-2:] == ["✓ Fixed 1 issue", "✗ 1 thing needs your attention"]
 
 

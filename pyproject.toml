@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.21"]
+requires = ["hatchling>=1.21", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -37,10 +37,18 @@ copycord = "copycord.__main__:main"
 [project.gui-scripts]
 copycordw = "copycord.__main__:main"
 
-# Single source: CURRENT_VERSION in src/copycord/common/config.py ("v4.0.0.1" -> 4.0.0.1).
+# The version comes from the git tag: a build at tag v4.0.0.3 is 4.0.0.3, a build
+# of any other commit is a dev version that sorts after the last tag, such as
+# 4.0.0.4.dev5+g1a2b3c4. Without git history (a zip download, a Docker build
+# context) set SETUPTOOLS_SCM_PRETEND_VERSION; otherwise it builds as 0+unknown.
 [tool.hatch.version]
-path = "src/copycord/common/config.py"
-pattern = 'CURRENT_VERSION = "v?(?P<version>[^"]+)"'
+source = "vcs"
+tag-pattern = '^v?(?P<version>\d+(?:\.\d+)*)$'
+fallback-version = "0+unknown"
+
+[tool.hatch.version.raw-options]
+version_scheme = "guess-next-dev"
+local_scheme = "node-and-date"
 
 [tool.hatch.build.targets.wheel]
 # One top-level package, copycord; admin, server, client, common and selfclient

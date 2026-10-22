@@ -16,9 +16,12 @@ from typing import Optional
 from copycord.common.db import DBManager
 from copycord.common import ports
 from copycord.common.paths import db_path
+from copycord.version import display_version, is_dev_build
 
 logger = logging.getLogger("common.config")
-CURRENT_VERSION = "v4.0.0.2"
+# Comes from the release tag (see copycord.version); never edited by hand.
+# v4.0.0.3 for a release, "dev (1a2b3c4)" for a dev build.
+CURRENT_VERSION = display_version()
 
 
 def _peer_host(_compose_name: str) -> str:
@@ -229,6 +232,12 @@ class Config:
                     )
 
             return notified_any
+
+        if is_dev_build():
+            # A dev build never writes its version into the DB, and never offers a release.
+            self.logger.info("Dev build %s: release notifications are off", CURRENT_VERSION)
+            await _maybe_update_status(CURRENT_VERSION)
+            return
 
         while not receiver.bot.is_closed():
             try:

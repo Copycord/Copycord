@@ -43,6 +43,7 @@ Thumbs.db
 *.7z
 
 # Git / Docker
-.git
+# .git stays in the context: only the pybuild stage copies it, to compute the
+# dev version. The runtime stage never does.
 .gitattributes
 .dockerignore

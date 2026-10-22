@@ -481,7 +481,8 @@ def print_version(as_json: bool = False) -> None:
         jsonout.emit(version_report())
         return
     version = _version()
-    commit = installed_commit()
+    # A dev build's version, "dev (abc1234)", already names its commit.
+    commit = None if version.startswith("dev") else installed_commit()
     channel = load_channel().describe(ui.dot())
     if sys.stdout.isatty():
         # On a terminal one header line: "Copycord v4.0.0 (abc1234) · stable channel".
@@ -888,9 +889,10 @@ def check_version() -> Check:
     from copycord import ui
     from copycord.update import installed_commit, load_channel
 
-    version = f"Copycord v{_version().lstrip('v')}"
+    version = f"Copycord {_version()}"
     try:
-        commit = installed_commit()
+        # A dev build's version, "dev (abc1234)", already names its commit.
+        commit = None if _version().startswith("dev") else installed_commit()
     except Exception:
         commit = None
     if commit:
@@ -1484,7 +1486,7 @@ def fix_reinstall(checks: List[Check]) -> str:
     if rc:
         raise FixError(f"the reinstall failed (exit {rc}); see the output above")
     importlib.invalidate_caches()
-    return f"v{update.current_version()}"
+    return _version()
 
 
 def fix_service(checks: List[Check]) -> str:
