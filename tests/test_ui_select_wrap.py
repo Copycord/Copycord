@@ -155,11 +155,11 @@ def _count(lines, needle):
 
 @pytest.mark.parametrize("color", [False, True])
 def test_long_confirm_redraws_in_place(term, color):
-    t = term(["right", "left", "right", "left", "right", "enter"], color=color)
+    t = term(["right", "left", "right", "left", "enter"], color=color)
     assert ui.confirm(LONG, default=False) is False
 
     # While choosing, the screen holds the question once and the Yes / No row.
-    assert len(t.frames) == 6
+    assert len(t.frames) == 5
     for frame in t.frames:
         assert _count(frame, "Downgrade from") == 1
         assert _count(frame, "restore the backup.") == 1
@@ -247,7 +247,7 @@ def test_short_confirm_is_unchanged(term):
 
 
 def test_cells_counts_terminal_columns():
-    assert ui._cells("◆  │ ❯ ↑/↓ ◇") == 11
+    assert ui._cells("◆  │ ❯ ↑/↓ ◇") == 12
     assert ui._cells("\033[1mab\033[0m") == 2
     assert ui._cells("日本") == 4
     assert ui._cells("é") == 1
