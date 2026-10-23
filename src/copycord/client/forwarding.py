@@ -18,7 +18,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from typing import Any, Dict, List, Optional, Sequence
 
 import aiohttp
@@ -275,6 +275,55 @@ def _sanitize_discord_embed_for_webhook(e: dict) -> dict | None:
             out["fields"] = fields_out
 
     return out or None
+
+
+def _sanitize_link_button_rows(components: object) -> list[dict]:
+    """Keep only action rows of link buttons, without emoji, in a shape webhooks accept."""
+    if not isinstance(components, list):
+        return []
+
+    rows: list[dict] = []
+    for row in components:
+        if len(rows) >= 5:
+            break
+        if not isinstance(row, dict) or row.get("type") != 1:
+            continue
+        children = row.get("components")
+        if not isinstance(children, list):
+            continue
+
+        buttons: list[dict] = []
+        for b in children:
+            if len(buttons) >= 5:
+                break
+            if not isinstance(b, dict) or b.get("type") != 2 or b.get("style") != 5:
+                continue
+            url = str(b.get("url") or "").strip()
+            # Discord rejects the whole message if a button url is over 512 chars
+            if len(url) > 512:
+                continue
+            try:
+                parts = urlsplit(url)
+            except ValueError:
+                continue
+            if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+                continue
+            label = str(b.get("label") or "").strip() or parts.hostname
+            buttons.append({"type": 2, "style": 5, "label": _clip(label, 80), "url": url})
+
+        if buttons:
+            rows.append({"type": 1, "components": buttons})
+
+    return rows
+
+
+def _with_components_param(url: str) -> str:
+    """Add with_components=true to a webhook url, keeping any existing query."""
+    parts = urlsplit(url)
+    if any(k == "with_components" for k, _ in parse_qsl(parts.query, keep_blank_values=True)):
+        return url
+    query = f"{parts.query}&with_components=true" if parts.query else "with_components=true"
+    return urlunsplit(parts._replace(query=query))
 
 
 def _extract_embed_image_urls(embeds: list[dict]) -> set[str]:
@@ -947,6 +996,14 @@ class ForwardingManager:
         except Exception:
             embeds = []
 
+        components = []
+        try:
+            for c in getattr(message, "components", []) or []:
+                if isinstance(c, dict):
+                    components.append(c)
+        except Exception:
+            components = []
+
         try:
             is_system = bool(message.is_system())
         except Exception:
@@ -1006,6 +1063,7 @@ class ForwardingManager:
             "content": content,
             "attachments": attachments,
             "embeds": embeds,
+            "components": components,
             "has_attachments": has_attachments,
             "jump_url": jump_url,
         }
@@ -2124,6 +2182,12 @@ class ForwardingManager:
         if not payload.get("content") and not payload.get("embeds"):
             payload["content"] = "New message"
 
+        # Non-application webhooks may only send non-interactive components,
+        # and only when the url carries with_components=true
+        link_rows = _sanitize_link_button_rows(attrs.get("components"))
+        if link_rows:
+            payload["components"] = link_rows
+
         uname = (
             (rule.config.get("username") or "")
             or (rule.config.get("bot_username") or "")
@@ -2172,8 +2236,9 @@ class ForwardingManager:
         async def _deliver(url: str) -> tuple:
             async with sem:
                 try:
+                    post_url = _with_components_param(url) if link_rows else url
                     status, body, retry_after = await _post_with_discord_429_retry(
-                        session, url, payload
+                        session, post_url, payload
                     )
                 except RetryableForwardingError as e:
                     return ("pending", url, e.status, e.body or "", None)
