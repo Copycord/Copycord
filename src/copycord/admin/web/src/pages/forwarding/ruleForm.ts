@@ -37,7 +37,7 @@ export const PROVIDERS = [
   { value: "pushover", label: "Pushover" },
   { value: "telegram", label: "Telegram" },
   { value: "discord", label: "Discord" },
-  { value: "http", label: "HTTP / API" },
+  { value: "http", label: "Custom Webhook" },
 ] as const;
 
 const WEBHOOK_RE = /^https?:\/\/(canary\.|ptb\.)?discord(app)?\.com\/api\/webhooks\/\d+\/.+/i;
@@ -259,7 +259,7 @@ export function localProblem(payload: ForwardingRulePayload, headers: HeaderRow[
   }
   if (payload.provider === "http") {
     const url = str(cfg.url);
-    if (!url) return "HTTP / API requires an endpoint URL.";
+    if (!url) return "Custom Webhook requires an endpoint URL.";
     if (!isHttpUrl(url)) return "The endpoint URL must start with http:// or https://.";
     return headersProblem(headers);
   }

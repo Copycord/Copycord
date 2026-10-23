@@ -44,7 +44,7 @@ export function describeProvider(provider: string): string {
     case "telegram":
       return "Telegram";
     case "http":
-      return "HTTP / API";
+      return "Custom Webhook";
     default:
       return provider || "Custom";
   }

@@ -303,13 +303,13 @@ const HTTP_RULE: ForwardingRule = {
   filters: {},
 };
 
-describe("HTTP / API rules", () => {
+describe("Custom Webhook rules", () => {
   it("creates an HTTP rule with headers, drops blank rows and skips the validate call", async () => {
     const user = userEvent.setup();
     const fetchMock = server();
     const dialog = await openNew(user);
     await user.type(input("fwd_label"), "Relay");
-    await pickProvider(user, "HTTP / API");
+    await pickProvider(user, "Custom Webhook");
     expect(input("fwd_provider").value).toBe("http");
     expect(within(dialog).getByText(/POSTs a JSON payload to this URL/)).toBeInTheDocument();
     await user.type(input("http_url"), " https://api.example.com/hook ");
@@ -362,11 +362,11 @@ describe("HTTP / API rules", () => {
     const fetchMock = server();
     await openNew(user);
     await user.type(input("fwd_label"), "Relay");
-    await pickProvider(user, "HTTP / API");
+    await pickProvider(user, "Custom Webhook");
     const save = () => user.click(screen.getByRole("button", { name: "Save Rule" }));
 
     await save();
-    expect(await screen.findByText("HTTP / API requires an endpoint URL.")).toBeInTheDocument();
+    expect(await screen.findByText("Custom Webhook requires an endpoint URL.")).toBeInTheDocument();
     await user.type(input("http_url"), "ftp://example.com/x");
     await save();
     expect(await screen.findByText("The endpoint URL must start with http:// or https://.")).toBeInTheDocument();
@@ -385,7 +385,7 @@ describe("HTTP / API rules", () => {
     server({ "GET /api/forwarding": () => jsonResponse({ ok: true, items: [HTTP_RULE] }) });
     renderPage();
     const card = await findCard("h1");
-    expect(within(card).getByText("HTTP / API")).toBeInTheDocument();
+    expect(within(card).getByText("Custom Webhook")).toBeInTheDocument();
     expect(card.querySelector(".fwd-card-summary")).toHaveTextContent(/^hooks\.example\.com:8443$/);
     for (const hidden of ["FAKE-pass", "FAKE-query-secret", "/in/copycord", "frag", "Authorization", HEADER_MASK]) {
       expect(card.textContent).not.toContain(hidden);
