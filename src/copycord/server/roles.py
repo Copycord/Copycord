@@ -71,6 +71,13 @@ def plan_role_order(
     others = [int(r["id"]) for r in sorted(clone_roles, key=key)
               if int(r["id"]) not in mapped_ids and why_not(r) is None]
     order = cloned + others
+    # Positions count up from 1 and must stay below my top role. Only stale or
+    # inconsistent positions can overflow it; leave those roles where they are.
+    room = max(0, int(bot_top_position) - 1)
+    for rid in cloned[room:]:
+        unmovable.append({"id": rid, "name": by_id[rid].get("name") or str(rid),
+                          "reason": "Above my top role"})
+    cloned, order = cloned[:room], order[:room]
     current = sorted(order, key=lambda i: key(by_id[i]))
     moved = sum(1 for a, b in zip(current, order) if a != b)
     return {
@@ -81,6 +88,149 @@ def plan_role_order(
         "unmovable": unmovable,
         "changed": moved > 0,
     }
+
+
+def my_role_ids(me) -> set[int]:
+    """Ids of the roles the bot member holds, its top role included."""
+    ids = {int(r.id) for r in (getattr(me, "roles", None) or ())}
+    top = getattr(me, "top_role", None)
+    if top is not None:
+        ids.add(int(top.id))
+    return ids
+
+
+def rank_role_facts(
+    roles: List[Dict], mine: set[int]
+) -> Optional[Tuple[List[Dict], int, int]]:
+    """Role facts renumbered 0..n-1 in Discord's hierarchy, and the bot's top role.
+
+    Positions read right after rapid role creation can be duplicated or gappy
+    (discord.py #5902, #2142), so a role below the bot can look level with or above
+    it. Discord orders by position and, on a tie, puts the lower id (older role)
+    higher, as discord.Role's comparison does; @everyone is always lowest.
+    Returns (facts, my top role's position, its id), or None when none of the
+    listed roles is one of mine."""
+
+    def key(r: Dict) -> tuple:
+        return (not r.get("default"), int(r.get("position") or 0), -int(r["id"]))
+
+    ranked = [dict(r, position=n, raw_position=int(r.get("position") or 0))
+              for n, r in enumerate(sorted(roles, key=key))]
+    own = [r for r in ranked if int(r["id"]) in mine and not r.get("default")]
+    if not own:
+        return None
+    top = max(own, key=lambda r: r["position"])
+    return ranked, int(top["position"]), int(top["id"])
+
+
+def role_rank(role) -> tuple:
+    """A role's place in Discord's hierarchy, comparable with <: position first and,
+    on a tie, the lower id (older role) higher, the same order rank_role_facts uses."""
+    return (int(role.position), -int(role.id))
+
+
+def below_my_top(role, me_top) -> bool:
+    """Whether role sits strictly below my top role, so I can edit or delete it.
+    A role sharing my top role's raw position but newer (higher id) is below it."""
+    return me_top is not None and role_rank(role) < role_rank(me_top)
+
+
+def top_tie_report(top_id: int, top_name, top_position: int, skipped: List[int]) -> Dict:
+    """My top role with its raw position, and of the raw positions of the roles skipped
+    as above it, how many share that position (tied_with_bot) or sit strictly above it."""
+    top_position = int(top_position)
+    return {
+        "bot_top": {"id": int(top_id), "name": top_name, "position": top_position},
+        "tied_with_bot": sum(1 for p in skipped if int(p) == top_position),
+        "above_bot": sum(1 for p in skipped if int(p) > top_position),
+        "skipped": len(skipped),
+    }
+
+
+def plan_tie_report(facts: List[Dict], top_id: int, unmovable: List[Dict]) -> Optional[Dict]:
+    """top_tie_report for a plan_role_order plan, read from the raw positions that
+    rank_role_facts keeps. None when my top role is not among the facts."""
+    by_id = {int(f["id"]): f for f in facts}
+
+    def raw(f: Dict) -> int:
+        return int(f.get("raw_position", f.get("position") or 0))
+
+    top = by_id.get(int(top_id))
+    if top is None:
+        return None
+    skipped = [raw(by_id[int(u["id"])]) for u in unmovable
+               if u["reason"] == "Above my top role" and int(u["id"]) in by_id]
+    return top_tie_report(top["id"], top.get("name"), raw(top), skipped)
+
+
+def bot_role_ties(facts: List[Dict], top_id: int) -> Optional[Dict]:
+    """How Discord's raw positions sit around my top role, read from fetched role facts
+    (raw_position when rank_role_facts renumbered them).
+
+    tied_with_bot counts every non-default role other than my top role that shares its
+    raw position, skipped or not: Discord will not let me move a role tied with mine.
+    at_bottom is set when my top role's raw position is 1 or lower. None when my top
+    role is not among the facts."""
+
+    def raw(f: Dict) -> int:
+        return int(f.get("raw_position", f.get("position") or 0))
+
+    top = next((f for f in facts if int(f["id"]) == int(top_id)), None)
+    if top is None:
+        return None
+    pos = raw(top)
+    tied = sum(1 for f in facts if not f.get("default") and int(f["id"]) != int(top_id)
+               and raw(f) == pos)
+    return {"id": int(top["id"]), "name": top.get("name") or str(top["id"]), "position": pos,
+            "tied_with_bot": tied, "at_bottom": pos <= 1}
+
+
+def tied_role_warning(name: str, tied: int) -> str:
+    return (
+        f"Discord has my role '{name}' at the same position as {tied} other roles, so it "
+        f"will not let me move them. Fix: open Server Settings > Roles in the clone server, "
+        f"drag the '{name}' role down one place and back to the top, then run the sync again."
+    )
+
+
+def bottom_role_warning(name: str) -> str:
+    return (
+        f"My role '{name}' is at the bottom of the role list. Drag it to the top in "
+        f"Server Settings > Roles before syncing so I can order the roles I create."
+    )
+
+
+def reorder_blocker(mine: Optional[Dict]) -> Optional[str]:
+    """Why a role reorder PATCH cannot succeed for bot_role_ties' report, or None."""
+    if not mine:
+        return None
+    if mine["tied_with_bot"]:
+        return "tied_positions"
+    if mine["at_bottom"]:
+        return "bot_role_at_bottom"
+    return None
+
+
+def reorder_fix(name: str, reason: str, tied: int) -> Dict:
+    """The role_order.fix a Sync assets report carries when the reorder is blocked."""
+    return {
+        "reason": reason,
+        "tied_with_bot": int(tied),
+        "steps": [
+            "Open Server Settings > Roles in the clone server",
+            f"Drag the '{name}' role down one place and back to the top",
+            "Run Sync assets again",
+        ],
+    }
+
+
+def above_top_note(report: Dict) -> str:
+    top = report["bot_top"]
+    return (
+        f"{report['skipped']} roles skipped as above my top role {top['name']} ({top['id']}, "
+        f"raw position {top['position']}): {report['tied_with_bot']} share its raw position, "
+        f"{report['above_bot']} sit strictly above it"
+    )
 
 
 class RoleManager:
@@ -477,7 +627,13 @@ class RoleManager:
         hooks hears about each role as it is done and can stop the pass between roles."""
         hooks = hooks or ItemHooks()
         me = guild.me
-        bot_top = me.top_role.position if me and me.top_role else 0
+        me_top = me.top_role if me and me.top_role else None
+        if me_top is not None:
+            # A fresh server leaves my role at the bottom; every role I create lands
+            # level with it there, and Discord will not let me order them afterwards.
+            mine = bot_role_ties([self.role_facts(r) for r in guild.roles], me_top.id)
+            if reorder_blocker(mine) == "bot_role_at_bottom":
+                self._log("warning", "[⚠️] %s", bottom_role_warning(mine["name"]))
 
         rows = self.db.get_all_role_mappings()
         current: dict[int, dict] = {}
@@ -523,8 +679,14 @@ class RoleManager:
         create_suppressed_logged = False
 
         deleted = updated = created = 0
+        # Raw positions of the roles skipped as above my top role, for one warning at the end.
+        above_top: list[int] = []
 
-        removed = [o for o in current if o not in incoming_filtered]
+        def skipped_above(role) -> None:
+            if role is not None and not role.is_default() and not role.managed:
+                above_top.append(int(role.position))
+
+        removed =[o for o in current if o not in incoming_filtered]
         await hooks.begin(len(incoming_filtered) + (len(removed) if delete_roles else 0))
 
         for orig_id in list(current.keys()):
@@ -557,11 +719,12 @@ class RoleManager:
                     not cloned_role
                     or cloned_role.is_default()
                     or cloned_role.managed
-                    or cloned_role.position >= bot_top
+                    or not below_my_top(cloned_role, me_top)
                 ):
 
                     self.db.delete_role_mapping_for_clone(orig_id, clone_id)
                     if cloned_role:
+                        skipped_above(cloned_role)
                         self._log(
                             "info",
                             "[🧩] Skipped deleting role %s (%d); removed mapping.",
@@ -640,7 +803,7 @@ class RoleManager:
                     cloned_role
                     and (not cloned_role.is_default())
                     and (not cloned_role.managed)
-                    and cloned_role.position < bot_top
+                    and below_my_top(cloned_role, me_top)
                 ):
                     try:
                         hooks.check()
@@ -816,7 +979,7 @@ class RoleManager:
                 cloned_role
                 and (not cloned_role.is_default())
                 and (not cloned_role.managed)
-                and cloned_role.position < bot_top
+                and below_my_top(cloned_role, me_top)
             ):
 
                 if not update_roles:
@@ -1013,12 +1176,15 @@ class RoleManager:
                             )
                             outcome, why = "failed", str(e) or type(e).__name__
             elif cloned_role is not None and outcome != "created":
+                skipped_above(cloned_role)
                 outcome, why = "skipped", "Managed or above my top role, I cannot edit it"
             await hooks.item(want_name, outcome, why)
+        if above_top and me_top is not None:
+            self._log("warning", "[⚠️] Role sync: %s", above_top_note(
+                top_tie_report(me_top.id, me_top.name, me_top.position, above_top)))
         rearranged = 0
         if rearrange_roles:
             try:
-                await guild.fetch_roles()
                 rearranged = await self._rearrange_roles(
                     guild=guild,
                     incoming=incoming,
@@ -1089,6 +1255,35 @@ class RoleManager:
             "default": bool(role.is_default()),
         }
 
+    async def _current_role_facts(self, guild) -> Tuple[List[Dict], int, int]:
+        """Role facts plus my top role's position and id, read fresh from Discord.
+
+        Cached positions go stale while roles are being created, which makes new
+        roles look above mine, so the roles are fetched over REST. The cache is the
+        fallback when the fetch fails."""
+        me = guild.me
+        mine = my_role_ids(me)
+        try:
+            fetched = await guild.fetch_roles()
+        except discord.HTTPException as e:
+            self._log("debug", "[🧩] Fetching roles failed (%s); using cached roles", e)
+        else:
+            ranked = rank_role_facts([self.role_facts(r) for r in fetched], mine)
+            if ranked:
+                return ranked
+            self._log("debug", "[🧩] My roles are not among the fetched roles; using cached roles")
+        cached = [self.role_facts(r) for r in guild.roles]
+        top = me.top_role
+        return rank_role_facts(cached, mine) or (cached, int(top.position), int(top.id))
+
+    async def _edit_role_order(self, guild, plan: Dict) -> None:
+        # Count up from 1, not down from the bot role: the plan keeps every
+        # position below my top role, so Discord has nothing to refuse.
+        await guild.edit_role_positions(
+            positions={discord.Object(id=rid): pos for rid, pos in plan["positions"].items()},
+            reason="Copycord role order sync",
+        )
+
     async def _rearrange_roles(
         self,
         *,
@@ -1111,13 +1306,9 @@ class RoleManager:
             self._log("warning", "[🧩] Bot has no top role; cannot rearrange roles")
             return 0
 
-        plan = plan_role_order(
-            incoming,
-            self.mapped_roles(host_id, clone_id),
-            [self.role_facts(r) for r in guild.roles],
-            bot_role.position,
-            bot_role.id,
-        )
+        mapped = self.mapped_roles(host_id, clone_id)
+        facts, top_pos, top_id = await self._current_role_facts(guild)
+        plan = plan_role_order(incoming, mapped, facts, top_pos, top_id)
 
         for role in plan["unmovable"]:
             if role["reason"] == "Above my top role":
@@ -1127,6 +1318,15 @@ class RoleManager:
                     "Move it below my role to include it in reordering.",
                     role["name"],
                 )
+        ties = plan_tie_report(facts, top_id, plan["unmovable"])
+        if ties and ties["skipped"]:
+            self._log("warning", "[⚠️] Role reorder: %s", above_top_note(ties))
+
+        mine = bot_role_ties(facts, top_id)
+        if reorder_blocker(mine) == "tied_positions":
+            # Discord refuses any move of a role tied with mine (50013), so do not try.
+            self._log("warning", "[⚠️] %s", tied_role_warning(mine["name"], mine["tied_with_bot"]))
+            return 0
 
         if not plan["cloned"]:
             self._log("debug", "[🧩] No cloned roles to rearrange")
@@ -1136,25 +1336,46 @@ class RoleManager:
             self._log("debug", "[🧩] All roles already in correct positions")
             return 0
 
-        # Count up from 1, not down from the bot role: its reported position can
-        # be stale after role creation and high moves then fail with 50013.
-        positions = {
-            guild.get_role(rid) or discord.Object(id=rid): pos
-            for rid, pos in plan["positions"].items()
-        }
-
         try:
-            await guild.edit_role_positions(
-                positions=positions, reason="Copycord role order sync"
-            )
+            try:
+                await self._edit_role_order(guild, plan)
+            except discord.HTTPException as e:
+                if getattr(e, "code", None) != 50013:
+                    raise
+                # Positions can still shift under us; plan once more from a fresh read.
+                self._log(
+                    "debug",
+                    "[🧩] Role reorder rejected (%s); refetching roles and retrying once",
+                    e,
+                )
+                facts, top_pos, top_id = await self._current_role_facts(guild)
+                mine = bot_role_ties(facts, top_id)
+                if reorder_blocker(mine) == "tied_positions":
+                    self._log("warning", "[⚠️] %s",
+                              tied_role_warning(mine["name"], mine["tied_with_bot"]))
+                    return 0
+                plan = plan_role_order(incoming, mapped, facts, top_pos, top_id)
+                if not plan["changed"]:
+                    return 0
+                try:
+                    await self._edit_role_order(guild, plan)
+                except discord.HTTPException as e2:
+                    self._log(
+                        "warning",
+                        "[⚠️] Failed to rearrange roles after refetching them: %s. "
+                        "Make sure my role sits above every cloned role. If it already does, "
+                        "drag it down one place and back to the top in Server Settings > Roles.",
+                        e2,
+                    )
+                    return 0
 
             self._log(
                 "info",
                 "[🧩] Rearranged %d roles to match host server order",
-                len(positions),
+                len(plan["positions"]),
             )
 
-            return len(positions)
+            return len(plan["positions"])
 
         except discord.Forbidden:
             self._log("warning", "[⚠️] Missing permissions to rearrange roles")
