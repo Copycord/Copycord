@@ -6,7 +6,17 @@ import { ConfirmProvider } from "../../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../../lib/api";
 import type { ForwardingRule, ForwardingRulePayload } from "../../types/forwarding";
 import { Forwarding } from "../Forwarding";
-import { GUILDS_RATE_LIMITED_MESSAGE } from "./ruleForm";
+import {
+  buildPayload,
+  EMPTY_FORM,
+  formFromRequest,
+  formFromRule,
+  GUILDS_RATE_LIMITED_MESSAGE,
+  HEADER_MASK,
+  localProblem,
+  MAX_HTTP_HEADERS,
+} from "./ruleForm";
+import type { HeaderRow } from "./ruleForm";
 
 // Made up secrets; every request below is answered by the fetch stub.
 const PUSH_RULE: ForwardingRule = {
@@ -276,5 +286,151 @@ describe("rule modal", () => {
     expect(input("pushover_app_token")).toBeNull();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+// The list endpoint masks every header value; the made up secret below only ever lives in the URL.
+const HTTP_RULE: ForwardingRule = {
+  rule_id: "h1",
+  label: "Webhook relay",
+  guild_id: null,
+  provider: "http",
+  enabled: true,
+  config: {
+    url: "https://bot:FAKE-pass@hooks.example.com:8443/in/copycord?token=FAKE-query-secret#frag",
+    headers: { Authorization: HEADER_MASK, "X-Api-Key": HEADER_MASK },
+  },
+  filters: {},
+};
+
+describe("HTTP / API rules", () => {
+  it("creates an HTTP rule with headers, drops blank rows and skips the validate call", async () => {
+    const user = userEvent.setup();
+    const fetchMock = server();
+    const dialog = await openNew(user);
+    await user.type(input("fwd_label"), "Relay");
+    await pickProvider(user, "HTTP / API");
+    expect(input("fwd_provider").value).toBe("http");
+    expect(within(dialog).getByText(/POSTs a JSON payload \(version 1\) to this URL/)).toBeInTheDocument();
+    await user.type(input("http_url"), " https://api.example.com/hook ");
+    await user.click(within(dialog).getByRole("button", { name: "Add header" }));
+    await user.click(within(dialog).getByRole("button", { name: "Add header" }));
+    await user.type(input("http_header_name_0"), "Authorization");
+    await user.type(input("http_header_value_0"), "Bearer FAKE-token");
+    expect(input("http_header_value_0")).toHaveAttribute("type", "password");
+    await user.click(screen.getByRole("button", { name: "Save Rule" }));
+
+    await waitFor(() => expect(calls(fetchMock, "POST /api/forwarding")).toHaveLength(1));
+    expect(posted(fetchMock, "POST /api/forwarding")).toMatchObject({
+      rule_id: null,
+      provider: "http",
+      config: { url: "https://api.example.com/hook", headers: { Authorization: "Bearer FAKE-token" } },
+    });
+    expect(calls(fetchMock, "POST /api/forwarding/validate")).toHaveLength(0);
+  });
+
+  it("keeps masked header values on edit unless one is retyped", async () => {
+    const user = userEvent.setup();
+    const fetchMock = server({ "GET /api/forwarding": () => jsonResponse({ ok: true, items: [HTTP_RULE] }) });
+    renderPage();
+    const card = await findCard("h1");
+    await user.click(within(card).getByRole("button", { name: /edit/i }));
+    await screen.findByRole("dialog", { name: "Edit Forwarding Rule" });
+
+    expect(input("http_url").value).toBe(HTTP_RULE.config!.url);
+    expect(input("http_header_name_0").value).toBe("Authorization");
+    expect(input("http_header_name_1").value).toBe("X-Api-Key");
+    // The mask never shows as a value; the input says the secret is saved.
+    for (const id of ["http_header_value_0", "http_header_value_1"]) {
+      expect(input(id).value).toBe("");
+      expect(input(id)).toHaveAttribute("placeholder", "Saved (type to replace)");
+    }
+    await user.type(input("http_header_value_1"), "FAKE-new-key");
+    await user.click(screen.getByRole("button", { name: "Save Rule" }));
+
+    await waitFor(() => expect(calls(fetchMock, "POST /api/forwarding")).toHaveLength(1));
+    const body = posted(fetchMock, "POST /api/forwarding");
+    expect(body.rule_id).toBe("h1");
+    expect(body.config).toEqual({
+      url: HTTP_RULE.config!.url,
+      headers: { Authorization: HEADER_MASK, "X-Api-Key": "FAKE-new-key" },
+    });
+  });
+
+  it("stops on bad URLs and headers before any request", async () => {
+    const user = userEvent.setup();
+    const fetchMock = server();
+    await openNew(user);
+    await user.type(input("fwd_label"), "Relay");
+    await pickProvider(user, "HTTP / API");
+    const save = () => user.click(screen.getByRole("button", { name: "Save Rule" }));
+
+    await save();
+    expect(await screen.findByText("HTTP / API requires an endpoint URL.")).toBeInTheDocument();
+    await user.type(input("http_url"), "ftp://example.com/x");
+    await save();
+    expect(await screen.findByText("The endpoint URL must start with http:// or https://.")).toBeInTheDocument();
+    await user.clear(input("http_url"));
+    await user.type(input("http_url"), "https://example.com/x");
+    await user.click(screen.getByRole("button", { name: "Add header" }));
+    await user.type(input("http_header_name_0"), "content-type");
+    await user.type(input("http_header_value_0"), "text/plain");
+    await save();
+    expect(await screen.findByText("Content-Type is always application/json and cannot be set.")).toBeInTheDocument();
+    expect(calls(fetchMock, "POST /api/forwarding")).toHaveLength(0);
+    expect(calls(fetchMock, "POST /api/forwarding/validate")).toHaveLength(0);
+  });
+
+  it("shows only the endpoint host on the card", async () => {
+    server({ "GET /api/forwarding": () => jsonResponse({ ok: true, items: [HTTP_RULE] }) });
+    renderPage();
+    const card = await findCard("h1");
+    expect(within(card).getByText("HTTP / API")).toBeInTheDocument();
+    expect(card.querySelector(".fwd-card-summary")).toHaveTextContent(/^hooks\.example\.com:8443$/);
+    for (const hidden of ["FAKE-pass", "FAKE-query-secret", "/in/copycord", "frag", "Authorization", HEADER_MASK]) {
+      expect(card.textContent).not.toContain(hidden);
+    }
+  });
+});
+
+describe("HTTP rule form", () => {
+  const base = { ...EMPTY_FORM, label: "Relay", provider: "http", http_url: "https://example.com/hook" };
+
+  it("round trips masked headers through the form and drops blank rows", () => {
+    const form = formFromRule(HTTP_RULE);
+    expect(form.http_headers).toEqual([
+      { name: "Authorization", value: HEADER_MASK },
+      { name: "X-Api-Key", value: HEADER_MASK },
+    ]);
+    const payload = buildPayload({ ...form, http_headers: [...form.http_headers, { name: " ", value: "" }] });
+    expect(payload.config).toEqual({ url: HTTP_RULE.config!.url, headers: HTTP_RULE.config!.headers });
+    expect(localProblem(payload, form.http_headers)).toBeNull();
+    expect(buildPayload(base).config).toEqual({ url: "https://example.com/hook", headers: {} });
+  });
+
+  it("clears masked values on duplicate, since a new rule has nothing stored", () => {
+    const form = formFromRequest({ mode: "duplicate", rule: HTTP_RULE });
+    expect(form.rule_id).toBe("");
+    expect(form.http_headers).toEqual([
+      { name: "Authorization", value: "" },
+      { name: "X-Api-Key", value: "" },
+    ]);
+    expect(localProblem(buildPayload(form), form.http_headers)).toBe("Header Authorization needs a value.");
+  });
+
+  it("checks header names", () => {
+    const problem = (rows: HeaderRow[]) => localProblem(buildPayload({ ...base, http_headers: rows }), rows);
+    expect(problem([{ name: "", value: "x" }])).toBe("Every header needs a name.");
+    expect(problem([{ name: "Bad Name", value: "x" }])).toBe("Invalid header name: Bad Name");
+    expect(problem([{ name: "Content-Type", value: "x" }])).toMatch(/Content-Type/);
+    expect(
+      problem([
+        { name: "X-Key", value: "a" },
+        { name: "x-key", value: "b" },
+      ]),
+    ).toBe("Header x-key is listed more than once.");
+    const many = Array.from({ length: MAX_HTTP_HEADERS + 1 }, (_, i) => ({ name: `X-H${i}`, value: "v" }));
+    expect(problem(many)).toBe(`At most ${MAX_HTTP_HEADERS} headers are allowed.`);
+    expect(problem(many.slice(0, MAX_HTTP_HEADERS))).toBeNull();
   });
 });
