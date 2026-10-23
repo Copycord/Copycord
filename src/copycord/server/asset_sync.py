@@ -34,7 +34,8 @@ from typing import Any, Optional
 import discord
 
 from copycord.server.item_hooks import OUTCOMES, ItemHooks
-from copycord.server.roles import RoleManager, my_role_ids, plan_role_order, rank_role_facts
+from copycord.server.roles import (RoleManager, above_top_note, my_role_ids, plan_role_order,
+                                   plan_tie_report, rank_role_facts)
 
 logger = logging.getLogger("server.asset_sync")
 
@@ -275,6 +276,7 @@ class AssetSync:
                               result: dict, totals: dict) -> None:
         order: dict = {"moved": 0, "unmovable": [], "error": None}
         result["role_order"] = order
+        tie_note: Optional[str] = None
         roles = self.server.roles
         await self._step(job, ROLE_ORDER, "running", label="Reading the clone's roles")
         try:
@@ -289,6 +291,12 @@ class AssetSync:
                 plan = plan_role_order(snap.get("roles") or [], roles.mapped_roles(host_id, guild.id),
                                        *ranked)
                 order["unmovable"] = plan["unmovable"]
+                ties = plan_tie_report(ranked[0], ranked[2], plan["unmovable"])
+                if ties:
+                    order["bot_top"] = ties["bot_top"]
+                    order["tied_with_bot"] = ties["tied_with_bot"]
+                    if ties["skipped"]:
+                        tie_note = above_top_note(ties)
                 total = len(plan["order"])
                 await self._progress(job, ROLE_ORDER, 0, total, "Checking the order", force=True)
                 if plan["changed"]:
@@ -311,5 +319,8 @@ class AssetSync:
             return
         for u in order["unmovable"]:
             await self._log(job, f"Could not move {u['name']}: {u['reason']}", "warning", step=ROLE_ORDER)
+        if tie_note:
+            logger.warning("[⚠️] Sync assets role order: %s", tie_note)
+            await self._log(job, tie_note,"warning", step=ROLE_ORDER)
         await self._step(job, ROLE_ORDER, "success", note=order_note(order["moved"], len(order["unmovable"])),
                          done=total, total=total)

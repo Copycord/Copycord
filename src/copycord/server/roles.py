@@ -114,7 +114,8 @@ def rank_role_facts(
     def key(r: Dict) -> tuple:
         return (not r.get("default"), int(r.get("position") or 0), -int(r["id"]))
 
-    ranked = [dict(r, position=n) for n, r in enumerate(sorted(roles, key=key))]
+    ranked = [dict(r, position=n, raw_position=int(r.get("position") or 0))
+              for n, r in enumerate(sorted(roles, key=key))]
     own = [r for r in ranked if int(r["id"]) in mine and not r.get("default")]
     if not own:
         return None
@@ -132,6 +133,43 @@ def below_my_top(role, me_top) -> bool:
     """Whether role sits strictly below my top role, so I can edit or delete it.
     A role sharing my top role's raw position but newer (higher id) is below it."""
     return me_top is not None and role_rank(role) < role_rank(me_top)
+
+
+def top_tie_report(top_id: int, top_name, top_position: int, skipped: List[int]) -> Dict:
+    """My top role with its raw position, and of the raw positions of the roles skipped
+    as above it, how many share that position (tied_with_bot) or sit strictly above it."""
+    top_position = int(top_position)
+    return {
+        "bot_top": {"id": int(top_id), "name": top_name, "position": top_position},
+        "tied_with_bot": sum(1 for p in skipped if int(p) == top_position),
+        "above_bot": sum(1 for p in skipped if int(p) > top_position),
+        "skipped": len(skipped),
+    }
+
+
+def plan_tie_report(facts: List[Dict], top_id: int, unmovable: List[Dict]) -> Optional[Dict]:
+    """top_tie_report for a plan_role_order plan, read from the raw positions that
+    rank_role_facts keeps. None when my top role is not among the facts."""
+    by_id = {int(f["id"]): f for f in facts}
+
+    def raw(f: Dict) -> int:
+        return int(f.get("raw_position", f.get("position") or 0))
+
+    top = by_id.get(int(top_id))
+    if top is None:
+        return None
+    skipped = [raw(by_id[int(u["id"])]) for u in unmovable
+               if u["reason"] == "Above my top role" and int(u["id"]) in by_id]
+    return top_tie_report(top["id"], top.get("name"), raw(top), skipped)
+
+
+def above_top_note(report: Dict) -> str:
+    top = report["bot_top"]
+    return (
+        f"{report['skipped']} roles skipped as above my top role {top['name']} ({top['id']}, "
+        f"raw position {top['position']}): {report['tied_with_bot']} share its raw position, "
+        f"{report['above_bot']} sit strictly above it"
+    )
 
 
 class RoleManager:
@@ -574,8 +612,14 @@ class RoleManager:
         create_suppressed_logged = False
 
         deleted = updated = created = 0
+        # Raw positions of the roles skipped as above my top role, for one warning at the end.
+        above_top: list[int] = []
 
-        removed = [o for o in current if o not in incoming_filtered]
+        def skipped_above(role) -> None:
+            if role is not None and not role.is_default() and not role.managed:
+                above_top.append(int(role.position))
+
+        removed =[o for o in current if o not in incoming_filtered]
         await hooks.begin(len(incoming_filtered) + (len(removed) if delete_roles else 0))
 
         for orig_id in list(current.keys()):
@@ -613,6 +657,7 @@ class RoleManager:
 
                     self.db.delete_role_mapping_for_clone(orig_id, clone_id)
                     if cloned_role:
+                        skipped_above(cloned_role)
                         self._log(
                             "info",
                             "[🧩] Skipped deleting role %s (%d); removed mapping.",
@@ -1064,8 +1109,12 @@ class RoleManager:
                             )
                             outcome, why = "failed", str(e) or type(e).__name__
             elif cloned_role is not None and outcome != "created":
+                skipped_above(cloned_role)
                 outcome, why = "skipped", "Managed or above my top role, I cannot edit it"
             await hooks.item(want_name, outcome, why)
+        if above_top and me_top is not None:
+            self._log("warning", "[⚠️] Role sync: %s", above_top_note(
+                top_tie_report(me_top.id, me_top.name, me_top.position, above_top)))
         rearranged = 0
         if rearrange_roles:
             try:
@@ -1191,7 +1240,8 @@ class RoleManager:
             return 0
 
         mapped = self.mapped_roles(host_id, clone_id)
-        plan = plan_role_order(incoming, mapped, *await self._current_role_facts(guild))
+        facts, top_pos, top_id = await self._current_role_facts(guild)
+        plan = plan_role_order(incoming, mapped, facts, top_pos, top_id)
 
         for role in plan["unmovable"]:
             if role["reason"] == "Above my top role":
@@ -1201,6 +1251,9 @@ class RoleManager:
                     "Move it below my role to include it in reordering.",
                     role["name"],
                 )
+        ties = plan_tie_report(facts, top_id, plan["unmovable"])
+        if ties and ties["skipped"]:
+            self._log("warning", "[⚠️] Role reorder: %s", above_top_note(ties))
 
         if not plan["cloned"]:
             self._log("debug", "[🧩] No cloned roles to rearrange")
