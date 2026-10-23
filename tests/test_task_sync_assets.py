@@ -2,6 +2,7 @@
 to the dispatcher, plan_role_order, and the server's sync_assets job with a fake guild."""
 import asyncio
 
+import discord
 import pytest
 
 from copycord.admin.tasks import sync_assets
@@ -130,7 +131,8 @@ async def test_run_streams_items_and_ends_with_summary_and_report(svc, sent, map
         },
         "role_order": {"moved": 2, "error": None,
                        "unmovable": [{"id": 5, "name": "Bots", "reason": "Managed by an integration"}],
-                       "bot_top": {"id": 99, "name": "Copycord", "position": 4}, "tied_with_bot": 0},
+                       "bot_top": {"id": 99, "name": "Copycord", "position": 4}, "tied_with_bot": 0,
+                       "fix": {"reason": "tied_positions", "tied_with_bot": 0, "steps": ["a", "b"]}},
     }
     await _frame("sync_assets_end", job_id=job, ok=True, error=None, cancelled=False, result=result,
                  totals={"created": 1, "updated": 1, "deleted": 0, "unchanged": 2, "reordered": 2,
@@ -149,6 +151,8 @@ async def test_run_streams_items_and_ends_with_summary_and_report(svc, sent, map
     assert done.report["unmovable"][0]["name"] == "Bots"
     assert done.report["role_order"]["bot_top"] == {"id": 99, "name": "Copycord", "position": 4}
     assert done.report["role_order"]["tied_with_bot"] == 0
+    assert done.report["role_order"]["fix"] == {"reason": "tied_positions", "tied_with_bot": 0,
+                                                "steps": ["a", "b"]}
     assert done.report["mapping"]["cloned_guild_id"] == str(CG)
     assert any(ln["msg"].startswith("Could not move Bots") and ln["step"] == "role_order"
                for ln in done.log_lines)
@@ -258,18 +262,21 @@ class _Me:
 
 
 class _Guild:
-    def __init__(self, roles, bot_role):
+    def __init__(self, roles, bot_role, edit_errors=()):
         self.id = CG
         self.features = []
         self._roles = roles
         self.me = _Me(bot_role)
         self.moves = []
+        self._edit_errors = list(edit_errors)
 
     async def fetch_roles(self):
         return list(self._roles)
 
     async def edit_role_positions(self, positions, reason=None):
         self.moves.append({int(o.id): p for o, p in positions.items()})
+        if self._edit_errors:
+            raise self._edit_errors.pop(0)
 
 
 class _Manager:
@@ -378,7 +385,97 @@ async def test_ws_job_streams_items_moves_roles_and_ends(monkeypatch):
     assert end["totals"]["reordered"] == 2
     assert end["result"]["kinds"]["emojis"]["items"] == [{"name": "pepe", "outcome": "failed",
                                                           "note": "Too big"}]
+    assert "fix" not in end["result"]["role_order"]
+    assert end["result"]["role_order"]["tied_with_bot"] == 0
     assert not sync._jobs
+
+
+def _fix(reason, tied):
+    return {"reason": reason, "tied_with_bot": tied,
+            "steps": ["Open Server Settings > Roles in the clone server",
+                      "Drag the 'Copycord' role down one place and back to the top",
+                      "Run Sync assets again"]}
+
+
+TIED_FIX = ("Discord has my role 'Copycord' at the same position as {n} other roles, so it "
+            "will not let me move them. Fix: open Server Settings > Roles in the clone server, "
+            "drag the 'Copycord' role down one place and back to the top, then run the sync again.")
+
+
+async def _role_order_job(guild, mapped):
+    snap = {"ok": True, "roles": [{"id": 1, "name": "Admin", "position": 2},
+                                  {"id": 2, "name": "Mods", "position": 1}],
+            "emojis": [], "stickers": []}
+    server = _Server(guild, snap, _Manager([], mapped=mapped))
+    await AssetSync(server).start({"job_id": "r4:assets", "original_guild_id": str(OG),
+                                   "cloned_guild_id": str(CG), "kinds": ["roles"]})
+    await _until(lambda: _frames(server, "sync_assets_end"))
+    order = _frames(server, "sync_assets_end")[0]["result"]["role_order"]
+    logs = [f["msg"] for f in _frames(server, "sync_assets_log") if f["step"] == "role_order"]
+    steps = [(f["state"], f.get("note")) for f in _frames(server, "sync_assets_step")
+             if f["step"] == "role_order"]
+    return order, logs, steps
+
+
+@pytest.mark.asyncio
+async def test_ws_job_role_order_skips_the_patch_when_my_role_is_tied(monkeypatch):
+    monkeypatch.setattr(asset_sync, "PROGRESS_INTERVAL", 0.0)
+    # Mods (150) shares my raw position but is newer, so it is not skipped; the plan
+    # would move it, yet Discord refuses any move while it is tied with my role.
+    bot = _Role(99, "Copycord", 3)
+    guild = _Guild([_Role(CG, "@everyone", 0, default=True), _Role(11, "Admin", 1),
+                    _Role(150, "Mods", 3), bot], bot)
+    order, logs, steps = await _role_order_job(guild, {1: 11, 2: 150})
+    assert guild.moves == []
+    assert order["unmovable"] == [] and order["moved"] == 0
+    assert order["tied_with_bot"] == 1
+    assert order["fix"] == _fix("tied_positions", 1)
+    assert logs.count(TIED_FIX.format(n=1)) == 1
+    assert steps[-1][0] == "success"
+
+
+@pytest.mark.asyncio
+async def test_ws_job_role_order_heads_up_when_my_role_is_at_the_bottom(monkeypatch):
+    monkeypatch.setattr(asset_sync, "PROGRESS_INTERVAL", 0.0)
+    bot = _Role(99, "Copycord", 1)
+    guild = _Guild([_Role(CG, "@everyone", 0, default=True), bot, _Role(11, "Admin", 2),
+                    _Role(12, "Mods", 3)], bot)
+    order, logs, _ = await _role_order_job(guild, {1: 11, 2: 12})
+    assert guild.moves == []
+    assert order["fix"] == _fix("bot_role_at_bottom", 0)
+    assert ("My role 'Copycord' is at the bottom of the role list. Drag it to the top in "
+            "Server Settings > Roles before syncing so I can order the roles I create.") in logs
+
+
+def _http_error(status, code, message):
+    resp = type("Resp", (), {"status": status, "reason": message})()
+    return discord.HTTPException(resp, {"code": code, "message": message})
+
+
+@pytest.mark.asyncio
+async def test_ws_job_role_order_reports_the_fix_when_still_refused_after_a_retry(monkeypatch):
+    monkeypatch.setattr(asset_sync, "PROGRESS_INTERVAL", 0.0)
+    _, guild = _host_and_clone()
+    err = _http_error(400, 50013, "Missing Permissions")
+    guild._edit_errors = [err, err]
+    order, logs, steps = await _role_order_job(guild, {1: 11, 2: 12})
+    assert len(guild.moves) == 2
+    assert "50013" in order["error"]
+    assert order["fix"] == _fix("missing_permissions_after_retry", 0)
+    assert steps[-1][0] == "failed"
+    assert ("Fix: Open Server Settings > Roles in the clone server, then Drag the 'Copycord' "
+            "role down one place and back to the top, then Run Sync assets again.") in logs
+
+
+@pytest.mark.asyncio
+async def test_ws_job_role_order_retries_once_after_missing_permissions(monkeypatch):
+    monkeypatch.setattr(asset_sync, "PROGRESS_INTERVAL", 0.0)
+    _, guild = _host_and_clone()
+    guild._edit_errors = [_http_error(400, 50013, "Missing Permissions")]
+    order, _, steps = await _role_order_job(guild, {1: 11, 2: 12})
+    assert guild.moves == [{12: 1, 11: 2}, {12: 1, 11: 2}]
+    assert order["error"] is None and order["moved"] == 2 and "fix" not in order
+    assert steps[-1][0] == "success"
 
 
 @pytest.mark.asyncio

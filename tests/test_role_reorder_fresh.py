@@ -8,8 +8,8 @@ import discord
 import pytest
 
 from copycord.server.item_hooks import ItemHooks
-from copycord.server.roles import (RoleManager, below_my_top, plan_role_order,
-                                   rank_role_facts)
+from copycord.server.roles import (RoleManager, below_my_top, bot_role_ties, plan_role_order,
+                                   rank_role_facts, reorder_blocker)
 
 CG = 1234567890123456790
 BOT = 99
@@ -283,3 +283,87 @@ async def test_reorder_with_roles_tied_with_mine_skips_the_patch_and_logs_the_fi
     assert "'tied older' is above my role" in caplog.text
     assert ("1 roles skipped as above my top role Copycord (99, raw position 5): "
             "1 share its raw position, 0 sit strictly above it") in caplog.text
+
+
+# Roles tied with my top role: Discord refuses every move, so the bot names the fix.
+
+def test_bot_role_ties_counts_every_role_tied_with_mine():
+    # 201 is newer so it is below me and never skipped; it still counts as tied,
+    # as do the older 50 and the managed 150. @everyone and 202 do not.
+    roles = [{"id": CG, "position": 0, "default": True}, {"id": 202, "position": 4},
+             {"id": 201, "position": 5}, {"id": 50, "position": 5},
+             {"id": 150, "position": 5, "managed": True}, {"id": BOT, "name": "Copycord", "position": 5}]
+    facts, _, top_id = rank_role_facts(roles, {BOT})
+    mine = bot_role_ties(facts, top_id)
+    assert mine == {"id": BOT, "name": "Copycord", "position": 5, "tied_with_bot": 3,
+                    "at_bottom": False}
+    assert reorder_blocker(mine) == "tied_positions"
+
+
+def test_bot_role_ties_flags_my_role_at_the_bottom():
+    roles = [{"id": CG, "position": 0, "default": True}, {"id": BOT, "name": "Copycord", "position": 1},
+             {"id": 201, "position": 2}]
+    mine = bot_role_ties(roles, BOT)
+    assert mine["tied_with_bot"] == 0 and mine["at_bottom"] is True
+    assert reorder_blocker(mine) == "bot_role_at_bottom"
+    clean = [{"id": CG, "position": 0, "default": True}, {"id": 201, "position": 1},
+             {"id": BOT, "position": 2}]
+    assert reorder_blocker(bot_role_ties(clean, BOT)) is None
+    assert bot_role_ties(clean, 12345) is None
+
+
+@pytest.mark.asyncio
+async def test_rearrange_with_a_fresh_tie_after_a_refused_patch_skips_the_retry(caplog):
+    tied = [_Role(CG, 0, "@everyone"), _Role(150, 1, "Bots", managed=True), _Role(203, 1),
+            _Role(202, 1), _Role(201, 1), _Role(BOT, 1, "Copycord", managed=True)]
+    guild = _Guild(_fresh(), _fresh(), edit_errors=[_http_error(400, 50013, "Missing Permissions")])
+    fetches = iter([_fresh(), tied])
+    guild.fetch_roles = lambda: _async(next(fetches))
+    with caplog.at_level(logging.DEBUG, logger="server.roles"):
+        moved = await _rearrange(guild)
+    assert moved == 0 and len(guild.moves) == 1
+    assert caplog.text.count(TIED_FIX.format(n=4)) == 1
+
+
+async def _async(value):
+    return value
+
+
+def _bottom_clone():
+    bot = _SyncRole(BOT, 1, "Copycord")
+    roles = [_SyncRole(CG, 0, "@everyone"), bot]
+    return SimpleNamespace(id=CG, roles=roles, features=[],
+                           me=SimpleNamespace(roles=[bot], top_role=bot))
+
+
+@pytest.mark.asyncio
+async def test_sync_gives_a_heads_up_when_my_role_is_at_the_bottom(caplog):
+    with caplog.at_level(logging.DEBUG, logger="server.roles"):
+        await _sync_manager({})._sync(
+            guild=_bottom_clone(), incoming=[], host_id=1, clone_id=CG, delete_roles=False,
+            mirror_permissions=False, update_roles=True, rearrange_roles=False)
+    assert caplog.text.count(BOTTOM_FIX) == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_gives_no_heads_up_when_my_role_is_tied_or_clean(caplog):
+    guild, _ = _tied_clone()
+    with caplog.at_level(logging.DEBUG, logger="server.roles"):
+        await _sync_manager({})._sync(
+            guild=guild, incoming=[], host_id=1, clone_id=CG, delete_roles=False,
+            mirror_permissions=False, update_roles=True, rearrange_roles=False)
+    assert "at the bottom of the role list" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_rearrange_skips_the_patch_when_new_roles_tie_with_mine_at_the_bottom(caplog):
+    tied = [_Role(CG, 0, "@everyone"), _Role(203, 1), _Role(202, 1), _Role(201, 1),
+            _Role(BOT, 1, "Copycord", managed=True)]
+    guild = _Guild(tied, tied)
+    guild.features = []
+    mgr = RoleManager(bot=None, db=_SyncDB(MAPPED), guild_resolver=None, ratelimit=None,
+                      clone_guild_id=CG)
+    with caplog.at_level(logging.DEBUG, logger="server.roles"):
+        moved = await mgr._rearrange_roles(guild=guild, incoming=HOST, host_id=1, clone_id=CG)
+    assert moved == 0 and guild.moves == []
+    assert caplog.text.count(TIED_FIX.format(n=3)) == 1
