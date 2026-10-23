@@ -277,6 +277,46 @@ def _sanitize_discord_embed_for_webhook(e: dict) -> dict | None:
     return out or None
 
 
+def _sanitize_link_button_rows(components: object) -> list[dict]:
+    """Keep only action rows of link buttons, without emoji, in a shape webhooks accept."""
+    if not isinstance(components, list):
+        return []
+
+    rows: list[dict] = []
+    for row in components:
+        if len(rows) >= 5:
+            break
+        if not isinstance(row, dict) or row.get("type") != 1:
+            continue
+        children = row.get("components")
+        if not isinstance(children, list):
+            continue
+
+        buttons: list[dict] = []
+        for b in children:
+            if len(buttons) >= 5:
+                break
+            if not isinstance(b, dict) or b.get("type") != 2 or b.get("style") != 5:
+                continue
+            url = str(b.get("url") or "").strip()
+            # Discord rejects the whole message if a button url is over 512 chars
+            if len(url) > 512:
+                continue
+            try:
+                parts = urlsplit(url)
+            except ValueError:
+                continue
+            if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+                continue
+            label = str(b.get("label") or "").strip() or parts.hostname
+            buttons.append({"type": 2, "style": 5, "label": _clip(label, 80), "url": url})
+
+        if buttons:
+            rows.append({"type": 1, "components": buttons})
+
+    return rows
+
+
 def _extract_embed_image_urls(embeds: list[dict]) -> set[str]:
     urls: set[str] = set()
     for e in embeds or []:
