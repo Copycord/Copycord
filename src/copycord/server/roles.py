@@ -185,6 +185,45 @@ def bot_role_ties(facts: List[Dict], top_id: int) -> Optional[Dict]:
             "tied_with_bot": tied, "at_bottom": pos <= 1}
 
 
+def tied_role_warning(name: str, tied: int) -> str:
+    return (
+        f"Discord has my role '{name}' at the same position as {tied} other roles, so it "
+        f"will not let me move them. Fix: open Server Settings > Roles in the clone server, "
+        f"drag the '{name}' role down one place and back to the top, then run the sync again."
+    )
+
+
+def bottom_role_warning(name: str) -> str:
+    return (
+        f"My role '{name}' is at the bottom of the role list. Drag it to the top in "
+        f"Server Settings > Roles before syncing so I can order the roles I create."
+    )
+
+
+def reorder_blocker(mine: Optional[Dict]) -> Optional[str]:
+    """Why a role reorder PATCH cannot succeed for bot_role_ties' report, or None."""
+    if not mine:
+        return None
+    if mine["tied_with_bot"]:
+        return "tied_positions"
+    if mine["at_bottom"]:
+        return "bot_role_at_bottom"
+    return None
+
+
+def reorder_fix(name: str, reason: str, tied: int) -> Dict:
+    """The role_order.fix a Sync assets report carries when the reorder is blocked."""
+    return {
+        "reason": reason,
+        "tied_with_bot": int(tied),
+        "steps": [
+            "Open Server Settings > Roles in the clone server",
+            f"Drag the '{name}' role down one place and back to the top",
+            "Run Sync assets again",
+        ],
+    }
+
+
 def above_top_note(report: Dict) -> str:
     top = report["bot_top"]
     return (
@@ -589,6 +628,12 @@ class RoleManager:
         hooks = hooks or ItemHooks()
         me = guild.me
         me_top = me.top_role if me and me.top_role else None
+        if me_top is not None:
+            # A fresh server leaves my role at the bottom; every role I create lands
+            # level with it there, and Discord will not let me order them afterwards.
+            mine = bot_role_ties([self.role_facts(r) for r in guild.roles], me_top.id)
+            if reorder_blocker(mine) == "bot_role_at_bottom":
+                self._log("warning", "[⚠️] %s", bottom_role_warning(mine["name"]))
 
         rows = self.db.get_all_role_mappings()
         current: dict[int, dict] = {}
@@ -1277,6 +1322,12 @@ class RoleManager:
         if ties and ties["skipped"]:
             self._log("warning", "[⚠️] Role reorder: %s", above_top_note(ties))
 
+        mine = bot_role_ties(facts, top_id)
+        if reorder_blocker(mine) == "tied_positions":
+            # Discord refuses any move of a role tied with mine (50013), so do not try.
+            self._log("warning", "[⚠️] %s", tied_role_warning(mine["name"], mine["tied_with_bot"]))
+            return 0
+
         if not plan["cloned"]:
             self._log("debug", "[🧩] No cloned roles to rearrange")
             return 0
@@ -1297,9 +1348,13 @@ class RoleManager:
                     "[🧩] Role reorder rejected (%s); refetching roles and retrying once",
                     e,
                 )
-                plan = plan_role_order(
-                    incoming, mapped, *await self._current_role_facts(guild)
-                )
+                facts, top_pos, top_id = await self._current_role_facts(guild)
+                mine = bot_role_ties(facts, top_id)
+                if reorder_blocker(mine) == "tied_positions":
+                    self._log("warning", "[⚠️] %s",
+                              tied_role_warning(mine["name"], mine["tied_with_bot"]))
+                    return 0
+                plan = plan_role_order(incoming, mapped, facts, top_pos, top_id)
                 if not plan["changed"]:
                     return 0
                 try:
@@ -1308,7 +1363,8 @@ class RoleManager:
                     self._log(
                         "warning",
                         "[⚠️] Failed to rearrange roles after refetching them: %s. "
-                        "Make sure my role sits above every cloned role.",
+                        "Make sure my role sits above every cloned role. If it already does, "
+                        "drag it down one place and back to the top in Server Settings > Roles.",
                         e2,
                     )
                     return 0

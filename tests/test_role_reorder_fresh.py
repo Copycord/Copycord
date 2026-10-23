@@ -229,6 +229,12 @@ def _sync_manager(mapped):
     return mgr
 
 
+TIED_FIX = ("Discord has my role 'Copycord' at the same position as {n} other roles, so it "
+            "will not let me move them. Fix: open Server Settings > Roles in the clone server, "
+            "drag the 'Copycord' role down one place and back to the top, then run the sync again.")
+BOTTOM_FIX = ("My role 'Copycord' is at the bottom of the role list. Drag it to the top in "
+              "Server Settings > Roles before syncing so I can order the roles I create.")
+
 TIE_NOTE = ("2 roles skipped as above my top role Copycord (99, raw position 5): "
             "1 share its raw position, 1 sit strictly above it")
 
@@ -263,7 +269,7 @@ async def test_sync_deletes_a_role_tied_with_mine_but_newer(caplog):
 
 
 @pytest.mark.asyncio
-async def test_reorder_moves_a_tied_newer_role_and_reports_the_older_one(caplog):
+async def test_reorder_with_roles_tied_with_mine_skips_the_patch_and_logs_the_fix(caplog):
     fresh = [_Role(CG, 0, "@everyone"), _Role(203, 1), _Role(201, 5, "tied newer"),
              _Role(50, 5, "tied older"), _Role(BOT, 5, "Copycord", managed=True)]
     guild = _Guild(fresh, fresh)
@@ -271,8 +277,9 @@ async def test_reorder_moves_a_tied_newer_role_and_reports_the_older_one(caplog)
     mgr = RoleManager(bot=None, db=_DB({1: 201, 2: 203, 3: 50}), guild_resolver=None,
                       ratelimit=None, clone_guild_id=CG)
     with caplog.at_level(logging.DEBUG, logger="server.roles"):
-        await mgr._rearrange_roles(guild=guild, incoming=host, host_id=1, clone_id=CG)
-    assert guild.moves == [{201: 1, 203: 2}]
+        moved = await mgr._rearrange_roles(guild=guild, incoming=host, host_id=1, clone_id=CG)
+    assert guild.moves == [] and moved == 0
+    assert caplog.text.count(TIED_FIX.format(n=2)) == 1
     assert "'tied older' is above my role" in caplog.text
     assert ("1 roles skipped as above my top role Copycord (99, raw position 5): "
             "1 share its raw position, 0 sit strictly above it") in caplog.text

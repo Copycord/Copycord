@@ -34,8 +34,10 @@ from typing import Any, Optional
 import discord
 
 from copycord.server.item_hooks import OUTCOMES, ItemHooks
-from copycord.server.roles import (RoleManager, above_top_note, bot_role_ties, my_role_ids,
-                                   plan_role_order, plan_tie_report, rank_role_facts)
+from copycord.server.roles import (RoleManager, above_top_note, bot_role_ties,
+                                   bottom_role_warning, my_role_ids, plan_role_order,
+                                   plan_tie_report, rank_role_facts, reorder_blocker,
+                                   reorder_fix, tied_role_warning)
 
 logger = logging.getLogger("server.asset_sync")
 
@@ -277,6 +279,7 @@ class AssetSync:
         order: dict = {"moved": 0, "unmovable": [], "error": None}
         result["role_order"] = order
         tie_note: Optional[str] = None
+        fix_note: Optional[str] = None
         roles = self.server.roles
         await self._step(job, ROLE_ORDER, "running", label="Reading the clone's roles")
         try:
@@ -299,9 +302,16 @@ class AssetSync:
                 mine = bot_role_ties(ranked[0], ranked[2])
                 if mine:
                     order["tied_with_bot"] = mine["tied_with_bot"]
+                # Discord refuses to move roles tied with mine or to order roles below a
+                # role at the bottom, so the PATCH is skipped and the fix is logged instead.
+                blocker = reorder_blocker(mine)
+                if blocker == "tied_positions":
+                    fix_note = tied_role_warning(mine["name"], mine["tied_with_bot"])
+                elif blocker == "bot_role_at_bottom":
+                    fix_note = bottom_role_warning(mine["name"])
                 total = len(plan["order"])
                 await self._progress(job, ROLE_ORDER, 0, total, "Checking the order", force=True)
-                if plan["changed"]:
+                if plan["changed"] and not blocker:
                     await self._progress(job, ROLE_ORDER, 0, total, f"Moving {plan['moved']} roles", force=True)
                     if job.cancelled:
                         raise asyncio.CancelledError()
@@ -324,5 +334,8 @@ class AssetSync:
         if tie_note:
             logger.warning("[⚠️] Sync assets role order: %s", tie_note)
             await self._log(job, tie_note,"warning", step=ROLE_ORDER)
+        if fix_note:
+            logger.warning("[⚠️] Sync assets role order: %s", fix_note)
+            await self._log(job, fix_note, "warning", step=ROLE_ORDER)
         await self._step(job, ROLE_ORDER, "success", note=order_note(order["moved"], len(order["unmovable"])),
                          done=total, total=total)
