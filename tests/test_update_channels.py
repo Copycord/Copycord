@@ -932,13 +932,76 @@ def test_move_aside_renames_executables_and_launchers(tmp_path, monkeypatch):
     home = tmp_path / "home"
     moved = winupdate.move_aside(str(env), [str(shim)], home)
     assert len(moved) == 4
-    assert not (env / "Scripts" / "python.exe").exists() and not shim.exists()
+    assert not (env / "Lib" / "x.pyd").exists() and not shim.exists()
     assert (env / "Lib" / "x.py").exists()
     winupdate.restore(moved)
     assert (env / "Scripts" / "python.exe").exists() and shim.exists()
     winupdate.move_aside(str(env), [str(shim)], home)
     winupdate.clean_old(home, [str(shim)])
     assert not (home / winupdate.ASIDE).exists()
+
+
+def _fake_env(tmp_path):
+    env = tmp_path / "tools" / "copycord"
+    (env / "Scripts").mkdir(parents=True)
+    (env / "Lib").mkdir()
+    for name in ("python.exe", "pythonw.exe", "copycord.exe"):
+        (env / "Scripts" / name).write_bytes(b"MZ " + name.encode())
+    (env / "Lib" / "x.pyd").write_bytes(b"pyd")
+    return env
+
+
+def test_move_aside_copies_the_interpreters_back(tmp_path):
+    env = _fake_env(tmp_path)
+    home = tmp_path / "home"
+    failed: list = []
+    moved = dict(winupdate.move_aside(str(env), [], home, failed))
+    assert failed == []
+    for name in ("python.exe", "pythonw.exe"):
+        src = env / "Scripts" / name
+        # uv needs Scripts\python.exe to treat the folder as an environment.
+        assert src.read_bytes() == b"MZ " + name.encode()
+        assert moved[src].read_bytes() == src.read_bytes()
+        assert winupdate.ASIDE in moved[src].parts
+    assert not (env / "Scripts" / "copycord.exe").exists()
+    assert not (env / "Lib" / "x.pyd").exists()
+
+
+def test_restore_puts_the_original_interpreters_back(tmp_path):
+    env = _fake_env(tmp_path)
+    moved = winupdate.move_aside(str(env), [], tmp_path / "home")
+    winupdate.restore(moved)
+    for src, dest in moved:
+        assert src.is_file() and not dest.exists()
+    assert (env / "Scripts" / "python.exe").read_bytes() == b"MZ python.exe"
+    assert (env / "Lib" / "x.pyd").read_bytes() == b"pyd"
+
+
+def test_restore_keeps_a_new_interpreter_and_new_files(tmp_path):
+    env = _fake_env(tmp_path)
+    moved = winupdate.move_aside(str(env), [], tmp_path / "home")
+    (env / "Scripts" / "python.exe").write_bytes(b"new")
+    (env / "Lib" / "x.pyd").write_bytes(b"new")
+    winupdate.restore(moved)
+    assert (env / "Scripts" / "python.exe").read_bytes() == b"new"
+    assert (env / "Lib" / "x.pyd").read_bytes() == b"new"
+    assert (env / "Scripts" / "copycord.exe").exists()
+
+
+def test_a_failed_copy_back_is_reported_and_does_not_stop(tmp_path, monkeypatch):
+    env = _fake_env(tmp_path)
+
+    def copy2(src, dst):
+        raise OSError("denied")
+
+    monkeypatch.setattr(winupdate.shutil, "copy2", copy2)
+    failed: list = []
+    moved = winupdate.move_aside(str(env), [], tmp_path / "home", failed)
+    assert len(moved) == 4
+    assert len(failed) == 2 and all("(copy back): denied" in f for f in failed)
+    assert not (env / "Scripts" / "python.exe").exists()
+    winupdate.restore(moved)
+    assert (env / "Scripts" / "python.exe").read_bytes() == b"MZ python.exe"
 
 
 def test_scan_finds_own_chain_and_ignores_the_service():

@@ -11,13 +11,15 @@
 Windows only: `uv tool install --force` deletes the tool environment, and
 Windows cannot delete a running .exe or a loaded .pyd/.dll, but it can rename
 them. So right before the install the executable files of the environment and
-the running launcher are moved into a .copycord-old folder on the same drive;
-the install then runs in this process like on Linux, and the next update
-deletes the old folder.
+the running launcher are moved into a .copycord-old folder on the same drive,
+and a copy of the environment's Scripts\\python*.exe is put back so uv still
+sees a valid environment it can replace; the install then runs in this process
+like on Linux, and the next update deletes the old folder.
 """
 
 from __future__ import annotations
 
+import filecmp
 import gc
 import importlib
 import json
@@ -180,9 +182,16 @@ def clean_old(home: Path, launchers: List[str]) -> None:
             shutil.rmtree(folder, ignore_errors=True)
 
 
+def _interpreter(path: Path) -> bool:
+    """A python*.exe in a Scripts folder: uv rejects an environment without it."""
+    name = path.name.lower()
+    return path.parent.name.lower() == "scripts" and name.startswith("python") and name.endswith(".exe")
+
+
 def move_aside(prefix: str, launchers: List[str], home: Path,
                failed: Optional[List[str]] = None) -> List[Tuple[Path, Path]]:
-    """Rename the executable files of the environment and the launchers out of the way."""
+    """Rename the executable files of the environment and the launchers out of the
+    way, then copy the environment's interpreters back so uv can still read it."""
     # importlib.metadata keeps the launcher (a zip on sys.path) open; that blocks the rename.
     importlib.invalidate_caches()
     gc.collect()
@@ -199,6 +208,12 @@ def move_aside(prefix: str, launchers: List[str], home: Path,
                 failed.append(f"{src}: {e}")
             continue
         moved.append((src, dest))
+        if _interpreter(src) and src.parent.parent == Path(prefix):
+            try:
+                shutil.copy2(dest, src)
+            except OSError as e:
+                if failed is not None:
+                    failed.append(f"{src} (copy back): {e}")
     return moved
 
 
@@ -206,7 +221,9 @@ def restore(moved: List[Tuple[Path, Path]]) -> None:
     """Put moved files back when the install left the old environment in place."""
     for src, dest in moved:
         try:
-            if src.parent.is_dir() and not src.exists():
+            # An interpreter copied back by move_aside is replaced by its original.
+            copy = _interpreter(src) and src.is_file() and filecmp.cmp(src, dest, shallow=False)
+            if src.parent.is_dir() and (copy or not src.exists()):
                 os.replace(dest, src)
         except OSError:
             pass
