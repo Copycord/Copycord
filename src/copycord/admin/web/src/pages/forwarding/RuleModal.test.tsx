@@ -311,7 +311,7 @@ describe("HTTP / API rules", () => {
     await user.type(input("fwd_label"), "Relay");
     await pickProvider(user, "HTTP / API");
     expect(input("fwd_provider").value).toBe("http");
-    expect(within(dialog).getByText(/POSTs a JSON payload \(version 1\) to this URL/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/POSTs a JSON payload to this URL/)).toBeInTheDocument();
     await user.type(input("http_url"), " https://api.example.com/hook ");
     await user.click(within(dialog).getByRole("button", { name: "Add header" }));
     await user.click(within(dialog).getByRole("button", { name: "Add header" }));

@@ -297,7 +297,7 @@ export function HttpFields({ form, patch }: { form: RuleForm; patch: Patch }) {
         label="Endpoint URL"
         id="http_url"
         className={GROUP}
-        help="POSTs a JSON payload (version 1) to this URL. Headers are stored as secrets."
+        help="POSTs a JSON payload to this URL. Headers are stored as secrets."
       >
         <Input
           type="text"
