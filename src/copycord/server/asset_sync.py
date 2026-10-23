@@ -34,7 +34,7 @@ from typing import Any, Optional
 import discord
 
 from copycord.server.item_hooks import OUTCOMES, ItemHooks
-from copycord.server.roles import RoleManager, plan_role_order
+from copycord.server.roles import RoleManager, my_role_ids, plan_role_order, rank_role_facts
 
 logger = logging.getLogger("server.asset_sync")
 
@@ -285,9 +285,9 @@ class AssetSync:
                 if top is None:
                     raise RuntimeError("The server bot has no role in the clone server")
                 facts = [RoleManager.role_facts(r) for r in fetched]
-                top_pos = next((f["position"] for f in facts if f["id"] == top.id), top.position)
+                ranked = rank_role_facts(facts, my_role_ids(me)) or (facts, top.position, top.id)
                 plan = plan_role_order(snap.get("roles") or [], roles.mapped_roles(host_id, guild.id),
-                                       facts, top_pos, top.id)
+                                       *ranked)
                 order["unmovable"] = plan["unmovable"]
                 total = len(plan["order"])
                 await self._progress(job, ROLE_ORDER, 0, total, "Checking the order", force=True)
