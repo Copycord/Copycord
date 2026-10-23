@@ -143,10 +143,9 @@ def test_payload_shape():
         "content": "hello",
         "embeds": [{"title": "t"}],
         "attachments": [{"url": "https://cdn.example/a.png", "filename": "a.png"}],
-        "timestamp": p["timestamp"],
+        # Decoded from the message id snowflake.
+        "timestamp": "2024-04-29T18:12:02.167000+00:00",
     }
-    # Taken from the snowflake: 2017 for this id.
-    assert p["timestamp"].startswith("2017-") and p["timestamp"].endswith("+00:00")
 
 
 def test_payload_tolerates_missing_attrs():
