@@ -17,6 +17,8 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
 from typing import Any, Dict, List, Optional, Sequence
 
 import aiohttp
@@ -121,6 +123,79 @@ def _extract_ratelimit_reset_after(headers) -> float | None:
         return float(v) if v is not None else None
     except Exception:
         return None
+
+
+HTTP_PAYLOAD_VERSION = 1
+HTTP_TIMEOUT_SECONDS = 10.0
+DISCORD_EPOCH_MS = 1420070400000
+
+
+def _is_http_url(url: Any) -> bool:
+    if not isinstance(url, str) or not url.strip():
+        return False
+    try:
+        parts = urlsplit(url.strip())
+    except Exception:
+        return False
+    return parts.scheme.lower() in ("http", "https") and bool(parts.netloc)
+
+
+def _redact_url(url: str) -> str:
+    """scheme://host/path only: drops credentials, query string and fragment."""
+    try:
+        parts = urlsplit(url or "")
+        host = parts.hostname or ""
+        if parts.port:
+            host = f"{host}:{parts.port}"
+        return urlunsplit((parts.scheme, host, parts.path, "", ""))
+    except Exception:
+        return "<invalid url>"
+
+
+def _snowflake_iso(message_id: Any) -> str | None:
+    """Creation time encoded in a Discord snowflake, as ISO-8601 UTC."""
+    try:
+        ms = (int(message_id) >> 22) + DISCORD_EPOCH_MS
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def _str_id(v: Any) -> str | None:
+    return str(v) if v is not None else None
+
+
+def build_http_payload(rule: "ForwardingRule", attrs: dict) -> dict:
+    """Versioned JSON body for the generic HTTP provider."""
+    attrs = attrs or {}
+    attachments = []
+    for att in attrs.get("attachments") or []:
+        if not isinstance(att, dict):
+            continue
+        url = (att.get("url") or "").strip()
+        if not url:
+            continue
+        attachments.append({"url": url, "filename": att.get("filename") or None})
+
+    return {
+        "version": HTTP_PAYLOAD_VERSION,
+        "rule_id": rule.rule_id,
+        "message_id": _str_id(attrs.get("message_id")),
+        "guild": {"id": _str_id(attrs.get("guild_id") or rule.guild_id), "name": None},
+        "channel": {
+            "id": _str_id(attrs.get("channel_id")),
+            "name": attrs.get("channel_name"),
+        },
+        "author": {
+            "id": _str_id(attrs.get("author_id")),
+            "name": attrs.get("author_name"),
+            "bot": bool(attrs.get("is_bot")),
+        },
+        "content": attrs.get("content") or "",
+        "embeds": [e for e in (attrs.get("embeds") or []) if isinstance(e, dict)],
+        "attachments": attachments,
+        "timestamp": _snowflake_iso(attrs.get("message_id")),
+    }
 
 
 def _clip(s: str, limit: int) -> str:
@@ -462,7 +537,7 @@ class ForwardingJob:
 
 
 class ForwardingManager:
-    """Per-guild forwarding rules with an async queue and worker task(s) per provider (Telegram, Pushover, Discord webhook)."""
+    """Per-guild forwarding rules with an async queue and worker task(s) per provider (Telegram, Pushover, Discord webhook, HTTP)."""
 
     def __init__(
         self,
@@ -508,12 +583,14 @@ class ForwardingManager:
             "telegram": int(os.getenv("FORWARDING_WORKERS_TELEGRAM", "1")),
             "pushover": int(os.getenv("FORWARDING_WORKERS_PUSHOVER", "1")),
             "discord": int(os.getenv("FORWARDING_WORKERS_DISCORD", "1")),
+            "http": int(os.getenv("FORWARDING_WORKERS_HTTP", "1")),
         }
 
         self._queues: Dict[str, asyncio.Queue] = {
             "telegram": asyncio.Queue(maxsize=self._queue_maxsize),
             "pushover": asyncio.Queue(maxsize=self._queue_maxsize),
             "discord": asyncio.Queue(maxsize=self._queue_maxsize),
+            "http": asyncio.Queue(maxsize=self._queue_maxsize),
         }
 
         self._worker_tasks: list[asyncio.Task] = []
@@ -753,7 +830,7 @@ class ForwardingManager:
 
         provider = "discord" if provider_raw == "webhook" else provider_raw
 
-        if provider_raw not in ("pushover", "telegram", "discord", "webhook"):
+        if provider_raw not in ("pushover", "telegram", "discord", "webhook", "http"):
             self.log.warning(
                 "[⏩] Invalid rule skipped | rule_id=%s guild_id=%s provider=%s",
                 rule_id,
@@ -785,6 +862,15 @@ class ForwardingManager:
             config = dict(config)
             config["urls"] = urls
             config.pop("url", None)
+
+        if provider == "http":
+            if not _is_http_url(config.get("url")):
+                self.log.warning(
+                    "[⏩] No valid HTTP endpoint URL; skipping rule | rule_id=%s provider=%s",
+                    rule_id,
+                    provider_raw,
+                )
+                return None
 
         filters = ForwardingFilters.from_dict(filters_raw)
 
@@ -1001,6 +1087,8 @@ class ForwardingManager:
             return "telegram"
         if p == "pushover":
             return "pushover"
+        if p == "http":
+            return "http"
         if p == "discord":
             urls = [
                 u
@@ -1102,6 +1190,14 @@ class ForwardingManager:
                 session=session,
                 job=job,
                 attempt=job.attempts,
+            )
+            return
+        if provider == "http":
+            await self._send_http(
+                rule=job.rule,
+                message_id=job.message_id,
+                attrs=job.attrs,
+                session=session,
             )
             return
 
@@ -1585,6 +1681,89 @@ class ForwardingManager:
 
             if idx != total:
                 await asyncio.sleep(0.15)
+
+    async def _send_http(
+        self,
+        *,
+        rule: ForwardingRule,
+        message_id: str,
+        attrs: dict,
+        session: aiohttp.ClientSession,
+    ) -> None:
+        url = (rule.config.get("url") or "").strip()
+        if not _is_http_url(url):
+            self.log.debug("[⏩] HTTP rule %s missing or invalid url", rule.rule_id)
+            return
+
+        headers: dict[str, str] = {}
+        raw_headers = rule.config.get("headers") or {}
+        if isinstance(raw_headers, dict):
+            for k, v in raw_headers.items():
+                if isinstance(k, str) and k.strip() and isinstance(v, str):
+                    headers[k.strip()] = v
+        headers["Content-Type"] = "application/json"
+
+        payload = build_http_payload(rule, attrs)
+        safe_url = _redact_url(url)
+
+        try:
+            async with session.post(
+                url,
+                data=json.dumps(payload),
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=HTTP_TIMEOUT_SECONDS),
+                allow_redirects=False,
+            ) as resp:
+                status = resp.status
+                body_txt = await resp.text()
+                resp_headers = resp.headers
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            raise RetryableForwardingError(
+                "HTTP network/timeout error", status=None
+            ) from e
+
+        if 200 <= status < 300:
+            self.log.info(
+                "[⏩] HTTP forward OK | rule_id=%s status=%s url=%s",
+                rule.rule_id,
+                status,
+                safe_url,
+            )
+            try:
+                self.db.record_forwarding_event(
+                    provider="http",
+                    rule_id=rule.rule_id,
+                    guild_id=rule.guild_id,
+                    source_message_id=attrs.get("message_id"),
+                )
+            except Exception:
+                self.log.debug("[⏩] failed to record http event", exc_info=True)
+            return
+
+        if status == 429:
+            raise RetryableForwardingError(
+                "HTTP 429 rate limited",
+                delay=_extract_retry_after_from_headers(resp_headers)
+                or _extract_retry_after_from_body(body_txt),
+                status=status,
+                body=body_txt,
+            )
+
+        if status >= 500 or status == 408:
+            raise RetryableForwardingError(
+                "HTTP transient error",
+                status=status,
+                body=body_txt,
+            )
+
+        self.log.warning(
+            "[⏩] HTTP forward failed, not retrying | rule_id=%s message_id=%s status=%s url=%s body=%s",
+            rule.rule_id,
+            message_id,
+            status,
+            safe_url,
+            (body_txt or "")[:300],
+        )
 
     async def _send_telegram(
         self,
