@@ -446,7 +446,7 @@ def test_release_update_never_sets_up_node(env, data_dir, monkeypatch):
 def test_dev_with_npm_on_path_passes_its_dir(env, data_dir):
     rec, _, _ = env
     assert cli.main(["update", "--channel", "dev"]) == 0
-    assert rec.envs[0]["PATH"].split(os.pathsep)[0] == "/usr/bin"
+    assert rec.envs[0]["PATH"].split(os.pathsep)[0] == os.path.normpath("/usr/bin")
 
 
 def test_failed_install_does_not_switch_channel(env, data_dir):
