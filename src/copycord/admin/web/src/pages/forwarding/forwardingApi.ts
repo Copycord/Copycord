@@ -43,8 +43,22 @@ export function describeProvider(provider: string): string {
       return "Discord";
     case "telegram":
       return "Telegram";
+    case "http":
+      return "Custom Webhook";
     default:
       return provider || "Custom";
+  }
+}
+
+/** The card's one line about where a rule sends: the endpoint host for HTTP, never its path, query or headers. */
+export function ruleSummary(rule: ForwardingRule): string | null {
+  if ((rule.provider || "").toLowerCase() !== "http") return null;
+  const raw = rule.config?.url;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    return new URL(raw.trim()).host || null;
+  } catch {
+    return null;
   }
 }
 

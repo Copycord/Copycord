@@ -1,6 +1,7 @@
 // Form state of the rule modal: prefill for edit and duplicate, the payload
 // built from the form, and the client side provider checks. Secrets are
-// prefilled as they come from GET /api/forwarding, in plain text inputs.
+// prefilled as they come from GET /api/forwarding, in plain text inputs; HTTP
+// header values arrive masked and the mask is posted back unless edited.
 
 import { api, ApiError, errorText } from "../../lib/api";
 import type {
@@ -36,9 +37,21 @@ export const PROVIDERS = [
   { value: "pushover", label: "Pushover" },
   { value: "telegram", label: "Telegram" },
   { value: "discord", label: "Discord" },
+  { value: "http", label: "Custom Webhook" },
 ] as const;
 
 const WEBHOOK_RE = /^https?:\/\/(canary\.|ptb\.)?discord(app)?\.com\/api\/webhooks\/\d+\/.+/i;
+
+/** What GET /api/forwarding sends in place of each HTTP header value; sent back, the server keeps the stored one. */
+export const HEADER_MASK = "********";
+export const MAX_HTTP_HEADERS = 20;
+// An RFC 9110 token, the same check the server makes.
+const HEADER_NAME_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+export interface HeaderRow {
+  name: string;
+  value: string;
+}
 
 export interface RuleForm {
   rule_id: string;
@@ -53,6 +66,8 @@ export interface RuleForm {
   discord_avatar_url: string;
   telegram_bot_token: string;
   telegram_chat_id: string;
+  http_url: string;
+  http_headers: HeaderRow[];
   keywords_any: string[];
   keywords_all: string[];
   channel_ids: string[];
@@ -77,6 +92,8 @@ export const EMPTY_FORM: RuleForm = {
   discord_avatar_url: "",
   telegram_bot_token: "",
   telegram_chat_id: "",
+  http_url: "",
+  http_headers: [],
   keywords_any: [],
   keywords_all: [],
   channel_ids: [],
@@ -96,6 +113,16 @@ function clean(list: string[]): string[] {
   return list.map((s) => s.trim()).filter(Boolean);
 }
 
+function headerRows(v: unknown): HeaderRow[] {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return [];
+  return Object.entries(v as Record<string, unknown>).map(([name, value]) => ({ name, value: str(value) }));
+}
+
+/** Header rows with something typed in, trimmed; a row left blank on both sides is dropped. */
+function filledHeaders(rows: HeaderRow[]): HeaderRow[] {
+  return rows.map((r) => ({ name: r.name.trim(), value: r.value.trim() })).filter((r) => r.name || r.value);
+}
+
 export function formFromRule(rule: ForwardingRule): RuleForm {
   const cfg = rule.config ?? {};
   const f = rule.filters ?? {};
@@ -113,6 +140,8 @@ export function formFromRule(rule: ForwardingRule): RuleForm {
     discord_avatar_url: str(cfg.avatar_url || cfg.bot_avatar_url || cfg.bot_avatar),
     telegram_bot_token: str(cfg.bot_token),
     telegram_chat_id: str(cfg.chat_id),
+    http_url: rule.provider === "http" ? str(cfg.url) : "",
+    http_headers: rule.provider === "http" ? headerRows(cfg.headers) : [],
     keywords_any: clean(toList(f.keywords_any)),
     keywords_all: clean(toList(f.keywords_all)),
     channel_ids: clean(toList(f.channel_ids)),
@@ -129,7 +158,9 @@ export function formFromRequest(req: RuleEditorRequest): RuleForm {
   if (req.mode === "create") return { ...EMPTY_FORM };
   const form = formFromRule(req.rule);
   if (req.mode === "edit") return form;
-  return { ...form, rule_id: "", label: `${req.rule.label || ""} (Copy)`.trim() };
+  // A copy is a new rule with no stored headers to fall back on, so masked values must be typed again.
+  const http_headers = form.http_headers.map((h) => (h.value === HEADER_MASK ? { ...h, value: "" } : h));
+  return { ...form, rule_id: "", label: `${req.rule.label || ""} (Copy)`.trim(), http_headers };
 }
 
 export function modalTitle(req: RuleEditorRequest | null): string {
@@ -158,6 +189,9 @@ export function buildPayload(form: RuleForm): ForwardingRulePayload {
   } else if (provider === "telegram") {
     config.bot_token = form.telegram_bot_token.trim();
     config.chat_id = form.telegram_chat_id.trim();
+  } else if (provider === "http") {
+    config.url = form.http_url.trim();
+    config.headers = Object.fromEntries(filledHeaders(form.http_headers).map((h) => [h.name, h.value]));
   }
   return {
     rule_id: form.rule_id.trim() || null,
@@ -180,8 +214,34 @@ export function buildPayload(form: RuleForm): ForwardingRulePayload {
   };
 }
 
+function isHttpUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return (u.protocol === "http:" || u.protocol === "https:") && Boolean(u.host);
+  } catch {
+    return false;
+  }
+}
+
+/** The HTTP header rows as typed; the payload object alone would hide blank and repeated names. */
+export function headersProblem(rows: HeaderRow[]): string | null {
+  const filled = filledHeaders(rows);
+  if (filled.length > MAX_HTTP_HEADERS) return `At most ${MAX_HTTP_HEADERS} headers are allowed.`;
+  const seen = new Set<string>();
+  for (const { name, value } of filled) {
+    if (!name) return "Every header needs a name.";
+    if (!HEADER_NAME_RE.test(name)) return `Invalid header name: ${name}`;
+    const key = name.toLowerCase();
+    if (key === "content-type") return "Content-Type is always application/json and cannot be set.";
+    if (seen.has(key)) return `Header ${name} is listed more than once.`;
+    seen.add(key);
+    if (!value) return `Header ${name} needs a value.`;
+  }
+  return null;
+}
+
 /** The checks run before asking the server; null when they pass. */
-export function localProblem(payload: ForwardingRulePayload): string | null {
+export function localProblem(payload: ForwardingRulePayload, headers: HeaderRow[] = []): string | null {
   const cfg = payload.config;
   if (!payload.provider) return "Please choose a provider.";
   if (!payload.label) return "Please enter a name for this rule.";
@@ -196,6 +256,12 @@ export function localProblem(payload: ForwardingRulePayload): string | null {
     if (!urls.length) return "Discord requires at least one webhook URL.";
     const bad = urls.filter((u) => !WEBHOOK_RE.test(u));
     if (bad.length) return `Invalid Discord webhook URL(s):\n${bad.join("\n")}`;
+  }
+  if (payload.provider === "http") {
+    const url = str(cfg.url);
+    if (!url) return "Custom Webhook requires an endpoint URL.";
+    if (!isHttpUrl(url)) return "The endpoint URL must start with http:// or https://.";
+    return headersProblem(headers);
   }
   return null;
 }

@@ -1,12 +1,14 @@
 // Provider half of the rule modal: the custom provider dropdown
-// (#providerSelectBtn / #providerSelectMenu) and the three field groups
-// (#provider_pushover, #provider_discord, #provider_telegram).
+// (#providerSelectBtn / #providerSelectMenu) and the four field groups
+// (#provider_pushover, #provider_discord, #provider_telegram, #provider_http).
 
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { cx, Field, Input } from "../../components/ui";
-import { PROVIDERS } from "./ruleForm";
-import type { RuleForm } from "./ruleForm";
+import { Button, cx, Field, Input } from "../../components/ui";
+import { HTTP_PAYLOAD_EXAMPLE } from "./httpPayloadExample";
+import { PayloadPreviewCard } from "./PayloadPreviewCard";
+import { HEADER_MASK, MAX_HTTP_HEADERS, PROVIDERS } from "./ruleForm";
+import type { HeaderRow, RuleForm } from "./ruleForm";
 import { ProviderIcon } from "./RuleCard";
 
 type Patch = (next: Partial<RuleForm>) => void;
@@ -284,9 +286,95 @@ export function DiscordFields({ form, patch }: { form: RuleForm; patch: Patch })
   );
 }
 
+/**
+ * Endpoint URL and header rows. A stored header value arrives as HEADER_MASK; its input stays empty with a
+ * "Saved" placeholder and the mask is posted back, so the server keeps the stored value until it is retyped.
+ */
+export function HttpFields({ form, patch }: { form: RuleForm; patch: Patch }) {
+  const rows = form.http_headers;
+  const setRow = (i: number, next: HeaderRow) => patch({ http_headers: rows.map((r, j) => (j === i ? next : r)) });
+  return (
+    <div id="provider_http" className="provider-fields">
+      <Field
+        label="Endpoint URL"
+        id="http_url"
+        className={GROUP}
+        help="POSTs a JSON payload to this URL. Headers are stored as secrets."
+      >
+        <Input
+          type="text"
+          inputMode="url"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="https://example.com/hooks/copycord"
+          value={form.http_url}
+          onChange={(e) => patch({ http_url: e.target.value })}
+        />
+      </Field>
+      <PayloadPreviewCard value={HTTP_PAYLOAD_EXAMPLE} className="mb-3" />
+      <div className={cx("flex flex-col", GROUP)}>
+        <span id="http_headers_label" className="form-label ml-0.5 text-xs text-muted">
+          Headers (optional)
+        </span>
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-labelledby="http_headers_label">
+          {rows.map((row, i) => {
+            const saved = row.value === HEADER_MASK;
+            return (
+              <li key={i} className={cx(ROW, "items-center")}>
+                <Input
+                  id={`http_header_name_${i}`}
+                  aria-label={`Header ${i + 1} name`}
+                  className="flex-[1_1_160px] w-auto"
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Authorization"
+                  value={row.name}
+                  // The server matches a saved value by name, so a renamed header needs its value typed again.
+                  onChange={(e) => setRow(i, { name: e.target.value, value: saved ? "" : row.value })}
+                />
+                <Input
+                  id={`http_header_value_${i}`}
+                  aria-label={`Header ${i + 1} value`}
+                  className="flex-[1_1_200px] w-auto"
+                  type="password"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  placeholder={saved ? "Saved (type to replace)" : "Value"}
+                  data-saved={saved || undefined}
+                  value={saved ? "" : row.value}
+                  onChange={(e) => setRow(i, { ...row, value: e.target.value })}
+                />
+                <Button
+                  variant="ghost-red"
+                  size="sm"
+                  aria-label={`Remove header ${i + 1}`}
+                  onClick={() => patch({ http_headers: rows.filter((_, j) => j !== i) })}
+                >
+                  Remove
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+        <div>
+          <Button
+            size="sm"
+            disabled={rows.length >= MAX_HTTP_HEADERS}
+            onClick={() => patch({ http_headers: [...rows, { name: "", value: "" }] })}
+          >
+            Add header
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ProviderFields({ form, patch }: { form: RuleForm; patch: Patch }) {
   if (form.provider === "pushover") return <PushoverFields form={form} patch={patch} />;
   if (form.provider === "discord") return <DiscordFields form={form} patch={patch} />;
   if (form.provider === "telegram") return <TelegramFields form={form} patch={patch} />;
+  if (form.provider === "http") return <HttpFields form={form} patch={patch} />;
   return null;
 }

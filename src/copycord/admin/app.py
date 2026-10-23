@@ -11,6 +11,7 @@
 from __future__ import annotations
 from collections import deque
 import contextlib
+from urllib.parse import urlsplit
 import mimetypes
 import hashlib
 import json
@@ -5150,6 +5151,102 @@ def _normalize_forwarding_rule_filters(raw: dict | str | None) -> dict:
     }
 
 
+FORWARDING_HTTP_HEADER_MASK = "********"
+FORWARDING_HTTP_MAX_HEADERS = 20
+FORWARDING_HTTP_MAX_HEADER_NAME_LEN = 256
+FORWARDING_HTTP_MAX_HEADER_VALUE_LEN = 4096
+FORWARDING_HTTP_MAX_URL_LEN = 2048
+_HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+
+
+def _validate_http_forwarding_config(config: dict) -> list[str]:
+    """Structural checks for the generic HTTP provider; no request is made."""
+    errors: list[str] = []
+    url = config.get("url")
+    if not isinstance(url, str) or not url.strip():
+        errors.append("HTTP: endpoint URL is required.")
+    else:
+        url = url.strip()
+        try:
+            parts = urlsplit(url)
+            scheme_ok = parts.scheme.lower() in ("http", "https") and bool(
+                parts.netloc
+            )
+        except Exception:
+            scheme_ok = False
+        if not scheme_ok:
+            errors.append("HTTP: endpoint URL must start with http:// or https://.")
+        elif len(url) > FORWARDING_HTTP_MAX_URL_LEN:
+            errors.append(
+                f"HTTP: endpoint URL is longer than {FORWARDING_HTTP_MAX_URL_LEN} characters."
+            )
+
+    headers = config.get("headers")
+    if headers is None:
+        return errors
+    if not isinstance(headers, dict):
+        errors.append("HTTP: headers must be an object of name/value strings.")
+        return errors
+    if len(headers) > FORWARDING_HTTP_MAX_HEADERS:
+        errors.append(f"HTTP: at most {FORWARDING_HTTP_MAX_HEADERS} headers are allowed.")
+    for name, value in headers.items():
+        if (
+            not isinstance(name, str)
+            or len(name) > FORWARDING_HTTP_MAX_HEADER_NAME_LEN
+            or not _HTTP_HEADER_NAME_RE.match(name)
+        ):
+            errors.append(f"HTTP: invalid header name {_safe(repr(name))[:80]}.")
+            continue
+        if name.lower() == "content-type":
+            errors.append("HTTP: Content-Type is always application/json and cannot be set.")
+            continue
+        if not isinstance(value, str):
+            errors.append(f"HTTP: header {name} must be a string.")
+        elif len(value) > FORWARDING_HTTP_MAX_HEADER_VALUE_LEN:
+            errors.append(
+                f"HTTP: header {name} is longer than {FORWARDING_HTTP_MAX_HEADER_VALUE_LEN} characters."
+            )
+        elif "\r" in value or "\n" in value:
+            errors.append(f"HTTP: header {name} must not contain line breaks.")
+    return errors
+
+
+def _mask_forwarding_rule(row: dict) -> dict:
+    """Replace HTTP header values with a fixed mask before a rule leaves the API."""
+    if str(row.get("provider") or "").lower() != "http":
+        return row
+    config = row.get("config")
+    if not isinstance(config, dict):
+        return row
+    headers = config.get("headers")
+    if isinstance(headers, dict) and headers:
+        config = dict(config)
+        config["headers"] = {k: FORWARDING_HTTP_HEADER_MASK for k in headers}
+        row = dict(row)
+        row["config"] = config
+    return row
+
+
+def _unmask_http_headers(config: dict, existing: dict | None) -> dict:
+    """Swap masked header values sent back by the client for the stored ones."""
+    headers = config.get("headers")
+    if not isinstance(headers, dict):
+        return config
+    stored: dict = {}
+    if existing and str(existing.get("provider") or "").lower() == "http":
+        prev = (existing.get("config") or {}).get("headers")
+        if isinstance(prev, dict):
+            stored = prev
+    merged = {}
+    for name, value in headers.items():
+        if value == FORWARDING_HTTP_HEADER_MASK and isinstance(stored.get(name), str):
+            value = stored[name]
+        merged[name] = value
+    config = dict(config)
+    config["headers"] = merged
+    return config
+
+
 async def _validate_forwarding_provider_config(
     provider: str, config: Any
 ) -> tuple[bool, list[str], dict]:
@@ -5297,6 +5394,10 @@ async def _validate_forwarding_provider_config(
 
         return True, [], details
 
+    if provider == "http":
+        errors = _validate_http_forwarding_config(config)
+        return (not errors), errors, details
+
     return True, [], details
 
 
@@ -5306,8 +5407,15 @@ async def api_validate_forwarding(payload: dict = Body(...)):
     provider = str(payload.get("provider") or "").strip().lower()
     config = payload.get("config")
 
-    if provider not in ("pushover", "telegram", "discord"):
+    if provider not in ("pushover", "telegram", "discord", "http"):
         raise HTTPException(status_code=400, detail="invalid-provider")
+
+    if provider == "http" and isinstance(config, dict):
+        existing = None
+        rule_id = str(payload.get("rule_id") or "").strip()
+        if rule_id:
+            existing = db.get_message_forwarding_rule(rule_id)
+        config = _unmask_http_headers(config, existing)
 
     ok, errors, details = await _validate_forwarding_provider_config(provider, config)
     if not ok:
@@ -5326,6 +5434,7 @@ async def api_list_forwarding(guild_id: str | None = Query(default=None)):
         row_filters = row.get("filters")
         row["filters"] = _normalize_forwarding_rule_filters(row_filters)
 
+    rows = [_mask_forwarding_rule(row) for row in rows]
     return JSONResponse({"ok": True, "items": rows})
 
 
@@ -5347,8 +5456,22 @@ async def api_save_forwarding(payload: dict = Body(...)):
 
     if not guild_id:
         raise HTTPException(status_code=400, detail="missing-guild-id")
-    if provider not in ("pushover", "telegram", "discord"):
+    if provider not in ("pushover", "telegram", "discord", "http"):
         raise HTTPException(status_code=400, detail="invalid-provider")
+
+    # HTTP checks are local, so they run for disabled rules too: the stored
+    # headers must stay well formed for masking to round-trip.
+    if provider == "http":
+        if not isinstance(config, dict):
+            return PlainTextResponse("HTTP: config must be an object.", status_code=400)
+        config = _unmask_http_headers(config, db.get_message_forwarding_rule(rule_id))
+        errors = _validate_http_forwarding_config(config)
+        if errors:
+            return PlainTextResponse("\n".join(errors), status_code=400)
+        config = dict(config)
+        config["url"] = config["url"].strip()
+        if not config.get("headers"):
+            config.pop("headers", None)
 
     # A disabled rule is stored as given, so a rule with a dead token can still
     # be switched off. Turning it back on validates again.
