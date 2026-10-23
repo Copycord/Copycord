@@ -299,6 +299,19 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
                       className={CHIP_WRAP}
                     />
                   </Field>
+                  <Field
+                    label="Block these words / phrases (optional)"
+                    id="fwd_keywords_exclude"
+                    help="Messages containing any of these are never forwarded, even if they match the rules above."
+                    className={GROUP}
+                  >
+                    <ChipInput
+                      value={form.exclude_keywords}
+                      onChange={(exclude_keywords) => patch({ exclude_keywords })}
+                      placeholder="Type and press Enter..."
+                      className={CHIP_WRAP}
+                    />
+                  </Field>
                   <Field label="Limit to channel IDs (optional)" id="fwd_channels" className={GROUP}>
                     <ChipInput
                       value={form.channel_ids}

@@ -6,6 +6,7 @@ export type ForwardingProvider = "discord" | "pushover" | "telegram" | "http";
 export interface ForwardingFilters {
   keywords_any?: string[] | string;
   keywords_all?: string[] | string;
+  exclude_keywords?: string[] | string;
   channel_ids?: string[] | string;
   user_ids?: string[] | string;
   [key: string]: unknown;
@@ -70,6 +71,7 @@ export interface ClientGuildsResponse {
 export interface ForwardingRuleFiltersPayload {
   keywords_any: string[];
   keywords_all: string[];
+  exclude_keywords: string[];
   channel_ids: string[];
   user_ids: string[];
   case_sensitive: boolean;
