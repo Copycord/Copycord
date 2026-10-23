@@ -381,6 +381,38 @@ describe("Custom Webhook rules", () => {
     expect(calls(fetchMock, "POST /api/forwarding/validate")).toHaveLength(0);
   });
 
+  it("shows a payload.json example that parses with the payload keys and copies it", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    server();
+    const dialog = await openNew(user);
+    expect(within(dialog).queryByText("payload.json")).not.toBeInTheDocument();
+    await pickProvider(user, "Custom Webhook");
+
+    expect(within(dialog).getByText("payload.json")).toBeInTheDocument();
+    const text = within(dialog).getByLabelText("Example payload.json").textContent ?? "";
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    expect(Object.keys(parsed)).toEqual([
+      "version",
+      "rule_id",
+      "message_id",
+      "guild",
+      "channel",
+      "author",
+      "content",
+      "embeds",
+      "attachments",
+      "timestamp",
+    ]);
+    expect(parsed.guild).toEqual({ id: expect.any(String), name: null });
+    expect(parsed.attachments).toEqual([{ url: expect.stringMatching(/^https:\/\//), filename: expect.any(String) }]);
+
+    await user.click(within(dialog).getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith(text);
+    expect(await within(dialog).findByRole("button", { name: "Copied" })).toBeInTheDocument();
+  });
+
   it("shows only the endpoint host on the card", async () => {
     server({ "GET /api/forwarding": () => jsonResponse({ ok: true, items: [HTTP_RULE] }) });
     renderPage();
