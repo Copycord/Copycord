@@ -61,12 +61,28 @@ def index_response(
     return HTMLResponse(page, status_code=status_code, headers=hdrs)
 
 
+def _asset_file(assets: Path, name: str) -> Optional[Path]:
+    """assets/name, only when name is a regular file directly inside assets.
+
+    Vite names files by a base64url hash, which can start with "-" or "_", so
+    this checks the folder itself rather than a name pattern.
+    """
+    if not name or name in (".", "..") or any(c in name for c in "/\\:\x00"):
+        return None
+    try:
+        folder = assets.resolve()
+        path = (folder / name).resolve()
+    except (OSError, ValueError):
+        return None
+    if path.parent != folder or not path.is_file():
+        return None
+    return path
+
+
 def asset_response(name: str) -> Response:
     """A hashed file from the build's assets dir, cached for a year."""
-    from copycord.admin.security import safe_child
-
     root = spa_dir()
-    asset = safe_child(root / "assets", name) if root is not None else None
-    if asset is None or not asset.is_file():
+    asset = _asset_file(root / "assets", name) if root is not None else None
+    if asset is None:
         raise HTTPException(status_code=404)
     return FileResponse(asset, headers={"Cache-Control": SPA_ASSET_CACHE})

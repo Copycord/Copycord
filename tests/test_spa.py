@@ -3,7 +3,10 @@ The SPA: behind the login guard, index.html for client routes,
 hashed assets with a long cache, no path traversal.
 """
 
+from urllib.parse import quote
+
 import pytest
+from fastapi import HTTPException
 from starlette.testclient import TestClient
 
 from copycord.admin import auth
@@ -11,6 +14,9 @@ from copycord.admin import spa as spa_module
 from copycord.admin.app import app
 from copycord.common.config import CURRENT_VERSION
 from tests.conftest import SPA_INDEX as INDEX
+
+# Read before the autouse spa_build fixture swaps in a stand-in build.
+REAL_SPA_DIRS = spa_module.SPA_DIRS
 
 
 @pytest.fixture()
@@ -55,6 +61,80 @@ def test_assets_served_with_long_cache(tc, spa):
 
 def test_missing_asset_is_404(tc, spa):
     assert tc.get("/assets/nope.js", headers=_cookie()).status_code == 404
+
+
+@pytest.fixture()
+def hashed_assets(spa):
+    # base64url hashes can start with - or _; sub/ and index.html must stay unreachable.
+    assets = spa / "assets"
+    for name in ("-abc123.js", "_x9.js", "Bv1.js"):
+        (assets / name).write_text(f"// {name}", encoding="utf-8")
+    (assets / "sub").mkdir()
+    (assets / "sub" / "x.js").write_text("// nested", encoding="utf-8")
+    return assets
+
+
+@pytest.mark.parametrize("name", ["-abc123.js", "_x9.js", "Bv1.js"])
+def test_hash_named_assets_served(tc, hashed_assets, name):
+    resp = tc.get(f"/assets/{name}", headers=_cookie())
+    assert resp.status_code == 200
+    assert resp.text == f"// {name}"
+    assert resp.headers["cache-control"] == spa_module.SPA_ASSET_CACHE
+    assert tc.get(f"/assets/{name}", follow_redirects=False).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "../index.html",
+        "..",
+        ".",
+        "",
+        "sub",
+        "sub/x.js",
+        "sub\\x.js",
+        "..\\index.html",
+        "/etc/passwd",
+        str(spa_module.BASE_DIR / "spa.py"),
+        "C:\\Windows\\win.ini",
+        "-abc123.js:stream",
+        "-abc123.js\x00",
+        "missing.js",
+    ],
+)
+def test_asset_response_rejects_non_children(hashed_assets, name):
+    with pytest.raises(HTTPException) as err:
+        spa_module.asset_response(name)
+    assert err.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/assets/..%2Findex.html",
+        "/assets/sub/x.js",
+        "/assets/sub%2Fx.js",
+        "/assets/..%5Cindex.html",
+        "/assets/%2Fetc%2Fpasswd",
+        "/assets/missing.js",
+    ],
+)
+def test_asset_route_rejects_non_children(tc, hashed_assets, path):
+    resp = tc.get(path, headers=_cookie())
+    assert resp.status_code == 404
+    assert '<div id="root">' not in resp.text
+
+
+def test_real_build_assets_all_served(tc, spa, monkeypatch):
+    monkeypatch.setattr(spa_module, "SPA_DIRS", REAL_SPA_DIRS)
+    root = spa_module.spa_dir()
+    if root is None or not (root / "assets").is_dir():
+        pytest.skip("no dashboard build")
+    names = sorted(p.name for p in (root / "assets").iterdir() if p.is_file())
+    if not names:
+        pytest.skip("dashboard build has no assets")
+    bad = [n for n in names if tc.get(f"/assets/{quote(n)}", follow_redirects=False).status_code != 200]
+    assert bad == []
 
 
 @pytest.mark.parametrize(
