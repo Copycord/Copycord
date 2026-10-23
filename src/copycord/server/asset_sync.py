@@ -284,15 +284,24 @@ class AssetSync:
         await self._step(job, ROLE_ORDER, "running", label="Reading the clone's roles")
         try:
             async with roles._get_lock_for_clone(guild.id):
-                fetched = await guild.fetch_roles()
                 me = guild.me
                 top = me.top_role if me else None
                 if top is None:
                     raise RuntimeError("The server bot has no role in the clone server")
-                facts = [RoleManager.role_facts(r) for r in fetched]
-                ranked = rank_role_facts(facts, my_role_ids(me)) or (facts, top.position, top.id)
-                plan = plan_role_order(snap.get("roles") or [], roles.mapped_roles(host_id, guild.id),
-                                       *ranked)
+
+                async def read() -> tuple:
+                    facts = [RoleManager.role_facts(r) for r in await guild.fetch_roles()]
+                    ranked = rank_role_facts(facts, my_role_ids(me)) or (facts, top.position, top.id)
+                    return ranked, plan_role_order(snap.get("roles") or [],
+                                                   roles.mapped_roles(host_id, guild.id), *ranked)
+
+                async def move(plan: dict) -> None:
+                    await guild.edit_role_positions(
+                        positions={discord.Object(id=rid): pos for rid, pos in plan["positions"].items()},
+                        reason="Copycord Sync assets: role order",
+                    )
+
+                ranked, plan = await read()
                 order["unmovable"] = plan["unmovable"]
                 ties = plan_tie_report(ranked[0], ranked[2], plan["unmovable"])
                 if ties:
@@ -309,18 +318,45 @@ class AssetSync:
                     fix_note = tied_role_warning(mine["name"], mine["tied_with_bot"])
                 elif blocker == "bot_role_at_bottom":
                     fix_note = bottom_role_warning(mine["name"])
+                if blocker:
+                    order["fix"] = reorder_fix(mine["name"], blocker, mine["tied_with_bot"])
                 total = len(plan["order"])
                 await self._progress(job, ROLE_ORDER, 0, total, "Checking the order", force=True)
                 if plan["changed"] and not blocker:
                     await self._progress(job, ROLE_ORDER, 0, total, f"Moving {plan['moved']} roles", force=True)
                     if job.cancelled:
                         raise asyncio.CancelledError()
-                    await guild.edit_role_positions(
-                        positions={discord.Object(id=rid): pos for rid, pos in plan["positions"].items()},
-                        reason="Copycord Sync assets: role order",
-                    )
-                    order["moved"] = plan["moved"]
-                    totals["reordered"] += plan["moved"]
+                    try:
+                        await move(plan)
+                    except discord.HTTPException as e:
+                        if getattr(e, "code", None) != 50013:
+                            raise
+                        # Positions can still shift under us; plan once more from a fresh read.
+                        logger.debug("[🧩] Sync assets role order rejected (%s); retrying once", e)
+                        ranked, plan = await read()
+                        order["unmovable"] = plan["unmovable"]
+                        total = len(plan["order"])
+                        mine = bot_role_ties(ranked[0], ranked[2]) or mine
+                        name = mine["name"] if mine else top.name
+                        tied = mine["tied_with_bot"] if mine else 0
+                        if mine:
+                            order["tied_with_bot"] = tied
+                        blocker = reorder_blocker(mine)
+                        if blocker:
+                            order["fix"] = reorder_fix(name, blocker, tied)
+                            fix_note = (tied_role_warning(name, tied) if tied
+                                        else bottom_role_warning(name))
+                        elif plan["changed"]:
+                            try:
+                                await move(plan)
+                            except discord.HTTPException as e2:
+                                if getattr(e2, "code", None) == 50013:
+                                    order["fix"] = reorder_fix(
+                                        name, "missing_permissions_after_retry", tied)
+                                raise
+                    if not blocker:
+                        order["moved"] = plan["moved"]
+                        totals["reordered"] += plan["moved"]
                 await self._progress(job, ROLE_ORDER, total, total, None, totals, force=True)
         except Exception as exc:
             order["error"] = str(exc) or type(exc).__name__
@@ -328,6 +364,9 @@ class AssetSync:
                 order["error"] = "Missing the Manage Roles permission to move roles"
             await self._step(job, ROLE_ORDER, "failed", note=order["error"])
             await self._log(job, f"Role order failed: {order['error']}", "error", step=ROLE_ORDER)
+            if order.get("fix"):
+                await self._log(job, fix_note or "Fix: " + ", then ".join(order["fix"]["steps"]) + ".",
+                                "warning", step=ROLE_ORDER)
             return
         for u in order["unmovable"]:
             await self._log(job, f"Could not move {u['name']}: {u['reason']}", "warning", step=ROLE_ORDER)
@@ -337,5 +376,7 @@ class AssetSync:
         if fix_note:
             logger.warning("[⚠️] Sync assets role order: %s", fix_note)
             await self._log(job, fix_note, "warning", step=ROLE_ORDER)
-        await self._step(job, ROLE_ORDER, "success", note=order_note(order["moved"], len(order["unmovable"])),
-                         done=total, total=total)
+        note = order_note(order["moved"], len(order["unmovable"]))
+        if order.get("fix"):
+            note += ", move my role to the top first"
+        await self._step(job, ROLE_ORDER, "success", note=note, done=total, total=total)
