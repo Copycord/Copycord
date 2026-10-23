@@ -7,7 +7,9 @@ from types import SimpleNamespace
 import discord
 import pytest
 
-from copycord.server.roles import RoleManager, plan_role_order, rank_role_facts
+from copycord.server.item_hooks import ItemHooks
+from copycord.server.roles import (RoleManager, below_my_top, plan_role_order,
+                                   rank_role_facts)
 
 CG = 1234567890123456790
 BOT = 99
@@ -160,3 +162,117 @@ def test_plan_never_sends_a_position_at_or_above_the_bot():
     plan = plan_role_order(host, {1: 11, 2: 12, 3: 13}, clone, 2, BOT)
     assert plan["positions"] == {11: 1}
     assert {u["id"] for u in plan["unmovable"]} == {12, 13}
+
+
+# A role sharing my top role's raw position: Discord puts the lower id higher.
+
+def test_below_my_top_breaks_ties_by_id():
+    me_top = _Role(BOT, 5)
+    assert below_my_top(_Role(201, 5), me_top)
+    assert not below_my_top(_Role(50, 5), me_top)
+    assert not below_my_top(_Role(202, 6), me_top)
+    assert below_my_top(_Role(10, 4), me_top)
+    assert not below_my_top(me_top, me_top)
+    assert not below_my_top(_Role(201, 1), None)
+
+
+class _SyncRole(_Role):
+    def __init__(self, rid, position, name=None, managed=False):
+        super().__init__(rid, position, name, managed)
+        self.permissions = discord.Permissions(0)
+        self.color = discord.Color(0)
+        self.hoist = self.mentionable = False
+        self.edits, self.deleted = [], False
+
+    async def edit(self, **kwargs):
+        self.edits.append(kwargs)
+        self.name = kwargs.get("name", self.name)
+
+    async def delete(self, reason=None):
+        self.deleted = True
+
+
+class _SyncDB(_DB):
+    def get_blocked_role_ids(self, clone_id):
+        return []
+
+    def upsert_role_mapping(self, *args, **kwargs):
+        pass
+
+    def delete_role_mapping_for_clone(self, orig_id, clone_id):
+        self.rows = [r for r in self.rows if r["original_role_id"] != orig_id]
+
+
+class _Outcomes(ItemHooks):
+    def __init__(self):
+        self.seen = {}
+
+    async def item(self, name, outcome, note=None):
+        self.seen[name] = (outcome, note)
+
+
+def _tied_clone():
+    # My top role sits at raw position 5. 201 shares it but is newer, so it is below me;
+    # 50 shares it and is older, so it is above me; 202 is strictly above.
+    bot = _SyncRole(BOT, 5, "Copycord")
+    roles = [_SyncRole(CG, 0, "@everyone"), _SyncRole(201, 5, "tied newer"),
+             _SyncRole(50, 5, "tied older"), _SyncRole(202, 6, "above"), bot]
+    guild = SimpleNamespace(id=CG, roles=roles, features=[],
+                            me=SimpleNamespace(roles=[bot], top_role=bot))
+    return guild, {r.id: r for r in roles}
+
+
+def _sync_manager(mapped):
+    mgr = RoleManager(bot=None, db=_SyncDB(mapped), guild_resolver=None, ratelimit=None,
+                      clone_guild_id=CG)
+    mgr._ROLE_OP_DELAY = 0
+    return mgr
+
+
+TIE_NOTE = ("2 roles skipped as above my top role Copycord (99, raw position 5): "
+            "1 share its raw position, 1 sit strictly above it")
+
+
+@pytest.mark.asyncio
+async def test_sync_edits_a_role_tied_with_mine_but_newer(caplog):
+    guild, by_id = _tied_clone()
+    incoming = [{"id": h, "name": f"host {h}"} for h in (1, 2, 3)]
+    hooks = _Outcomes()
+    with caplog.at_level(logging.DEBUG, logger="server.roles"):
+        await _sync_manager({1: 201, 2: 50, 3: 202})._sync(
+            guild=guild, incoming=incoming, host_id=1, clone_id=CG, delete_roles=False,
+            mirror_permissions=False, update_roles=True, rearrange_roles=False, hooks=hooks)
+    assert by_id[201].edits and by_id[201].name == "host 1"
+    assert not by_id[50].edits and not by_id[202].edits
+    assert hooks.seen["host 1"] == ("updated", None)
+    assert hooks.seen["host 2"][0] == hooks.seen["host 3"][0] == "skipped"
+    assert caplog.text.count("roles skipped as above my top role") == 1
+    assert TIE_NOTE in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_sync_deletes_a_role_tied_with_mine_but_newer(caplog):
+    guild, by_id = _tied_clone()
+    with caplog.at_level(logging.DEBUG, logger="server.roles"):
+        await _sync_manager({1: 201, 2: 50, 3: 202})._sync(
+            guild=guild, incoming=[], host_id=1, clone_id=CG, delete_roles=True,
+            mirror_permissions=False, update_roles=True, rearrange_roles=False)
+    assert by_id[201].deleted
+    assert not by_id[50].deleted and not by_id[202].deleted
+    assert TIE_NOTE in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_reorder_moves_a_tied_newer_role_and_reports_the_older_one(caplog):
+    fresh = [_Role(CG, 0, "@everyone"), _Role(203, 1), _Role(201, 5, "tied newer"),
+             _Role(50, 5, "tied older"), _Role(BOT, 5, "Copycord", managed=True)]
+    guild = _Guild(fresh, fresh)
+    host = [{"id": 1, "position": 1}, {"id": 2, "position": 2}, {"id": 3, "position": 3}]
+    mgr = RoleManager(bot=None, db=_DB({1: 201, 2: 203, 3: 50}), guild_resolver=None,
+                      ratelimit=None, clone_guild_id=CG)
+    with caplog.at_level(logging.DEBUG, logger="server.roles"):
+        await mgr._rearrange_roles(guild=guild, incoming=host, host_id=1, clone_id=CG)
+    assert guild.moves == [{201: 1, 203: 2}]
+    assert "'tied older' is above my role" in caplog.text
+    assert ("1 roles skipped as above my top role Copycord (99, raw position 5): "
+            "1 share its raw position, 0 sit strictly above it") in caplog.text

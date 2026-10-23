@@ -129,7 +129,8 @@ async def test_run_streams_items_and_ends_with_summary_and_report(svc, sent, map
                                                "note": "Too big"}], "error": None},
         },
         "role_order": {"moved": 2, "error": None,
-                       "unmovable": [{"id": 5, "name": "Bots", "reason": "Managed by an integration"}]},
+                       "unmovable": [{"id": 5, "name": "Bots", "reason": "Managed by an integration"}],
+                       "bot_top": {"id": 99, "name": "Copycord", "position": 4}, "tied_with_bot": 0},
     }
     await _frame("sync_assets_end", job_id=job, ok=True, error=None, cancelled=False, result=result,
                  totals={"created": 1, "updated": 1, "deleted": 0, "unchanged": 2, "reordered": 2,
@@ -146,6 +147,8 @@ async def test_run_streams_items_and_ends_with_summary_and_report(svc, sent, map
     assert done.report["failures"] == [{"kind": "emojis", "name": "pepe", "outcome": "failed",
                                         "note": "Too big"}]
     assert done.report["unmovable"][0]["name"] == "Bots"
+    assert done.report["role_order"]["bot_top"] == {"id": 99, "name": "Copycord", "position": 4}
+    assert done.report["role_order"]["tied_with_bot"] == 0
     assert done.report["mapping"]["cloned_guild_id"] == str(CG)
     assert any(ln["msg"].startswith("Could not move Bots") and ln["step"] == "role_order"
                for ln in done.log_lines)
@@ -376,6 +379,31 @@ async def test_ws_job_streams_items_moves_roles_and_ends(monkeypatch):
     assert end["result"]["kinds"]["emojis"]["items"] == [{"name": "pepe", "outcome": "failed",
                                                           "note": "Too big"}]
     assert not sync._jobs
+
+
+@pytest.mark.asyncio
+async def test_ws_job_role_order_reports_my_top_role_and_ties(monkeypatch):
+    monkeypatch.setattr(asset_sync, "PROGRESS_INTERVAL", 0.0)
+    snap = {"ok": True, "roles": [{"id": 1, "name": "Admin", "position": 2},
+                                  {"id": 2, "name": "Mods", "position": 1}],
+            "emojis": [], "stickers": []}
+    # All three share raw position 3: Mods (150) is newer than my role, Admin (11) older.
+    bot = _Role(99, "Copycord", 3)
+    guild = _Guild([_Role(CG, "@everyone", 0, default=True), _Role(11, "Admin", 3),
+                    _Role(150, "Mods", 3), bot], bot)
+    server = _Server(guild, snap, _Manager([], mapped={1: 11, 2: 150}))
+    await AssetSync(server).start({"job_id": "r3:assets", "original_guild_id": str(OG),
+                                   "cloned_guild_id": str(CG), "kinds": ["roles"]})
+    await _until(lambda: _frames(server, "sync_assets_end"))
+
+    order = _frames(server, "sync_assets_end")[0]["result"]["role_order"]
+    assert [u["name"] for u in order["unmovable"]] == ["Admin"]
+    assert order["bot_top"] == {"id": 99, "name": "Copycord", "position": 3}
+    assert order["tied_with_bot"] == 1
+    assert guild.moves == []  # Mods already sits lowest; Admin cannot move
+    logs = [f["msg"] for f in _frames(server, "sync_assets_log") if f["step"] == "role_order"]
+    assert ("1 roles skipped as above my top role Copycord (99, raw position 3): "
+            "1 share its raw position, 0 sit strictly above it") in logs
 
 
 @pytest.mark.asyncio
