@@ -139,6 +139,12 @@ describe("rule modal", () => {
     await user.type(input("discord_webhook_urls"), `${HOOK}{Enter}`);
     expect(within(dialog).getByRole("button", { name: `Remove ${HOOK}` })).toBeInTheDocument();
     await user.type(input("fwd_keywords_any"), "urgent{Enter}");
+    await user.type(input("fwd_keywords_exclude"), "spam{Enter}");
+    expect(within(dialog).getByRole("button", { name: "Remove spam" })).toBeInTheDocument();
+    expect(input("fwd_keywords_exclude")).toHaveAttribute("aria-describedby", "fwd_keywords_exclude-help");
+    expect(document.getElementById("fwd_keywords_exclude-help")).toHaveTextContent(
+      "Messages containing any of these are never forwarded, even if they match the rules above.",
+    );
     await user.type(input("fwd_users"), "42{Enter}");
     await user.click(screen.getByText("More filters"));
     await user.click(input("fwd_bot_messages"));
@@ -157,6 +163,7 @@ describe("rule modal", () => {
       filters: {
         keywords_any: ["urgent"],
         keywords_all: [],
+        exclude_keywords: ["spam"],
         channel_ids: [],
         user_ids: ["42"],
         case_sensitive: false,
@@ -286,6 +293,31 @@ describe("rule modal", () => {
     expect(input("pushover_app_token")).toBeNull();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("loads blocked words on edit and saves them back", async () => {
+    const user = userEvent.setup();
+    const blocked: ForwardingRule = {
+      ...PUSH_RULE,
+      filters: { ...PUSH_RULE.filters, exclude_keywords: ["free nitro", "giveaway"] },
+    };
+    const fetchMock = server({ "GET /api/forwarding": () => jsonResponse({ ok: true, items: [blocked] }) });
+    renderPage();
+    const card = await findCard("r1");
+    await user.click(within(card).getByRole("button", { name: /edit/i }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit Forwarding Rule" });
+
+    expect(within(dialog).getByRole("button", { name: "Remove free nitro" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Remove giveaway" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Remove giveaway" }));
+    await user.type(input("fwd_keywords_exclude"), "leak{Enter}");
+    await user.click(screen.getByRole("button", { name: "Save Rule" }));
+
+    await waitFor(() => expect(calls(fetchMock, "POST /api/forwarding")).toHaveLength(1));
+    const body = posted(fetchMock, "POST /api/forwarding");
+    expect(body.rule_id).toBe("r1");
+    expect(body.filters.exclude_keywords).toEqual(["free nitro", "leak"]);
+    expect(body.filters.keywords_any).toEqual(["urgent", "down"]);
   });
 });
 

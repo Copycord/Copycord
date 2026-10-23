@@ -5139,6 +5139,9 @@ def _normalize_forwarding_rule_filters(raw: dict | str | None) -> dict:
     return {
         "keywords_any": to_str_list(raw.get("keywords_any")),
         "keywords_all": to_str_list(raw.get("keywords_all")),
+        "exclude_keywords": to_str_list(
+            raw.get("exclude_keywords", raw.get("keywords_exclude"))
+        ),
         "channel_ids": to_str_list(raw.get("channel_ids")),
         "user_ids": to_str_list(raw.get("user_ids")),
         "case_sensitive": to_bool(raw.get("case_sensitive"), False),

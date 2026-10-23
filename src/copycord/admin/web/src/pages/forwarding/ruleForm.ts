@@ -70,6 +70,7 @@ export interface RuleForm {
   http_headers: HeaderRow[];
   keywords_any: string[];
   keywords_all: string[];
+  exclude_keywords: string[];
   channel_ids: string[];
   user_ids: string[];
   case_sensitive: boolean;
@@ -96,6 +97,7 @@ export const EMPTY_FORM: RuleForm = {
   http_headers: [],
   keywords_any: [],
   keywords_all: [],
+  exclude_keywords: [],
   channel_ids: [],
   user_ids: [],
   case_sensitive: false,
@@ -144,6 +146,7 @@ export function formFromRule(rule: ForwardingRule): RuleForm {
     http_headers: rule.provider === "http" ? headerRows(cfg.headers) : [],
     keywords_any: clean(toList(f.keywords_any)),
     keywords_all: clean(toList(f.keywords_all)),
+    exclude_keywords: clean(toList(f.exclude_keywords)),
     channel_ids: clean(toList(f.channel_ids)),
     user_ids: clean(toList(f.user_ids)),
     case_sensitive: Boolean(f.case_sensitive),
@@ -203,6 +206,7 @@ export function buildPayload(form: RuleForm): ForwardingRulePayload {
     filters: {
       keywords_any: clean(form.keywords_any),
       keywords_all: clean(form.keywords_all),
+      exclude_keywords: clean(form.exclude_keywords),
       channel_ids: clean(form.channel_ids),
       user_ids: clean(form.user_ids),
       case_sensitive: form.case_sensitive,
