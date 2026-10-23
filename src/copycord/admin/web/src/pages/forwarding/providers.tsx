@@ -5,6 +5,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { Button, cx, Field, Input } from "../../components/ui";
+import { HTTP_PAYLOAD_EXAMPLE } from "./httpPayloadExample";
+import { PayloadPreviewCard } from "./PayloadPreviewCard";
 import { HEADER_MASK, MAX_HTTP_HEADERS, PROVIDERS } from "./ruleForm";
 import type { HeaderRow, RuleForm } from "./ruleForm";
 import { ProviderIcon } from "./RuleCard";
@@ -309,6 +311,7 @@ export function HttpFields({ form, patch }: { form: RuleForm; patch: Patch }) {
           onChange={(e) => patch({ http_url: e.target.value })}
         />
       </Field>
+      <PayloadPreviewCard value={HTTP_PAYLOAD_EXAMPLE} className="mb-3" />
       <div className={cx("flex flex-col", GROUP)}>
         <span id="http_headers_label" className="form-label ml-0.5 text-xs text-muted">
           Headers (optional)
