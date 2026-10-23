@@ -128,6 +128,13 @@ def _deliver(responses, *, path="/hook?token=qs-secret", headers=None, timeout_s
     return outcome, seen, mgr.db, mgr
 
 
+def _fwd_log(caplog):
+    """What the forwarding logger wrote; the test server's access log is left out."""
+    return "\n".join(
+        r.getMessage() for r in caplog.records if r.name.startswith("client.forwarding")
+    )
+
+
 # Payload
 
 
@@ -172,8 +179,9 @@ def test_success_posts_json_with_headers(caplog):
     assert body["version"] == 1 and body["rule_id"] == "rule-http"
     assert body["message_id"] == str(MESSAGE_ID)
     assert fake_db.events and fake_db.events[0]["provider"] == "http"
-    assert SECRET not in caplog.text
-    assert "qs-secret" not in caplog.text
+    log_text = _fwd_log(caplog)
+    assert SECRET not in log_text
+    assert "qs-secret" not in log_text
 
 
 def test_429_is_retryable_with_retry_after():
@@ -218,9 +226,10 @@ def test_4xx_is_not_retried(status, caplog):
     assert outcome is None
     assert len(seen) == 1
     assert fake_db.events == []
-    assert "not retrying" in caplog.text
-    assert SECRET not in caplog.text
-    assert "qs-secret" not in caplog.text
+    assert "not retrying" in _fwd_log(caplog)
+    log_text = _fwd_log(caplog)
+    assert SECRET not in log_text
+    assert "qs-secret" not in log_text
 
 
 def test_redirect_is_not_followed():
