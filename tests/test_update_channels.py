@@ -191,6 +191,12 @@ def env(data_dir, fake_net, monkeypatch):
     monkeypatch.setattr(update, "installed_version", lambda: ("4.0.0", "abcdef1234567"))
     # The up-to-date check has its own tests below; here every update installs.
     monkeypatch.setattr(update, "nothing_new", lambda target: (False, None))
+    # On a Windows host the real winupdate would move the files of the venv
+    # running pytest aside; the win fixture and the move_aside tests cover it.
+    monkeypatch.setattr(winupdate, "running", lambda: ([], None))
+    monkeypatch.setattr(winupdate, "clean_old", lambda home, launchers: None)
+    monkeypatch.setattr(winupdate, "move_aside", lambda *a, **k: [])
+    monkeypatch.setattr(winupdate, "restore", lambda moved: None)
     return rec, on_path, restarts
 
 
