@@ -169,7 +169,7 @@ export function RuleModal({ request, onClose, onSaved }: RuleModalProps) {
     e.preventDefault();
     if (savingRef.current) return;
     const payload = buildPayload(form);
-    const problem = localProblem(payload);
+    const problem = localProblem(payload, form.http_headers);
     if (problem) {
       notify(problem, "error");
       return;

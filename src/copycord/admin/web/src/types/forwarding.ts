@@ -1,6 +1,6 @@
 // Replies of the Forwarding page endpoints (app.py forwarding routes).
 
-export type ForwardingProvider = "discord" | "pushover" | "telegram";
+export type ForwardingProvider = "discord" | "pushover" | "telegram" | "http";
 
 /** Filters as _normalize_forwarding_rule_filters returns them. */
 export interface ForwardingFilters {
