@@ -330,6 +330,16 @@ def test_channel_switch_to_an_older_stable_asks(env, tty, monkeypatch):
     assert rec.calls == []
 
 
+def test_downgrade_from_a_dev_build_names_its_commit(env, tty, monkeypatch):
+    rec, _, _ = env
+    monkeypatch.setattr(update, "current_version", lambda: "4.0.0.8.dev5+gcfb0832e8")
+    tty["answers"] = ["n"]
+    assert cli.main(["update", "--channel", "stable"]) == 1
+    assert "Downgrade from dev (cfb0832) to v4.0.0?" in tty["asked"][0]
+    assert "+g" not in tty["asked"][0]
+    assert rec.calls == []
+
+
 @pytest.mark.parametrize("argv, prompt", [
     (["update", "--tag", "4.1.0b1"], "Update Copycord now? (Y/n)"),
     (["update", "--channel", "beta"], "Update Copycord now? (Y/n)"),

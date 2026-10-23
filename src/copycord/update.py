@@ -623,17 +623,21 @@ _last_backup: Optional[Path] = None
 
 def confirm_downgrade(current: str, target: str, yes: bool = False) -> int:
     """0 to go ahead with a downgrade, else the exit code."""
+    from copycord.version import display_version
+
+    # v4.0.0.7 for a release, "dev (1a2b3c4)" for a dev build, as the banner shows it.
+    current, target = display_version(current), display_version(target)
     if yes:
-        ui.warn(f"downgrading from v{current} to v{target} (--yes)")
+        ui.warn(f"downgrading from {current} to {target} (--yes)")
         return 0
     if not ui.is_interactive():
-        _err(f"copycord update would downgrade from v{current} to v{target}",
+        _err(f"copycord update would downgrade from {current} to {target}",
              "no terminal to ask in; rerun with --yes to downgrade without a prompt")
         return 1
     ui.gap(blank=False)
     try:
         ok = ui.confirm(
-            f"Downgrade from v{current} to v{target}? Your data is backed up first; "
+            f"Downgrade from {current} to {target}? Your data is backed up first; "
             "a newer database schema will block the older version until you "
             "restore the backup.",
             default=False,
