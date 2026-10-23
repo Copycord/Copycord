@@ -163,6 +163,28 @@ def plan_tie_report(facts: List[Dict], top_id: int, unmovable: List[Dict]) -> Op
     return top_tie_report(top["id"], top.get("name"), raw(top), skipped)
 
 
+def bot_role_ties(facts: List[Dict], top_id: int) -> Optional[Dict]:
+    """How Discord's raw positions sit around my top role, read from fetched role facts
+    (raw_position when rank_role_facts renumbered them).
+
+    tied_with_bot counts every non-default role other than my top role that shares its
+    raw position, skipped or not: Discord will not let me move a role tied with mine.
+    at_bottom is set when my top role's raw position is 1 or lower. None when my top
+    role is not among the facts."""
+
+    def raw(f: Dict) -> int:
+        return int(f.get("raw_position", f.get("position") or 0))
+
+    top = next((f for f in facts if int(f["id"]) == int(top_id)), None)
+    if top is None:
+        return None
+    pos = raw(top)
+    tied = sum(1 for f in facts if not f.get("default") and int(f["id"]) != int(top_id)
+               and raw(f) == pos)
+    return {"id": int(top["id"]), "name": top.get("name") or str(top["id"]), "position": pos,
+            "tied_with_bot": tied, "at_bottom": pos <= 1}
+
+
 def above_top_note(report: Dict) -> str:
     top = report["bot_top"]
     return (

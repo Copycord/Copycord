@@ -34,8 +34,8 @@ from typing import Any, Optional
 import discord
 
 from copycord.server.item_hooks import OUTCOMES, ItemHooks
-from copycord.server.roles import (RoleManager, above_top_note, my_role_ids, plan_role_order,
-                                   plan_tie_report, rank_role_facts)
+from copycord.server.roles import (RoleManager, above_top_note, bot_role_ties, my_role_ids,
+                                   plan_role_order, plan_tie_report, rank_role_facts)
 
 logger = logging.getLogger("server.asset_sync")
 
@@ -294,9 +294,11 @@ class AssetSync:
                 ties = plan_tie_report(ranked[0], ranked[2], plan["unmovable"])
                 if ties:
                     order["bot_top"] = ties["bot_top"]
-                    order["tied_with_bot"] = ties["tied_with_bot"]
                     if ties["skipped"]:
                         tie_note = above_top_note(ties)
+                mine = bot_role_ties(ranked[0], ranked[2])
+                if mine:
+                    order["tied_with_bot"] = mine["tied_with_bot"]
                 total = len(plan["order"])
                 await self._progress(job, ROLE_ORDER, 0, total, "Checking the order", force=True)
                 if plan["changed"]:

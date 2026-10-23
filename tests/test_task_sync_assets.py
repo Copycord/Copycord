@@ -399,7 +399,7 @@ async def test_ws_job_role_order_reports_my_top_role_and_ties(monkeypatch):
     order = _frames(server, "sync_assets_end")[0]["result"]["role_order"]
     assert [u["name"] for u in order["unmovable"]] == ["Admin"]
     assert order["bot_top"] == {"id": 99, "name": "Copycord", "position": 3}
-    assert order["tied_with_bot"] == 1
+    assert order["tied_with_bot"] == 2  # Admin and Mods both share my raw position
     assert guild.moves == []  # Mods already sits lowest; Admin cannot move
     logs = [f["msg"] for f in _frames(server, "sync_assets_log") if f["step"] == "role_order"]
     assert ("1 roles skipped as above my top role Copycord (99, raw position 3): "
