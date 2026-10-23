@@ -28,6 +28,7 @@ import shutil
 import sys
 import threading
 import time
+import unicodedata
 from typing import Iterable, List, Optional, TextIO
 
 RESET = "\033[0m"
@@ -324,6 +325,17 @@ def _visible_len(text: str) -> int:
     return len(_ANSI.sub("", text))
 
 
+def _cells(text: str) -> int:
+    """The terminal columns text takes: wide East Asian characters count two,
+    combining marks none. The rail glyphs, ❯ and the arrows are one."""
+    size = 0
+    for ch in _ANSI.sub("", text):
+        if unicodedata.combining(ch):
+            continue
+        size += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return size
+
+
 def box(lines: Iterable[str], title: str = "", status: str = "info",
         stream: Optional[TextIO] = None) -> None:
     """A boxed notice; on the rail a titled step with the lines under it."""
@@ -538,7 +550,7 @@ def _wrap(text: str, width: int, indent: str = "  ") -> List[str]:
         n = _visible_len(word)
         if cur and size + 1 + n > width:
             rows.append(cur + (RESET if style else ""))
-            cur, size = indent + style, len(indent)
+            cur, size = indent + style, _visible_len(indent)
             joiner = ""
         else:
             joiner = " " if cur else ""
@@ -957,7 +969,20 @@ def _select(render, keys, question: str, answer) -> int:
     """Drive a selector: render(index) gives the lines, keys(key, index) the
     next index, or (index, True) when picked. Returns the picked index."""
     out = sys.stdout
+    # The terminal rows the last frame took, not its lines: a line wider than
+    # the terminal wraps onto more rows, and clear() has to go back over all.
     state = {"lines": 0}
+
+    def fit(rows: List[str]) -> tuple:
+        # Each line broken to the terminal width as it is now, its tail under
+        # the rail or the indent; one column is spare so no line ends on the
+        # last one, where terminals differ about the cursor. A word wider than
+        # the terminal still wraps, so the rows are counted from the widths.
+        columns = max(_columns(), 2)
+        indent = _ask_row("") if on_rail(out) else "  "
+        lines = [piece for row in rows for piece in _wrap(row, columns - 1, indent)]
+        height = sum(max(1, -(-_cells(piece) // columns)) for piece in lines)
+        return lines, height
 
     def clear() -> None:
         # Back to the first row drawn and wipe everything below it.
@@ -967,19 +992,20 @@ def _select(render, keys, question: str, answer) -> int:
     def draw(index: int) -> None:
         if state["lines"]:
             clear()
-        rows = render(index)
+        rows, height = fit(render(index))
         out.write("\n".join(rows))
         out.flush()
-        state["lines"] = len(rows)
+        state["lines"] = height
 
     def collapse(status: str, text: str) -> None:
         tail = accent(text) if status == "ok" else dim(text)
         clear()
         if on_rail(out):
             head = _rail_glyph("done", out) if status == "ok" else mark(status, out)
-            out.write(f"{head}  {bold(question)}\n{_ask_row(tail)}\n")
+            rows = [f"{head}  {bold(question)}", _ask_row(tail)]
         else:
-            out.write(f"{mark(status)} {bold(question)} {tail}\n")
+            rows = [f"{mark(status)} {bold(question)} {tail}"]
+        out.write("\n".join(fit(rows)[0]) + "\n")
         out.flush()
         state["lines"] = 0
 
@@ -1053,7 +1079,11 @@ def confirm(question: str, default: bool = True) -> bool:
             answer = f"{parts[0]}{dim(' / ')}{parts[1]}"
             if on_rail():
                 return [_ask_head(question), _ask_row(answer)]
-            return [f"{_ask_head(question)}  {answer}"]
+            line = f"{_ask_head(question)}  {answer}"
+            if _cells(line) < _columns():
+                return [line]
+            # Too wide for one row: the answer on its own, so it stays whole.
+            return [_ask_head(question), f"  {answer}"]
 
         def keys(key, index):
             if key is None:
