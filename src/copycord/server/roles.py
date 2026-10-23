@@ -122,6 +122,18 @@ def rank_role_facts(
     return ranked, int(top["position"]), int(top["id"])
 
 
+def role_rank(role) -> tuple:
+    """A role's place in Discord's hierarchy, comparable with <: position first and,
+    on a tie, the lower id (older role) higher, the same order rank_role_facts uses."""
+    return (int(role.position), -int(role.id))
+
+
+def below_my_top(role, me_top) -> bool:
+    """Whether role sits strictly below my top role, so I can edit or delete it.
+    A role sharing my top role's raw position but newer (higher id) is below it."""
+    return me_top is not None and role_rank(role) < role_rank(me_top)
+
+
 class RoleManager:
     def __init__(
         self,
@@ -516,7 +528,7 @@ class RoleManager:
         hooks hears about each role as it is done and can stop the pass between roles."""
         hooks = hooks or ItemHooks()
         me = guild.me
-        bot_top = me.top_role.position if me and me.top_role else 0
+        me_top = me.top_role if me and me.top_role else None
 
         rows = self.db.get_all_role_mappings()
         current: dict[int, dict] = {}
@@ -596,7 +608,7 @@ class RoleManager:
                     not cloned_role
                     or cloned_role.is_default()
                     or cloned_role.managed
-                    or cloned_role.position >= bot_top
+                    or not below_my_top(cloned_role, me_top)
                 ):
 
                     self.db.delete_role_mapping_for_clone(orig_id, clone_id)
@@ -679,7 +691,7 @@ class RoleManager:
                     cloned_role
                     and (not cloned_role.is_default())
                     and (not cloned_role.managed)
-                    and cloned_role.position < bot_top
+                    and below_my_top(cloned_role, me_top)
                 ):
                     try:
                         hooks.check()
@@ -855,7 +867,7 @@ class RoleManager:
                 cloned_role
                 and (not cloned_role.is_default())
                 and (not cloned_role.managed)
-                and cloned_role.position < bot_top
+                and below_my_top(cloned_role, me_top)
             ):
 
                 if not update_roles:
