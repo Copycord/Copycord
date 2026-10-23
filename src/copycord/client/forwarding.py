@@ -947,6 +947,14 @@ class ForwardingManager:
         except Exception:
             embeds = []
 
+        components = []
+        try:
+            for c in getattr(message, "components", []) or []:
+                if isinstance(c, dict):
+                    components.append(c)
+        except Exception:
+            components = []
+
         try:
             is_system = bool(message.is_system())
         except Exception:
@@ -1006,6 +1014,7 @@ class ForwardingManager:
             "content": content,
             "attachments": attachments,
             "embeds": embeds,
+            "components": components,
             "has_attachments": has_attachments,
             "jump_url": jump_url,
         }
