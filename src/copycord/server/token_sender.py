@@ -773,19 +773,34 @@ class UserTokenSender:
 
         ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
         self._channel_last_seen[chan] = time.monotonic()
+        online = self._online_ids()
+        live = [t for t in ordered if str(t.get("token_id")) in online]
+        if live:
+            # Step over the online tokens only, so one account never posts twice in a row
+            # while others are online; the offline ones stay behind as fallbacks.
+            rest = [t for t in ordered if str(t.get("token_id")) not in online]
+            idx = self._rr_index_by_channel.get(chan, 0) % len(live)
+            self._rr_index_by_channel[chan] = (idx + 1) % len(live)
+            return live[idx:] + live[:idx] + rest
         idx = self._rr_index_by_channel.get(chan, 0) % len(ordered)
         self._rr_index_by_channel[chan] = (idx + 1) % len(ordered)
         return ordered[idx:] + ordered[:idx]
+
+    def _online_ids(self) -> set:
+        """Token ids with a live pool session; empty without a pool or when it fails."""
+        if self._pool is None:
+            return set()
+        try:
+            return set(self._pool.online_ids())
+        except Exception:
+            self._log.debug("[user-send] Pool online_ids failed", exc_info=True)
+            return set()
 
     def _prefer_online(self, order: list) -> list:
         """Move the tokens with a live pool session to the front, keeping each group's order."""
         if self._pool is None or not order:
             return order
-        try:
-            online = self._pool.online_ids()
-        except Exception:
-            self._log.debug("[user-send] Pool online_ids failed", exc_info=True)
-            return order
+        online = self._online_ids()
         if not online:
             return order
         first = [t for t in order if str(t.get("token_id")) in online]

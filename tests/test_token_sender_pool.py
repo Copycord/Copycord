@@ -112,19 +112,16 @@ async def test_round_robin_rotates_inside_online_group(monkeypatch):
         assert sorted(order[2:]) == ["ta", "tc"]
     firsts = [o[0] for o in orders]
     assert firsts.count("tb") == firsts.count("td") == 4
-    # Each group keeps the round-robin rotation it came in with.
+    # The rotation steps over the online tokens only, so no account goes twice in a row.
     assert [o[:2] for o in orders[:4]] == [
         ["tb", "td"],
+        ["td", "tb"],
         ["tb", "td"],
         ["td", "tb"],
-        ["td", "tb"],
     ]
-    assert [o[2:] for o in orders[:4]] == [
-        ["ta", "tc"],
-        ["tc", "ta"],
-        ["tc", "ta"],
-        ["ta", "tc"],
-    ]
+    assert all(a != b for a, b in zip(firsts, firsts[1:]))
+    # The offline fallbacks keep their sorted order.
+    assert all(o[2:] == ["ta", "tc"] for o in orders)
     # One acquire per send, with the ids in the order tried.
     assert len(pool.acquired) == 8
     assert pool.acquired[0] == [t[1:] for t in orders[0]]
