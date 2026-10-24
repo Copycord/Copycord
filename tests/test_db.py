@@ -514,21 +514,15 @@ class TestMappingUserTokens:
         with pytest.raises(ValueError):
             db.update_token_identity(username="x")
 
-    def test_identity_columns_added_to_existing_table(self, tmp_db_path):
+    def test_identity_columns_added_to_existing_table(self, db, tmp_db_path):
         # A table from before the identity columns keeps its rows and gains the columns.
-        conn = sqlite3.connect(tmp_db_path)
-        conn.execute(
-            "CREATE TABLE mapping_user_tokens (token_id TEXT PRIMARY KEY, mapping_id TEXT NOT NULL,"
-            " token_value TEXT NOT NULL, label TEXT, username TEXT, user_id TEXT,"
-            " enabled INTEGER NOT NULL DEFAULT 1, added_at INTEGER NOT NULL DEFAULT 0,"
-            " last_used INTEGER, use_count INTEGER DEFAULT 0, UNIQUE(mapping_id, token_value))"
-        )
-        conn.execute(
-            "INSERT INTO mapping_user_tokens (token_id, mapping_id, token_value, username, use_count)"
-            " VALUES ('t1', 'm1', 'tokA', 'acc', 5)"
-        )
-        conn.commit()
-        conn.close()
+        self._mapping(db)
+        tid = db.add_mapping_token("ut-map", "tokA", username="acc")
+        db.conn.execute("UPDATE mapping_user_tokens SET use_count = 5 WHERE token_id = ?", (tid,))
+        db.conn.execute("ALTER TABLE mapping_user_tokens DROP COLUMN display_name")
+        db.conn.execute("ALTER TABLE mapping_user_tokens DROP COLUMN avatar_url")
+        db.conn.commit()
+        db.conn.close()
         from copycord.common.db import DBManager
 
         db = DBManager(tmp_db_path, init_schema=True)
