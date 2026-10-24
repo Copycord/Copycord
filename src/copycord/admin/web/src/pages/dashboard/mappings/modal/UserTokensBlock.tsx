@@ -1,6 +1,6 @@
 // "Token Message Cloning" section of the mapping modal (#user-tokens-section): the
 // USE_USER_TOKENS switch, strategy, sticky options, delays, the per mapping token manager and the
-// warm pool options (Keep online, Token status) with the live online count and chip dots.
+// warm pool options (Keep online, Token status). Live account status is on the System page.
 // The option values live in the mapping form state, so Save sends them with the rest. The
 // token list is server state: add, bulk add, enable, remove, verify and delete all go straight
 // to /api/guild-mappings/{id}/user-tokens. Only masked values are shown and nothing is logged.
@@ -21,8 +21,6 @@ import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
 import { ToolbarSelect } from "../../../channels/ToolbarSelect";
 import { normalizeKeepOnline, normalizePresence, normalizeStrategy, toBool } from "./model";
-import { onlineCount, tokenDot, useTokenPool } from "./useTokenPool";
-import type { TokenDot } from "./useTokenPool";
 import { DESC, ROW, SECTION, SectionSummary, Switch, ToggleRow } from "./parts";
 import {
   BULK_LABELS,
@@ -68,23 +66,6 @@ const PRESENCE_DESCS: Record<string, string> = {
   busy: "Every kept online account shows as Busy (Do Not Disturb).",
   invisible: "Every kept online account stays connected but appears offline.",
 };
-
-// Chip dots: filled for a live presence, a hollow ring while offline or connecting (pulsing only then).
-const DOT_BASE = "user-token-dot inline-block size-2 flex-none rounded-full";
-const DOTS: Record<Exclude<TokenDot, null>, { cls: string; label: string }> = {
-  online: { cls: "bg-good", label: "Online" },
-  busy: { cls: "bg-danger", label: "Busy" },
-  invisible: { cls: "bg-muted", label: "Invisible" },
-  connecting: { cls: "border-[1.5px] border-muted motion-safe:animate-pulse", label: "Connecting" },
-  offline: { cls: "border-[1.5px] border-muted", label: "Offline" },
-};
-
-function StatusDot({ dot }: { dot: TokenDot }) {
-  // The slot is always there so a dot arriving or leaving never moves the name.
-  if (!dot) return <span aria-hidden="true" className={cx(DOT_BASE, "user-token-dot-none")} />;
-  const d = DOTS[dot];
-  return <span role="img" aria-label={d.label} title={d.label} data-dot={dot} className={cx(DOT_BASE, d.cls)} />;
-}
 
 // .user-token-num, .user-token-menu-item and .user-token-bulk-results.
 const NUM =
@@ -293,24 +274,15 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
 
   const shown = useMemo(() => filterTokens(tokens ?? [], query), [tokens, query]);
 
-  const { pool, loaded: poolLoaded, refresh: refreshPool } = useTokenPool(Boolean(mappingId));
   const enabledIds = useMemo(() => (tokens ?? []).filter((t) => t.enabled).map((t) => t.id), [tokens]);
   const keepOnline = normalizeKeepOnline(settings.USER_TOKEN_KEEP_ONLINE);
   const presence = normalizePresence(settings.USER_TOKEN_PRESENCE);
   // Without a token list (create, clone, still loading) there is no ceiling yet.
   const keepMax = tokens === null ? undefined : enabledIds.length;
-  const keepTarget = Math.min(keepOnline, keepMax ?? keepOnline);
-  const poolText = !mappingId || !poolLoaded ? "" : !pool || keepTarget === 0 ? "off" : `${onlineCount(pool, enabledIds)}/${keepTarget} online`;
 
   const setKeepOnline = (raw: string) => {
     const n = raw.trim() === "" ? 0 : normalizeKeepOnline(raw);
     setSetting("USER_TOKEN_KEEP_ONLINE", keepMax === undefined ? n : Math.min(n, keepMax));
-  };
-
-  /** After a token change: the list, and the pool once the server has reconciled it. */
-  const reload = async () => {
-    await load();
-    refreshPool();
   };
 
   const addToken = async () => {
@@ -331,7 +303,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
       setValue("");
       setReveal(false);
       setStatus({ text: "Token added.", kind: "ok" });
-      await reload();
+      await load();
     } catch (err) {
       setStatus({ text: err instanceof Error && err.message ? err.message : "Network error.", kind: "error" });
     } finally {
@@ -346,7 +318,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     } catch (e) {
       notify(errorText(e, "Failed to update token"), "error");
     }
-    await reload();
+    await load();
   };
 
   const removeToken = async (t: UserToken) => {
@@ -358,7 +330,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     } catch {
       setStatus({ text: "Failed to remove token.", kind: "error" });
     }
-    await reload();
+    await load();
   };
 
   /** Returns the deleted count, or null when the request failed. */
@@ -366,14 +338,14 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     if (!mappingId) return null;
     try {
       const j = await api.post<{ ok: boolean; deleted?: number; error?: string }>(tokensPath(mappingId, "/delete"), body);
-      await reload();
+      await load();
       if (!j.ok) {
         notify(j.error || "Failed to delete tokens.", "error");
         return null;
       }
       return j.deleted ?? 0;
     } catch (e) {
-      await reload();
+      await load();
       notify(errorText(e, "Failed to delete tokens"), "error");
       return null;
     }
@@ -760,10 +732,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                     data-token-id={t.id}
                   >
                     <div className="user-token-meta flex min-w-0 flex-col gap-0.5">
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <StatusDot dot={pool ? tokenDot(pool.tokens[t.id]) : null} />
-                        <span className="user-token-name truncate text-[13px] font-medium text-text">{tokenName(t)}</span>
-                      </span>
+                      <span className="user-token-name truncate text-[13px] font-medium text-text">{tokenName(t)}</span>
                       <span className={cx(DESC, "user-token-sub font-mono")}>{tokenSub(t)}</span>
                     </div>
                     <div className="user-token-actions flex shrink-0 items-center gap-2.5">
@@ -802,14 +771,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
               </label>
               <span className={DESC}>Accounts held connected so sends start at once. 0 turns it off.</span>
             </div>
-            <div className="user-token-keep flex flex-none items-center gap-2">
-              <span
-                id="ut_keep_online_count"
-                aria-live="polite"
-                className="w-[76px] text-right text-xs whitespace-nowrap text-muted tabular-nums"
-              >
-                {poolText}
-              </span>
+            <div className="user-token-keep flex flex-none items-center">
               <input
                 type="number"
                 id="ut_keep_online"
@@ -845,7 +807,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
         </div>
       </div>
       {bulkOpen && mappingId ? (
-        <BulkModal mappingId={mappingId} onClose={() => setBulkOpen(false)} onChanged={() => void reload()} />
+        <BulkModal mappingId={mappingId} onClose={() => setBulkOpen(false)} onChanged={() => void load()} />
       ) : null}
     </details>
   );

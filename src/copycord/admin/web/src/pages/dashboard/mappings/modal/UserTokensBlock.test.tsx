@@ -53,30 +53,14 @@ const TOKENS = [
   { id: "t4", label: "", username: "delta", user_id: "4", enabled: false, token_masked: "ddd***", use_count: 0, last_used: null },
 ];
 
-const entry = (state: string, presence: string, dead = false) => ({ state, presence, since: 1, dead, session: "0123456789abcdef" });
-
-const POOL = {
-  keep_online: 3,
-  live: 2,
-  max_loop_lag_ms: 1.5,
-  tokens: {
-    t1: entry("online", "online"),
-    t2: entry("online", "dnd"),
-    t3: entry("connecting", "invisible"),
-    t4: entry("online", "invisible", true),
-  },
-};
-
-function mockApi(pool: unknown) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/user-tokens")) return json({ ok: true, tokens: TOKENS });
-      if (url.includes("/api/status")) return json({ server: { running: true, token_pool: pool }, client: { running: true } });
-      return json({ ok: false });
-    }),
-  );
+function mockApi() {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/user-tokens")) return json({ ok: true, tokens: TOKENS });
+    return json({ ok: false });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 function renderPool(settings: Record<string, string | number | boolean> = {}) {
@@ -95,7 +79,7 @@ describe("UserTokensBlock warm pool", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("keep online writes a whole number and clamps to the enabled token count", async () => {
-    mockApi(POOL);
+    mockApi();
     const setSetting = renderPool({ USER_TOKEN_KEEP_ONLINE: 2 });
     await screen.findByText("alpha");
     const input = screen.getByLabelText("Keep online") as HTMLInputElement;
@@ -110,7 +94,7 @@ describe("UserTokensBlock warm pool", () => {
   });
 
   it("token status is the app dropdown and writes USER_TOKEN_PRESENCE", async () => {
-    mockApi(POOL);
+    mockApi();
     const setSetting = renderPool();
     const select = screen.getByRole("combobox", { name: "Token status" });
     expect(select).toHaveTextContent("Random per session");
@@ -122,29 +106,15 @@ describe("UserTokensBlock warm pool", () => {
     await screen.findByText("alpha");
   });
 
-  it("counts this mapping's online tokens against min(keep online, enabled) and dots each chip", async () => {
-    mockApi(POOL);
-    renderPool({ USER_TOKEN_KEEP_ONLINE: 5 });
-    expect(await screen.findByText("2/3 online")).toBeInTheDocument();
-    const dotOf = (name: string) => screen.getByText(name).closest(".user-token-row")!.querySelector("[data-dot]")?.getAttribute("data-dot") ?? null;
-    expect(dotOf("alpha")).toBe("online");
-    expect(dotOf("bravo")).toBe("busy");
-    expect(dotOf("charlie")).toBe("connecting");
-    // Dead tokens get no dot but keep the slot.
-    expect(dotOf("delta")).toBeNull();
-    for (const row of document.querySelectorAll(".user-token-row")) expect(row.querySelectorAll(".user-token-dot").length).toBe(1);
-    expect(screen.getByRole("img", { name: "Connecting" }).className).toContain("motion-safe:animate-pulse");
-    expect(screen.getByRole("img", { name: "Online" }).className).not.toContain("animate");
-  });
-
-  it("shows off and no dots while the pool has not started, in the same reserved box", async () => {
-    mockApi(null);
+  it("shows no status dots or online count and never polls the pool; live status is on the System page", async () => {
+    const fetchMock = mockApi();
     renderPool({ USER_TOKEN_KEEP_ONLINE: 5 });
     await screen.findByText("alpha");
-    const count = document.getElementById("ut_keep_online_count")!;
-    await vi.waitFor(() => expect(count).toHaveTextContent("off"));
-    expect(count.className).toContain("w-[76px]");
-    expect(document.querySelectorAll("[data-dot]").length).toBe(0);
-    expect(document.querySelectorAll(".user-token-dot").length).toBe(4);
+    expect(document.querySelectorAll("[data-dot], .user-token-dot").length).toBe(0);
+    expect(document.getElementById("ut_keep_online_count")).toBeNull();
+    expect(screen.queryByText(/\d+\/\d+ online|^off$/)).toBeNull();
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/status"))).toBe(false);
+    // The keep online field is the only thing in its slot.
+    expect(screen.getByLabelText("Keep online").parentElement!.children).toHaveLength(1);
   });
 });
