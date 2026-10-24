@@ -50,9 +50,9 @@ def _count_failures(monkeypatch, pool):
     reported = []
     real = pool.report_failure
 
-    async def report_failure(token):
+    async def report_failure(token, **kw):
         reported.append(pool.current(token))
-        return await real(token)
+        return await real(token, **kw)
 
     monkeypatch.setattr(pool, "report_failure", report_failure)
     return reported
