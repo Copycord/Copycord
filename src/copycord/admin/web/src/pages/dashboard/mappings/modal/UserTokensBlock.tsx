@@ -1,6 +1,6 @@
 // "Token Message Cloning" section of the mapping modal (#user-tokens-section): the
 // USE_USER_TOKENS switch, strategy, sticky options, delays, the per mapping token manager and the
-// warm pool options (Keep online, Token status). Live account status is on the System page.
+// warm pool options (Keep online, Token status, Rotate status). Live account status is on the System page.
 // The option values live in the mapping form state, so Save sends them with the rest. The
 // token list is server state: add, bulk add, enable, remove, verify and delete all go straight
 // to /api/guild-mappings/{id}/user-tokens. Only masked values are shown and nothing is logged.
@@ -62,7 +62,7 @@ const PRESENCES = [
   { value: "invisible", label: "Invisible" },
 ];
 const PRESENCE_DESCS: Record<string, string> = {
-  random: "Each account's status changes now and then on its own.",
+  random: "Picks a random status for each account.",
   online: "Every kept online account shows as Online.",
   idle: "Every kept online account shows as Idle.",
   busy: "Every kept online account shows as Busy (Do Not Disturb).",
@@ -800,6 +800,17 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
               />
             </div>
           </div>
+          {/* Only Random rotates: a fixed status disables the switch and shows it off, keeping the saved value. */}
+          <ToggleRow
+            id="map_USER_TOKEN_PRESENCE_ROTATE"
+            settingKey="user_token_presence_rotate"
+            field={false}
+            name="Rotate status"
+            desc="Change each account's status every 20 to 90 minutes."
+            checked={presence === "random" && on("USER_TOKEN_PRESENCE_ROTATE")}
+            disabled={presence !== "random"}
+            onChange={(v) => setSetting("USER_TOKEN_PRESENCE_ROTATE", v)}
+          />
         </div>
       </div>
       {bulkOpen && mappingId ? (
