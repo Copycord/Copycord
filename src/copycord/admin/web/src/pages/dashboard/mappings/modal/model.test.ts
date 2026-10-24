@@ -6,6 +6,8 @@ import {
   initialForm,
   invalidFields,
   modeOf,
+  normalizeKeepOnline,
+  normalizePresence,
   normalizeStrategy,
   settingMatches,
   snapshot,
@@ -65,6 +67,42 @@ describe("mapping modal model", () => {
     expect(p.settings.USER_TOKEN_MAX_DELAY).toBe(3.5);
     expect(p.settings.USER_TOKEN_MIN_DELAY).toBe(0);
     expect(Object.keys(p.settings).length).toBe(Object.keys(DEFAULT_MAPPING_SETTINGS).length);
+  });
+
+  it("defaults keep online to 5 and presence to random", () => {
+    const f = initialForm(null, "create");
+    expect(f.settings.USER_TOKEN_KEEP_ONLINE).toBe(5);
+    expect(f.settings.USER_TOKEN_PRESENCE).toBe("random");
+    expect(initialForm(M, "edit").settings.USER_TOKEN_KEEP_ONLINE).toBe(5);
+  });
+
+  it("clamps keep online to a whole number of at least 0", () => {
+    expect(normalizeKeepOnline(3)).toBe(3);
+    expect(normalizeKeepOnline("7")).toBe(7);
+    expect(normalizeKeepOnline(2.9)).toBe(2);
+    expect(normalizeKeepOnline(-4)).toBe(0);
+    expect(normalizeKeepOnline(0)).toBe(0);
+    expect(normalizeKeepOnline("abc")).toBe(5);
+    expect(normalizeKeepOnline(undefined)).toBe(5);
+  });
+
+  it("normalizes presence to the four values", () => {
+    expect(normalizePresence("busy")).toBe("busy");
+    expect(normalizePresence("ONLINE")).toBe("online");
+    expect(normalizePresence("invisible")).toBe("invisible");
+    expect(normalizePresence("dnd")).toBe("random");
+    expect(normalizePresence(undefined)).toBe("random");
+  });
+
+  it("loads and saves the token pool settings normalized", () => {
+    const f = initialForm({ ...M, settings: { USER_TOKEN_KEEP_ONLINE: "2", USER_TOKEN_PRESENCE: "nope" } }, "edit");
+    expect(f.settings.USER_TOKEN_KEEP_ONLINE).toBe(2);
+    expect(f.settings.USER_TOKEN_PRESENCE).toBe("random");
+    f.settings.USER_TOKEN_KEEP_ONLINE = "-1";
+    f.settings.USER_TOKEN_PRESENCE = "invisible";
+    const p = buildPayload(f);
+    expect(p.settings.USER_TOKEN_KEEP_ONLINE).toBe(0);
+    expect(p.settings.USER_TOKEN_PRESENCE).toBe("invisible");
   });
 
   it("snapshot changes with any edit", () => {

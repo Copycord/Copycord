@@ -63,7 +63,13 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
   USER_TOKEN_STICKY_NICKNAME: false,
   USER_TOKEN_STICKY_AVATAR: false,
   USER_TOKEN_STICKY_ROLES: false,
+  USER_TOKEN_KEEP_ONLINE: 5,
+  USER_TOKEN_PRESENCE: "random",
 };
+
+export const DEFAULT_KEEP_ONLINE = 5;
+export const PRESENCE_VALUES = ["random", "online", "busy", "invisible"] as const;
+export type TokenPresence = (typeof PRESENCE_VALUES)[number];
 
 export const FRIENDLY_NAMES: Record<string, string> = {
   ENABLE_CLONING: "Enable Cloning",
@@ -218,6 +224,20 @@ export function normalizeStrategy(v: unknown): string {
   return v === "sticky_author" ? "sticky_author" : "round_robin";
 }
 
+/** Warm pool size: a whole number of tokens, 0 turns it off; anything unreadable falls back to the default. */
+export function normalizeKeepOnline(v: unknown): number {
+  if (v === "" || v === null || v === undefined || typeof v === "boolean") return DEFAULT_KEEP_ONLINE;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DEFAULT_KEEP_ONLINE;
+  return Math.max(0, Math.floor(n));
+}
+
+/** Token presence: one of the four choices, anything else is a random pick per session. */
+export function normalizePresence(v: unknown): TokenPresence {
+  const s = String(v ?? "").toLowerCase();
+  return (PRESENCE_VALUES as readonly string[]).includes(s) ? (s as TokenPresence) : "random";
+}
+
 export function modeOf(mapping: DashboardMapping | null | undefined, mode?: "clone"): MappingMode {
   if (mode === "clone" && mapping) return "clone";
   return mapping ? "edit" : "create";
@@ -230,6 +250,8 @@ export function initialForm(mapping: DashboardMapping | null | undefined, mode: 
   for (const [key, def] of Object.entries(DEFAULT_MAPPING_SETTINGS)) {
     const raw = source && key in source ? source[key] : def;
     if (key === "USER_TOKEN_STRATEGY") settings[key] = normalizeStrategy(raw);
+    else if (key === "USER_TOKEN_KEEP_ONLINE") settings[key] = normalizeKeepOnline(raw);
+    else if (key === "USER_TOKEN_PRESENCE") settings[key] = normalizePresence(raw);
     else if (typeof def === "boolean") settings[key] = toBool(raw);
     else settings[key] = (raw as MappingSettingValue | null | undefined) ?? def;
   }
@@ -264,6 +286,8 @@ export function buildPayload(form: MappingFormState): MappingSavePayload {
   settings.USER_TOKEN_STRATEGY = String(settings.USER_TOKEN_STRATEGY ?? "round_robin");
   settings.USER_TOKEN_MIN_DELAY = num(settings.USER_TOKEN_MIN_DELAY);
   settings.USER_TOKEN_MAX_DELAY = num(settings.USER_TOKEN_MAX_DELAY);
+  settings.USER_TOKEN_KEEP_ONLINE = normalizeKeepOnline(settings.USER_TOKEN_KEEP_ONLINE);
+  settings.USER_TOKEN_PRESENCE = normalizePresence(settings.USER_TOKEN_PRESENCE);
   return {
     mapping_name: form.mapping_name.trim(),
     original_guild_id: form.original_guild_id.trim(),
