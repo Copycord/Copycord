@@ -36,3 +36,28 @@ export interface BackupRestoreResponse {
   ok: boolean;
   restored_from?: string;
 }
+
+/** Where a sending account stands: online in the warm pool, connecting, not held, switched off or rejected by Discord. */
+export type SenderState = "online" | "connecting" | "offline" | "disabled" | "revoked";
+
+/** One sending account, every token row of one account merged. */
+export interface Sender {
+  id: string;
+  username: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  state: SenderState;
+  /** The Discord status of an online session. */
+  presence: "online" | "dnd" | "invisible" | null;
+  /** Unix seconds the session came online; null when not online. */
+  since: number | null;
+  /** Unix seconds of the last send. */
+  last_used: number | null;
+  use_count: number;
+}
+
+/** GET /api/system/senders */
+export interface SendersResponse {
+  ok: boolean;
+  items: Sender[];
+}
