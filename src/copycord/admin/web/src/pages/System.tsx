@@ -1,4 +1,4 @@
-// System page: the Database card.
+// System page: the Database card, and the sending accounts table under it.
 // Collapsed by default; open it to back up now, download the latest or any
 // archive, restore from an upload or an existing archive, and delete archives.
 // Restore and delete ask first. Element ids are stable; tests and integrations select by them.
@@ -40,6 +40,7 @@ import {
   ROW_BUTTON,
 } from "./system/SystemSkeleton";
 import { useNotify, useSafeConfirm } from "./system/providers";
+import { SendersTable } from "./system/SendersTable";
 
 /** The archive list scrolls once it has more rows than this. */
 export const VISIBLE_ROWS = 5;
@@ -328,6 +329,7 @@ export function System() {
           </div>
         </div>
       </Card>
+      <SendersTable />
     </div>
   );
 }
