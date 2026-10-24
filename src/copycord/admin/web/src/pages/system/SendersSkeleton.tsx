@@ -26,7 +26,7 @@ export const SENDERS_SECTION = "mt-[18px]";
 // about twelve rows, capped so the page fits the screen. The height never follows the row count:
 // three accounts leave empty space below, a hundred scroll inside.
 export const SENDERS_WRAP = cx(
-  "cc-hscroll relative h-[520px] max-h-[calc(100vh-420px)] min-h-[360px] overflow-auto rounded-xl border border-border",
+  "cc-hscroll relative h-[520px] max-h-[calc(100vh-500px)] min-h-[360px] overflow-auto rounded-xl border border-border",
   "bg-linear-to-b from-card-a50 to-well-a60 transition-opacity",
 );
 export const SENDERS_TABLE = TABLE;

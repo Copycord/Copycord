@@ -324,7 +324,7 @@ describe("SendersTable size", () => {
     render(<SendersTable />);
     await waitFor(() => expect(document.querySelectorAll("tr[data-sender]")).toHaveLength(n));
     const wrap = document.getElementById("system-senders")!;
-    for (const c of ["h-[520px]", "max-h-[calc(100vh-420px)]", "min-h-[360px]", "overflow-auto", "cc-hscroll", "relative"]) {
+    for (const c of ["h-[520px]", "max-h-[calc(100vh-500px)]", "min-h-[360px]", "overflow-auto", "cc-hscroll", "relative"]) {
       expect(wrap.className.split(" ")).toContain(c);
     }
     expect(wrap.className).not.toMatch(/(^| )h-auto|max-h-\[min/);
