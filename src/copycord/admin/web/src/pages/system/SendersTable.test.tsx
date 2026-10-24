@@ -51,6 +51,15 @@ function serve(...replies: Array<() => Response>) {
 
 const ok = (items: Sender[]) => () => json({ ok: true, items });
 
+const COLORS = ["#5865F2", "#747F8D", "#3BA55D", "#FAA61A", "#ED4245", "#EB459E"];
+/** A hex colour as jsdom reports an inline background. */
+function rgb(hex: string) {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`;
+}
+
+const order = () => [...document.querySelectorAll("tr[data-sender]")].map((r) => r.getAttribute("data-sender"));
+
 const rowOf = (id: string) => document.querySelector(`tr[data-sender="${id}"]`) as HTMLTableRowElement;
 const cellText = (id: string, col: number) => rowOf(id).cells[col]!.textContent;
 
@@ -130,7 +139,7 @@ describe("SendersTable", () => {
     expect(dimmed).toEqual(["f", "g"]);
   });
 
-  it("shows the avatar lazily and a neutral circle when there is none or it fails", async () => {
+  it("shows the avatar lazily over its default colour and the colour circle when there is none or it fails", async () => {
     serve(ok(ITEMS));
     render(<SendersTable />);
     await waitFor(() => expect(rowOf("a")).toBeTruthy());
@@ -138,10 +147,15 @@ describe("SendersTable", () => {
     expect(img).toHaveAttribute("loading", "lazy");
     expect(img).toHaveAttribute("src", "https://cdn.discordapp.com/embed/avatars/0.png");
     expect(img).toHaveAttribute("alt", "");
-    expect(rowOf("d").querySelector('[data-avatar="none"]')).not.toBeNull();
+    expect(img.className).toContain("size-6");
+    expect(img.style.backgroundColor).toBe(rgb("#5865F2"));
+    expect(rowOf("d").querySelector('[data-avatar="default"]')).not.toBeNull();
     fireEvent.error(img);
     expect(rowOf("a").querySelector("img")).toBeNull();
-    expect(rowOf("a").querySelector('[data-avatar="none"]')).not.toBeNull();
+    const circle = rowOf("a").querySelector<HTMLElement>('[data-avatar="default"]')!;
+    expect(circle.className).toContain("size-6");
+    expect(circle.style.backgroundColor).toBe(rgb("#5865F2"));
+    expect(circle.textContent).toBe("");
   });
 
   it("ticks Online for every second", async () => {
@@ -162,13 +176,15 @@ describe("SendersTable", () => {
     serve(ok([]));
     render(<SendersTable />);
     const line = await screen.findByText("No sending accounts yet");
-    expect(line.tagName).toBe("TD");
     expect(line.className).toContain("text-center");
     expect(line.className).toContain("text-muted");
-    expect(line).toHaveAttribute("colspan", "6");
+    expect(line.className).toContain("absolute inset-0 flex items-center justify-center");
     const wrap = document.getElementById("system-senders")!;
+    expect(line.parentElement).toBe(wrap);
     expect(wrap.className).toContain("rounded-xl border border-border");
+    expect(wrap.className).toContain("h-[520px]");
     expect(wrap.className).not.toContain("dashed");
+    expect(document.getElementById("system-senders-count")).toHaveTextContent("0 accounts");
     expect(screen.getAllByRole("columnheader")).toHaveLength(6);
     expect(document.querySelectorAll("tr[data-sender]")).toHaveLength(0);
   });
@@ -255,20 +271,234 @@ describe("SendersTable loading", () => {
     expect(localStorage.getItem("skel:system.senders")).toBe("3");
   });
 
-  it("the chunk skeleton has the same table under the Database card", () => {
-    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+  it("the chunk skeleton has the same header, toolbar and table under the Database card", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await gate;
+        return json({ ok: true, items: ITEMS });
+      }),
+    );
     const skel = render(<SendersTableSkeleton />);
     const page = render(<SendersTable />);
-    const heads = (root: HTMLElement) => within(root).getAllByRole("columnheader", { hidden: true }).map((h) => [h.textContent, h.className, h.style.width]);
-    expect(heads(skel.container)).toEqual(heads(page.container));
+    const heads = (root: HTMLElement) =>
+      within(root)
+        .getAllByRole("columnheader", { hidden: true })
+        .map((h) => [h.textContent, h.className, h.style.width, h.querySelector("button")?.className]);
     const firstCells = (root: HTMLElement) => [...root.querySelector("tr[data-skeleton-row]")!.querySelectorAll("td")].map((c) => c.className);
+    // The section's tree of tags and classes, down to the table and the count box: header, toolbar card, search, wrap.
+    const leaf = (el: Element) => el.tagName === "TABLE" || el.id === "system-senders-count";
+    const shape = (el: Element): unknown => [el.tagName, el.getAttribute("class"), leaf(el) ? [] : [...el.children].map(shape)];
+    const section = (root: HTMLElement) => root.querySelector("section")!;
+    expect(heads(skel.container)).toEqual(heads(page.container));
     expect(firstCells(skel.container)).toEqual(firstCells(page.container));
-    expect((skel.container.firstElementChild as HTMLElement).className).toBe(document.getElementById("system-senders")!.className);
+    expect(shape(section(skel.container))).toEqual(shape(section(page.container)));
+    expect(within(section(skel.container)).getByRole("heading", { level: 2, hidden: true })).toHaveTextContent("Token Message Cloning");
+    expect(skel.container.querySelector("#system-senders-count [data-skeleton]")).not.toBeNull();
+    expect(within(skel.container).getByRole("searchbox", { hidden: true })).toHaveAttribute("placeholder", "Search accounts");
+    const skelWrap = skel.container.querySelector("table")!.parentElement!;
+    expect(skelWrap.className).toBe(document.getElementById("system-senders")!.className);
+
+    // Loaded: the header, toolbar and wrap keep their classes, only the count and rows change.
+    const loadingShape = shape(section(page.container));
+    release();
+    await waitFor(() => expect(rowOf("a")).toBeTruthy());
+    expect(shape(section(page.container))).toEqual(loadingShape);
+    expect(heads(page.container)).toEqual(heads(skel.container));
 
     const sys = render(<SystemSkeleton />);
     const card = within(sys.container).getByTestId("card-skeleton");
     const table = within(sys.container).getByRole("table", { name: "Sending accounts", hidden: true });
     expect(card.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(table).getAllByRole("columnheader", { hidden: true })).toHaveLength(6);
+  });
+});
+
+const many = (n: number) => Array.from({ length: n }, (_, i) => sender(`s${i}`, { state: "online", presence: "online", since: NOW - i }));
+
+describe("SendersTable size", () => {
+  it.each([3, 100])("keeps the same fixed height wrap and sticky head with %i accounts", async (n) => {
+    serve(ok(many(n)));
+    render(<SendersTable />);
+    await waitFor(() => expect(document.querySelectorAll("tr[data-sender]")).toHaveLength(n));
+    const wrap = document.getElementById("system-senders")!;
+    for (const c of ["h-[520px]", "max-h-[calc(100vh-500px)]", "min-h-[360px]", "overflow-auto", "cc-hscroll", "relative"]) {
+      expect(wrap.className.split(" ")).toContain(c);
+    }
+    expect(wrap.className).not.toMatch(/(^| )h-auto|max-h-\[min/);
+    expect(wrap.getAttribute("style")).toBeNull();
+    expect(wrap.querySelector("thead")!.className).toContain("sticky top-0");
+    expect(screen.queryByText(/end of list/i)).toBeNull();
+  });
+});
+
+describe("SendersTable avatars", () => {
+  it("falls back to the Discord default colour of the URL index, or of a stable id hash", async () => {
+    const items = [
+      ...COLORS.map((_, n) => sender(`u${n}`, { avatar_url: `https://cdn.discordapp.com/embed/avatars/${n}.png` })),
+      sender("a", { avatar_url: null }),
+      sender("b", { avatar_url: "https://cdn.discordapp.com/avatars/2/abc.png" }),
+    ];
+    serve(ok(items));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("u0")).toBeTruthy());
+    for (const img of document.querySelectorAll("tr[data-sender] img")) fireEvent.error(img);
+    const circle = (id: string) => rowOf(id).querySelector<HTMLElement>('[data-avatar="default"]')!;
+    COLORS.forEach((hex, n) => {
+      expect(circle(`u${n}`).style.backgroundColor).toBe(rgb(hex));
+      expect(circle(`u${n}`)).toHaveAttribute("data-avatar-index", String(n));
+    });
+    // No default URL: ("a".charCodeAt(0) = 97) % 6 = 1 grey; "b" = 98 % 6 = 2 green, the same on every render.
+    expect(circle("a").style.backgroundColor).toBe(rgb(COLORS[1]!));
+    expect(circle("b").style.backgroundColor).toBe(rgb(COLORS[2]!));
+  });
+
+  it("swaps the default for the real avatar on a later poll in the same box", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const real = "https://cdn.discordapp.com/avatars/1/abc.png?size=64";
+    serve(ok([sender("a", { avatar_url: "https://cdn.discordapp.com/embed/avatars/3.png" })]), ok([sender("a", { avatar_url: real })]));
+    render(<SendersTable />);
+    await vi.waitFor(() => expect(rowOf("a")).toBeTruthy());
+    const img = rowOf("a").querySelector("img")!;
+    expect(img.style.backgroundColor).toBe(rgb(COLORS[3]!));
+    const cls = img.className;
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
+    });
+    await vi.waitFor(() => expect(rowOf("a").querySelector("img")).toHaveAttribute("src", real));
+    expect(rowOf("a").querySelector("img")).toBe(img);
+    expect(img.className).toBe(cls);
+    expect(img).toHaveAttribute("loading", "lazy");
+  });
+});
+
+describe("SendersTable header and search", () => {
+  it("titles the section and counts the accounts", async () => {
+    serve(ok(ITEMS));
+    render(<SendersTable />);
+    expect(screen.getByRole("heading", { level: 2, name: "Token Message Cloning" })).toBeInTheDocument();
+    expect(document.querySelector("#system-senders-count [data-skeleton]")).not.toBeNull();
+    await waitFor(() => expect(document.getElementById("system-senders-count")).toHaveTextContent(/^7 accounts$/));
+    expect(screen.getByRole("searchbox", { name: "Search accounts" })).toHaveAttribute("placeholder", "Search accounts");
+  });
+
+  it("says 1 account for one", async () => {
+    serve(ok(ITEMS.slice(0, 1)));
+    render(<SendersTable />);
+    await waitFor(() => expect(document.getElementById("system-senders-count")).toHaveTextContent(/^1 account$/));
+  });
+
+  it("filters by name, username and status label, case-insensitive, with an M of N count; Escape clears", async () => {
+    serve(ok(ITEMS));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("a")).toBeTruthy());
+    const box = screen.getByRole("searchbox", { name: "Search accounts" });
+    const count = document.getElementById("system-senders-count")!;
+
+    fireEvent.change(box, { target: { value: "NAME B" } });
+    expect(order()).toEqual(["b"]);
+    expect(count).toHaveTextContent(/^1 of 7 accounts$/);
+    fireEvent.change(box, { target: { value: "relay.f" } });
+    expect(order()).toEqual(["f"]);
+    fireEvent.change(box, { target: { value: "busy" } });
+    expect(order()).toEqual(["b"]);
+    fireEvent.change(box, { target: { value: "online" } });
+    expect(order()).toEqual(["a"]);
+    fireEvent.change(box, { target: { value: "relay" } });
+    expect(order()).toEqual(["a", "b", "c", "d", "e", "f"]);
+    expect(count).toHaveTextContent(/^6 of 7 accounts$/);
+
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(box).toHaveValue("");
+    expect(order()).toEqual(ITEMS.map((s) => s.id));
+    expect(count).toHaveTextContent(/^7 accounts$/);
+  });
+
+  it("keeps the wrap its size with one muted centred line when nothing matches", async () => {
+    serve(ok(ITEMS));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("a")).toBeTruthy());
+    const wrapClass = document.getElementById("system-senders")!.className;
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
+    const line = screen.getByText("No matching accounts");
+    expect(line.className).toContain("absolute inset-0 flex items-center justify-center");
+    expect(line.className).toContain("text-muted");
+    expect(document.getElementById("system-senders")!.className).toBe(wrapClass);
+    expect(order()).toEqual([]);
+    expect(screen.getAllByRole("columnheader")).toHaveLength(6);
+    expect(document.getElementById("system-senders-count")).toHaveTextContent(/^0 of 7 accounts$/);
+    expect(screen.queryByText("No sending accounts yet")).toBeNull();
+  });
+});
+
+describe("SendersTable sort", () => {
+  const head = (name: string) => screen.getByRole("button", { name });
+  const th = (name: string) => head(name).closest("th")!;
+
+  it.each([
+    ["Account", ["g", "a", "b", "c", "d", "e", "f"], ["f", "e", "d", "c", "b", "a", "g"]],
+    ["Username", ["a", "b", "c", "d", "e", "f", "g"], ["f", "e", "d", "c", "b", "a", "g"]],
+    ["Status", ["a", "b", "c", "d", "e", "g", "f"], ["f", "g", "e", "d", "c", "b", "a"]],
+    ["Online for", ["b", "a", "c", "d", "e", "f", "g"], ["c", "a", "b", "d", "e", "f", "g"]],
+    ["Last send", ["f", "e", "a", "b", "c", "d", "g"], ["a", "e", "f", "b", "c", "d", "g"]],
+    ["Messages sent", ["d", "g", "f", "e", "c", "b", "a"], ["a", "b", "c", "e", "f", "g", "d"]],
+  ])("%s sorts ascending, descending, then back to the API order, unknown values last", async (name, asc, desc) => {
+    serve(ok(ITEMS));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("a")).toBeTruthy());
+    expect(screen.getAllByRole("columnheader").filter((h) => h.hasAttribute("aria-sort"))).toHaveLength(0);
+
+    fireEvent.click(head(name));
+    expect(order()).toEqual(asc);
+    expect(th(name)).toHaveAttribute("aria-sort", "ascending");
+    expect(head(name).textContent).toBe(`${name}▲`);
+    expect(head(name).className).toContain("text-text");
+    expect(screen.getAllByRole("columnheader").filter((h) => h.hasAttribute("aria-sort"))).toHaveLength(1);
+
+    fireEvent.click(head(name));
+    expect(order()).toEqual(desc);
+    expect(th(name)).toHaveAttribute("aria-sort", "descending");
+    expect(head(name).textContent).toBe(`${name}▼`);
+
+    fireEvent.click(head(name));
+    expect(order()).toEqual(ITEMS.map((s) => s.id));
+    expect(th(name)).not.toHaveAttribute("aria-sort");
+    expect(head(name).textContent).toBe(name);
+  });
+
+  it("another column starts ascending", async () => {
+    serve(ok(ITEMS));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("a")).toBeTruthy());
+    fireEvent.click(head("Messages sent"));
+    fireEvent.click(head("Messages sent"));
+    fireEvent.click(head("Username"));
+    expect(th("Username")).toHaveAttribute("aria-sort", "ascending");
+    expect(th("Messages sent")).not.toHaveAttribute("aria-sort");
+  });
+
+  it("keeps the sort and the search across a poll, with the new rows swapped in and no skeleton", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const next = ITEMS.map((s) => (s.id === "d" ? { ...s, use_count: 5000 } : s));
+    serve(ok(ITEMS), ok(next));
+    render(<SendersTable />);
+    await vi.waitFor(() => expect(rowOf("a")).toBeTruthy());
+    fireEvent.click(head("Messages sent"));
+    fireEvent.click(head("Messages sent"));
+    expect(order()).toEqual(["a", "b", "c", "e", "f", "g", "d"]);
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "name" } });
+    expect(order()).toEqual(["a", "b", "c", "e", "d"]);
+
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
+    });
+    await vi.waitFor(() => expect(order()[0]).toBe("d"));
+    expect(order()).toEqual(["d", "a", "b", "c", "e"]);
+    expect(th("Messages sent")).toHaveAttribute("aria-sort", "descending");
+    expect(screen.getByRole("searchbox")).toHaveValue("name");
+    expect(document.getElementById("system-senders-count")).toHaveTextContent(/^5 of 7 accounts$/);
+    expect(document.querySelectorAll("tr[data-skeleton-row]")).toHaveLength(0);
   });
 });

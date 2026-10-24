@@ -117,4 +117,16 @@ describe("UserTokensBlock warm pool", () => {
     // The keep online field is the only thing in its slot.
     expect(screen.getByLabelText("Keep online").parentElement!.children).toHaveLength(1);
   });
+
+  it("has no proxy switch: token cloning always sends through proxies", async () => {
+    mockApi();
+    renderPool({ USER_TOKEN_USE_PROXIES: true });
+    await screen.findByText("alpha");
+    expect(document.getElementById("map_USER_TOKEN_USE_PROXIES")).toBeNull();
+    expect(document.querySelector('[data-setting-key="user_token_use_proxies"]')).toBeNull();
+    expect(screen.queryByText(/prox(y|ies)/i)).toBeNull();
+    // Attachments as links is followed straight by the send delay row, no gap or label between.
+    const links = document.querySelector('[data-setting-key="user_token_links_only"]')!;
+    expect(links.nextElementSibling).toHaveTextContent(/^Send delay/);
+  });
 });
