@@ -287,7 +287,7 @@ async def test_loop_lag_during_connect_warns_once_and_widens_next_gap(pool, capl
 
 @pytest.mark.parametrize(
     "presence,status",
-    [("online", "online"), ("busy", "dnd"), ("invisible", "invisible")],
+    [("online", "online"), ("idle", "idle"), ("busy", "dnd"), ("invisible", "invisible")],
 )
 async def test_presence_maps_to_discord_status(pool, fakes, presence, status):
     try:
@@ -299,7 +299,7 @@ async def test_presence_maps_to_discord_status(pool, fakes, presence, status):
         await pool.close_all()
 
 
-async def test_random_presence_never_idle_and_sticks_across_reconnect(pool, fakes):
+async def test_random_presence_sticks_across_reconnect(pool, fakes):
     pool._rng = random.Random(1234)
     try:
         pairs = [(f"t{i}", f"tok-{i}") for i in range(12)]
@@ -307,7 +307,6 @@ async def test_random_presence_never_idle_and_sticks_across_reconnect(pool, fake
         await until(lambda: len(pool.online_ids()) == 12)
         picked = {c.token: c.kwargs["status"] for c in fakes.clients}
         assert set(picked.values()) <= set(RANDOM_STATUSES)
-        assert "idle" not in picked.values()
 
         # the gateway drops for good and the pool reconnects with a new client
         first = fakes.for_token("tok-0")[0]
@@ -481,3 +480,30 @@ async def test_snapshot_identity_while_ready(pool, fakes):
         assert all(t["identity"] is None for t in pool.snapshot()["tokens"].values())
     finally:
         await pool.close_all()
+
+
+async def test_weighted_pick_covers_idle_and_follows_the_weights():
+    rng = random.Random(7)
+    counts = {s: 0 for s in RANDOM_STATUSES}
+    for _ in range(4000):
+        counts[token_pool._pick_status(rng)] += 1
+    assert set(RANDOM_STATUSES) == {"online", "idle", "dnd", "invisible"}
+    assert all(n > 0 for n in counts.values())
+    assert counts["online"] > counts["idle"] > counts["invisible"] > counts["dnd"]
+    weights = dict(zip(RANDOM_STATUSES, token_pool.RANDOM_WEIGHTS))
+    assert weights == {"online": 50, "idle": 25, "dnd": 10, "invisible": 15}
+
+
+async def test_weighted_pick_never_repeats_the_excluded_status():
+    rng = random.Random(3)
+    for current in RANDOM_STATUSES:
+        picks = {token_pool._pick_status(rng, exclude=current) for _ in range(300)}
+        assert current not in picks
+        assert picks == set(RANDOM_STATUSES) - {current}
+
+
+async def test_unknown_presence_falls_back_to_random(pool):
+    pool._rng = random.Random(5)
+    assert pool._status_for("k1", "sleepy") in RANDOM_STATUSES
+    assert pool._status_for("k1", "") == pool._status_for("k1", "random")
+    assert pool._status_for("k2", " IDLE ") == "idle"

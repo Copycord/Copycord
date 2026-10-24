@@ -35,10 +35,16 @@ STATE_CONNECTING = "connecting"
 STATE_ONLINE = "online"
 STATE_OFFLINE = "offline"
 
-# The setting's values and the Discord status each one sends.
-PRESENCE_STATUS = {"online": "online", "busy": "dnd", "invisible": "invisible"}
-# ``random`` picks once per token from these; never idle.
-RANDOM_STATUSES = ("online", "dnd", "invisible")
+# The setting's values and the Discord status each one sends; any other value is ``random``.
+PRESENCE_STATUS = {
+    "online": "online",
+    "idle": "idle",
+    "busy": "dnd",
+    "invisible": "invisible",
+}
+# ``random`` picks from these, weighted like a real person's day.
+RANDOM_STATUSES = ("online", "idle", "dnd", "invisible")
+RANDOM_WEIGHTS = (50, 25, 10, 15)
 
 STAGGER_MIN = 2.0
 STAGGER_MAX = 6.0
@@ -76,6 +82,13 @@ def _identity_of(client: Any) -> Optional[dict]:
         "avatar_url": avatar_url,
         "user_id": str(user_id) if user_id else None,
     }
+
+
+def _pick_status(rng: random.Random, exclude: Optional[str] = None) -> str:
+    """A weighted pick from ``RANDOM_STATUSES``, never ``exclude``."""
+    pairs = [(s, w) for s, w in zip(RANDOM_STATUSES, RANDOM_WEIGHTS) if s != exclude]
+    statuses, weights = zip(*pairs)
+    return rng.choices(statuses, weights=weights)[0]
 
 
 def _is_auth_failure(exc: BaseException) -> bool:
@@ -327,7 +340,7 @@ class TokenSessionPool:
             return PRESENCE_STATUS[presence]
         status = self._random_status.get(key)
         if status is None:
-            status = self._rng.choice(RANDOM_STATUSES)
+            status = _pick_status(self._rng)
             self._random_status[key] = status
         return status
 
@@ -548,4 +561,4 @@ async def _raise(exc: BaseException) -> None:
     raise exc
 
 
-__all__ = ["TokenSessionPool", "PRESENCE_STATUS", "RANDOM_STATUSES"]
+__all__ = ["TokenSessionPool", "PRESENCE_STATUS", "RANDOM_STATUSES", "RANDOM_WEIGHTS"]
