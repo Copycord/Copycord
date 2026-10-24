@@ -494,8 +494,10 @@ class GatewayClient:
         presence_delay: float = PRESENCE_DELAY,
     ) -> None:
         self.token = token
-        # Online by default and never idle: Copycord never goes idle on its own.
+        # Online by default; idle only when the caller asks for it.
         self.status = status
+        # Epoch ms the status turned idle, sent as op 3 `since` while idle.
+        self._idle_since: Optional[int] = None
         self.custom_status = custom_status
         self.activity = activity
         self.reconnect = reconnect
@@ -669,6 +671,8 @@ class GatewayClient:
         activity: Optional[Dict[str, Any]] = None,
     ) -> None:
         if status is not None:
+            if status != self.status:
+                self._idle_since = None
             self.status = status
         if custom_status is not None:
             self.custom_status = custom_status or None
@@ -1099,13 +1103,21 @@ class GatewayClient:
         if self.activity:
             activities.append(self.activity)
         # The web client's shape; an unfocused tab reports afk. The status is
-        # the configured one (online by default), never a switch to idle.
+        # the configured one (online by default). Idle carries `since`, the ms
+        # timestamp it went idle, kept across resends; every other status sends 0.
+        since = 0
+        if self.status == "idle":
+            if self._idle_since is None:
+                self._idle_since = int(time.time() * 1000)
+            since = self._idle_since
+        else:
+            self._idle_since = None
         await self._send(
             {
                 "op": GatewayOp.PRESENCE_UPDATE,
                 "d": {
                     "status": self.status,
-                    "since": 0,
+                    "since": since,
                     "activities": activities,
                     "afk": True,
                 },

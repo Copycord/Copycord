@@ -308,6 +308,62 @@ class TestPresence:
             ("afk", True),
         ]
 
+    @pytest.mark.asyncio
+    async def test_idle_frame_carries_since_and_afk(self, monkeypatch):
+        clock = [1_700_000_000.25]
+        monkeypatch.setattr(sc_gateway.time, "time", lambda: clock[0])
+        ws = FakeWS()
+        client, _ = make_client(ws)
+        client._ws = ws
+
+        await client.change_presence(status="idle")
+        assert list(ws.frames(3)[-1]["d"].items()) == [
+            ("status", "idle"),
+            ("since", 1_700_000_000_250),
+            ("activities", []),
+            ("afk", True),
+        ]
+
+        # a resend while still idle keeps when it went idle
+        clock[0] += 60
+        await client._send_presence_update()
+        assert ws.frames(3)[-1]["d"]["since"] == 1_700_000_000_250
+
+        # other statuses are unchanged: since 0
+        await client.change_presence(status="dnd")
+        assert list(ws.frames(3)[-1]["d"].items()) == [
+            ("status", "dnd"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", True),
+        ]
+
+        # idle again is a new idle spell
+        clock[0] += 60
+        await client.change_presence(status="idle")
+        assert ws.frames(3)[-1]["d"]["since"] == 1_700_000_120_250
+        assert [f["d"]["status"] for f in ws.frames(3)] == ["idle", "idle", "dnd", "idle"]
+        client._ws = None
+
+    @pytest.mark.asyncio
+    async def test_identify_presence_is_unchanged_for_idle(self):
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws, status="idle", presence_delay=0.05)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(3))
+        await stop(client, task)
+
+        # IDENTIFY keeps the web client's placeholder; the idle op 3 follows READY.
+        assert list(ws.frames(2)[0]["d"]["presence"].items()) == [
+            ("status", "unknown"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", False),
+        ]
+        d = ws.frames(3)[0]["d"]
+        assert d["status"] == "idle" and d["afk"] is True
+        assert isinstance(d["since"], int) and d["since"] > 0
+
 
 # heartbeat
 
