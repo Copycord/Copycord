@@ -26,9 +26,11 @@ class FakeClient:
         self._closed = False
         self._fail = None
         self._listeners = {}
+        self.user = None
 
     async def login(self, token):
         self.token = token
+        self.user = self.fakes.users.get(token)
         self.fakes.events.append(("login", token))
         err = self.fakes.next_error("login", token)
         if err is not None:
@@ -80,6 +82,8 @@ class Fakes:
         self.clients = []
         self.events = []
         self.errors = {}
+        # token value -> the selfclient User its login resolves to
+        self.users = {}
 
     def factory(self, **kwargs):
         client = FakeClient(self, **kwargs)
@@ -416,5 +420,34 @@ async def test_reap_idle_closes_sessions_not_seen_for_ttl(pool, fakes):
         assert pool.online_ids() == set()
         assert pool.snapshot()["tokens"] == {}
         assert all(c.is_closed() for c in fakes.clients)
+    finally:
+        await pool.close_all()
+
+
+async def test_snapshot_identity_while_ready(pool, fakes):
+    from copycord.selfclient.models import User
+
+    fakes.users["tok-a"] = User(
+        {"id": "175928847299117063", "username": "relay.alpha", "global_name": "Ava", "avatar": "abc123"}
+    )
+    fakes.users["tok-b"] = User({"id": "175928847299117063", "username": "relay.bravo"})
+    try:
+        await ensure_all(pool, [("a", "tok-a"), ("b", "tok-b"), ("c", "tok-c")], keep_online=2)
+        await until(lambda: pool.online_ids() == {"a", "b"})
+        tokens = pool.snapshot()["tokens"]
+        assert tokens["a"]["identity"] == {
+            "username": "relay.alpha",
+            "display_name": "Ava",
+            "avatar_url": "https://cdn.discordapp.com/avatars/175928847299117063/abc123.png?size=1024",
+            "user_id": "175928847299117063",
+        }
+        # No avatar hash: the default avatar for the id; no global name: None.
+        assert tokens["b"]["identity"]["avatar_url"] == "https://cdn.discordapp.com/embed/avatars/2.png"
+        assert tokens["b"]["identity"]["display_name"] is None
+        # Not connected: no identity.
+        assert tokens["c"]["identity"] is None
+
+        await pool.ensure("a", "tok-a", keep_online=0, presence="online")
+        assert all(t["identity"] is None for t in pool.snapshot()["tokens"].values())
     finally:
         await pool.close_all()

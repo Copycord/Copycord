@@ -57,6 +57,25 @@ def _token_key(token_value: str) -> str:
     return hashlib.sha256(token_value.encode("utf-8")).hexdigest()[:16]
 
 
+def _identity_of(client: Any) -> Optional[dict]:
+    """The account behind a ready session: username, global name, avatar URL (or the default one), user id."""
+    user = getattr(client, "user", None)
+    if user is None:
+        return None
+    try:
+        asset = user.avatar or user.default_avatar
+        avatar_url = asset.url if asset is not None else None
+    except Exception:
+        avatar_url = None
+    user_id = getattr(user, "id", None)
+    return {
+        "username": getattr(user, "name", None) or None,
+        "display_name": getattr(user, "global_name", None) or None,
+        "avatar_url": avatar_url,
+        "user_id": str(user_id) if user_id else None,
+    }
+
+
 def _is_auth_failure(exc: BaseException) -> bool:
     """A 401 on login or a 4004 gateway close: the token is revoked."""
     if isinstance(exc, LoginFailure):
@@ -187,13 +206,19 @@ class TokenSessionPool:
         return {tid for tid, key in self._key_by_id.items() if key in self._dead}
 
     def snapshot(self) -> dict:
-        """Per-token session state for the settings UI."""
+        """Per-token session state for the settings UI; ``identity`` is set while the session is ready."""
         tokens = {}
         for token_id, key in self._key_by_id.items():
             sess = self._sessions.get(key)
+            identity = None
             if sess is not None:
                 sess.refresh()
                 state, since, status = sess.state, sess.since, sess.status
+                if sess.is_online():
+                    try:
+                        identity = _identity_of(sess.client)
+                    except Exception:
+                        identity = None
             else:
                 state, since = STATE_OFFLINE, None
                 status = self._status_for(key, self._presence_by_key.get(key, "random"))
@@ -203,6 +228,7 @@ class TokenSessionPool:
                 "since": since,
                 "dead": key in self._dead,
                 "session": key,
+                "identity": identity,
             }
         return {
             "keep_online": self._keep_online,

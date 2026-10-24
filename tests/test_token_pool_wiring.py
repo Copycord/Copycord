@@ -140,6 +140,7 @@ def make_rx(srv, monkeypatch):
         r._pool_debounce_task = None
         r._pool_loop_task = None
         r._pool_online_seen = None
+        r._pool_identity_saved = {}
         r.proxies = proxies
         return r
 
@@ -347,6 +348,41 @@ async def test_status_publish_keeps_the_server_fields(make_rx):
     assert sent[0]["running"] is True
     assert sent[0]["discord"] == {"ready": True}
     assert sent[0]["token_pool"]["live"] == 1
+
+
+def test_status_persists_identity_only_on_change(make_rx):
+    rx = make_rx([])
+    ident = {"username": "relay.alpha", "display_name": "Ava", "avatar_url": "https://x/a.png", "user_id": "7"}
+    tokens = {
+        "1": {"state": "online", "session": "k1", "identity": dict(ident)},
+        "2": {"state": "online", "session": "k1", "identity": dict(ident)},
+        "3": {"state": "connecting", "session": "k3", "identity": None},
+    }
+    rx.token_pool.snapshot = lambda: {"live": 1, "tokens": tokens}
+    saved = []
+    rx.db.update_token_identity = lambda **kw: saved.append(kw) or 1
+
+    rx._token_pool_status()
+    rx._token_pool_status()
+    # Two ids on one session (one token value) and two publishes: one write.
+    assert saved == [dict(token_id="1", **ident)]
+
+    tokens["1"]["identity"] = dict(ident, display_name="Ava R")
+    tokens["2"]["identity"] = dict(ident, display_name="Ava R")
+    rx._token_pool_status()
+    assert len(saved) == 2 and saved[1]["display_name"] == "Ava R"
+
+    def boom(**kw):
+        raise RuntimeError("db locked")
+
+    rx.db.update_token_identity = boom
+    tokens["1"]["identity"] = dict(ident, avatar_url="https://x/b.png")
+    tokens["2"]["identity"] = dict(ident, avatar_url="https://x/b.png")
+    # A failed write is retried on the next publish and never breaks the status.
+    assert rx._token_pool_status()["live"] == 1
+    rx.db.update_token_identity = lambda **kw: saved.append(kw) or 1
+    rx._token_pool_status()
+    assert saved[-1]["avatar_url"] == "https://x/b.png"
 
 
 # round robin over online only

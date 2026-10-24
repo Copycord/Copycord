@@ -334,6 +334,8 @@ class ServerReceiver:
         self._pool_debounce_task: Optional[asyncio.Task] = None
         self._pool_loop_task: Optional[asyncio.Task] = None
         self._pool_online_seen: Optional[frozenset] = None
+        # Last account identity stored per pool session, so the DB is written only on change.
+        self._pool_identity_saved: dict[str, dict] = {}
         self.token_pool = TokenSessionPool(
             logger=logger, proxy_for=self._token_pool_proxy_for
         )
@@ -1026,10 +1028,34 @@ class ServerReceiver:
 
     def _token_pool_status(self) -> Optional[dict]:
         try:
-            return self.token_pool.snapshot()
+            snap = self.token_pool.snapshot()
         except Exception:
             logger.debug("[token-pool] snapshot failed", exc_info=True)
             return None
+        self._persist_token_identities(snap)
+        return snap
+
+    def _persist_token_identities(self, snap: Optional[dict]) -> None:
+        """Store each ready session's account identity on its token rows, only when it changed."""
+        for token_id, entry in ((snap or {}).get("tokens") or {}).items():
+            ident = entry.get("identity")
+            if not ident:
+                continue
+            key = entry.get("session") or str(token_id)
+            if self._pool_identity_saved.get(key) == ident:
+                continue
+            try:
+                self.db.update_token_identity(
+                    token_id=str(token_id),
+                    username=ident.get("username"),
+                    display_name=ident.get("display_name"),
+                    avatar_url=ident.get("avatar_url"),
+                    user_id=ident.get("user_id"),
+                )
+            except Exception:
+                logger.debug("[token-pool] identity save failed for %s", token_id, exc_info=True)
+                continue
+            self._pool_identity_saved[key] = dict(ident)
 
     async def _publish_token_pool_status(self, *, force: bool = False) -> None:
         """Republish the server status with the pool snapshot when the online set changed."""
