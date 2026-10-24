@@ -74,10 +74,9 @@ export function SendersLoadingRows({ rows = readLastCount(SENDERS_COUNT_KEY, 3, 
                   <Skeleton.Text className="leading-6" width={NAME_BAR[i % NAME_BAR.length]} />
                 </span>
               ) : (
-                <Skeleton.Text
-                  className={c.right ? "leading-6" : cx(SENDER_TEXT, "leading-6")}
-                  width={BAR[c.key][i % BAR[c.key].length]}
-                />
+                // A block bar in the cell's 24 px line box: an inline-block with overflow hidden would
+                // sit on the baseline and make the row taller than a loaded one.
+                <Skeleton.Text block className={cx("leading-6", c.right && "ml-auto")} width={BAR[c.key][i % BAR[c.key].length]} />
               )}
             </td>
           ))}
