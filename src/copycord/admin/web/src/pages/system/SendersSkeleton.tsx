@@ -64,7 +64,7 @@ export function SendersLoadingRows({ rows = readLastCount(SENDERS_COUNT_KEY, 3, 
   return (
     <>
       {Array.from({ length: rows }, (_, i) => (
-        <tr key={i} data-skeleton-row="" aria-hidden="true" className={SENDER_ROW}>
+        <tr key={i} data-skeleton-row="" className={SENDER_ROW}>
           {SENDER_COLUMNS.map((c, j) => (
             <td key={c.key} className={c.right ? SENDER_TD_RIGHT : SENDER_TD}>
               {i === 0 && j === 0 ? <span role="status" aria-label="Loading sending accounts" className="sr-only" /> : null}
