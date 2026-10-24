@@ -24,6 +24,7 @@ from curl_cffi import CurlMime
 from curl_cffi.requests.exceptions import RequestException as CurlRequestException
 
 from copycord.common import traffic_capture
+from copycord.common.env import is_dev
 from copycord.common.exit_timezone import note_token_proxy
 from copycord.common.proxy_pool import get_pool as get_proxy_pool
 from copycord.common.selfbot_headers import (
@@ -203,6 +204,8 @@ _capture_log = logging.getLogger("server.token_sender.capture")
 
 def _capture_for(token: str):
     try:
+        if not is_dev():
+            return None
         return traffic_capture.recorder_for(token)
     except Exception:
         _capture_log.debug("traffic capture unavailable", exc_info=True)

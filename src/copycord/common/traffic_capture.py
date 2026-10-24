@@ -20,7 +20,9 @@ to curl_cffi (its impersonation profile adds defaults and fixes the order on the
 wire; wire_probe.py adds a "wire_probe" record of that side), the JSON bodies, every gateway frame
 sent and every one received after zlib-stream decoding. X-Super-Properties stays
 base64 in the headers, as Chrome sends it and discord-capture records it, and is
-also given decoded as superProperties.
+also given decoded as superProperties. The user-token sender's REST calls
+(server/token_sender.py: messages, threads, edits, deletes, typing, upload slots,
+the nitro check) are recorded too, a multipart body as its field names and payload_json.
 
 Secrets are redacted before anything is written, with discord-capture's rules
 and its "<redacted len=N>" form: Authorization and cookie headers, token keys
