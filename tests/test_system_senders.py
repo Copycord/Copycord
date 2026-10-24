@@ -1,4 +1,5 @@
 """GET /api/system/senders: DB token rows merged with the server's live token_pool status (no Discord)."""
+import hashlib
 from unittest.mock import AsyncMock
 
 import pytest
@@ -93,8 +94,33 @@ def test_identity_fallbacks():
     assert by_id["u"]["display_name"] == "plain"
     assert by_id["u"]["avatar_url"] == "https://cdn.discordapp.com/embed/avatars/2.png"
     assert by_id["n"]["display_name"] is None
-    assert by_id["n"]["avatar_url"] is None
+    # No user id yet: a default avatar from the row id's hash, not None.
+    idx = int(hashlib.sha1(b"n").hexdigest(), 16) % 6
+    assert by_id["n"]["avatar_url"] == f"https://cdn.discordapp.com/embed/avatars/{idx}.png"
     assert by_id["n"]["username"] is None
+
+
+def test_unknown_user_default_avatar_comes_from_the_token_id_not_the_value():
+    ids = [f"tok-row-{i}" for i in range(200)]
+    first = {i["id"]: i["avatar_url"] for i in app_module._merge_senders(
+        [_row(t, f"VALUE-A-{t}") for t in ids], None)}
+    again = {i["id"]: i["avatar_url"] for i in app_module._merge_senders(
+        [_row(t, f"VALUE-B-{t}") for t in ids], None)}
+    # Stable per id, and the token value plays no part.
+    assert first == again
+    for t in ids:
+        idx = int(hashlib.sha1(t.encode()).hexdigest(), 16) % 6
+        assert first[t] == f"https://cdn.discordapp.com/embed/avatars/{idx}.png"
+    # Spread over Discord's six default colours.
+    assert len(set(first.values())) == 6
+
+
+def test_real_avatar_replaces_the_id_default():
+    item = app_module._merge_senders(
+        [_row("n", "N", avatar_url="https://cdn.discordapp.com/avatars/1/h.png?size=1024", user_id="1")],
+        None,
+    )[0]
+    assert item["avatar_url"] == "https://cdn.discordapp.com/avatars/1/h.png?size=1024"
 
 
 def test_sort_online_first_then_username():
@@ -196,7 +222,7 @@ def test_verify_route_makes_no_identity_request(tc, monkeypatch):
 
     monkeypatch.setattr(app_module, "db", DB())
     monkeypatch.setattr(app_module, "_selfbot_in_guild",
-                        AsyncMock(side_effect=lambda tok, gid: tok == "VAL-1"))
+                        AsyncMock(side_effect=lambda tok, gid, proxy=None: tok == "VAL-1"))
     identity = AsyncMock(return_value={"id": UID, "username": "new"})
     monkeypatch.setattr(app_module, "_selfbot_identity", identity)
     body = tc.post("/api/guild-mappings/m1/user-tokens/verify").json()

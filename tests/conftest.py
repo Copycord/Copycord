@@ -100,6 +100,9 @@ def _sender_has_a_proxy(monkeypatch):
         mod = sys.modules.get(name)
         if mod is not None:
             monkeypatch.setattr(mod, "get_proxy_pool", lambda: FakeLeasedPool())
+    admin = sys.modules.get("copycord.admin.app")
+    if admin is not None:
+        monkeypatch.setattr(admin, "_user_token_proxies", lambda: [FAKE_PROXY])
 
 
 @pytest.fixture(autouse=True)

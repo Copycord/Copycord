@@ -372,7 +372,8 @@ class TestMappingUserTokensAPI:
     @pytest.mark.asyncio
     async def test_bulk_add_marks_invalid(self, client, monkeypatch):
         import copycord.admin.app as app_mod
-        async def fake_in_guild(token, gid):
+        async def fake_in_guild(token, gid, proxy=None):
+            assert proxy == "http://proxy.test:8080"
             return token == "goodtoken1"
 
         monkeypatch.setattr(app_mod, "_selfbot_in_guild", fake_in_guild)
@@ -414,7 +415,8 @@ class TestMappingUserTokensAPI:
         )
 
         # Re-check: only the first token is still a member.
-        async def fake_in_guild(token, gid):
+        async def fake_in_guild(token, gid, proxy=None):
+            assert proxy == "http://proxy.test:8080"
             return token == "goodtoken1"
 
         monkeypatch.setattr(app_mod, "_selfbot_in_guild", fake_in_guild)
@@ -601,9 +603,11 @@ class _GuildsSession:
     def __init__(self, *responses):
         self.queue = list(responses)
         self.urls = []
+        self.proxies = []
 
-    def get(self, url, headers=None, timeout=None):
+    def get(self, url, headers=None, timeout=None, proxy=None):
         self.urls.append(url)
+        self.proxies.append(proxy)
         resp = self.queue.pop(0) if len(self.queue) > 1 else self.queue[0]
         return resp
 
@@ -903,3 +907,160 @@ class TestTokenPoolGlue:
         )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+
+
+# Proxies are mandatory for user tokens
+
+PROXIES_REQUIRED = "Proxies are required for user tokens. Add proxies first."
+
+
+class TestProxiesRequired:
+
+    def _mapping(self, settings=None):
+        return db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name="Proxy rule",
+            original_guild_id=111,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=222,
+            cloned_guild_name="",
+            settings=settings or {},
+        )
+
+    def _discord(self, monkeypatch, *, proxies=()):
+        import copycord.admin.app as app_mod
+
+        monkeypatch.setattr(app_mod, "_user_token_proxies", lambda: list(proxies))
+        mocks = {
+            "_selfbot_in_guild": AsyncMock(return_value=True),
+            "_selfbot_identity": AsyncMock(return_value=None),
+            "_bot_in_guild": AsyncMock(return_value=True),
+        }
+        for name, mock in mocks.items():
+            monkeypatch.setattr(app_mod, name, mock)
+        return mocks
+
+    def _assert_refused(self, resp, mocks):
+        assert resp.status_code == 400
+        assert resp.json() == {"ok": False, "error": PROXIES_REQUIRED}
+        for mock in mocks.values():
+            mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_add_without_proxies_is_refused_with_no_discord_call(self, client, monkeypatch):
+        mocks = self._discord(monkeypatch)
+        mid = self._mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens", json={"token": "tokaaaaaaaa"}
+        )
+        self._assert_refused(resp, mocks)
+        assert db.list_mapping_tokens(mid) == []
+
+    @pytest.mark.asyncio
+    async def test_bulk_add_without_proxies_is_refused(self, client, monkeypatch):
+        mocks = self._discord(monkeypatch)
+        mid = self._mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/bulk",
+            json={"tokens": "tokaaaaaaaa\ntokbbbbbbbb"},
+        )
+        self._assert_refused(resp, mocks)
+        assert db.list_mapping_tokens(mid) == []
+
+    @pytest.mark.asyncio
+    async def test_verify_without_proxies_is_refused(self, client, monkeypatch):
+        mocks = self._discord(monkeypatch)
+        mid = self._mapping()
+        db.add_mapping_token(mid, "tokaaaaaaaa")
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
+        self._assert_refused(resp, mocks)
+
+    @pytest.mark.asyncio
+    async def test_reenabling_a_token_without_proxies_is_refused(self, client, monkeypatch):
+        self._discord(monkeypatch)
+        mid = self._mapping()
+        tid = db.add_mapping_token(mid, "tokaaaaaaaa")
+        db.set_mapping_token_enabled(tid, False)
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}/user-tokens/{tid}", json={"enabled": True}
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"] == PROXIES_REQUIRED
+        # Turning one off is always allowed.
+        db.set_mapping_token_enabled(tid, True)
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}/user-tokens/{tid}", json={"enabled": False}
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_add_with_proxies_checks_through_a_proxy(self, client, monkeypatch):
+        mocks = self._discord(monkeypatch, proxies=["http://p1.test:1", "http://p2.test:2"])
+        mid = self._mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens", json={"token": "tokaaaaaaaa"}
+        )
+        assert resp.status_code == 200
+        proxy = mocks["_selfbot_in_guild"].await_args.kwargs["proxy"]
+        assert proxy in ("http://p1.test:1", "http://p2.test:2")
+        assert mocks["_selfbot_identity"].await_args.kwargs["proxy"] == proxy
+
+    def _patch(self, client, mid, settings):
+        return client.patch(
+            f"/api/guild-mappings/{mid}",
+            json={
+                "mapping_name": "Proxy rule",
+                "original_guild_id": "111",
+                "cloned_guild_id": "222",
+                "settings": settings,
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_turning_user_tokens_on_without_proxies_is_refused(self, client, monkeypatch):
+        self._discord(monkeypatch)
+        mid = self._mapping({"USE_USER_TOKENS": False})
+        db.add_mapping_token(mid, "tokaaaaaaaa")
+        resp = await self._patch(client, mid, {"USE_USER_TOKENS": True})
+        assert resp.status_code == 400
+        assert resp.json() == {"ok": False, "error": PROXIES_REQUIRED}
+        assert db.get_mapping_by_id(mid)["settings"].get("USE_USER_TOKENS") is False
+
+    @pytest.mark.asyncio
+    async def test_unrelated_save_with_tokens_on_is_kept_with_a_warning(self, client, monkeypatch):
+        self._discord(monkeypatch)
+        mid = self._mapping({"USE_USER_TOKENS": True})
+        db.add_mapping_token(mid, "tokaaaaaaaa")
+        resp = await self._patch(
+            client, mid, {"USE_USER_TOKENS": True, "USER_TOKEN_TYPING": True}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["proxy_warning"] == PROXIES_REQUIRED
+        assert db.get_mapping_by_id(mid)["settings"]["USER_TOKEN_TYPING"] is True
+
+    @pytest.mark.asyncio
+    async def test_turning_on_with_no_tokens_or_with_proxies_is_accepted(self, client, monkeypatch):
+        self._discord(monkeypatch)
+        mid = self._mapping({"USE_USER_TOKENS": False})
+        resp = await self._patch(client, mid, {"USE_USER_TOKENS": True})
+        assert resp.status_code == 200
+        assert "proxy_warning" not in resp.json()
+
+        mid2 = self._mapping({"USE_USER_TOKENS": False})
+        db.add_mapping_token(mid2, "tokbbbbbbbb")
+        self._discord(monkeypatch, proxies=["http://p1.test:1"])
+        resp = await self._patch(client, mid2, {"USE_USER_TOKENS": True})
+        assert resp.status_code == 200
+        assert "proxy_warning" not in resp.json()
+
+    def test_check_proxy_is_stable_per_token(self, monkeypatch):
+        import copycord.admin.app as app_mod
+
+        monkeypatch.setattr(app_mod, "_user_token_proxies", lambda: ["http://a:1", "http://b:2"])
+        picks = {app_mod._token_check_proxy("tokaaaaaaaa") for _ in range(5)}
+        assert len(picks) == 1
+        monkeypatch.setattr(app_mod, "_user_token_proxies", lambda: [])
+        assert app_mod._token_check_proxy("tokaaaaaaaa") is None
