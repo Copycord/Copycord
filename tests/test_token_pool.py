@@ -190,6 +190,10 @@ async def test_client_gets_small_cache_and_proxy(pool, fakes, proxies):
         assert kwargs["refresh_build"] is False
         assert kwargs["proxy"] == "http://proxy.invalid:8080"
         assert proxies == ["tok-1"]
+        # the shared pool REST leases from, so a gateway dial failure rotates that lease
+        from copycord.common.proxy_pool import get_pool
+
+        assert kwargs["proxy_pool"] is get_pool()
     finally:
         await pool.close_all()
 
