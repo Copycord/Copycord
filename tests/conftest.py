@@ -90,7 +90,7 @@ class FakeLeasedPool:
     async def release(self, token):
         pass
 
-    async def report_failure(self, token):
+    async def report_failure(self, token, *, exclude=()):
         return FAKE_PROXY
 
     def report_success(self, proxy):

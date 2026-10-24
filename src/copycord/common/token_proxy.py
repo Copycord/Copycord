@@ -48,12 +48,14 @@ async def lease_with_timezone(pool, token: str, *, time_cap: float = ROTATE_TIME
             raise NoProxyAvailable("no proxies configured")
         proxy = await pool.lease(token)
     deadline = time.monotonic() + time_cap
+    tried: set = set()
     for _ in range(max(1, int(getattr(pool, "total", 1) or 1))):
         if not proxy:
             raise NoProxyAvailable("no free proxy for this token")
         if await note_token_proxy(token, proxy):
             return proxy
-        proxy = await pool.report_failure(token)
+        tried.add(proxy)
+        proxy = await pool.report_failure(token, exclude=tried)
         if time.monotonic() >= deadline:
             break
     if proxy:

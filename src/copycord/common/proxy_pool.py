@@ -14,7 +14,7 @@ import logging
 import random
 import re
 import time
-from typing import Optional
+from typing import Iterable, Optional, Union
 
 from copycord.common.paths import data_dir
 
@@ -145,8 +145,11 @@ class ProxyPool:
             info["failures"] = 0
         return False
 
-    async def lease(self, token: str, *, exclude: Optional[str] = None) -> Optional[str]:
-        """Return the proxy leased to ``token``, assigning a free healthy one if needed. ``exclude`` skips one proxy."""
+    async def lease(
+        self, token: str, *, exclude: Optional[Union[str, Iterable[str]]] = None
+    ) -> Optional[str]:
+        """Return the proxy leased to ``token``, assigning a free healthy one if needed. ``exclude`` skips one proxy or a collection of them."""
+        skip = {exclude} if isinstance(exclude, str) else set(exclude or ())
         async with self._lock:
             existing = self._leases.get(token)
             if existing:
@@ -159,7 +162,7 @@ class ProxyPool:
             def _free(proxy: str) -> bool:
                 return (
                     proxy in self._all
-                    and proxy != exclude
+                    and proxy not in skip
                     and proxy not in self._in_use
                     and not self._is_suspended(proxy, now)
                 )
@@ -212,8 +215,10 @@ class ProxyPool:
                     len(self._all),
                 )
 
-    async def report_failure(self, token: str) -> Optional[str]:
-        """Release a proxy that failed a real connection, suspend it after repeated failures, and lease a replacement."""
+    async def report_failure(self, token: str, *, exclude: Iterable[str] = ()) -> Optional[str]:
+        """Release a proxy that failed a real connection, suspend it after repeated failures, and lease a replacement.
+
+        The replacement skips the failed proxy and anything in ``exclude``."""
         async with self._lock:
             proxy = self._leases.pop(token, None)
             if proxy:
@@ -233,7 +238,7 @@ class ProxyPool:
                         )
                 # suspension only starts after several failures; without this the sticky path returns it
                 self._preferred.pop(token, None)
-        return await self.lease(token, exclude=proxy)
+        return await self.lease(token, exclude={proxy, *exclude} - {None})
 
     def report_success(self, proxy: str) -> None:
         """Clear a proxy's failure count after a successful request."""
