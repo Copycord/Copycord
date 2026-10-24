@@ -97,12 +97,22 @@ describe("UserTokensBlock warm pool", () => {
     mockApi();
     const setSetting = renderPool();
     const select = screen.getByRole("combobox", { name: "Token status" });
-    expect(select).toHaveTextContent("Random per session");
+    expect(select).toHaveTextContent("Random");
+    expect(document.getElementById("ut_presence_desc")).toHaveTextContent("Each account's status changes now and then on its own.");
     fireEvent.click(select);
     const list = screen.getByRole("listbox");
-    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["Random per session", "Online", "Busy", "Invisible"]);
-    fireEvent.click(within(list).getByRole("option", { name: "Busy" }));
-    expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_PRESENCE", "busy");
+    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["Random", "Online", "Idle", "Busy", "Invisible"]);
+    fireEvent.click(within(list).getByRole("option", { name: "Idle" }));
+    expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_PRESENCE", "idle");
+    await screen.findByText("alpha");
+  });
+
+  it("token status Idle shows Idle with its description", async () => {
+    mockApi();
+    renderPool({ USER_TOKEN_PRESENCE: "idle" });
+    const select = screen.getByRole("combobox", { name: "Token status" });
+    expect(select).toHaveTextContent("Idle");
+    expect(document.getElementById("ut_presence_desc")).toHaveTextContent("Every kept online account shows as Idle.");
     await screen.findByText("alpha");
   });
 
