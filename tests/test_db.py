@@ -470,6 +470,73 @@ class TestMappingUserTokens:
         assert enabled[0]["user_id"] == "4242"
         assert enabled[0]["username"] == "acc"
 
+    def test_list_all_user_tokens_across_mappings(self, db):
+        self._mapping(db)
+        self._mapping(db, mapping_id="ut-map2", ogid=3, cgid=4)
+        db.add_mapping_token("ut-map", "shared", label="L", username="acc", user_id="7")
+        db.add_mapping_token("ut-map2", "shared")
+        db.add_mapping_token("ut-map2", "other")
+        rows = db.list_all_user_tokens()
+        assert len(rows) == 3
+        assert set(rows[0]) == {
+            "token_id", "token_value", "username", "display_name", "avatar_url",
+            "user_id", "enabled", "last_used", "use_count",
+        }
+        assert rows[0]["display_name"] is None and rows[0]["avatar_url"] is None
+
+    def test_update_token_identity_by_id_updates_every_row_of_the_value(self, db):
+        self._mapping(db)
+        self._mapping(db, mapping_id="ut-map2", ogid=3, cgid=4)
+        t1 = db.add_mapping_token("ut-map", "shared", username="old", user_id="7")
+        db.add_mapping_token("ut-map2", "shared")
+        db.add_mapping_token("ut-map2", "other", username="keep")
+        n = db.update_token_identity(
+            token_id=t1, username="new", display_name="New Name",
+            avatar_url="https://cdn.discordapp.com/avatars/7/abc.png?size=1024", user_id=7,
+        )
+        assert n == 2
+        rows = db.list_all_user_tokens()
+        shared = [r for r in rows if r["token_value"] == "shared"]
+        assert all(r["username"] == "new" and r["display_name"] == "New Name" for r in shared)
+        assert all(r["user_id"] == "7" for r in shared)
+        other = [r for r in rows if r["token_value"] == "other"][0]
+        assert other["username"] == "keep" and other["display_name"] is None
+
+    def test_update_token_identity_by_value_keeps_username_when_none(self, db):
+        self._mapping(db)
+        db.add_mapping_token("ut-map", "tokA", username="acc", user_id="9")
+        assert db.update_token_identity(token_value="tokA", display_name="D") == 1
+        row = db.list_all_user_tokens()[0]
+        assert (row["username"], row["user_id"], row["display_name"]) == ("acc", "9", "D")
+
+    def test_update_token_identity_unknown(self, db):
+        assert db.update_token_identity(token_id="nope", username="x") == 0
+        with pytest.raises(ValueError):
+            db.update_token_identity(username="x")
+
+    def test_identity_columns_added_to_existing_table(self, tmp_db_path):
+        # A table from before the identity columns keeps its rows and gains the columns.
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "CREATE TABLE mapping_user_tokens (token_id TEXT PRIMARY KEY, mapping_id TEXT NOT NULL,"
+            " token_value TEXT NOT NULL, label TEXT, username TEXT, user_id TEXT,"
+            " enabled INTEGER NOT NULL DEFAULT 1, added_at INTEGER NOT NULL DEFAULT 0,"
+            " last_used INTEGER, use_count INTEGER DEFAULT 0, UNIQUE(mapping_id, token_value))"
+        )
+        conn.execute(
+            "INSERT INTO mapping_user_tokens (token_id, mapping_id, token_value, username, use_count)"
+            " VALUES ('t1', 'm1', 'tokA', 'acc', 5)"
+        )
+        conn.commit()
+        conn.close()
+        from copycord.common.db import DBManager
+
+        db = DBManager(tmp_db_path, init_schema=True)
+        rows = db.list_all_user_tokens()
+        assert len(rows) == 1
+        assert rows[0]["username"] == "acc" and rows[0]["use_count"] == 5
+        assert rows[0]["display_name"] is None and rows[0]["avatar_url"] is None
+
 
 class TestMappingTokenIdentities:
 
