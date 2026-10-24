@@ -791,3 +791,115 @@ class TestMappingSaveChecks:
         )
         assert resp.status_code == 400
         assert resp.json()["which"] == "original_guild_id"
+
+
+# Warm token pool glue
+
+class TestTokenPoolGlue:
+
+    def test_enrich_from_bus_copies_token_pool(self):
+        import copycord.admin.app as app_mod
+
+        pool = {"keep_online": 5, "live": 1, "max_loop_lag_ms": 2.5, "tokens": {}}
+        out = app_mod._enrich_from_bus(
+            {"status": "running"}, {"pid": 7, "running": True, "token_pool": pool}
+        )
+        assert out["token_pool"] == pool
+        assert out["status"] == "running"
+        assert out["pid"] == 7
+        assert out["running"] is True
+
+    def test_enrich_from_bus_token_pool_null_or_absent(self):
+        import copycord.admin.app as app_mod
+
+        assert app_mod._enrich_from_bus({}, {"token_pool": None})["token_pool"] is None
+        assert app_mod._enrich_from_bus({}, {"token_pool": "junk"})["token_pool"] is None
+        assert "token_pool" not in app_mod._enrich_from_bus({}, {"status": "x"})
+
+    def _make_mapping(self):
+        return db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name="Pool glue",
+            original_guild_id=111,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=222,
+            cloned_guild_name="",
+        )
+
+    def _reloads(self, mock):
+        return [
+            c for c in mock.call_args_list
+            if len(c.args) > 1 and c.args[1] == {"type": "reload_user_tokens"}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_token_changes_and_settings_save_reload_pool(self, client, monkeypatch):
+        import copycord.admin.app as app_mod
+
+        ws = AsyncMock(return_value={"ok": True})
+        monkeypatch.setattr(app_mod, "_ws_cmd", ws)
+        monkeypatch.setattr(app_mod, "_selfbot_in_guild", AsyncMock(return_value=True))
+        monkeypatch.setattr(app_mod, "_bot_in_guild", AsyncMock(return_value=True))
+        monkeypatch.setattr(app_mod, "_selfbot_identity", AsyncMock(return_value=None))
+        mid = self._make_mapping()
+
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens", json={"token": "tokaaaaaaaa"}
+        )
+        tid = resp.json()["token"]["id"]
+        assert len(self._reloads(ws)) == 1
+
+        await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/bulk",
+            json={"tokens": "tokbbbbbbbb\ntokcccccccc"},
+        )
+        assert len(self._reloads(ws)) == 2
+
+        await client.patch(
+            f"/api/guild-mappings/{mid}/user-tokens/{tid}", json={"enabled": False}
+        )
+        assert len(self._reloads(ws)) == 3
+
+        await client.delete(f"/api/guild-mappings/{mid}/user-tokens/{tid}")
+        assert len(self._reloads(ws)) == 4
+
+        ids = [t["id"] for t in (await client.get(f"/api/guild-mappings/{mid}/user-tokens")).json()["tokens"]]
+        await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/delete", json={"ids": ids[:1]}
+        )
+        assert len(self._reloads(ws)) == 5
+
+        await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/delete", json={"scope": "all"}
+        )
+        assert len(self._reloads(ws)) == 6
+
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}",
+            json={
+                "mapping_name": "Pool glue",
+                "original_guild_id": "111",
+                "cloned_guild_id": "222",
+                "settings": {"USER_TOKEN_KEEP_ONLINE": 3, "USER_TOKEN_PRESENCE": "busy"},
+            },
+        )
+        assert resp.status_code == 200
+        assert len(self._reloads(ws)) == 7
+        assert all(c.args[0] == app_mod.SERVER_AGENT_URL for c in self._reloads(ws))
+
+    @pytest.mark.asyncio
+    async def test_reload_send_failure_only_logs(self, client, monkeypatch):
+        import copycord.admin.app as app_mod
+
+        from unittest.mock import Mock
+
+        monkeypatch.setattr(app_mod, "_ws_cmd", Mock(side_effect=RuntimeError("down")))
+        monkeypatch.setattr(app_mod, "_selfbot_in_guild", AsyncMock(return_value=True))
+        monkeypatch.setattr(app_mod, "_selfbot_identity", AsyncMock(return_value=None))
+        mid = self._make_mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens", json={"token": "tokdddddddd"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True

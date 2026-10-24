@@ -2804,6 +2804,9 @@ def _enrich_from_bus(ctrl: dict, bus: dict) -> dict:
         out["running"] = bus["running"]
     if "discord" not in out and isinstance(bus.get("discord"), dict):
         out["discord"] = bus["discord"]
+    if "token_pool" not in out and "token_pool" in bus:
+        tp = bus.get("token_pool")
+        out["token_pool"] = tp if isinstance(tp, dict) else None
     out.setdefault("status", "")
     return out
 
@@ -4786,6 +4789,7 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
         settings=settings,
     )
 
+    _notify_user_tokens_changed()
     return JSONResponse({"ok": True, "mapping_id": mapping_id})
 
 
@@ -4793,6 +4797,20 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
 async def api_delete_mapping(mapping_id: str):
     db.delete_guild_mapping(mapping_id)
     return JSONResponse({"ok": True})
+
+
+def _notify_user_tokens_changed() -> None:
+    """Tell the server to reconcile its warm token pool after a mapping's tokens or token settings change."""
+    try:
+        asyncio.create_task(
+            _ws_cmd(
+                SERVER_AGENT_URL,
+                {"type": "reload_user_tokens"},
+                timeout=1.0,
+            )
+        )
+    except Exception:
+        LOGGER.warning("reload_user_tokens ws send failed", exc_info=True)
 
 
 def _mask_token(tok: str) -> str:
@@ -4874,6 +4892,7 @@ async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
         )
 
     row = db.get_mapping_token(token_id)
+    _notify_user_tokens_changed()
     return JSONResponse(
         {"ok": True, "token": _serialize_mapping_token(row)}, status_code=200
     )
@@ -4940,6 +4959,8 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
         except Exception:
             results.append({"masked": masked, "status": "error"})
 
+    if added:
+        _notify_user_tokens_changed()
     return JSONResponse(
         {
             "ok": True,
@@ -5015,6 +5036,7 @@ async def api_bulk_delete_mapping_tokens(mapping_id: str, payload: dict = Body(.
     scope = str(payload.get("scope") or "").strip().lower()
     if scope == "all":
         deleted = db.delete_all_mapping_tokens(mapping_id)
+        _notify_user_tokens_changed()
         return JSONResponse({"ok": True, "deleted": deleted})
 
     ids = payload.get("ids")
@@ -5031,6 +5053,8 @@ async def api_bulk_delete_mapping_tokens(mapping_id: str, payload: dict = Body(.
             if db.delete_mapping_token(tid):
                 deleted += 1
 
+    if deleted:
+        _notify_user_tokens_changed()
     return JSONResponse({"ok": True, "deleted": deleted})
 
 
@@ -5047,6 +5071,7 @@ async def api_update_mapping_token(
 
     if "enabled" in payload:
         db.set_mapping_token_enabled(token_id, bool(payload.get("enabled")))
+        _notify_user_tokens_changed()
 
     updated = db.get_mapping_token(token_id)
     return JSONResponse({"ok": True, "token": _serialize_mapping_token(updated)})
@@ -5061,6 +5086,7 @@ async def api_delete_mapping_token(mapping_id: str, token_id: str):
     if not row or str(row.get("mapping_id")) != str(mapping_id):
         return JSONResponse({"ok": False, "error": "Token not found."}, status_code=404)
     db.delete_mapping_token(token_id)
+    _notify_user_tokens_changed()
     return JSONResponse({"ok": True})
 
 
