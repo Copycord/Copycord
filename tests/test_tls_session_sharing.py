@@ -69,6 +69,10 @@ def _registry(tmp_path, monkeypatch):
     monkeypatch.setattr(sh, "_TLS_LAST_USED", {})
     monkeypatch.setattr(sh, "_TLS_SHARED", {})
     monkeypatch.setattr(sh, "_CurlAsyncSession", FakeSession)
+    # proxies are mandatory for tokens: both tokens hold a fake lease
+    from tests.conftest import FakeLeasedPool
+
+    monkeypatch.setattr(sh, "_get_proxy_pool", lambda: FakeLeasedPool())
 
     async def no_prime(sess, token, proxy=None):
         pass

@@ -194,6 +194,32 @@ async def test_client_gets_small_cache_and_proxy(pool, fakes, proxies):
         await pool.close_all()
 
 
+async def test_no_proxy_means_no_connect(fakes, sleeps):
+    """Proxies are mandatory: proxy_for None keeps the token offline and retries, never dialling direct."""
+    asked = []
+
+    def proxy_for(token):
+        asked.append(token)
+        return None
+
+    pool = TokenSessionPool(
+        logger=logging.getLogger("test.token_pool"),
+        proxy_for=proxy_for,
+        client_factory=fakes.factory,
+    )
+    try:
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="online")
+        await until(lambda: len(asked) >= 2)
+        assert fakes.clients == []
+        assert pool.online_ids() == set()
+        assert pool.snapshot()["tokens"]["t1"]["state"] != "online"
+        assert "t1" not in pool.dead_ids()
+        # it backs off between attempts
+        assert any(d > 0 for d in sleeps)
+    finally:
+        await pool.close_all()
+
+
 async def test_shared_token_is_one_session(pool, fakes):
     try:
         await pool.ensure("a", "same-token", keep_online=5, presence="online")

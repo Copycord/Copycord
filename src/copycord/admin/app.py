@@ -324,7 +324,8 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "USER_TOKEN_FALLBACK_WEBHOOK": True,
     "USER_TOKEN_TYPING": False,
     "USER_TOKEN_LINKS_ONLY": False,
-    "USER_TOKEN_USE_PROXIES": False,
+    # ignored: proxies are mandatory for user tokens
+    "USER_TOKEN_USE_PROXIES": True,
     "USER_TOKEN_STICKY_NICKNAME": False,
     "USER_TOKEN_STICKY_AVATAR": False,
     "USER_TOKEN_STICKY_ROLES": False,

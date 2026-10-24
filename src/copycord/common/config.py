@@ -159,8 +159,8 @@ class Config:
             "USER_TOKEN_STICKY_NICKNAME": False,
             "USER_TOKEN_STICKY_AVATAR": False,
             "USER_TOKEN_STICKY_ROLES": False,
-            # off by default: proxies.txt is shared with the client, so users must opt in for token sends
-            "USER_TOKEN_USE_PROXIES": False,
+            # kept for old databases; ignored: proxies are mandatory for token sends
+            "USER_TOKEN_USE_PROXIES": True,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

@@ -30,6 +30,7 @@ from copycord.common.exit_timezone import (
 )
 from copycord.common.http_session import shared_session
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
+from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable
 
 try:
     from curl_cffi.requests import AsyncSession as _CurlAsyncSession
@@ -410,15 +411,35 @@ def _tls_session_lock(token: str) -> asyncio.Lock:
     return lock
 
 
-async def get_tls_session(token: str, *, use_proxy: bool = False):
-    """Return a curl_cffi ``AsyncSession`` dedicated to this token."""
+async def require_token_proxy(token: str) -> str:
+    """The proxy leased to ``token``, leasing one if needed; NoProxyAvailable when there is none."""
+    pool = _get_proxy_pool()
+    proxy = pool.current(token)
+    if proxy:
+        return proxy
+    if not pool.enabled:
+        raise NoProxyAvailable("no proxies configured")
+    proxy = await pool.lease(token)
+    if not proxy:
+        raise NoProxyAvailable("no free proxy for this token")
+    return proxy
+
+
+async def get_tls_session(token: str, *, use_proxy: bool = USE_PROXY):
+    """Return a curl_cffi ``AsyncSession`` dedicated to this token.
+
+    Proxies are mandatory for user tokens: ``use_proxy`` is ignored, and with no
+    proxy lease this raises NoProxyAvailable before any session is made or primed.
+    """
     shared = _shared_tls_session(token)
     if shared is not None:
+        await require_token_proxy(token)
         return shared
     if _CurlAsyncSession is None:
         raise RuntimeError("curl_cffi is not installed")
 
     async with _tls_session_lock(token):
+        proxy = await require_token_proxy(token)
         sess = _TLS_SESSIONS.get(token)
         is_new = sess is None
         if sess is None:
@@ -435,11 +456,7 @@ async def get_tls_session(token: str, *, use_proxy: bool = False):
                 raise
             _TLS_SESSIONS[token] = sess
 
-        proxy = None
         if token not in _TLS_PRIMED:
-            pool = _get_proxy_pool()
-            if use_proxy and pool.enabled:
-                proxy = await pool.lease(token)
             await _note_token_proxy(token, proxy)
             await _prime_tls_session(sess, token, proxy=proxy)
             _TLS_PRIMED.add(token)
@@ -470,6 +487,9 @@ def _mask_proxy_for_log(proxy: str) -> str:
 
 async def _prime_tls_session(sess, token: str, proxy: str | None = None) -> None:
     """Warm the session's cookie jar through the token's leased proxy, so cookies match the source IP."""
+    if not proxy:
+        # never prime a user token's session from the server's own address
+        raise NoProxyAvailable("cookie priming needs the token's proxy")
     try:
         await sess.get("https://discord.com", timeout=12, proxy=proxy)
     except Exception as e:

@@ -65,6 +65,43 @@ def _fresh_qos_tokens():
     qos.set_store(qos.QosTokenStore())
 
 
+FAKE_PROXY = "http://proxy.test:8080"
+
+
+class FakeLeasedPool:
+    """A proxy pool where every token holds FAKE_PROXY; no address is ever dialled."""
+
+    enabled = True
+    total = 1
+
+    def current(self, token):
+        return FAKE_PROXY
+
+    async def lease(self, token, *, exclude=None):
+        return FAKE_PROXY
+
+    async def release(self, token):
+        pass
+
+    async def report_failure(self, token):
+        return FAKE_PROXY
+
+    def report_success(self, proxy):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _sender_has_a_proxy(monkeypatch):
+    """Proxies are mandatory for user tokens; sender tests run with a leased fake one.
+    A test about the no-proxy path patches get_proxy_pool itself."""
+    import sys
+
+    for name in ("copycord.server.token_sender", "copycord.server.token_avatar"):
+        mod = sys.modules.get(name)
+        if mod is not None:
+            monkeypatch.setattr(mod, "get_proxy_pool", lambda: FakeLeasedPool())
+
+
 @pytest.fixture(autouse=True)
 def _no_shared_tls_sessions():
     """A Client a test left logged in never hands its session to a later test."""

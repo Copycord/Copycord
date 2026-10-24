@@ -158,7 +158,7 @@ def _m(mid, settings, *toks):
     }
 
 
-def test_plan_unions_mappings_and_ors_the_proxy_flag(srv):
+def test_plan_unions_mappings_and_always_proxies(srv):
     plan = srv.plan_token_pool(
         [
             _m("m1", _settings(keep=2, presence="busy", proxy=False), ("1", "X"), ("2", "Y")),
@@ -169,7 +169,8 @@ def test_plan_unions_mappings_and_ors_the_proxy_flag(srv):
     assert x["ids"] == ["1", "3"]
     assert x["mappings"] == ["m1", "m2"]
     assert x["use_proxy"] is True
-    assert plan["tokens"]["Y"]["use_proxy"] is False
+    # the stored USER_TOKEN_USE_PROXIES=False is ignored
+    assert plan["tokens"]["Y"]["use_proxy"] is True
     # The largest keep_online and the first mapping's presence win.
     assert x["keep_online"] == 2
     assert x["presence"] == "busy"
@@ -247,11 +248,23 @@ async def test_reconcile_shared_token_is_one_proxied_session(make_rx):
 
     # Both ids of the shared token go to the pool, which keys the session by value.
     assert [e[:3] for e in rx.token_pool.ensured] == [("1", "X", 2), ("2", "X", 2), ("3", "Y", 2)]
-    assert rx._pool_proxied == {"X"}
-    assert list(rx.proxies.leases) == ["X"]
+    # Proxies are mandatory: every wanted token is proxied, whatever the stored flag says.
+    assert rx._pool_proxied == {"X", "Y"}
+    assert list(rx.proxies.leases) == ["X", "Y"]
     # proxy_for hands the gateway the lease REST reads.
     assert rx._token_pool_proxy_for("X") == rx.proxies.current("X")
-    assert rx._token_pool_proxy_for("Y") is None
+    assert rx._token_pool_proxy_for("Y") == rx.proxies.current("Y")
+    # A token with no lease gets None, which the pool takes as "do not connect".
+    assert rx._token_pool_proxy_for("Z") is None
+
+
+@pytest.mark.asyncio
+async def test_reconcile_without_proxies_leases_nothing(make_rx):
+    rx = make_rx([("m1", _settings(keep=1), [("1", "X", True)])])
+    rx.proxies.enabled = False
+    await rx._reconcile_token_pool()
+    assert rx.proxies.leases == {}
+    assert rx._token_pool_proxy_for("X") is None
 
 
 @pytest.mark.asyncio

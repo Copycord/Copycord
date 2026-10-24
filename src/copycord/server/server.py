@@ -47,6 +47,7 @@ from copycord.common.selfbot_headers import (
     TLS_SESSION_IDLE_TTL,
 )
 from copycord.common.proxy_pool import get_pool as get_proxy_pool
+from copycord.common.token_proxy import token_use_proxy
 from copycord.common.websockets import WebsocketManager, AdminBus
 from copycord.common.db import DBManager
 from copycord.common.http_session import close_shared_session
@@ -161,7 +162,7 @@ def plan_token_pool(
     ``mappings`` holds one dict per mapping, in mapping order, with ``mapping_id``,
     the resolved ``settings`` and its enabled ``tokens`` (``token_id``, ``token_value``).
     A token value used by several mappings is one entry: its ids and mappings are the
-    union, ``use_proxy`` is on if any of them has proxies on, ``keep_online`` is the
+    union, ``use_proxy`` is always on (proxies are mandatory for tokens), ``keep_online`` is the
     largest of theirs and ``presence`` is the first mapping's. Each mapping wants
     ``min(keep_online, its tokens)`` online; a token another mapping already wants,
     then one already online, is picked first so a shared token counts once.
@@ -177,7 +178,7 @@ def plan_token_pool(
         except (TypeError, ValueError):
             keep = 0
         presence = str(settings.get("USER_TOKEN_PRESENCE") or "random")
-        use_proxy = bool(settings.get("USER_TOKEN_USE_PROXIES", False))
+        use_proxy = token_use_proxy(settings)
         mine: list[str] = []
         for tok in m.get("tokens") or []:
             value = (tok.get("token_value") or "").strip()
@@ -921,7 +922,7 @@ class ServerReceiver:
     # warm token pool
 
     def _token_pool_proxy_for(self, token_value: str) -> Optional[str]:
-        """The proxy the token's REST calls already lease, or None when no mapping using it has proxies on."""
+        """The proxy the token's REST calls already lease; None (no connect) when it has none."""
         if token_value not in self._pool_proxied:
             return None
         return get_proxy_pool().current(token_value)
@@ -8345,7 +8346,7 @@ class ServerReceiver:
                     links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                     forced_token_id=forced,
                     sticky_exclusive=exclusive,
-                    use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                    use_proxy=token_use_proxy(settings),
                     sent_as=sent_as,
                     sent_ids=sent_ids,
                     reply_to=reply_to,
@@ -8516,7 +8517,7 @@ class ServerReceiver:
                 links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                 forced_token_id=forced_token_id,
                 sticky_exclusive=identity_active,
-                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                use_proxy=token_use_proxy(settings),
             )
         except Exception:
             logger.exception(
@@ -8587,7 +8588,7 @@ class ServerReceiver:
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 forced_token_id=forced_token_id,
                 sticky_exclusive=identity_active,
-                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                use_proxy=token_use_proxy(settings),
             )
         except Exception:
             logger.exception(
@@ -8695,7 +8696,7 @@ class ServerReceiver:
                     links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                     forced_token_id=forced,
                     sticky_exclusive=exclusive,
-                    use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                    use_proxy=token_use_proxy(settings),
                     sent_as=sent_as,
                     sent_ids=sent_ids,
                     reply_to=reply_to,
@@ -10431,7 +10432,7 @@ class ServerReceiver:
                 token_id=token_id,
                 content=content,
                 embeds=embeds,
-                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                use_proxy=token_use_proxy(settings),
                 guild_id=clone_gid,
             )
 
@@ -12987,7 +12988,7 @@ class ServerReceiver:
             channel_id=cloned_cid,
             message_id=cloned_mid,
             token_id=token_id,
-            use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+            use_proxy=token_use_proxy(settings),
             guild_id=clone_gid,
         )
 

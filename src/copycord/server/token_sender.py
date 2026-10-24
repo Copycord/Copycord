@@ -33,6 +33,7 @@ from copycord.common.selfbot_headers import (
     context_properties,
     get_tls_session,
 )
+from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable, warn_no_proxy
 
 if TYPE_CHECKING:
     from copycord.server.token_pool import TokenSessionPool
@@ -185,6 +186,14 @@ SEND_UNSUPPORTED = "unsupported"
 SEND_NO_TOKENS = "no_tokens"
 
 
+def _leased_proxy(token: str) -> str:
+    """The token's proxy for this request; NoProxyAvailable if the lease is gone, so nothing goes direct."""
+    proxy = get_proxy_pool().current(token)
+    if not proxy:
+        raise NoProxyAvailable("token lost its proxy lease")
+    return proxy
+
+
 class UserTokenSender:
     def __init__(
         self,
@@ -236,7 +245,7 @@ class UserTokenSender:
         links_only: bool = False,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         sent_as: Optional[list] = None,
         sent_ids: Optional[list] = None,
         reply_to: Optional[dict] = None,
@@ -404,7 +413,7 @@ class UserTokenSender:
         token_id: Optional[str],
         content: Optional[str],
         embeds: Optional[list] = None,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         guild_id=None,
     ) -> str:
         """Edit a message, as the account that posted it.
@@ -447,7 +456,7 @@ class UserTokenSender:
         channel_id: int,
         message_id: int,
         token_id: Optional[str],
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         guild_id=None,
     ) -> str:
         """Delete a message, as the account that posted it.
@@ -490,7 +499,7 @@ class UserTokenSender:
         links_only: bool = False,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> Optional[int]:
         """Create a forum thread whose starter message is authored by one of the mapping's user tokens."""
         if not mapping_id or not forum_channel_id or not thread_name:
@@ -602,7 +611,7 @@ class UserTokenSender:
         max_delay: float = 0.0,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> Optional[int]:
         """Create a text-channel thread as one of the mapping's user tokens."""
         if not mapping_id or not parent_channel_id or not thread_name:
@@ -912,7 +921,7 @@ class UserTokenSender:
             self._author_last_seen.pop(key, None)
         return len(stale)
 
-    async def _token_has_nitro(self, token: str, *, use_proxy: bool = False) -> bool:
+    async def _token_has_nitro(self, token: str, *, use_proxy: bool = USE_PROXY) -> bool:
         """Whether this account may use custom emoji outside their own guild.
 
         One lookup per account for the life of the process. On any failure we
@@ -957,7 +966,7 @@ class UserTokenSender:
             self._log.debug("[user-send] emoji lookup failed", exc_info=True)
             return set()
 
-    async def _tls_session(self, token: str, *, use_proxy: bool = False):
+    async def _tls_session(self, token: str, *, use_proxy: bool = USE_PROXY):
         """The per-token curl_cffi session. Overridden in tests."""
         return await get_tls_session(token, use_proxy=use_proxy)
 
@@ -971,7 +980,7 @@ class UserTokenSender:
         timeout: int = 30,
         ctx: str = "",
         extra_headers: Optional[dict] = None,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         method: str = "POST",
         not_found_status: str = SEND_UNDELIVERABLE,
         referer: Optional[str] = None,
@@ -990,7 +999,7 @@ class UserTokenSender:
                 proxy = get_proxy_pool().current(token)
                 try:
                     session = await self._tls_session(token, use_proxy=use_proxy)
-                    proxy = get_proxy_pool().current(token)
+                    proxy = _leased_proxy(token)
                     await note_token_proxy(token, proxy)
                     headers = self._build_headers(token, referer)
                     if extra_headers:
@@ -1077,6 +1086,11 @@ class UserTokenSender:
                         body[:300],
                     )
                     return SEND_UNDELIVERABLE, None
+                except NoProxyAvailable:
+                    # Token unavailable for this send, never dead: the caller moves on
+                    # to the next token, then the bot or webhook.
+                    warn_no_proxy(self._log, _token_log_id(token), ctx)
+                    return SEND_NO_TOKENS, None
                 except CurlRequestException as e:
                     rnet += 1
                     self._log.warning(
@@ -1098,7 +1112,7 @@ class UserTokenSender:
         *,
         typing: bool = False,
         token: Optional[str] = None,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> None:
         """Wait a message's send-delay before it goes out."""
         lo = max(0.0, float(min_delay or 0.0))
@@ -1114,7 +1128,7 @@ class UserTokenSender:
             await asyncio.sleep(delay)
 
     async def _type_for(
-        self, chan: int, token: str, duration: float, *, use_proxy: bool = False
+        self, chan: int, token: str, duration: float, *, use_proxy: bool = USE_PROXY
     ) -> None:
         """Show the typing indicator in ``chan`` for ``duration`` seconds."""
         headers = self._build_headers(token)
@@ -1124,7 +1138,7 @@ class UserTokenSender:
             self._token_last_seen[token] = time.monotonic()
             try:
                 session = await self._tls_session(token, use_proxy=use_proxy)
-                proxy = get_proxy_pool().current(token)
+                proxy = _leased_proxy(token)
                 await session.post(url, headers=headers, timeout=10, proxy=proxy)
             except Exception:
                 pass
@@ -1191,7 +1205,7 @@ class UserTokenSender:
         """
         try:
             session = await self._tls_session(token, use_proxy=use_proxy)
-            proxy = get_proxy_pool().current(token)
+            proxy = _leased_proxy(token)
             resp = await session.request(
                 "PUT",
                 upload_url,
@@ -1250,7 +1264,7 @@ class UserTokenSender:
         attachments: list,
         *,
         sticker_ids: Optional[list] = None,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         reply_to: Optional[dict] = None,
         guild_id=None,
     ) -> str:
@@ -1365,7 +1379,7 @@ class UserTokenSender:
         sticker_ids: Optional[list] = None,
         applied_tag_ids: Optional[list] = None,
         auto_archive_duration: int = 60,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> Optional[int]:
         """POST a forum thread + starter message as one account."""
         session = self._session_provider()
@@ -1441,7 +1455,7 @@ class UserTokenSender:
         *,
         starter_message_id: Optional[int] = None,
         auto_archive_duration: int = 60,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> Optional[int]:
         """Create a text-channel thread as one account."""
         body: dict = {

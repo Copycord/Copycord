@@ -284,8 +284,11 @@ class TestAvatarGatewaySession:
         )
 
         class _Session:
-            async def ws_connect(self, url):
+            async def ws_connect(self, url, proxy=None):
+                dialled.append(proxy)
                 return ws
+
+        dialled = []
 
         async def _tls(token, use_proxy=False):
             return _Session()
@@ -296,6 +299,8 @@ class TestAvatarGatewaySession:
         gw = token_avatar.GatewaySession("avatar-token", _logging.getLogger("t"))
         try:
             assert await gw.connect() is True
+            # the gateway socket goes through the token's proxy, never direct
+            assert dialled == ["http://proxy.test:8080"]
             await asyncio.sleep(0.1)
         finally:
             await gw.close()

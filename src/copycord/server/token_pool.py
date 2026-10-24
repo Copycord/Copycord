@@ -23,6 +23,7 @@ import random
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from copycord.common.token_proxy import NoProxyAvailable
 from copycord.selfclient import Client
 from copycord.selfclient.errors import ConnectionClosed, HTTPException, LoginFailure
 
@@ -131,8 +132,9 @@ class TokenSessionPool:
     """Keeps up to ``keep_online`` sending tokens connected to the gateway.
 
     ``proxy_for`` is called with the token value before every connect attempt
-    and returns the proxy URL to use, or None for a direct connection. If it
-    raises, the attempt counts as failed and is retried with backoff.
+    and returns the proxy URL to use. None means the token has no proxy, so it
+    does not connect: proxies are mandatory, never a direct connection. A None
+    or a raise counts as a failed attempt and is retried with backoff.
     """
 
     def __init__(
@@ -404,6 +406,10 @@ class TokenSessionPool:
             try:
                 try:
                     proxy = self._proxy_for(sess.token_value)
+                    if not proxy:
+                        # Proxies are mandatory: no lease, no connect. The session
+                        # stays offline and retries with the normal backoff.
+                        raise NoProxyAvailable("no proxy leased for this token")
                     client = self._factory(
                         proxy=proxy,
                         max_messages=0,
