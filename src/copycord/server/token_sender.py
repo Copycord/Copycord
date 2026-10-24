@@ -955,6 +955,8 @@ class UserTokenSender:
             self._token_locks.pop(token, None)
             self._token_cooldown.pop(token, None)
             self._token_last_seen.pop(token, None)
+            # Dev mode only; a token whose gateway still records keeps its capture.
+            traffic_capture.stop_if_quiet(token, idle_ttl, "sender idle")
             reaped += 1
         return reaped
 
