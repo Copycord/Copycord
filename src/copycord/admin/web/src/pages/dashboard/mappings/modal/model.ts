@@ -65,6 +65,7 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
   USER_TOKEN_STICKY_ROLES: false,
   USER_TOKEN_KEEP_ONLINE: 5,
   USER_TOKEN_PRESENCE: "random",
+  USER_TOKEN_PRESENCE_ROTATE: false,
 };
 
 export const DEFAULT_KEEP_ONLINE = 5;
@@ -288,6 +289,8 @@ export function buildPayload(form: MappingFormState): MappingSavePayload {
   settings.USER_TOKEN_MAX_DELAY = num(settings.USER_TOKEN_MAX_DELAY);
   settings.USER_TOKEN_KEEP_ONLINE = normalizeKeepOnline(settings.USER_TOKEN_KEEP_ONLINE);
   settings.USER_TOKEN_PRESENCE = normalizePresence(settings.USER_TOKEN_PRESENCE);
+  // Sent as saved even under a fixed status; the server only reads it with Random.
+  settings.USER_TOKEN_PRESENCE_ROTATE = toBool(settings.USER_TOKEN_PRESENCE_ROTATE);
   return {
     mapping_name: form.mapping_name.trim(),
     original_guild_id: form.original_guild_id.trim(),

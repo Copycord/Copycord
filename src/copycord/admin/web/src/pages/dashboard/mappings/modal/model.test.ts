@@ -67,6 +67,21 @@ describe("mapping modal model", () => {
     expect(p.settings.USER_TOKEN_MAX_DELAY).toBe(3.5);
     expect(p.settings.USER_TOKEN_MIN_DELAY).toBe(0);
     expect(Object.keys(p.settings).length).toBe(Object.keys(DEFAULT_MAPPING_SETTINGS).length);
+    expect(Object.keys(p.settings).length).toBe(54);
+    expect(p.settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
+  });
+
+  it("rotate status defaults off and loads and saves as a boolean", () => {
+    expect(DEFAULT_MAPPING_SETTINGS.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
+    expect(initialForm(M, "edit").settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
+    const f = initialForm({ ...M, settings: { USER_TOKEN_PRESENCE_ROTATE: "true" } }, "edit");
+    expect(f.settings.USER_TOKEN_PRESENCE_ROTATE).toBe(true);
+    expect(initialForm({ ...M, settings: { USER_TOKEN_PRESENCE_ROTATE: "false" } }, "edit").settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
+    // A fixed status keeps the saved value; it is ignored, not cleared.
+    f.settings.USER_TOKEN_PRESENCE = "busy";
+    expect(buildPayload(f).settings.USER_TOKEN_PRESENCE_ROTATE).toBe(true);
+    f.settings.USER_TOKEN_PRESENCE_ROTATE = "false";
+    expect(buildPayload(f).settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
   });
 
   it("defaults keep online to 5 and presence to random", () => {
