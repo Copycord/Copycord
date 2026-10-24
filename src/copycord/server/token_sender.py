@@ -272,6 +272,8 @@ class UserTokenSender:
                 "[user-send] Failed to load tokens for mapping %s", mapping_id
             )
             return SEND_NO_TOKENS
+        if self._sync_pool_dead(tokens):
+            tokens = self._filter_dead(tokens)
 
         if not tokens:
             return SEND_NO_TOKENS
@@ -500,6 +502,8 @@ class UserTokenSender:
                 "[user-send] Failed to load tokens for mapping %s", mapping_id
             )
             return None
+        if self._sync_pool_dead(tokens):
+            tokens = self._filter_dead(tokens)
         if not tokens:
             return None
 
@@ -607,6 +611,8 @@ class UserTokenSender:
                 "[user-send] Failed to load tokens for mapping %s", mapping_id
             )
             return None
+        if self._sync_pool_dead(tokens):
+            tokens = self._filter_dead(tokens)
         if not tokens:
             return None
 
@@ -702,6 +708,34 @@ class UserTokenSender:
             "[user-send] Token %s returned 401 (revoked); disabled it",
             tok.get("username") or token_id,
         )
+
+    def _sync_pool_dead(self, tokens: list) -> bool:
+        """Bench the tokens the warm pool saw rejected (401 or 4004). True if any were.
+
+        The pool already stops a dead token's session by itself, so this only
+        carries its verdict into the sender and the DB, once per token.
+        """
+        if self._pool is None:
+            return False
+        try:
+            dead = self._pool.dead_ids()
+        except Exception:
+            self._log.debug("[user-send] Pool dead_ids failed", exc_info=True)
+            return False
+        if not dead:
+            return False
+        benched = False
+        for tok in tokens:
+            token_id = tok.get("token_id")
+            if token_id is None or str(token_id) not in dead:
+                continue
+            key = (str(token_id), (tok.get("token_value") or "").strip())
+            if key in self._pool_dead_synced:
+                continue
+            self._pool_dead_synced.add(key)
+            self._mark_token_dead(tok)
+            benched = True
+        return benched
 
     def _order_tokens(
         self, tokens: list, chan: int, strategy: str, author_id, mapping_id=None
