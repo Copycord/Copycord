@@ -1049,6 +1049,7 @@ class TestProxiesRequired:
         assert resp.status_code == 200
         assert "proxy_warning" not in resp.json()
 
+        db.delete_guild_mapping(mid)
         mid2 = self._mapping({"USE_USER_TOKENS": False})
         db.add_mapping_token(mid2, "tokbbbbbbbb")
         self._discord(monkeypatch, proxies=["http://p1.test:1"])
