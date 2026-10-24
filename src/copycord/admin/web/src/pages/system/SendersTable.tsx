@@ -51,6 +51,8 @@ const DOT = "inline-block size-2 flex-none rounded-full";
 const RING = cx(DOT, "border-[1.5px] border-muted");
 export const STATUS: Record<SenderStatus, { label: string; dot?: string; text?: string }> = {
   online: { label: STATUS_LABEL.online, dot: cx(DOT, "bg-good") },
+  // Discord's own idle yellow; the theme has no token for it.
+  idle: { label: STATUS_LABEL.idle, dot: cx(DOT, "bg-[#F0B232]") },
   busy: { label: STATUS_LABEL.busy, dot: cx(DOT, "bg-danger") },
   invisible: { label: STATUS_LABEL.invisible, dot: cx(DOT, "bg-muted") },
   connecting: { label: STATUS_LABEL.connecting, dot: cx(RING, "motion-safe:animate-pulse") },

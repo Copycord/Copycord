@@ -48,7 +48,7 @@ export interface Sender {
   avatar_url: string | null;
   state: SenderState;
   /** The Discord status of an online session. */
-  presence: "online" | "dnd" | "invisible" | null;
+  presence: "online" | "idle" | "dnd" | "invisible" | null;
   /** Unix seconds the session came online; null when not online. */
   since: number | null;
   /** Unix seconds of the last send. */

@@ -3,10 +3,11 @@
 
 import type { Sender } from "../../types/system";
 
-export type SenderStatus = "online" | "busy" | "invisible" | "connecting" | "offline" | "revoked" | "disabled";
+export type SenderStatus = "online" | "idle" | "busy" | "invisible" | "connecting" | "offline" | "revoked" | "disabled";
 
 export const STATUS_LABEL: Record<SenderStatus, string> = {
   online: "Online",
+  idle: "Idle",
   busy: "Busy",
   invisible: "Invisible",
   connecting: "Connecting",
@@ -18,6 +19,7 @@ export const STATUS_LABEL: Record<SenderStatus, string> = {
 /** The Status column of one account: the presence while online, else the state. */
 export function senderStatus(s: Pick<Sender, "state" | "presence">): SenderStatus {
   if (s.state !== "online") return s.state in STATUS_LABEL ? s.state : "offline";
+  if (s.presence === "idle") return "idle";
   if (s.presence === "dnd") return "busy";
   return s.presence === "invisible" ? "invisible" : "online";
 }
@@ -43,7 +45,7 @@ export interface SenderSort {
 }
 
 /** Status sort order, ascending. */
-export const STATUS_ORDER: readonly SenderStatus[] = ["online", "busy", "invisible", "connecting", "offline", "disabled", "revoked"];
+export const STATUS_ORDER: readonly SenderStatus[] = ["online", "idle", "busy", "invisible", "connecting", "offline", "disabled", "revoked"];
 
 /** A header click: a new column sorts ascending, then descending, then back to the API order (null). */
 export function nextSort(current: SenderSort | null, by: SenderSortKey): SenderSort | null {
