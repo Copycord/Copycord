@@ -517,12 +517,6 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
             "Post source attachment links instead of re-uploading the files.",
             "user_token_links_only",
           )}
-          {switchRow(
-            "USER_TOKEN_USE_PROXIES",
-            "Send through proxies",
-            "Give each account its own proxy from your proxy list. Uses the same proxy list on the dashboard.",
-            "user_token_use_proxies",
-          )}
 
           <div className={ROW}>
             <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
