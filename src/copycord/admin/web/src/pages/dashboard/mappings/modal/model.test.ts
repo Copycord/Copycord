@@ -86,9 +86,11 @@ describe("mapping modal model", () => {
     expect(normalizeKeepOnline(undefined)).toBe(5);
   });
 
-  it("normalizes presence to the four values", () => {
+  it("normalizes presence to the five values", () => {
     expect(normalizePresence("busy")).toBe("busy");
     expect(normalizePresence("ONLINE")).toBe("online");
+    expect(normalizePresence("idle")).toBe("idle");
+    expect(normalizePresence("Idle")).toBe("idle");
     expect(normalizePresence("invisible")).toBe("invisible");
     expect(normalizePresence("dnd")).toBe("random");
     expect(normalizePresence(undefined)).toBe("random");

@@ -502,3 +502,41 @@ describe("SendersTable sort", () => {
     expect(document.querySelectorAll("tr[data-skeleton-row]")).toHaveLength(0);
   });
 });
+
+describe("SendersTable idle", () => {
+  const WITH_IDLE: Sender[] = [...ITEMS, sender("h", { state: "online", presence: "idle", since: NOW - 30, use_count: 40 })];
+
+  it("shows an idle account with a filled yellow dot and the Idle label on one line", async () => {
+    serve(ok(WITH_IDLE));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("h")).toBeTruthy());
+    expect(rowOf("h").getAttribute("data-status")).toBe("idle");
+    expect(cellText("h", 2)).toBe("Idle");
+    const dot = rowOf("h").querySelector("[data-dot]")!;
+    expect(dot.getAttribute("data-dot")).toBe("idle");
+    expect(dot.className).toContain("bg-[#F0B232]");
+    expect(dot.className).toContain("rounded-full");
+    expect(dot.className).not.toContain("animate");
+    expect(dot.className).toBe(rowOf("a").querySelector("[data-dot]")!.className.replace("bg-good", "bg-[#F0B232]"));
+    expect(rowOf("h").className).toBe(rowOf("a").className);
+  });
+
+  it("sorts Idle between Online and Busy", async () => {
+    serve(ok(WITH_IDLE));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("h")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Status" }));
+    expect(order()).toEqual(["a", "h", "b", "c", "d", "e", "g", "f"]);
+    fireEvent.click(screen.getByRole("button", { name: "Status" }));
+    expect(order()).toEqual(["f", "g", "e", "d", "c", "b", "h", "a"]);
+  });
+
+  it("finds an idle account by searching idle", async () => {
+    serve(ok(WITH_IDLE));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("h")).toBeTruthy());
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search accounts" }), { target: { value: "idle" } });
+    expect(order()).toEqual(["h"]);
+    expect(document.getElementById("system-senders-count")).toHaveTextContent(/^1 of 8 accounts$/);
+  });
+});

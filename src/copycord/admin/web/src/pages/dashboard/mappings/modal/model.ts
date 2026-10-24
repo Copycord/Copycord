@@ -68,7 +68,7 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
 };
 
 export const DEFAULT_KEEP_ONLINE = 5;
-export const PRESENCE_VALUES = ["random", "online", "busy", "invisible"] as const;
+export const PRESENCE_VALUES = ["random", "online", "idle", "busy", "invisible"] as const;
 export type TokenPresence = (typeof PRESENCE_VALUES)[number];
 
 export const FRIENDLY_NAMES: Record<string, string> = {
@@ -232,7 +232,7 @@ export function normalizeKeepOnline(v: unknown): number {
   return Math.max(0, Math.floor(n));
 }
 
-/** Token presence: one of the four choices, anything else is a random pick per session. */
+/** Token presence: one of the five choices, anything else falls back to random. */
 export function normalizePresence(v: unknown): TokenPresence {
   const s = String(v ?? "").toLowerCase();
   return (PRESENCE_VALUES as readonly string[]).includes(s) ? (s as TokenPresence) : "random";
