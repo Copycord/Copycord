@@ -1,8 +1,10 @@
 // The sending accounts under the Database card: one row per account that posts cloned messages,
 // live from /api/system/senders. Avatar and name, username, status dot, how long it has been online
 // (ticking), the last send and how many messages it sent. Revoked and disabled rows are dimmed.
+// A search and a column sort over the loaded rows live in state, so each 5 s poll swaps the rows
+// underneath without losing them.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cx, useReveal } from "../../components/ui";
 import { useLastCount } from "../../components/ui/lastCount";
 import type { Sender } from "../../types/system";
@@ -10,62 +12,75 @@ import { formatUptime } from "../dashboard/model";
 import { MUTED } from "../messages/MessagesSkeleton";
 import { absoluteTime, relativeTime } from "../messages/model";
 import {
+  DEFAULT_AVATAR_COLORS,
+  STATUS_LABEL,
+  defaultAvatarIndex,
+  filterSenders,
+  nextSort,
+  senderName,
+  senderStatus,
+  sortSenders,
+} from "./senders";
+import type { SenderSort, SenderStatus } from "./senders";
+import {
   ACCOUNT,
   AVATAR,
-  SENDER_COLUMNS,
   SENDER_ROW,
   SENDER_TD,
   SENDER_TD_RIGHT,
   SENDER_TEXT,
   SENDERS_COUNT_KEY,
   SENDERS_NOTE,
+  SENDERS_SECTION,
   SENDERS_TABLE,
   SENDERS_TABLE_STYLE,
   SENDERS_WRAP,
-  SENDERS_WRAP_STYLE,
+  SendersCountBar,
   SendersHead,
+  SendersHeader,
   SendersLoadingRows,
+  SendersToolbar,
 } from "./SendersSkeleton";
 import { useSenders } from "./useSenders";
 
 const DASH = "-";
-
-export type SenderStatus = "online" | "busy" | "invisible" | "connecting" | "offline" | "revoked" | "disabled";
-
-/** The Status column of one account: the presence while online, else the state. */
-export function senderStatus(s: Pick<Sender, "state" | "presence">): SenderStatus {
-  if (s.state !== "online") return s.state in STATUS ? s.state : "offline";
-  if (s.presence === "dnd") return "busy";
-  return s.presence === "invisible" ? "invisible" : "online";
-}
 
 // Filled dots for a live presence, a hollow ring while connecting or offline (pulsing only while
 // connecting), no dot for revoked and disabled: their label says it.
 const DOT = "inline-block size-2 flex-none rounded-full";
 const RING = cx(DOT, "border-[1.5px] border-muted");
 export const STATUS: Record<SenderStatus, { label: string; dot?: string; text?: string }> = {
-  online: { label: "Online", dot: cx(DOT, "bg-good") },
-  busy: { label: "Busy", dot: cx(DOT, "bg-danger") },
-  invisible: { label: "Invisible", dot: cx(DOT, "bg-muted") },
-  connecting: { label: "Connecting", dot: cx(RING, "motion-safe:animate-pulse") },
-  offline: { label: "Offline", dot: RING },
-  revoked: { label: "Revoked", text: "text-warn" },
-  disabled: { label: "Disabled", text: "text-muted" },
+  online: { label: STATUS_LABEL.online, dot: cx(DOT, "bg-good") },
+  busy: { label: STATUS_LABEL.busy, dot: cx(DOT, "bg-danger") },
+  invisible: { label: STATUS_LABEL.invisible, dot: cx(DOT, "bg-muted") },
+  connecting: { label: STATUS_LABEL.connecting, dot: cx(RING, "motion-safe:animate-pulse") },
+  offline: { label: STATUS_LABEL.offline, dot: RING },
+  revoked: { label: STATUS_LABEL.revoked, text: "text-warn" },
+  disabled: { label: STATUS_LABEL.disabled, text: "text-muted" },
 };
 
 const DIMMED = new Set<SenderStatus>(["revoked", "disabled"]);
 
-function Avatar({ url }: { url: string | null }) {
-  const [failed, setFailed] = useState(false);
-  if (!url || failed) return <span aria-hidden="true" data-avatar="none" className={cx(AVATAR, "bg-wash-10")} />;
+/** The avatar the API names (a Discord default until the account has connected, then the real one) over a
+ *  circle in the account's default colour, which shows while an image loads and when it fails or is missing.
+ *  A new URL on a later poll swaps the image in the same 24 px box. */
+function Avatar({ url, id }: { url: string | null; id: string }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const index = defaultAvatarIndex(url, id);
+  const color = { backgroundColor: DEFAULT_AVATAR_COLORS[index] };
+  if (!url || failedUrl === url) {
+    return <span aria-hidden="true" data-avatar="default" data-avatar-index={index} className={AVATAR} style={color} />;
+  }
   return (
     <img
       src={url}
       alt=""
       loading="lazy"
       data-avatar="img"
-      className={cx(AVATAR, "bg-wash-10 object-cover")}
-      onError={() => setFailed(true)}
+      data-avatar-index={index}
+      className={cx(AVATAR, "object-cover")}
+      style={color}
+      onError={() => setFailedUrl(url)}
     />
   );
 }
@@ -98,13 +113,12 @@ function Text({ text, className }: { text: string; className?: string }) {
 function SenderRow({ s, now }: { s: Sender; now: number }) {
   const status = senderStatus(s);
   const st = STATUS[status];
-  const name = s.display_name || s.username || s.id;
   return (
     <tr className={cx(SENDER_ROW, DIMMED.has(status) && "opacity-60")} data-sender={s.id} data-status={status}>
       <td className={SENDER_TD}>
         <span className={ACCOUNT}>
-          <Avatar key={s.avatar_url ?? ""} url={s.avatar_url} />
-          <Text text={name} className="font-medium" />
+          <Avatar url={s.avatar_url} id={s.id} />
+          <Text text={senderName(s)} className="font-medium" />
         </span>
       </td>
       <td className={SENDER_TD}>
@@ -131,34 +145,47 @@ function SenderRow({ s, now }: { s: Sender; now: number }) {
   );
 }
 
+const accounts = (n: number) => `${n.toLocaleString()} ${n === 1 ? "account" : "accounts"}`;
+
 export function SendersTable() {
   const { items, error, busy } = useSenders();
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SenderSort | null>(null);
   const reveal = useReveal(items !== undefined || error);
   useLastCount(SENDERS_COUNT_KEY, items?.length);
   const now = Date.now();
-  const note = items === undefined ? (error ? "Could not load sending accounts" : null) : items.length === 0 ? "No sending accounts yet" : null;
+  const searching = query.trim() !== "";
+  const rows = useMemo(() => (items ? sortSenders(filterSenders(items, query), sort) : undefined), [items, query, sort]);
+
+  const count =
+    items === undefined ? (error ? null : <SendersCountBar />) : searching ? `${rows!.length.toLocaleString()} of ${accounts(items.length)}` : accounts(items.length);
+  const note =
+    items === undefined
+      ? error
+        ? "Could not load sending accounts"
+        : null
+      : items.length === 0
+        ? "No sending accounts yet"
+        : rows!.length === 0
+          ? "No matching accounts"
+          : null;
 
   return (
-    <div
-      id="system-senders"
-      className={SENDERS_WRAP}
-      style={SENDERS_WRAP_STYLE}
-      aria-busy={busy && items !== undefined ? true : undefined}
-    >
-      <table aria-label="Sending accounts" className={SENDERS_TABLE} style={SENDERS_TABLE_STYLE}>
-        <SendersHead />
-        <tbody className={reveal}>
-          {items === undefined && !error ? <SendersLoadingRows /> : null}
-          {items?.map((s) => <SenderRow key={s.id} s={s} now={now} />)}
-          {note ? (
-            <tr>
-              <td colSpan={SENDER_COLUMNS.length} className={SENDERS_NOTE}>
-                {note}
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
-    </div>
+    <section aria-labelledby="system-senders-title" className={SENDERS_SECTION}>
+      <SendersHeader count={count} />
+      <div>
+        <SendersToolbar query={query} onQuery={setQuery} />
+      </div>
+      <div id="system-senders" className={SENDERS_WRAP} aria-busy={busy && items !== undefined ? true : undefined}>
+        <table aria-label="Sending accounts" className={SENDERS_TABLE} style={SENDERS_TABLE_STYLE}>
+          <SendersHead sort={sort} onSort={(by) => setSort((cur) => nextSort(cur, by))} />
+          <tbody className={reveal}>
+            {items === undefined && !error ? <SendersLoadingRows /> : null}
+            {rows?.map((s) => <SenderRow key={s.id} s={s} now={now} />)}
+          </tbody>
+        </table>
+        {note ? <p className={SENDERS_NOTE}>{note}</p> : null}
+      </div>
+    </section>
   );
 }
