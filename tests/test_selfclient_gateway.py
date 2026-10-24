@@ -539,10 +539,20 @@ class FakePool:
         self.failures = 0
         self.successes = []
 
-    async def lease(self, token):
+    @property
+    def total(self):
+        return len(self.proxies)
+
+    def current(self, token):
         return self.proxies[0]
 
-    async def report_failure(self, token):
+    async def lease(self, token, *, exclude=None):
+        return self.proxies[0]
+
+    async def release(self, token):
+        pass
+
+    async def report_failure(self, token, *, exclude=()):
         self.failures += 1
         self.proxies.pop(0)
         return self.proxies[0]
