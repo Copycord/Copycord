@@ -524,6 +524,8 @@ async def online_random(pool, pairs, *, seed=11):
     pool._rng = random.Random(seed)
     await ensure_all(pool, pairs, keep_online=len(pairs), presence="random")
     await until(lambda: len(pool.online_ids()) == len(pairs))
+    # READY shows before the connect step (or the on_ready listener) starts the clock
+    await until(lambda: len(pool._shuffle_due) == len(pairs))
 
 
 def key_of(token_value):
