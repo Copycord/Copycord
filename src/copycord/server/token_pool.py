@@ -46,6 +46,12 @@ PRESENCE_STATUS = {
 RANDOM_STATUSES = ("online", "idle", "dnd", "invisible")
 RANDOM_WEIGHTS = (50, 25, 10, 15)
 
+# A ``random`` token changes status 20 to 90 minutes after its last change (or
+# after it went online), and no two tokens change within SHUFFLE_GAP_S.
+SHUFFLE_MIN_S = 1200
+SHUFFLE_MAX_S = 5400
+SHUFFLE_GAP_S = 10
+
 STAGGER_MIN = 2.0
 STAGGER_MAX = 6.0
 # A connect not READY by then frees the gate so one stuck token holds no one up.
@@ -178,6 +184,12 @@ class TokenSessionPool:
         self._gate = asyncio.Lock()
         self._lock = asyncio.Lock()
         self._rng = random.Random()
+        # Patched by tests; the reshuffle schedule runs on it.
+        self._clock: Callable[[], float] = time.monotonic
+        # key -> when its ``random`` status changes next, on ``_clock``.
+        self._shuffle_due: Dict[str, float] = {}
+        self._last_shuffle: Optional[float] = None
+        self._shuffle_task: Optional[asyncio.Task] = None
         self._connecting = 0
         self._lag_warned = False
         self._widen_next_gap = False
@@ -279,15 +291,22 @@ class TokenSessionPool:
             await self._reconcile()
 
     async def close_all(self) -> None:
-        """Close every session and the lag monitor; ``ensure`` starts them again."""
+        """Close every session, the lag monitor and the reshuffle; ``ensure`` starts them again."""
+        shuffler, self._shuffle_task = self._shuffle_task, None
+        if shuffler is not None:
+            shuffler.cancel()
+            await asyncio.gather(shuffler, return_exceptions=True)
         async with self._lock:
             self._keep_online = 0
             for key in list(self._sessions):
                 await self._stop(key)
-        task, self._lag_task = self._lag_task, None
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            self._shuffle_due.clear()
+        for attr in ("_lag_task", "_shuffle_task"):
+            task = getattr(self, attr)
+            setattr(self, attr, None)
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     async def reap_idle(self, idle_ttl: float = 3600) -> int:
         """Drop tokens not ensured or acquired for ``idle_ttl`` seconds and close their sessions.
@@ -344,11 +363,19 @@ class TokenSessionPool:
             self._random_status[key] = status
         return status
 
+    def _is_random(self, key: str) -> bool:
+        presence = (self._presence_by_key.get(key, "random") or "").strip().lower()
+        return presence not in PRESENCE_STATUS
+
     async def _apply_presence(self, key: str, presence: str) -> None:
         self._presence_by_key[key] = presence
         sess = self._sessions.get(key)
         if sess is None:
             return
+        if not self._is_random(key):
+            self._shuffle_due.pop(key, None)
+        elif sess.is_online():
+            self._arm_shuffle(key)
         status = self._status_for(key, presence)
         if status == sess.status:
             return
@@ -366,6 +393,7 @@ class TokenSessionPool:
         sess.task = asyncio.ensure_future(self._run(sess))
 
     async def _stop(self, key: str) -> None:
+        self._shuffle_due.pop(key, None)
         sess = self._sessions.pop(key, None)
         if sess is None:
             return
@@ -453,6 +481,7 @@ class TokenSessionPool:
                 if sess.is_online():
                     sess.failures = 0
                     sess.set_state(STATE_ONLINE)
+                    self._arm_shuffle(sess.key)
                     self._log.info(
                         "[token-pool] Session %s online as %s", sess.key, sess.status
                     )
@@ -486,6 +515,9 @@ class TokenSessionPool:
                 sess.dropped = False
                 sess.failures = 0
                 sess.refresh()
+                # A READY that came after READY_TIMEOUT still starts the clock.
+                if self._sessions.get(sess.key) is sess and sess.is_online():
+                    self._arm_shuffle(sess.key)
 
         add(on_disconnect, "on_disconnect")
         add(on_up, "on_ready")
@@ -507,6 +539,7 @@ class TokenSessionPool:
 
     def _mark_dead(self, sess: _Session) -> None:
         self._dead.add(sess.key)
+        self._shuffle_due.pop(sess.key, None)
         if self._sessions.get(sess.key) is sess:
             self._sessions.pop(sess.key, None)
         ids = sorted(t for t, k in self._key_by_id.items() if k == sess.key)
@@ -522,6 +555,63 @@ class TokenSessionPool:
     async def _refill(self) -> None:
         async with self._lock:
             await self._reconcile()
+
+    # random status reshuffle
+
+    def _next_shuffle_at(self, now: float) -> float:
+        return now + self._rng.uniform(SHUFFLE_MIN_S, SHUFFLE_MAX_S)
+
+    def _arm_shuffle(self, key: str) -> None:
+        """Start a ``random`` token's clock if it has none; fixed modes never change."""
+        if key in self._shuffle_due or not self._is_random(key):
+            return
+        self._shuffle_due[key] = self._next_shuffle_at(self._clock())
+        if self._shuffle_task is None or self._shuffle_task.done():
+            self._shuffle_task = asyncio.ensure_future(self._shuffle_loop())
+
+    async def _shuffle_loop(self) -> None:
+        """Make due status changes one at a time until no token is in ``random`` mode."""
+        while self._shuffle_due:
+            try:
+                wait = await self._shuffle_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._log.debug("[token-pool] status reshuffle failed: %r", exc)
+                wait = SHUFFLE_GAP_S
+            # Capped so a clock armed meanwhile is never overslept.
+            await _sleep(max(0.0, min(wait, SHUFFLE_GAP_S)))
+
+    async def _shuffle_once(self) -> float:
+        """Make at most one due change; returns the seconds until the next one could be due."""
+        async with self._lock:
+            now = self._clock()
+            if self._last_shuffle is not None:
+                gap = self._last_shuffle + SHUFFLE_GAP_S - now
+                if gap > 0:
+                    return gap
+            due = [(at, key) for key, at in self._shuffle_due.items() if at <= now]
+            if not due:
+                return min(self._shuffle_due.values(), default=now + SHUFFLE_GAP_S) - now
+            _, key = min(due)
+            sess = self._sessions.get(key)
+            if sess is None or not self._is_random(key):
+                self._shuffle_due.pop(key, None)
+                return 0.0
+            self._shuffle_due[key] = self._next_shuffle_at(now)
+            if not sess.is_online():
+                # Skipped: the next try is a whole new interval away.
+                return 0.0
+            status = _pick_status(self._rng, exclude=sess.status)
+            self._last_shuffle = now
+            self._random_status[key] = status
+            old, sess.status = sess.status, status
+            try:
+                await sess.client.change_presence(status=status)
+            except Exception as exc:
+                self._log.debug("[token-pool] presence change failed for %s: %r", key, exc)
+            self._log.debug("[token-pool] Session %s status %s -> %s", key, old, status)
+            return SHUFFLE_GAP_S
 
     # stagger and loop lag
 

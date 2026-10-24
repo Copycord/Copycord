@@ -507,3 +507,219 @@ async def test_unknown_presence_falls_back_to_random(pool):
     assert pool._status_for("k1", "sleepy") in RANDOM_STATUSES
     assert pool._status_for("k1", "") == pool._status_for("k1", "random")
     assert pool._status_for("k2", " IDLE ") == "idle"
+
+
+# random status reshuffle
+
+
+@pytest.fixture()
+def clock(pool):
+    """The pool's reshuffle clock, moved by hand."""
+    now = [1000.0]
+    pool._clock = lambda: now[0]
+    return now
+
+
+async def online_random(pool, pairs, *, seed=11):
+    pool._rng = random.Random(seed)
+    await ensure_all(pool, pairs, keep_online=len(pairs), presence="random")
+    await until(lambda: len(pool.online_ids()) == len(pairs))
+
+
+def key_of(token_value):
+    return token_pool._token_key(token_value)
+
+
+async def test_shuffle_constants():
+    assert token_pool.SHUFFLE_MIN_S == 1200
+    assert token_pool.SHUFFLE_MAX_S == 5400
+    assert token_pool.SHUFFLE_GAP_S == 10
+
+
+async def test_first_change_comes_20_to_90_minutes_after_online(pool, fakes, clock):
+    try:
+        await online_random(pool, [("t1", "tok-1")])
+        client = fakes.clients[0]
+        due = pool._shuffle_due[key_of("tok-1")]
+        assert 1200 <= due - 1000.0 <= 5400
+
+        clock[0] = due - 0.5
+        await settle()
+        assert client.presence_changes == []
+
+        clock[0] = due
+        await until(lambda: len(client.presence_changes) == 1)
+        assert client.presence_changes[0] != client.kwargs["status"]
+        assert client.presence_changes[0] in RANDOM_STATUSES
+        nxt = pool._shuffle_due[key_of("tok-1")]
+        assert 1200 <= nxt - due <= 5400
+    finally:
+        await pool.close_all()
+
+
+async def test_each_change_is_a_new_status_and_shows_in_the_snapshot(pool, fakes, clock):
+    try:
+        await online_random(pool, [("t1", "tok-1")], seed=2)
+        client = fakes.clients[0]
+        key = key_of("tok-1")
+        seen = [client.kwargs["status"]]
+        for n in range(1, 81):
+            clock[0] = pool._shuffle_due[key]
+            await until(lambda: len(client.presence_changes) == n)
+            seen.append(client.presence_changes[-1])
+            assert pool.snapshot()["tokens"]["t1"]["presence"] == seen[-1]
+            assert pool._random_status[key] == seen[-1]
+        assert all(a != b for a, b in zip(seen, seen[1:]))
+        assert set(seen) == set(RANDOM_STATUSES)
+    finally:
+        await pool.close_all()
+
+
+async def test_two_due_tokens_change_at_least_10_seconds_apart(pool, fakes, clock):
+    try:
+        await online_random(pool, [("a", "tok-a"), ("b", "tok-b")])
+        ca, cb = fakes.for_token("tok-a")[0], fakes.for_token("tok-b")[0]
+        start = float(int(max(pool._shuffle_due.values())) + 100)
+        clock[0] = start
+        await until(lambda: len(ca.presence_changes) + len(cb.presence_changes) == 1)
+        await settle()
+        assert len(ca.presence_changes) + len(cb.presence_changes) == 1
+
+        clock[0] = start + 9.9
+        await settle()
+        assert len(ca.presence_changes) + len(cb.presence_changes) == 1
+
+        clock[0] = start + 10
+        await until(lambda: len(ca.presence_changes) == 1 and len(cb.presence_changes) == 1)
+    finally:
+        await pool.close_all()
+
+
+async def test_fixed_modes_never_change(pool, fakes, clock):
+    try:
+        for i, presence in enumerate(("online", "idle", "busy", "invisible")):
+            await pool.ensure(f"t{i}", f"tok-{i}", keep_online=4, presence=presence)
+        await until(lambda: len(pool.online_ids()) == 4)
+        assert pool._shuffle_due == {}
+        assert pool._shuffle_task is None
+        clock[0] += 10 * token_pool.SHUFFLE_MAX_S
+        await settle()
+        assert all(c.presence_changes == [] for c in fakes.clients)
+    finally:
+        await pool.close_all()
+
+
+async def test_random_to_fixed_cancels_and_back_sets_the_clock(pool, fakes, clock):
+    try:
+        await online_random(pool, [("t1", "tok-1")])
+        client = fakes.clients[0]
+        key = key_of("tok-1")
+        assert key in pool._shuffle_due
+
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="busy")
+        assert key not in pool._shuffle_due
+        clock[0] += 10 * token_pool.SHUFFLE_MAX_S
+        await settle()
+        assert client.presence_changes in ([], ["dnd"])
+        changes = list(client.presence_changes)
+
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="random")
+        due = pool._shuffle_due[key]
+        assert 1200 <= due - clock[0] <= 5400
+        # back on the random pick it had; the reshuffle comes later
+        changes = list(client.presence_changes)
+        clock[0] = due
+        await until(lambda: len(client.presence_changes) == len(changes) + 1)
+    finally:
+        await pool.close_all()
+
+
+async def test_reconnect_keeps_the_current_pick(pool, fakes, clock):
+    try:
+        await online_random(pool, [("t1", "tok-1")])
+        first = fakes.clients[0]
+        clock[0] = pool._shuffle_due[key_of("tok-1")]
+        await until(lambda: len(first.presence_changes) == 1)
+        current = first.presence_changes[0]
+
+        first.end_with(ConnectionClosed(4000, "unknown error"))
+        await until(lambda: len(fakes.for_token("tok-1")) == 2 and "t1" in pool.online_ids())
+        assert fakes.for_token("tok-1")[1].kwargs["status"] == current
+        assert pool.snapshot()["tokens"]["t1"]["presence"] == current
+
+        await pool.close("t1")
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="random")
+        await until(lambda: len(fakes.for_token("tok-1")) == 3 and "t1" in pool.online_ids())
+        assert fakes.for_token("tok-1")[2].kwargs["status"] == current
+    finally:
+        await pool.close_all()
+
+
+async def test_not_ready_session_is_skipped_and_rescheduled(pool, fakes, clock):
+    try:
+        await online_random(pool, [("t1", "tok-1")])
+        client = fakes.clients[0]
+        key = key_of("tok-1")
+        client.fire("on_disconnect")
+        await until(lambda: pool.online_ids() == set())
+
+        due = pool._shuffle_due[key]
+        clock[0] = due
+        await until(lambda: pool._shuffle_due[key] != due)
+        assert client.presence_changes == []
+        assert 1200 <= pool._shuffle_due[key] - due <= 5400
+
+        client.fire("on_resumed")
+        await until(lambda: pool.online_ids() == {"t1"})
+        clock[0] = pool._shuffle_due[key]
+        await until(lambda: len(client.presence_changes) == 1)
+    finally:
+        await pool.close_all()
+
+
+async def test_a_failed_change_never_stops_the_reshuffle(pool, fakes, clock, caplog):
+    caplog.set_level(logging.DEBUG, logger="test.token_pool")
+    try:
+        await online_random(pool, [("t1", "tok-1")])
+        client = fakes.clients[0]
+        key = key_of("tok-1")
+
+        async def broken(**_):
+            raise RuntimeError("socket gone")
+
+        client.change_presence = broken
+        clock[0] = pool._shuffle_due[key]
+        await until(lambda: "presence change failed" in caplog.text)
+        task = pool._shuffle_task
+        assert task is not None and not task.done()
+        assert pool._random_status[key] == pool.snapshot()["tokens"]["t1"]["presence"]
+
+        # a raise inside the step is logged and the loop carries on
+        real = pool._shuffle_once
+        calls = []
+
+        async def flaky():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("boom")
+            return await real()
+
+        pool._shuffle_once = flaky
+        await until(lambda: len(calls) >= 3)
+        assert "status reshuffle failed" in caplog.text
+        assert not task.done()
+    finally:
+        await pool.close_all()
+
+
+async def test_close_all_stops_the_reshuffle(pool, fakes, clock):
+    await online_random(pool, [("a", "tok-a"), ("b", "tok-b")])
+    task = pool._shuffle_task
+    assert task is not None and not task.done()
+    await pool.close_all()
+    assert task.done()
+    assert pool._shuffle_task is None
+    assert pool._shuffle_due == {}
+    clock[0] += 10 * token_pool.SHUFFLE_MAX_S
+    await settle()
+    assert all(c.presence_changes == [] for c in fakes.clients)
