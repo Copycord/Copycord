@@ -16,7 +16,7 @@ import random
 import re
 import threading
 import time
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import aiohttp
 from curl_cffi import CurlMime
@@ -33,6 +33,9 @@ from copycord.common.selfbot_headers import (
     context_properties,
     get_tls_session,
 )
+
+if TYPE_CHECKING:
+    from copycord.server.token_pool import TokenSessionPool
 
 DISCORD_API_BASE = "https://discord.com/api/v9"
 
@@ -191,12 +194,17 @@ class UserTokenSender:
         action_type,
         session_provider: Callable[[], aiohttp.ClientSession],
         logger,
+        pool: Optional["TokenSessionPool"] = None,
     ):
         self._db = db
         self._ratelimit = ratelimit
         self._action = action_type
         self._session_provider = session_provider
         self._log = logger
+        # The warm gateway pool; None keeps every send path REST-only, as before.
+        self._pool = pool
+        # (token_id, token_value) pairs the pool reported dead and we benched.
+        self._pool_dead_synced: set = set()
         self._rr_index_by_channel: dict = {}
         self._sticky_author_token: dict = {}
         self._pace_locks: dict = {}
