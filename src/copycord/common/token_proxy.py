@@ -23,11 +23,40 @@ USE_PROXY = True
 PROXIES_REQUIRED_ERROR = "Proxies are required for user tokens. Add proxies first."
 
 _WARN_INTERVAL = 60.0
+# total time lease_with_timezone spends rotating before the token counts as unavailable
+ROTATE_TIME_CAP = 30.0
 _last_warned: dict[str, float] = {}
 
 
 class NoProxyAvailable(RuntimeError):
     """A user token has no proxy lease, so it must not make a request."""
+
+
+async def lease_with_timezone(pool, token: str, *, time_cap: float = ROTATE_TIME_CAP) -> str:
+    """The token's proxy once its exit timezone resolves, rotating past proxies whose lookup fails.
+
+    Each failed proxy goes to ``pool.report_failure`` (its health logic, then a
+    lease that excludes it). Tries at most one proxy per pool entry and stops
+    after ``time_cap`` seconds; then the lease is released and NoProxyAvailable
+    is raised, so nothing is sent with a fallback timezone.
+    """
+    from copycord.common.exit_timezone import note_token_proxy
+
+    if not getattr(pool, "enabled", False):
+        raise NoProxyAvailable("no proxies configured")
+    proxy = pool.current(token) or await pool.lease(token)
+    deadline = time.monotonic() + time_cap
+    for _ in range(max(1, int(getattr(pool, "total", 1) or 1))):
+        if not proxy:
+            raise NoProxyAvailable("no free proxy for this token")
+        if await note_token_proxy(token, proxy):
+            return proxy
+        proxy = await pool.report_failure(token)
+        if time.monotonic() >= deadline:
+            break
+    if proxy:
+        await pool.release(token)
+    raise NoProxyAvailable("no proxy with a resolvable exit timezone for this token")
 
 
 def token_use_proxy(settings=None) -> bool:
