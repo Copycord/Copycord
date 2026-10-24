@@ -30,7 +30,7 @@ from copycord.common.exit_timezone import (
 )
 from copycord.common.http_session import shared_session
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
-from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable
+from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable, lease_with_timezone
 
 try:
     from curl_cffi.requests import AsyncSession as _CurlAsyncSession
@@ -412,17 +412,9 @@ def _tls_session_lock(token: str) -> asyncio.Lock:
 
 
 async def require_token_proxy(token: str) -> str:
-    """The proxy leased to ``token``, leasing one if needed; NoProxyAvailable when there is none."""
-    pool = _get_proxy_pool()
-    proxy = pool.current(token)
-    if proxy:
-        return proxy
-    if not pool.enabled:
-        raise NoProxyAvailable("no proxies configured")
-    proxy = await pool.lease(token)
-    if not proxy:
-        raise NoProxyAvailable("no free proxy for this token")
-    return proxy
+    """The proxy leased to ``token``, leasing one if needed and rotating past proxies whose
+    exit timezone lookup fails; NoProxyAvailable when there is none."""
+    return await lease_with_timezone(_get_proxy_pool(), token)
 
 
 async def get_tls_session(token: str, *, use_proxy: bool = USE_PROXY):

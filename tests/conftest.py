@@ -40,13 +40,20 @@ def pytest_sessionfinish(session, exitstatus):
     shutil.rmtree(_SESSION_DATA_DIR, ignore_errors=True)
 
 
+OFFLINE_PROXY_ZONE = "America/Chicago"
+
+
 @pytest.fixture(autouse=True)
 def _no_exit_ip_lookup(request, monkeypatch):
-    """The exit-IP timezone lookup never reaches ipinfo.io from a test; it
-    fails (so the fallback zone applies) unless a test fakes _fetch_json."""
+    """The exit-IP timezone lookup never reaches ipinfo.io from a test. A direct
+    lookup fails (so the fallback zone applies) and a proxied one answers
+    OFFLINE_PROXY_ZONE (a failed proxy lookup would refuse the token), unless a
+    test fakes _fetch_json."""
     from copycord.common import exit_timezone
 
     async def _offline(proxy, timeout):
+        if proxy:
+            return {"timezone": OFFLINE_PROXY_ZONE}
         raise OSError("network disabled in tests")
 
     monkeypatch.setattr(exit_timezone, "_fetch_json", _offline)

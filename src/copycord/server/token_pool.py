@@ -23,6 +23,7 @@ import random
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from copycord.common.proxy_pool import get_pool as get_proxy_pool
 from copycord.common.token_proxy import NoProxyAvailable
 from copycord.selfclient import Client
 from copycord.selfclient.errors import ConnectionClosed, HTTPException, LoginFailure
@@ -143,9 +144,13 @@ class TokenSessionPool:
         logger: Any,
         proxy_for: Callable[[str], Optional[str]],
         client_factory: Callable[..., Any] = Client,
+        proxy_pool: Any = None,
     ):
         self._log = logger
         self._proxy_for = proxy_for
+        # The pool REST leases from: the gateway rotates in it on a dial failure,
+        # so after a rotation both still share the token's one lease.
+        self._proxy_pool = proxy_pool if proxy_pool is not None else get_proxy_pool()
         self._factory = client_factory
         self._keep_online = 0
         # key -> token value, in the order tokens were first ensured.
@@ -412,6 +417,7 @@ class TokenSessionPool:
                         raise NoProxyAvailable("no proxy leased for this token")
                     client = self._factory(
                         proxy=proxy,
+                        proxy_pool=self._proxy_pool,
                         max_messages=0,
                         status=sess.status,
                         refresh_build=False,

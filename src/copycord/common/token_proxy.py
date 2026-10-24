@@ -42,9 +42,11 @@ async def lease_with_timezone(pool, token: str, *, time_cap: float = ROTATE_TIME
     """
     from copycord.common.exit_timezone import note_token_proxy
 
-    if not getattr(pool, "enabled", False):
-        raise NoProxyAvailable("no proxies configured")
-    proxy = pool.current(token) or await pool.lease(token)
+    proxy = pool.current(token)
+    if not proxy:
+        if not getattr(pool, "enabled", False):
+            raise NoProxyAvailable("no proxies configured")
+        proxy = await pool.lease(token)
     deadline = time.monotonic() + time_cap
     for _ in range(max(1, int(getattr(pool, "total", 1) or 1))):
         if not proxy:

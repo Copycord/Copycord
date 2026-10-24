@@ -26,6 +26,8 @@ from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
 
 from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
+from copycord.common.proxy_pool import get_pool as get_proxy_pool
+from copycord.common.token_proxy import NoProxyAvailable, lease_with_timezone
 
 from .enums import API_VERSION
 from .errors import HTTPException, LoginFailure, RateLimited, for_status
@@ -390,7 +392,12 @@ class HTTPClient:
         query = {k: str(v) for k, v in (params or {}).items() if v is not None} or None
         has_body = json is not None
         if self.token and self._headers_factory is None:
-            await note_token_proxy(self.token, self.proxy)
+            pool = get_proxy_pool()
+            if self.proxy and pool.current(self.token) == self.proxy:
+                # The pool's lease: rotate past proxies whose exit timezone lookup fails.
+                self.proxy = await lease_with_timezone(pool, self.token)
+            elif not await note_token_proxy(self.token, self.proxy):
+                raise NoProxyAvailable("exit timezone lookup failed for the token's proxy")
         send_headers = self.headers_for(method, has_body=has_body, referer=referer, extra=headers)
         route = _route_key(method, path)
 

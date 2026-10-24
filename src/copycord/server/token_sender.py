@@ -1000,7 +1000,9 @@ class UserTokenSender:
                 try:
                     session = await self._tls_session(token, use_proxy=use_proxy)
                     proxy = _leased_proxy(token)
-                    await note_token_proxy(token, proxy)
+                    if not await note_token_proxy(token, proxy):
+                        # never a fallback zone for a proxied token: unavailable for this send
+                        raise NoProxyAvailable("exit timezone lookup failed for the token's proxy")
                     headers = self._build_headers(token, referer)
                     if extra_headers:
                         headers = {**headers, **extra_headers}

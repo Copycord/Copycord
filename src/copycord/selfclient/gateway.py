@@ -28,6 +28,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
+from copycord.common.token_proxy import lease_with_timezone
 
 from . import fingerprint, qos
 from .enums import API_VERSION, FATAL_CLOSE_CODES, Capabilities, CloseCode, GatewayOp
@@ -685,14 +686,12 @@ class GatewayClient:
     async def _current_proxy(self) -> Optional[str]:
         pool = self.proxy_pool
         if pool is not None and getattr(pool, "enabled", False):
-            try:
-                proxy = await pool.lease(self.token)
-            except Exception as exc:
-                log.warning("proxy lease failed: %r", exc)
-                return None
-        else:
-            proxy = self.proxy
-        await note_token_proxy(self.token, proxy)
+            # Rotates past proxies whose exit timezone lookup fails; NoProxyAvailable
+            # when none resolves, so the socket is not opened (run() backs off).
+            return await lease_with_timezone(pool, self.token)
+        proxy = self.proxy
+        if not await note_token_proxy(self.token, proxy):
+            raise GatewayDialError("exit timezone lookup failed for the token's proxy")
         return proxy
 
     async def _rotate_proxy(self) -> None:
