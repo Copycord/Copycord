@@ -1203,8 +1203,41 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
         return False
 
 
+def _default_avatar_url(user_id) -> str | None:
+    """Discord's default avatar for a user id, or None when the id is unknown."""
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    return f"https://cdn.discordapp.com/embed/avatars/{(uid >> 22) % 6}.png"
+
+
+def _user_avatar_url(user_id, avatar_hash) -> str | None:
+    """The CDN URL for an avatar hash, else the default avatar for the id."""
+    if avatar_hash and user_id:
+        ext = "gif" if str(avatar_hash).startswith("a_") else "png"
+        return f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.{ext}?size=1024"
+    return _default_avatar_url(user_id)
+
+
+def _store_token_identity(token_value: str, ident: dict | None) -> None:
+    """Save a /users/@me answer on every row of the token, for the System page senders table."""
+    if not ident or not token_value:
+        return
+    try:
+        db.update_token_identity(
+            token_value=token_value,
+            username=ident.get("username") or None,
+            display_name=ident.get("global_name") or None,
+            avatar_url=ident.get("avatar_url"),
+            user_id=ident.get("id") or None,
+        )
+    except Exception:
+        LOGGER.debug("token identity save failed token=%s", _redact_token(token_value), exc_info=True)
+
+
 async def _selfbot_identity(token: str) -> dict | None:
-    """Return {"id", "username"} for a user token, or None if invalid."""
+    """Return {"id", "username", "global_name", "avatar_url"} for a user token, or None if invalid."""
     if not token:
         return None
 
@@ -1224,7 +1257,12 @@ async def _selfbot_identity(token: str) -> dict | None:
                 discriminator = str(data.get("discriminator") or "0")
                 if discriminator and discriminator not in ("0", "0000"):
                     username = f"{username}#{discriminator}"
-                return {"id": uid, "username": username}
+                return {
+                    "id": uid,
+                    "username": username,
+                    "global_name": data.get("global_name") or None,
+                    "avatar_url": _user_avatar_url(uid, data.get("avatar")),
+                }
     except Exception as e:
         LOGGER.debug(
             "_selfbot_identity | exception=%s token=%s",
@@ -2878,6 +2916,86 @@ async def _bots_running() -> bool:
 
 
 task_routes.set_bots_check(_bots_running)
+
+
+_POOL_STATES = ("online", "connecting", "offline")
+
+
+def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
+    """One item per token value: its DB rows merged with the live pool entry of any of its ids.
+
+    ``pool`` is the server's token_pool status, or None when the server is stopped.
+    """
+    pool_tokens = pool.get("tokens") if isinstance(pool, dict) else None
+    if not isinstance(pool_tokens, dict):
+        pool_tokens = {}
+
+    groups: dict[str, list[dict]] = {}
+    for r in rows or []:
+        value = (r.get("token_value") or "").strip()
+        if value:
+            groups.setdefault(value, []).append(r)
+
+    items = []
+    for group in groups.values():
+        entries = [
+            e
+            for e in (pool_tokens.get(str(r.get("token_id"))) for r in group)
+            if isinstance(e, dict)
+        ]
+        # Ids of one value share one session; prefer the most live entry if they ever differ.
+        entry = next(
+            (e for s in _POOL_STATES for e in entries if e.get("state") == s), None
+        )
+        if any(e.get("dead") for e in entries):
+            state = "revoked"
+        elif not any(r.get("enabled") for r in group):
+            state = "disabled"
+        elif entry is not None:
+            state = entry["state"]
+        else:
+            state = "offline"
+        online = state == "online"
+
+        def first(field):
+            return next((r.get(field) for r in group if r.get(field)), None)
+
+        username = first("username")
+        since = entry.get("since") if online and entry else None
+        last_used = [r["last_used"] for r in group if r.get("last_used") is not None]
+        items.append(
+            {
+                "id": str(group[0].get("token_id")),
+                "username": username,
+                "display_name": first("display_name") or username,
+                "avatar_url": first("avatar_url") or _default_avatar_url(first("user_id")),
+                "state": state,
+                "presence": (entry.get("presence") or None) if online and entry else None,
+                "since": int(since) if isinstance(since, (int, float)) else None,
+                "last_used": max(last_used) if last_used else None,
+                "use_count": sum(int(r.get("use_count") or 0) for r in group),
+            }
+        )
+
+    items.sort(
+        key=lambda i: (
+            i["state"] != "online",
+            i["username"] is None,
+            (i["username"] or "").lower(),
+            i["id"],
+        )
+    )
+    return items
+
+
+@app.get("/api/system/senders", response_class=JSONResponse)
+async def api_system_senders():
+    """The sending accounts for the System page, live state from the same status /api/status serves; no token values."""
+    status = await _collect_status()
+    server = status.get("server") or {}
+    pool = server.get("token_pool") if server.get("state") == "running" else None
+    items = _merge_senders(db.list_all_user_tokens(), pool)
+    return JSONResponse({"ok": True, "items": items})
 
 
 @app.get("/filters/{mapping_id}")
@@ -4891,6 +5009,7 @@ async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
             status_code=400,
         )
 
+    _store_token_identity(token, ident)
     row = db.get_mapping_token(token_id)
     _notify_user_tokens_changed()
     return JSONResponse(
@@ -4951,6 +5070,7 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
         user_id = (ident or {}).get("id") or None
         try:
             db.add_mapping_token(mapping_id, t, username=username, user_id=user_id)
+            _store_token_identity(t, ident)
             existing.add(t)
             added += 1
             results.append({"masked": masked, "status": "added", "username": username})
@@ -4997,15 +5117,19 @@ async def api_verify_mapping_tokens(mapping_id: str):
     for r in rows:
         token_value = r.get("token_value") or ""
         ok = bool(await _selfbot_in_guild(token_value, clone_gid))
+        ident = None
         if ok:
             working += 1
+            # Refresh the stored name and avatar while the token is known good.
+            ident = await _selfbot_identity(token_value)
+            _store_token_identity(token_value, ident)
         else:
             broken += 1
         results.append(
             {
                 "id": r.get("token_id"),
                 "masked": _mask_token(token_value),
-                "username": r.get("username") or "",
+                "username": (ident or {}).get("username") or r.get("username") or "",
                 "ok": ok,
             }
         )
