@@ -46,8 +46,9 @@ PRESENCE_STATUS = {
 RANDOM_STATUSES = ("online", "idle", "dnd", "invisible")
 RANDOM_WEIGHTS = (50, 25, 10, 15)
 
-# A ``random`` token changes status 20 to 90 minutes after its last change (or
-# after it went online), and no two tokens change within SHUFFLE_GAP_S.
+# A ``random`` token with rotation on changes status 20 to 90 minutes after its
+# last change (or after it went online), and no two tokens change within
+# SHUFFLE_GAP_S. With rotation off it keeps its one pick.
 SHUFFLE_MIN_S = 1200
 SHUFFLE_MAX_S = 5400
 SHUFFLE_GAP_S = 10
@@ -176,6 +177,8 @@ class TokenSessionPool:
         self._tokens: Dict[str, str] = {}
         self._key_by_id: Dict[str, str] = {}
         self._presence_by_key: Dict[str, str] = {}
+        # key -> whether its ``random`` status rotates on the reshuffle clock.
+        self._rotate_by_key: Dict[str, bool] = {}
         self._sessions: Dict[str, _Session] = {}
         self._dead: set = set()
         # The ``random`` pick per token, kept for the life of the process.
@@ -200,12 +203,20 @@ class TokenSessionPool:
     # public API
 
     async def ensure(
-        self, token_id: str, token_value: str, *, keep_online: int, presence: str
+        self,
+        token_id: str,
+        token_value: str,
+        *,
+        keep_online: int,
+        presence: str,
+        rotate: bool = False,
     ) -> None:
         """Register ``token_id`` and reconcile so at most ``keep_online`` sessions are live.
 
         Sessions already live keep their slot; free slots go to tokens in the
         order they were first ensured. ``keep_online <= 0`` closes them all.
+        ``rotate`` lets a ``random`` token change status on the reshuffle clock;
+        without it the one random pick is kept. Fixed statuses never rotate.
         """
         token_id = str(token_id)
         token_value = (token_value or "").strip()
@@ -219,7 +230,7 @@ class TokenSessionPool:
                 self._last_seen[key] = time.monotonic()
                 if old is not None and old != key:
                     self._forget_if_unused(old)
-                await self._apply_presence(key, presence)
+                await self._apply_presence(key, presence, rotate)
             await self._reconcile()
             if self._keep_online > 0:
                 self._start_lag_monitor()
@@ -338,6 +349,7 @@ class TokenSessionPool:
             return
         self._tokens.pop(key, None)
         self._presence_by_key.pop(key, None)
+        self._rotate_by_key.pop(key, None)
         self._last_seen.pop(key, None)
 
     async def _reconcile(self) -> None:
@@ -367,12 +379,17 @@ class TokenSessionPool:
         presence = (self._presence_by_key.get(key, "random") or "").strip().lower()
         return presence not in PRESENCE_STATUS
 
-    async def _apply_presence(self, key: str, presence: str) -> None:
+    def _rotates(self, key: str) -> bool:
+        """True when ``key`` is in ``random`` mode with rotation turned on."""
+        return self._is_random(key) and self._rotate_by_key.get(key, False)
+
+    async def _apply_presence(self, key: str, presence: str, rotate: bool = False) -> None:
         self._presence_by_key[key] = presence
+        self._rotate_by_key[key] = bool(rotate)
         sess = self._sessions.get(key)
         if sess is None:
             return
-        if not self._is_random(key):
+        if not self._rotates(key):
             self._shuffle_due.pop(key, None)
         elif sess.is_online():
             self._arm_shuffle(key)
@@ -562,15 +579,15 @@ class TokenSessionPool:
         return now + self._rng.uniform(SHUFFLE_MIN_S, SHUFFLE_MAX_S)
 
     def _arm_shuffle(self, key: str) -> None:
-        """Start a ``random`` token's clock if it has none; fixed modes never change."""
-        if key in self._shuffle_due or not self._is_random(key):
+        """Start a rotating ``random`` token's clock if it has none; fixed modes never change."""
+        if key in self._shuffle_due or not self._rotates(key):
             return
         self._shuffle_due[key] = self._next_shuffle_at(self._clock())
         if self._shuffle_task is None or self._shuffle_task.done():
             self._shuffle_task = asyncio.ensure_future(self._shuffle_loop())
 
     async def _shuffle_loop(self) -> None:
-        """Make due status changes one at a time until no token is in ``random`` mode."""
+        """Make due status changes one at a time until no token rotates."""
         while self._shuffle_due:
             try:
                 wait = await self._shuffle_once()
@@ -595,7 +612,7 @@ class TokenSessionPool:
                 return min(self._shuffle_due.values(), default=now + SHUFFLE_GAP_S) - now
             _, key = min(due)
             sess = self._sessions.get(key)
-            if sess is None or not self._is_random(key):
+            if sess is None or not self._rotates(key):
                 self._shuffle_due.pop(key, None)
                 return 0.0
             self._shuffle_due[key] = self._next_shuffle_at(now)

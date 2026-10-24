@@ -154,9 +154,11 @@ async def settle(rounds=200):
         await asyncio.sleep(0)
 
 
-async def ensure_all(pool, pairs, *, keep_online, presence="online"):
+async def ensure_all(pool, pairs, *, keep_online, presence="online", rotate=False):
     for token_id, token_value in pairs:
-        await pool.ensure(token_id, token_value, keep_online=keep_online, presence=presence)
+        await pool.ensure(
+            token_id, token_value, keep_online=keep_online, presence=presence, rotate=rotate
+        )
 
 
 async def test_reconcile_up_and_down(pool, fakes):
@@ -522,7 +524,7 @@ def clock(pool):
 
 async def online_random(pool, pairs, *, seed=11):
     pool._rng = random.Random(seed)
-    await ensure_all(pool, pairs, keep_online=len(pairs), presence="random")
+    await ensure_all(pool, pairs, keep_online=len(pairs), presence="random", rotate=True)
     await until(lambda: len(pool.online_ids()) == len(pairs))
     # READY shows before the connect step (or the on_ready listener) starts the clock
     await until(lambda: len(pool._shuffle_due) == len(pairs))
@@ -600,13 +602,66 @@ async def test_two_due_tokens_change_at_least_10_seconds_apart(pool, fakes, cloc
 async def test_fixed_modes_never_change(pool, fakes, clock):
     try:
         for i, presence in enumerate(("online", "idle", "busy", "invisible")):
-            await pool.ensure(f"t{i}", f"tok-{i}", keep_online=4, presence=presence)
+            # rotate on changes nothing for a fixed status
+            await pool.ensure(f"t{i}", f"tok-{i}", keep_online=4, presence=presence, rotate=True)
         await until(lambda: len(pool.online_ids()) == 4)
+        await settle()
         assert pool._shuffle_due == {}
         assert pool._shuffle_task is None
         clock[0] += 10 * token_pool.SHUFFLE_MAX_S
         await settle()
         assert all(c.presence_changes == [] for c in fakes.clients)
+    finally:
+        await pool.close_all()
+
+
+async def test_random_without_rotate_keeps_its_one_pick(pool, fakes, clock):
+    pool._rng = random.Random(11)
+    try:
+        pairs = [("a", "tok-a"), ("b", "tok-b")]
+        await ensure_all(pool, pairs, keep_online=2, presence="random")
+        await until(lambda: len(pool.online_ids()) == 2)
+        await settle()
+        assert pool._shuffle_due == {}
+        assert pool._shuffle_task is None
+        picked = {c.token: c.kwargs["status"] for c in fakes.clients}
+        assert set(picked.values()) <= set(RANDOM_STATUSES)
+
+        clock[0] += 10 * token_pool.SHUFFLE_MAX_S
+        await settle()
+        assert all(c.presence_changes == [] for c in fakes.clients)
+        for token_id, token_value in pairs:
+            assert pool.snapshot()["tokens"][token_id]["presence"] == picked[token_value]
+    finally:
+        await pool.close_all()
+
+
+async def test_rotate_off_cancels_and_on_starts_the_clock(pool, fakes, clock):
+    try:
+        await online_random(pool, [("t1", "tok-1")])
+        client = fakes.clients[0]
+        key = key_of("tok-1")
+        current = client.kwargs["status"]
+        assert key in pool._shuffle_due
+
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="random", rotate=False)
+        assert key not in pool._shuffle_due
+        clock[0] += 10 * token_pool.SHUFFLE_MAX_S
+        await settle()
+        assert client.presence_changes == []
+        assert pool.snapshot()["tokens"]["t1"]["presence"] == current
+
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="random", rotate=True)
+        due = pool._shuffle_due[key]
+        assert 1200 <= due - clock[0] <= 5400
+        # the current pick stays until the first timer fires
+        assert client.presence_changes == []
+        clock[0] = due - 0.5
+        await settle()
+        assert client.presence_changes == []
+        clock[0] = due
+        await until(lambda: len(client.presence_changes) == 1)
+        assert client.presence_changes[0] != current
     finally:
         await pool.close_all()
 
@@ -618,14 +673,14 @@ async def test_random_to_fixed_cancels_and_back_sets_the_clock(pool, fakes, cloc
         key = key_of("tok-1")
         assert key in pool._shuffle_due
 
-        await pool.ensure("t1", "tok-1", keep_online=1, presence="busy")
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="busy", rotate=True)
         assert key not in pool._shuffle_due
         clock[0] += 10 * token_pool.SHUFFLE_MAX_S
         await settle()
         assert client.presence_changes in ([], ["dnd"])
         changes = list(client.presence_changes)
 
-        await pool.ensure("t1", "tok-1", keep_online=1, presence="random")
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="random", rotate=True)
         due = pool._shuffle_due[key]
         assert 1200 <= due - clock[0] <= 5400
         # back on the random pick it had; the reshuffle comes later
@@ -650,7 +705,7 @@ async def test_reconnect_keeps_the_current_pick(pool, fakes, clock):
         assert pool.snapshot()["tokens"]["t1"]["presence"] == current
 
         await pool.close("t1")
-        await pool.ensure("t1", "tok-1", keep_online=1, presence="random")
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="random", rotate=True)
         await until(lambda: len(fakes.for_token("tok-1")) == 3 and "t1" in pool.online_ids())
         assert fakes.for_token("tok-1")[2].kwargs["status"] == current
     finally:
