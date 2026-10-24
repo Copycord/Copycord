@@ -184,6 +184,20 @@ def test_endpoint_merges_live_pool_and_never_returns_token_values(tc, monkeypatc
     assert body["items"][0]["presence"] == "online"
 
 
+def test_endpoint_passes_every_pool_presence_through(tc, monkeypatch):
+    statuses = ["online", "idle", "dnd", "invisible"]
+    rows = [_row(f"t{i}", f"V{i}", username=f"u{i}") for i in range(len(statuses))]
+    monkeypatch.setattr(app_module, "db", FakeDB(rows))
+    pool = _pool(**{f"t{i}": _entry("online", presence=s) for i, s in enumerate(statuses)})
+    monkeypatch.setattr(
+        app_module, "_collect_status", AsyncMock(return_value=_status("running", pool)),
+    )
+    items = tc.get("/api/system/senders").json()["items"]
+    assert {i["id"]: i["presence"] for i in items} == {
+        f"t{i}": s for i, s in enumerate(statuses)
+    }
+
+
 def test_endpoint_ignores_a_stale_pool_when_the_server_is_stopped(tc, monkeypatch):
     monkeypatch.setattr(app_module, "db", FakeDB([_row("t1", "V", username="a")]))
     monkeypatch.setattr(
