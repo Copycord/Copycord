@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 import re
 import threading
@@ -22,6 +23,7 @@ import aiohttp
 from curl_cffi import CurlMime
 from curl_cffi.requests.exceptions import RequestException as CurlRequestException
 
+from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
 from copycord.common.proxy_pool import get_pool as get_proxy_pool
 from copycord.common.selfbot_headers import (
@@ -192,6 +194,67 @@ def _leased_proxy(token: str) -> str:
     if not proxy:
         raise NoProxyAvailable("token lost its proxy lease")
     return proxy
+
+
+# Dev mode's traffic record (traffic_capture.py). Each helper is a no-op when the
+# recorder is None and never raises into a send: a failure only logs at debug.
+_capture_log = logging.getLogger("server.token_sender.capture")
+
+
+def _capture_for(token: str):
+    try:
+        return traffic_capture.recorder_for(token)
+    except Exception:
+        _capture_log.debug("traffic capture unavailable", exc_info=True)
+        return None
+
+
+def _capture_request(capture, method: str, url: str, headers: dict, kwargs: dict) -> Optional[str]:
+    """One request attempt with the headers and body handed to curl_cffi.
+
+    A multipart body is recorded as its field names and parsed payload_json
+    (the builders leave them on the CurlMime as _capture_body), never file bytes.
+    """
+    if capture is None:
+        return None
+    try:
+        if "json" in kwargs:
+            body, has_body = kwargs["json"], True
+        elif "multipart" in kwargs:
+            body = getattr(kwargs["multipart"], "_capture_body", None) or {"multipart": None}
+            has_body = True
+        else:
+            body, has_body = None, False
+        return capture.request(method, url, headers, body=body, has_body=has_body)
+    except Exception:
+        _capture_log.debug("traffic capture request failed", exc_info=True)
+        return None
+
+
+def _capture_response(capture, rid: Optional[str], status) -> None:
+    if capture is None:
+        return
+    try:
+        capture.response(rid, status)
+    except Exception:
+        _capture_log.debug("traffic capture response failed", exc_info=True)
+
+
+def _capture_failed(capture, rid: Optional[str], error) -> None:
+    if capture is None:
+        return
+    try:
+        capture.failed(rid, error)
+    except Exception:
+        _capture_log.debug("traffic capture failure record failed", exc_info=True)
+
+
+def _note_multipart(mime, fields: list, payload) -> None:
+    """What _capture_request records for this multipart body."""
+    try:
+        mime._capture_body = {"multipart": fields, "payload_json": payload}
+    except Exception:
+        _capture_log.debug("traffic capture multipart note failed", exc_info=True)
 
 
 class UserTokenSender:
@@ -993,6 +1056,8 @@ class UserTokenSender:
         """
         r429 = 0
         rnet = 0
+        # Dev mode only: None otherwise.
+        capture = _capture_for(token)
         async with self._token_lock(token):
             while True:
                 await self._await_cooldown(token)
@@ -1016,12 +1081,18 @@ class UserTokenSender:
                         kwargs = {}
                     kwargs.update(headers=headers, timeout=timeout, proxy=proxy)
 
-                    if method == "POST":
-                        resp = await session.post(url, **kwargs)
-                    else:
-                        resp = await session.request(method, url, **kwargs)
+                    rid = _capture_request(capture, method, url, headers, kwargs)
+                    try:
+                        if method == "POST":
+                            resp = await session.post(url, **kwargs)
+                        else:
+                            resp = await session.request(method, url, **kwargs)
+                    except Exception as e:
+                        _capture_failed(capture, rid, e)
+                        raise
 
                     status = resp.status_code
+                    _capture_response(capture, rid, status)
 
                     if status in (200, 201, 204):
                         if proxy:
@@ -1135,13 +1206,21 @@ class UserTokenSender:
         """Show the typing indicator in ``chan`` for ``duration`` seconds."""
         headers = self._build_headers(token)
         url = f"{DISCORD_API_BASE}/channels/{chan}/typing"
+        # Dev mode only: None otherwise.
+        capture = _capture_for(token)
 
         async def _fire():
             self._token_last_seen[token] = time.monotonic()
             try:
                 session = await self._tls_session(token, use_proxy=use_proxy)
                 proxy = _leased_proxy(token)
-                await session.post(url, headers=headers, timeout=10, proxy=proxy)
+                rid = _capture_request(capture, "POST", url, headers, {})
+                try:
+                    resp = await session.post(url, headers=headers, timeout=10, proxy=proxy)
+                except Exception as e:
+                    _capture_failed(capture, rid, e)
+                    raise
+                _capture_response(capture, rid, getattr(resp, "status_code", 0))
             except Exception:
                 pass
 
@@ -1558,6 +1637,9 @@ class UserTokenSender:
         )
         for i, (fn, data, ct) in enumerate(files):
             mime.addpart(f"files[{i}]", content_type=ct, filename=fn, data=data)
+        _note_multipart(
+            mime, ["payload_json"] + [f"files[{i}]" for i in range(len(files))], payload
+        )
         return mime
 
     def _build_forum_multipart(self, thread_body: dict, files: list) -> "CurlMime":
@@ -1576,6 +1658,9 @@ class UserTokenSender:
         )
         for i, (fn, data, ct) in enumerate(files):
             mime.addpart(f"files[{i}]", content_type=ct, filename=fn, data=data)
+        _note_multipart(
+            mime, ["payload_json"] + [f"files[{i}]" for i in range(len(files))], body
+        )
         return mime
 
     def _compose_text(self, content: Optional[str], embeds: Optional[list]) -> str:
