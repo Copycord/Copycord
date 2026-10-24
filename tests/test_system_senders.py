@@ -179,7 +179,7 @@ def test_endpoint_needs_login(tmp_path, monkeypatch):
     assert resp.status_code == 401
 
 
-def test_verify_route_stores_identity(tc, monkeypatch):
+def test_verify_route_makes_no_identity_request(tc, monkeypatch):
     stored = []
 
     class DB:
@@ -197,16 +197,13 @@ def test_verify_route_stores_identity(tc, monkeypatch):
     monkeypatch.setattr(app_module, "db", DB())
     monkeypatch.setattr(app_module, "_selfbot_in_guild",
                         AsyncMock(side_effect=lambda tok, gid: tok == "VAL-1"))
-    monkeypatch.setattr(app_module, "_selfbot_identity", AsyncMock(return_value={
-        "id": UID, "username": "new", "global_name": "New Name",
-        "avatar_url": f"https://cdn.discordapp.com/avatars/{UID}/a_h.gif?size=1024",
-    }))
+    identity = AsyncMock(return_value={"id": UID, "username": "new"})
+    monkeypatch.setattr(app_module, "_selfbot_identity", identity)
     body = tc.post("/api/guild-mappings/m1/user-tokens/verify").json()
-    assert [r["username"] for r in body["results"]] == ["new", "bad"]
-    assert stored == [{
-        "token_value": "VAL-1", "username": "new", "display_name": "New Name",
-        "avatar_url": f"https://cdn.discordapp.com/avatars/{UID}/a_h.gif?size=1024", "user_id": UID,
-    }]
+    assert [r["username"] for r in body["results"]] == ["old", "bad"]
+    assert body["working"] == 1 and body["broken"] == 1
+    identity.assert_not_awaited()
+    assert stored == []
 
 
 def test_avatar_url_helpers():

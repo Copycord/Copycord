@@ -5117,19 +5117,15 @@ async def api_verify_mapping_tokens(mapping_id: str):
     for r in rows:
         token_value = r.get("token_value") or ""
         ok = bool(await _selfbot_in_guild(token_value, clone_gid))
-        ident = None
         if ok:
             working += 1
-            # Refresh the stored name and avatar while the token is known good.
-            ident = await _selfbot_identity(token_value)
-            _store_token_identity(token_value, ident)
         else:
             broken += 1
         results.append(
             {
                 "id": r.get("token_id"),
                 "masked": _mask_token(token_value),
-                "username": (ident or {}).get("username") or r.get("username") or "",
+                "username": r.get("username") or "",
                 "ok": ok,
             }
         )
