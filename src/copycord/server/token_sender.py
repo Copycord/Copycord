@@ -303,6 +303,9 @@ class UserTokenSender:
                 order = forced + rest
         else:
             order = self._order_tokens(tokens, chan, strategy, author_id, mapping_id)
+        if not (forced_token_id is not None and sticky_exclusive):
+            order = self._prefer_online(order)
+            await self._acquire_online(order)
 
         type_token = next(
             (tv for tv in ((t.get("token_value") or "").strip() for t in order) if tv),
@@ -533,6 +536,9 @@ class UserTokenSender:
             order = self._order_tokens(
                 tokens, forum_id, strategy, author_id, mapping_id
             )
+        if not (forced_token_id is not None and sticky_exclusive):
+            order = self._prefer_online(order)
+            await self._acquire_online(order)
 
         await self._pace_channel(forum_id, min_delay, max_delay)
 
@@ -633,6 +639,9 @@ class UserTokenSender:
             order = self._order_tokens(
                 tokens, parent_id, strategy, author_id, mapping_id
             )
+        if not (forced_token_id is not None and sticky_exclusive):
+            order = self._prefer_online(order)
+            await self._acquire_online(order)
 
         await self._pace_channel(parent_id, min_delay, max_delay)
 
@@ -768,6 +777,37 @@ class UserTokenSender:
         self._rr_index_by_channel[chan] = (idx + 1) % len(ordered)
         return ordered[idx:] + ordered[:idx]
 
+    def _prefer_online(self, order: list) -> list:
+        """Move the tokens with a live pool session to the front, keeping each group's order."""
+        if self._pool is None or not order:
+            return order
+        try:
+            online = self._pool.online_ids()
+        except Exception:
+            self._log.debug("[user-send] Pool online_ids failed", exc_info=True)
+            return order
+        if not online:
+            return order
+        first = [t for t in order if str(t.get("token_id")) in online]
+        rest = [t for t in order if str(t.get("token_id")) not in online]
+        return first + rest
+
+    async def _acquire_online(self, order: list) -> None:
+        """Tell the pool which online token this send will try first."""
+        if self._pool is None:
+            return
+        ids = [
+            str(t.get("token_id"))
+            for t in order
+            if t.get("token_id") is not None and (t.get("token_value") or "").strip()
+        ]
+        if not ids:
+            return
+        try:
+            await self._pool.acquire_online(ids)
+        except Exception:
+            self._log.debug("[user-send] Pool acquire_online failed", exc_info=True)
+
     def _chan_lock(self, chan: int) -> asyncio.Lock:
         """Per-channel lock."""
         self._channel_last_seen[chan] = time.monotonic()
@@ -794,6 +834,7 @@ class UserTokenSender:
         if delay > 0:
             await asyncio.sleep(delay)
 
+    # Never calls pool.reap_idle: keep-online sessions stay warm; the server's pool reconcile decides who is online.
     async def reap_idle_state(self, idle_ttl: float = 3600) -> dict:
         """Drop bookkeeping for tokens, channels and sticky authors idle for idle_ttl seconds.
 
