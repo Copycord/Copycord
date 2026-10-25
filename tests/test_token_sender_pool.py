@@ -91,39 +91,26 @@ def _record_sends(monkeypatch, status=SEND_OK):
 
 
 async def _send(s, **kw):
-    kw.setdefault("strategy", "round_robin")
     return await s.send(mapping_id="m", target_channel_id=1, content="hi", **kw)
 
 
 @pytest.mark.asyncio
-async def test_round_robin_rotates_inside_online_group(monkeypatch):
+async def test_authorless_send_takes_the_first_available_token_every_time(monkeypatch):
     tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
     pool = FakePool(online={"b", "d"})
     s = _sender(_DB(["a", "b", "c", "d"]), pool)
 
     orders = []
-    for _ in range(8):
+    for _ in range(4):
         tried.clear()
         await _send(s)
         orders.append(list(tried))
 
-    for order in orders:
-        assert sorted(order[:2]) == ["tb", "td"]
-        assert sorted(order[2:]) == ["ta", "tc"]
-    firsts = [o[0] for o in orders]
-    assert firsts.count("tb") == firsts.count("td") == 4
-    # The rotation steps over the online tokens only, so no account goes twice in a row.
-    assert [o[:2] for o in orders[:4]] == [
-        ["tb", "td"],
-        ["td", "tb"],
-        ["tb", "td"],
-        ["td", "tb"],
-    ]
-    assert all(a != b for a, b in zip(firsts, firsts[1:]))
-    # The offline fallbacks keep their sorted order.
-    assert all(o[2:] == ["ta", "tc"] for o in orders)
+    # No rotation: the online tokens by id, then the offline ones by id, on every send.
+    assert all(o == ["tb", "td", "ta", "tc"] for o in orders)
+    assert s._sticky_author_token == {}
     # One acquire per send, with the ids in the order tried.
-    assert len(pool.acquired) == 8
+    assert len(pool.acquired) == 4
     assert pool.acquired[0] == [t[1:] for t in orders[0]]
 
 
@@ -136,7 +123,7 @@ async def test_sticky_author_keeps_assignment_order_inside_groups(monkeypatch):
     got = {}
     for author in ("userA", "userB", "userC"):
         tried.clear()
-        await _send(s, strategy="sticky_author", author_id=author)
+        await _send(s, author_id=author)
         got[author] = list(tried)
 
     assert s._sticky_author_token[("m", "userA")] == "a"
@@ -149,7 +136,7 @@ async def test_sticky_author_keeps_assignment_order_inside_groups(monkeypatch):
     # With every token online the assignment order is untouched.
     pool.online = {"a", "b", "c"}
     tried.clear()
-    await _send(s, strategy="sticky_author", author_id="userB")
+    await _send(s, author_id="userB")
     assert tried == ["tb", "tc", "ta"]
 
 
@@ -184,12 +171,12 @@ async def test_no_online_tokens_leaves_order_unchanged(monkeypatch):
     with_pool = _sender(_DB(["a", "b", "c"]), pool)
     without = _sender(_DB(["a", "b", "c"]))
 
-    for strategy, author in (("round_robin", None),) * 4 + (("sticky_author", "u"),):
+    for author in (None,) * 4 + ("u",):
         tried.clear()
-        await _send(with_pool, strategy=strategy, author_id=author)
+        await _send(with_pool, author_id=author)
         a = list(tried)
         tried.clear()
-        await _send(without, strategy=strategy, author_id=author)
+        await _send(without, author_id=author)
         assert a == tried
     assert len(pool.acquired) == 5
 

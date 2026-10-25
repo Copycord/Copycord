@@ -200,7 +200,6 @@ class TestPrepareIdempotency:
         settings = {
             "USER_TOKEN_STICKY_NICKNAME": True,
             "USER_TOKEN_STICKY_ROLES": False,
-            "USER_TOKEN_STRATEGY": "sticky_author",
         }
         kw = dict(
             mapping_id="m", cloned_guild_id=2, author_id="777",
@@ -236,7 +235,6 @@ class TestPrepareIdempotency:
         settings = {
             "USER_TOKEN_STICKY_NICKNAME": True,
             "USER_TOKEN_STICKY_ROLES": False,
-            "USER_TOKEN_STRATEGY": "sticky_author",
         }
         kw = dict(
             mapping_id="m", cloned_guild_id=2, author_id="777",
@@ -261,7 +259,6 @@ class TestPrepareIdempotency:
         settings = {
             "USER_TOKEN_STICKY_NICKNAME": False,
             "USER_TOKEN_STICKY_ROLES": True,
-            "USER_TOKEN_STRATEGY": "sticky_author",
         }
         kw = dict(
             mapping_id="m", cloned_guild_id=2, author_id="777",
@@ -285,7 +282,6 @@ class TestPrepareSwapAndExhaust:
             mapping_id="m", cloned_guild_id=2, author_id="777",
             author_display_name="Alice", author_role_ids=[],
             settings={
-                "USER_TOKEN_STRATEGY": "sticky_author",
                 "USER_TOKEN_STICKY_NICKNAME": True,
                 "USER_TOKEN_FALLBACK_WEBHOOK": fallback_webhook,
             },
@@ -376,7 +372,6 @@ class TestBadTokens:
             mapping_id="m", cloned_guild_id=2, author_id=author,
             author_display_name="Alice", author_role_ids=[],
             settings={
-                "USER_TOKEN_STRATEGY": "sticky_author",
                 "USER_TOKEN_STICKY_NICKNAME": True,
                 "USER_TOKEN_FALLBACK_WEBHOOK": fallback_webhook,
             },

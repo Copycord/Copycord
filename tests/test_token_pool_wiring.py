@@ -601,33 +601,59 @@ def test_status_persists_identity_only_on_change(make_rx):
     assert saved[-1]["avatar_url"] == "https://x/b.png"
 
 
-# round robin over online only
+# sticky per author is the only strategy
 
 
-@pytest.mark.asyncio
-async def test_round_robin_never_repeats_an_online_account(monkeypatch):
-    tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
-    pool = SenderFakePool(online={"a", "c", "e"})
-    s = _sender(SenderDB(["a", "b", "c", "d", "e"]), pool)
-
+async def _author_firsts(s, tried, authors):
     firsts = []
-    for _ in range(9):
+    for author in authors:
         tried.clear()
-        await _send(s)
+        await _send(s, author_id=author)
         firsts.append(tried[0])
-        assert sorted(tried[3:]) == ["tb", "td"]
-
-    assert firsts == ["ta", "tc", "te"] * 3
+    return firsts
 
 
 @pytest.mark.asyncio
-async def test_round_robin_without_online_tokens_rotates_over_all(monkeypatch):
+async def test_sticky_assignment_is_used_with_no_strategy_setting(srv, monkeypatch):
+    from copycord.common.config import Config
+
+    assert "USER_TOKEN_STRATEGY" not in Config.default_mapping_settings(None)
     tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
     s = _sender(SenderDB(["a", "b", "c"]), SenderFakePool())
 
-    firsts = []
-    for _ in range(3):
-        tried.clear()
-        await _send(s)
-        firsts.append(tried[0])
-    assert firsts == ["ta", "tb", "tc"]
+    firsts = await _author_firsts(s, tried, ["u1", "u2", "u3", "u1", "u2", "u3", "u1"])
+    # Each author keeps one account; no rotation between their messages.
+    assert firsts == ["ta", "tb", "tc", "ta", "tb", "tc", "ta"]
+    assert s._sticky_author_token == {("m", "u1"): "a", ("m", "u2"): "b", ("m", "u3"): "c"}
+    # The identity manager follows the sticky options alone.
+    assert srv.ServerReceiver._identity_active({"USER_TOKEN_STICKY_NICKNAME": True}) is True
+    assert srv.ServerReceiver._identity_active({}) is False
+
+
+@pytest.mark.asyncio
+async def test_stale_round_robin_value_changes_nothing(srv, monkeypatch):
+    from copycord.common.common_helpers import resolve_mapping_settings
+    from copycord.common.config import Config
+
+    defaults = Config.default_mapping_settings(None)
+    cfg = SimpleNamespace(default_mapping_settings=lambda: dict(defaults))
+    stored = '{"USE_USER_TOKENS": true, "USER_TOKEN_STRATEGY": "round_robin", "USER_TOKEN_STICKY_ROLES": true}'
+    db = SimpleNamespace(get_mapping_by_id=lambda mid: {"settings": stored, "status": "active"})
+    eff = resolve_mapping_settings(db, cfg, mapping_id=1)
+    assert eff["USER_TOKEN_STICKY_ROLES"] is True
+
+    for sticky in ({}, {"USER_TOKEN_STICKY_NICKNAME": True}, {"USER_TOKEN_STICKY_ROLES": True}, {"USER_TOKEN_STICKY_AVATAR": True}):
+        for stale in ("round_robin", "sticky_author", "junk"):
+            assert srv.ServerReceiver._identity_active(
+                dict(sticky, USER_TOKEN_STRATEGY=stale)
+            ) == srv.ServerReceiver._identity_active(sticky)
+    assert srv.ServerReceiver._identity_active(eff) is True
+
+    tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
+    pool = SenderFakePool(online={"a", "b", "c"})
+    authors = ["u1", "u2", "u1", "u2", "u1"]
+    plain = await _author_firsts(_sender(SenderDB(["a", "b", "c"]), pool), tried, authors)
+    assert plain == ["ta", "tb", "ta", "tb", "ta"]
+    # Author-less sends always start from the same first token.
+    s = _sender(SenderDB(["a", "b", "c"]), pool)
+    assert await _author_firsts(s, tried, [None, None, None]) == ["ta", "ta", "ta"]
