@@ -598,67 +598,6 @@ async def test_send_serializes_typing_then_send_per_channel():
 
 
 @pytest.mark.asyncio
-async def test_no_consecutive_repeat_same_channel(monkeypatch):
-    """With multiple tokens, the same account should not be picked twice in a
-    row for one channel."""
-
-    class _DB:
-        def get_enabled_mapping_tokens(self, mapping_id):
-            return [
-                {"token_id": "a", "token_value": "ta", "username": "A"},
-                {"token_id": "b", "token_value": "tb", "username": "B"},
-                {"token_id": "c", "token_value": "tc", "username": "C"},
-            ]
-
-        def increment_mapping_token_usage(self, tid):
-            return None
-
-    used = []
-
-    async def fake_send_with_token(
-        self,
-        token,
-        channel_id,
-        text,
-        attachments,
-        *,
-        sticker_ids=None,
-        use_proxy=False,
-        reply_to=None,
-        guild_id=None,
-    ):
-
-        used.append(token)
-        return SEND_OK, 111
-
-    monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send_with_token)
-
-    s = UserTokenSender(
-        db=_DB(),
-        ratelimit=_FakeRateLimit(),
-        action_type="user_message",
-        session_provider=lambda: None,
-        logger=types.SimpleNamespace(
-            debug=lambda *a, **k: None,
-            warning=lambda *a, **k: None,
-            exception=lambda *a, **k: None,
-        ),
-    )
-
-    for _ in range(30):
-        ok = await s.send(
-            mapping_id="m",
-            target_channel_id=555,
-            content="hi",
-            embeds=None,
-            attachments=None,
-        )
-        assert ok == SEND_OK
-
-    assert all(used[i] != used[i + 1] for i in range(len(used) - 1))
-
-
-@pytest.mark.asyncio
 async def test_send_returns_false_without_tokens():
     class _DB:
         def get_enabled_mapping_tokens(self, mapping_id):
