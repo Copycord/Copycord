@@ -11,8 +11,9 @@
 
 Each session is a selfclient ``Client`` running in this process, on the same
 event loop as ``UserTokenSender``, so the token keeps one TLS identity for
-REST and the gateway. Sessions connect one at a time with a jittered gap,
-because parsing READY is the CPU spike.
+REST and the gateway. Every session has its own proxy, so up to
+CONNECT_CONCURRENCY sessions connect at once, each slot followed by a jittered
+gap, because parsing READY is the CPU spike.
 """
 
 from __future__ import annotations
@@ -57,9 +58,12 @@ SHUFFLE_MIN_S = 1200
 SHUFFLE_MAX_S = 5400
 SHUFFLE_GAP_S = 10
 
+# Each token connects through its own proxy, so connects overlap; the cap keeps
+# the READY parsing CPU spike bounded.
+CONNECT_CONCURRENCY = 10
 STAGGER_MIN = 2.0
 STAGGER_MAX = 6.0
-# A connect not READY by then frees the gate so one stuck token holds no one up.
+# A connect not READY by then frees its slot so one stuck token holds no one up.
 READY_TIMEOUT = 60.0
 
 BACKOFF_BASE = 5.0
@@ -208,7 +212,7 @@ class TokenSessionPool:
         # The ``random`` pick per token, kept for the life of the process.
         self._random_status: Dict[str, str] = {}
         self._last_seen: Dict[str, float] = {}
-        self._gate = asyncio.Lock()
+        self._gate = asyncio.Semaphore(CONNECT_CONCURRENCY)
         self._lock = asyncio.Lock()
         self._rng = random.Random()
         # Patched by tests; the reshuffle schedule runs on it.
@@ -515,7 +519,7 @@ class TokenSessionPool:
         )
 
     async def _connect_once(self, sess: _Session) -> None:
-        """Start one connect under the gate, wait for READY, then hold the gate for the stagger gap."""
+        """Start one connect under a gate slot, wait for READY, then hold the slot for the stagger gap."""
         async with self._gate:
             sess.set_state(STATE_CONNECTING)
             sess.dropped = False

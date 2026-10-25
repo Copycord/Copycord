@@ -255,7 +255,8 @@ async def test_shared_token_counts_once_against_keep_online(pool, fakes):
         await pool.close_all()
 
 
-async def test_connects_one_at_a_time_with_stagger_gap(pool, fakes, sleeps):
+async def test_a_slot_holds_the_stagger_gap_after_its_connect(pool, fakes, sleeps):
+    pool._gate = asyncio.Semaphore(1)
     try:
         pairs = [("t1", "tok-1"), ("t2", "tok-2"), ("t3", "tok-3")]
         await ensure_all(pool, pairs, keep_online=3)
@@ -268,6 +269,29 @@ async def test_connects_one_at_a_time_with_stagger_gap(pool, fakes, sleeps):
         assert len(gaps) == 3
         assert all(2.0 <= g <= 6.0 for g in gaps)
     finally:
+        await pool.close_all()
+
+
+async def test_connects_overlap_up_to_the_concurrency_limit(pool, fakes, monkeypatch):
+    release = asyncio.Event()
+
+    async def held_sleep(delay, *_, **__):
+        await release.wait()
+
+    monkeypatch.setattr(token_pool, "_sleep", held_sleep)
+    total = token_pool.CONNECT_CONCURRENCY + 2
+    pairs = [(f"t{i}", f"tok-{i}") for i in range(total)]
+    try:
+        await ensure_all(pool, pairs, keep_online=total)
+        await settle()
+        logins = [t for kind, t in fakes.events if kind == "login"]
+        # Every slot is busy in its gap, so no more than the limit is in flight.
+        assert token_pool.CONNECT_CONCURRENCY > 1
+        assert len(logins) == token_pool.CONNECT_CONCURRENCY
+        release.set()
+        await until(lambda: len(pool.online_ids()) == total)
+    finally:
+        release.set()
         await pool.close_all()
 
 
