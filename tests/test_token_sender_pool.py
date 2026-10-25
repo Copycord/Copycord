@@ -1,11 +1,38 @@
 """UserTokenSender with the warm gateway pool, driven by a fake pool (no Discord)."""
 
+import asyncio
 import types
 
 import pytest
 
-from copycord.server.token_sender import SEND_OK, SEND_TRANSIENT, UserTokenSender
+from copycord.server import token_sender
+from copycord.server.token_sender import (
+    ONLINE_POLL,
+    ONLINE_WAIT,
+    SEND_NO_TOKENS,
+    SEND_OK,
+    SEND_TRANSIENT,
+    UserTokenSender,
+)
 from tests.test_token_sender import _FakeRateLimit
+
+FULL_WAIT = int(ONLINE_WAIT / ONLINE_POLL)
+
+
+@pytest.fixture(autouse=True)
+def polls(monkeypatch):
+    """The online wait's sleep, without real time; each hook gets the poll count."""
+    state = types.SimpleNamespace(count=0, hooks=[])
+
+    async def fake_sleep(seconds):
+        assert seconds == ONLINE_POLL
+        state.count += 1
+        for hook in state.hooks:
+            hook(state.count)
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(token_sender, "_sleep", fake_sleep)
+    return state
 
 
 class FakePool:
@@ -52,7 +79,7 @@ class _DB:
         self.disabled.append((token_id, enabled))
 
 
-def _sender(db, pool=None):
+def _sender(db, pool=None, warnings=None):
     return UserTokenSender(
         db=db,
         ratelimit=_FakeRateLimit(),
@@ -60,7 +87,7 @@ def _sender(db, pool=None):
         session_provider=lambda: None,
         logger=types.SimpleNamespace(
             debug=lambda *a, **k: None,
-            warning=lambda *a, **k: None,
+            warning=lambda *a, **k: (warnings.append(a) if warnings is not None else None),
             exception=lambda *a, **k: None,
         ),
         pool=pool,
@@ -95,9 +122,9 @@ async def _send(s, **kw):
 
 
 @pytest.mark.asyncio
-async def test_authorless_send_takes_the_first_available_token_every_time(monkeypatch):
+async def test_authorless_send_takes_the_first_online_token_every_time(monkeypatch, polls):
     tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
-    pool = FakePool(online={"b", "d"})
+    pool = FakePool(online={"a", "c"})
     s = _sender(_DB(["a", "b", "c", "d"]), pool)
 
     orders = []
@@ -106,18 +133,50 @@ async def test_authorless_send_takes_the_first_available_token_every_time(monkey
         await _send(s)
         orders.append(list(tried))
 
-    # No rotation: the online tokens by id, then the offline ones by id, on every send.
-    assert all(o == ["tb", "td", "ta", "tc"] for o in orders)
+    # No rotation, and the offline tokens are never used.
+    assert all(o == ["ta", "tc"] for o in orders)
     assert s._sticky_author_token == {}
+    assert polls.count == 0
     # One acquire per send, with the ids in the order tried.
-    assert len(pool.acquired) == 4
-    assert pool.acquired[0] == [t[1:] for t in orders[0]]
+    assert pool.acquired == [["a", "c"]] * 4
 
 
 @pytest.mark.asyncio
-async def test_sticky_author_keeps_assignment_order_inside_groups(monkeypatch):
-    tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
+async def test_head_comes_online_during_the_wait_and_sends(monkeypatch, polls):
+    tried = _record_sends(monkeypatch, status=SEND_OK)
+    pool = FakePool(online={"b"})
+    s = _sender(_DB(["a", "b", "c"]), pool)
+    polls.hooks.append(lambda n: pool.online.add("a") if n == 3 else None)
+
+    assert await _send(s, author_id="u") == SEND_OK
+
+    # The sticky account waited three polls and sent; b was online but not used.
+    assert polls.count == 3
+    assert tried == ["ta"]
+    assert s._sticky_author_token[("m", "u")] == "a"
+    assert pool.acquired == [["a", "b"]]
+
+
+@pytest.mark.asyncio
+async def test_head_offline_for_the_whole_wait_uses_another_online_token(monkeypatch, polls):
+    tried = _record_sends(monkeypatch, status=SEND_OK)
+    warnings = []
     pool = FakePool(online={"c"})
+    s = _sender(_DB(["a", "b", "c"]), pool, warnings)
+
+    assert await _send(s, author_id="u") == SEND_OK
+
+    assert polls.count == FULL_WAIT
+    assert tried == ["tc"]
+    # The assignment stays with a for when it comes back.
+    assert s._sticky_author_token[("m", "u")] == "a"
+    assert len(warnings) == 1 and "a" in warnings[0]
+
+
+@pytest.mark.asyncio
+async def test_sticky_author_keeps_assignment_with_every_token_online(monkeypatch, polls):
+    tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
+    pool = FakePool(online={"a", "b", "c"})
     s = _sender(_DB(["a", "b", "c"]), pool)
 
     got = {}
@@ -126,24 +185,21 @@ async def test_sticky_author_keeps_assignment_order_inside_groups(monkeypatch):
         await _send(s, author_id=author)
         got[author] = list(tried)
 
-    assert s._sticky_author_token[("m", "userA")] == "a"
-    assert s._sticky_author_token[("m", "userB")] == "b"
-    assert s._sticky_author_token[("m", "userC")] == "c"
-    assert got["userA"] == ["tc", "ta", "tb"]
-    assert got["userB"] == ["tc", "tb", "ta"]
+    assert s._sticky_author_token == {
+        ("m", "userA"): "a",
+        ("m", "userB"): "b",
+        ("m", "userC"): "c",
+    }
+    assert got["userA"] == ["ta", "tb", "tc"]
+    assert got["userB"] == ["tb", "tc", "ta"]
     assert got["userC"] == ["tc", "ta", "tb"]
-
-    # With every token online the assignment order is untouched.
-    pool.online = {"a", "b", "c"}
-    tried.clear()
-    await _send(s, author_id="userB")
-    assert tried == ["tb", "tc", "ta"]
+    assert polls.count == 0
 
 
 @pytest.mark.asyncio
-async def test_forced_sticky_exclusive_is_untouched(monkeypatch):
+async def test_forced_sticky_exclusive_online_sends_with_it_alone(monkeypatch, polls):
     tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
-    pool = FakePool(online={"b"})
+    pool = FakePool(online={"a", "b"})
     s = _sender(_DB(["a", "b"]), pool)
 
     await _send(s, forced_token_id="a", sticky_exclusive=True)
@@ -153,32 +209,110 @@ async def test_forced_sticky_exclusive_is_untouched(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_forced_without_exclusive_still_prefers_online(monkeypatch):
+async def test_forced_sticky_exclusive_offline_is_no_tokens(monkeypatch, polls):
+    tried = _record_sends(monkeypatch, status=SEND_OK)
+    pool = FakePool(online={"b"})
+    s = _sender(_DB(["a", "b"]), pool)
+
+    assert await _send(s, forced_token_id="a", sticky_exclusive=True) == SEND_NO_TOKENS
+
+    assert polls.count == FULL_WAIT
+    assert tried == []
+    assert pool.acquired == []
+
+
+@pytest.mark.asyncio
+async def test_forced_without_exclusive_waits_then_uses_the_online_rest(monkeypatch, polls):
     tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
     pool = FakePool(online={"b"})
     s = _sender(_DB(["a", "b", "c"]), pool)
 
     await _send(s, forced_token_id="a")
 
-    assert tried == ["tb", "ta", "tc"]
-    assert pool.acquired == [["b", "a", "c"]]
+    assert polls.count == FULL_WAIT
+    assert tried == ["tb"]
+    assert pool.acquired == [["b"]]
 
 
 @pytest.mark.asyncio
-async def test_no_online_tokens_leaves_order_unchanged(monkeypatch):
-    tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
-    pool = FakePool(online=set())
-    with_pool = _sender(_DB(["a", "b", "c"]), pool)
-    without = _sender(_DB(["a", "b", "c"]))
+async def test_nothing_online_is_no_tokens_without_any_request(monkeypatch, polls):
+    tried = _record_sends(monkeypatch, status=SEND_OK)
+    typed = []
 
-    for author in (None,) * 4 + ("u",):
-        tried.clear()
-        await _send(with_pool, author_id=author)
-        a = list(tried)
-        tried.clear()
-        await _send(without, author_id=author)
-        assert a == tried
-    assert len(pool.acquired) == 5
+    async def fake_type(self, chan, token, duration, *, use_proxy=False):
+        typed.append(token)
+
+    monkeypatch.setattr(UserTokenSender, "_type_for", fake_type)
+    pool = FakePool(online=set())
+    s = _sender(_DB(["a", "b", "c"]), pool)
+
+    assert await _send(s, typing=True, max_delay=1.0) == SEND_NO_TOKENS
+    assert tried == [] and typed == []
+    assert pool.acquired == []
+    assert await s.create_text_thread(mapping_id="m", parent_channel_id=9, thread_name="t") is None
+    assert await s.create_forum_thread(
+        mapping_id="m", forum_channel_id=8, thread_name="t", content="hi"
+    ) is None
+    assert tried == [] and pool.acquired == []
+
+
+@pytest.mark.asyncio
+async def test_offline_warning_is_throttled_per_token(monkeypatch, polls):
+    _record_sends(monkeypatch, status=SEND_OK)
+    now = [1000.0]
+    monkeypatch.setattr(token_sender, "time", types.SimpleNamespace(monotonic=lambda: now[0]))
+    warnings = []
+    pool = FakePool(online=set())
+    s = _sender(_DB(["a", "b"]), pool, warnings)
+
+    for _ in range(5):
+        await _send(s)
+    assert len(warnings) == 1
+    now[0] += 30
+    await _send(s)
+    assert len(warnings) == 1
+    now[0] += 31
+    await _send(s)
+    assert len(warnings) == 2
+    # Another token has its own minute.
+    await _send(s, forced_token_id="b")
+    assert len(warnings) == 3
+
+
+@pytest.mark.asyncio
+async def test_typing_and_delay_start_after_the_head_is_online(monkeypatch, polls):
+    tried = _record_sends(monkeypatch, status=SEND_OK)
+    pool = FakePool(online=set())
+    seen = []
+
+    async def fake_pace(self, chan, lo, hi, *, typing=False, token=None, use_proxy=False):
+        seen.append((token, set(pool.online)))
+
+    monkeypatch.setattr(UserTokenSender, "_pace_channel", fake_pace)
+    s = _sender(_DB(["a", "b"]), pool)
+    polls.hooks.append(lambda n: pool.online.add("a") if n == 2 else None)
+
+    assert await _send(s, typing=True, max_delay=2.0) == SEND_OK
+
+    assert seen == [("ta", {"a"})]
+    assert tried == ["ta"]
+
+
+@pytest.mark.asyncio
+async def test_a_waiting_message_is_not_overtaken_in_its_channel(monkeypatch, polls):
+    tried = _record_sends(monkeypatch, status=SEND_OK)
+    pool = FakePool(online={"b"})
+    s = _sender(_DB(["a", "b"]), pool)
+    polls.hooks.append(lambda n: pool.online.add("a") if n == 5 else None)
+
+    first = asyncio.create_task(_send(s, author_id="u1"))
+    await asyncio.sleep(0)
+    second = asyncio.create_task(_send(s, author_id="u2"))
+
+    assert await first == SEND_OK
+    assert await second == SEND_OK
+    # u1 is sticky to a, which waited; u2's b was online but went second.
+    assert tried == ["ta", "tb"]
 
 
 @pytest.mark.asyncio
@@ -227,11 +361,12 @@ async def test_pool_dead_id_dropped_from_thread_creation(monkeypatch):
     assert new_id == 555
     assert tried == ["tc"]
     assert db.disabled == [("a", False)]
-    assert pool.acquired == [["c", "b"]]
+    # b leads once a is benched; it never came online, so only c is used.
+    assert pool.acquired == [["c"]]
 
 
 @pytest.mark.asyncio
-async def test_pool_none_is_unchanged(monkeypatch):
+async def test_pool_none_is_unchanged(monkeypatch, polls):
     tried = _record_sends(monkeypatch, status=SEND_OK)
     db = _DB(["a", "b", "c"])
     s = _sender(db)
@@ -244,8 +379,10 @@ async def test_pool_none_is_unchanged(monkeypatch):
     assert db.disabled == []
     assert s._pool is None
     order = [{"token_id": "x"}, {"token_id": "y"}]
-    assert s._prefer_online(order) is order
+    assert await s._online_only(order) is order
+    assert await s._online_only(order, exclusive=True) is order
     assert s._sync_pool_dead(order) is False
+    assert polls.count == 0
 
 
 @pytest.mark.asyncio

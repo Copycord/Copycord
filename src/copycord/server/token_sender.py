@@ -188,6 +188,17 @@ SEND_TRANSIENT = "transient"
 SEND_UNSUPPORTED = "unsupported"
 SEND_NO_TOKENS = "no_tokens"
 
+# How long a send waits for its account's gateway session, polling every ONLINE_POLL seconds.
+ONLINE_WAIT = 20.0
+ONLINE_POLL = 0.25
+# One "not online" warning per token per this many seconds.
+_OFFLINE_WARN_INTERVAL = 60.0
+
+
+async def _sleep(seconds: float) -> None:
+    """The online wait's sleep; tests patch it so they need no real time."""
+    await asyncio.sleep(seconds)
+
 
 def _leased_proxy(token: str) -> str:
     """The token's proxy for this request; NoProxyAvailable if the lease is gone, so nothing goes direct."""
@@ -290,6 +301,8 @@ class UserTokenSender:
         self._author_last_seen: dict = {}
 
         self._dead_tokens: set = set()
+        # token_id -> monotonic time of its last "not online" warning.
+        self._offline_warned: dict = {}
 
         self._nitro_by_token: dict = {}
 
@@ -376,26 +389,27 @@ class UserTokenSender:
                 order = forced + rest
         else:
             order = self._order_tokens(tokens, chan, author_id, mapping_id)
-        if not (forced_token_id is not None and sticky_exclusive):
-            order = self._prefer_online(order)
-            await self._acquire_online(order)
+        exclusive = forced_token_id is not None and sticky_exclusive
 
-        type_token = next(
-            (tv for tv in ((t.get("token_value") or "").strip() for t in order) if tv),
-            None,
-        )
+        type_token = self._first_value(order)
 
         async def _deliver() -> str:
+            # Waits here, inside the channel's turn, so a later message cannot overtake it.
+            ready = await self._online_only(order, exclusive=exclusive)
+            if not ready:
+                return SEND_NO_TOKENS
+            if not exclusive:
+                await self._acquire_online(ready)
             await self._pace_channel(
                 chan,
                 min_delay,
                 max_delay,
                 typing=typing,
-                token=type_token,
+                token=self._first_value(ready),
                 use_proxy=use_proxy,
             )
             last = SEND_NO_TOKENS
-            for tok in order:
+            for tok in ready:
                 token_value = (tok.get("token_value") or "").strip()
                 if not token_value:
                     continue
@@ -443,7 +457,7 @@ class UserTokenSender:
             )
             return last
 
-        if (typing and type_token) or float(max_delay or 0.0) > 0:
+        if self._pool is not None or (typing and type_token) or float(max_delay or 0.0) > 0:
             async with self._chan_lock(chan):
                 return await _deliver()
         return await _deliver()
@@ -601,8 +615,29 @@ class UserTokenSender:
                 order = forced + rest
         else:
             order = self._order_tokens(tokens, forum_id, author_id, mapping_id)
-        if not (forced_token_id is not None and sticky_exclusive):
-            order = self._prefer_online(order)
+        exclusive = forced_token_id is not None and sticky_exclusive
+
+        if self._pool is None:
+            return await self._create_forum_with(
+                order, forum_id, thread_name, text, atts_to_upload, stkr_ids, tag_ids,
+                auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+            )
+        # Waits inside the channel's turn, so a later post cannot overtake it.
+        async with self._chan_lock(forum_id):
+            return await self._create_forum_with(
+                order, forum_id, thread_name, text, atts_to_upload, stkr_ids, tag_ids,
+                auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+            )
+
+    async def _create_forum_with(
+        self, order, forum_id, thread_name, text, atts_to_upload, stkr_ids, tag_ids,
+        auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+    ) -> Optional[int]:
+        """create_forum_thread's delivery: wait for the account, pace, then post."""
+        order = await self._online_only(order, exclusive=exclusive)
+        if not order:
+            return None
+        if not exclusive:
             await self._acquire_online(order)
 
         await self._pace_channel(forum_id, min_delay, max_delay)
@@ -701,8 +736,29 @@ class UserTokenSender:
                 order = forced + rest
         else:
             order = self._order_tokens(tokens, parent_id, author_id, mapping_id)
-        if not (forced_token_id is not None and sticky_exclusive):
-            order = self._prefer_online(order)
+        exclusive = forced_token_id is not None and sticky_exclusive
+
+        if self._pool is None:
+            return await self._create_text_with(
+                order, parent_id, thread_name, starter_message_id,
+                auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+            )
+        # Waits inside the channel's turn, so a later post cannot overtake it.
+        async with self._chan_lock(parent_id):
+            return await self._create_text_with(
+                order, parent_id, thread_name, starter_message_id,
+                auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+            )
+
+    async def _create_text_with(
+        self, order, parent_id, thread_name, starter_message_id,
+        auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+    ) -> Optional[int]:
+        """create_text_thread's delivery: wait for the account, pace, then post."""
+        order = await self._online_only(order, exclusive=exclusive)
+        if not order:
+            return None
+        if not exclusive:
             await self._acquire_online(order)
 
         await self._pace_channel(parent_id, min_delay, max_delay)
@@ -846,16 +902,52 @@ class UserTokenSender:
             self._log.debug("[user-send] Pool online_ids failed", exc_info=True)
             return set()
 
-    def _prefer_online(self, order: list) -> list:
-        """Move the tokens with a live pool session to the front, keeping each group's order."""
-        if self._pool is None or not order:
+    @staticmethod
+    def _first_value(order: list) -> Optional[str]:
+        """The first non-empty token value in ``order``, or None."""
+        return next(
+            (tv for tv in ((t.get("token_value") or "").strip() for t in order) if tv),
+            None,
+        )
+
+    async def _online_only(self, order: list, *, exclusive: bool = False) -> list:
+        """The tokens of ``order`` with a live gateway session, in order; [] means none may send.
+
+        A token only sends while it is online, so it looks like a real user.
+        The head (the sticky or forced account) gets up to ONLINE_WAIT seconds
+        to come online; after that the other tokens that are online now are
+        used instead. ``exclusive`` allows only the head. Holds no pool lock.
+        """
+        if self._pool is None:
             return order
+        if not order:
+            return []
+        head = str(order[0].get("token_id"))
         online = self._online_ids()
-        if not online:
-            return order
-        first = [t for t in order if str(t.get("token_id")) in online]
-        rest = [t for t in order if str(t.get("token_id")) not in online]
-        return first + rest
+        polls = int(ONLINE_WAIT / ONLINE_POLL)
+        while head not in online and polls > 0:
+            await _sleep(ONLINE_POLL)
+            polls -= 1
+            online = self._online_ids()
+        if head not in online:
+            self._warn_offline(order[0])
+        candidates = order[:1] if exclusive else order
+        return [t for t in candidates if str(t.get("token_id")) in online]
+
+    def _warn_offline(self, tok: dict) -> bool:
+        """Log one warning per token per minute that it was skipped for being offline. True when it logged."""
+        key = str(tok.get("token_id"))
+        now = time.monotonic()
+        last = self._offline_warned.get(key)
+        if last is not None and now - last < _OFFLINE_WARN_INTERVAL:
+            return False
+        self._offline_warned[key] = now
+        self._log.warning(
+            "[user-send] Token %s has no gateway session after %.0fs; not sending with it",
+            tok.get("username") or key,
+            ONLINE_WAIT,
+        )
+        return True
 
     async def _acquire_online(self, order: list) -> None:
         """Tell the pool which online token this send will try first."""

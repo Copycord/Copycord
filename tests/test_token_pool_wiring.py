@@ -619,7 +619,7 @@ async def test_sticky_assignment_is_used_with_no_strategy_setting(srv, monkeypat
 
     assert "USER_TOKEN_STRATEGY" not in Config.default_mapping_settings(None)
     tried = _record_sends(monkeypatch, status=SEND_TRANSIENT)
-    s = _sender(SenderDB(["a", "b", "c"]), SenderFakePool())
+    s = _sender(SenderDB(["a", "b", "c"]), SenderFakePool(online={"a", "b", "c"}))
 
     firsts = await _author_firsts(s, tried, ["u1", "u2", "u3", "u1", "u2", "u3", "u1"])
     # Each author keeps one account; no rotation between their messages.
