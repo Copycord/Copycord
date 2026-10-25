@@ -97,7 +97,7 @@ To pin a release, use its image tag, for example `ghcr.io/copycord/copycord:v4.0
 
 ## Test a branch {#branches}
 
-To test a branch, tag or commit that has no release, pass it to `--version`. The installer clones the repository into `<home>/src`, builds the dashboard and installs that copy. This needs git: on Linux and macOS install it with your package manager; on Windows, when git is missing, the installer downloads MinGit from the Git for Windows release, checks its SHA-256 checksum and unpacks it into `<home>\git`, without admin rights. `copycord update` on the dev channel does the same. When Node.js 22 or newer is missing, the installer downloads the official build, checks its SHA-256 checksum and unpacks it into `<home>/node`, without sudo.
+To test a branch, tag or commit that has no release, pass it to `--version`. The installer clones the repository into `<home>/src`, builds the dashboard and installs that copy. This needs git: on Linux and macOS, when git is missing and you run it in a terminal, the installer installs git through your package manager (Homebrew on macOS; apk, apt-get, pacman, dnf or yum on Linux), asking for your password when it needs sudo; on Windows, when git is missing, the installer downloads MinGit from the Git for Windows release, checks its SHA-256 checksum and unpacks it into `<home>\git`, without admin rights. `copycord update` on the dev channel does the same. When Node.js 22 or newer is missing, the installer downloads the official build, checks its SHA-256 checksum and unpacks it into `<home>/node`, without sudo.
 
 <Tabs groupId="os" queryString>
 <TabItem value="unix" label="Linux / macOS" default>
