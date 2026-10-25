@@ -104,19 +104,17 @@ function renderPool(settings: Record<string, string | number | boolean> = {}) {
 describe("UserTokensBlock warm pool", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("keep online writes a whole number and clamps to the enabled token count", async () => {
+  it("has no keep online field: Token status then Rotate status follow the token list", async () => {
     mockApi();
     const setSetting = renderPool({ USER_TOKEN_KEEP_ONLINE: 2 });
     await screen.findByText("alpha");
-    const input = screen.getByLabelText("Keep online") as HTMLInputElement;
-    expect(input.value).toBe("2");
-    expect(input).toHaveAttribute("max", "3");
-    fireEvent.change(input, { target: { value: "1" } });
-    expect(setSetting).toHaveBeenLastCalledWith("USER_TOKEN_KEEP_ONLINE", 1);
-    fireEvent.change(input, { target: { value: "9" } });
-    expect(setSetting).toHaveBeenLastCalledWith("USER_TOKEN_KEEP_ONLINE", 3);
-    fireEvent.change(input, { target: { value: "" } });
-    expect(setSetting).toHaveBeenLastCalledWith("USER_TOKEN_KEEP_ONLINE", 0);
+    expect(document.getElementById("ut_keep_online")).toBeNull();
+    expect(screen.queryByText("Keep online")).toBeNull();
+    const pool = document.getElementById("user-token-pool")!;
+    expect(pool.children).toHaveLength(2);
+    expect(pool.children[0]).toHaveTextContent(/^Token status/);
+    expect(pool.children[1]).toHaveAttribute("data-setting-key", "user_token_presence_rotate");
+    expect(setSetting.mock.calls.some(([k]) => k === "USER_TOKEN_KEEP_ONLINE")).toBe(false);
   });
 
   it("token status is the app dropdown and writes USER_TOKEN_PRESENCE", async () => {
@@ -235,14 +233,11 @@ describe("UserTokensBlock warm pool", () => {
 
   it("shows no status dots or online count and never polls the pool; live status is on the System page", async () => {
     const fetchMock = mockApi();
-    renderPool({ USER_TOKEN_KEEP_ONLINE: 5 });
+    renderPool();
     await screen.findByText("alpha");
     expect(document.querySelectorAll("[data-dot], .user-token-dot").length).toBe(0);
-    expect(document.getElementById("ut_keep_online_count")).toBeNull();
     expect(screen.queryByText(/\d+\/\d+ online|^off$/)).toBeNull();
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/status"))).toBe(false);
-    // The keep online field is the only thing in its slot.
-    expect(screen.getByLabelText("Keep online").parentElement!.children).toHaveLength(1);
   });
 
   it("has no proxy switch: token cloning always sends through proxies", async () => {

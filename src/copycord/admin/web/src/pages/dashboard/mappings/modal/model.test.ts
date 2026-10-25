@@ -7,7 +7,6 @@ import {
   initialForm,
   invalidFields,
   modeOf,
-  normalizeKeepOnline,
   normalizePresence,
   normalizeStrategy,
   settingMatches,
@@ -68,7 +67,7 @@ describe("mapping modal model", () => {
     expect(p.settings.USER_TOKEN_MAX_DELAY).toBe(3.5);
     expect(p.settings.USER_TOKEN_MIN_DELAY).toBe(0);
     expect(Object.keys(p.settings).length).toBe(Object.keys(DEFAULT_MAPPING_SETTINGS).length);
-    expect(Object.keys(p.settings).length).toBe(54);
+    expect(Object.keys(p.settings).length).toBe(53);
     expect(p.settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
   });
 
@@ -85,21 +84,18 @@ describe("mapping modal model", () => {
     expect(buildPayload(f).settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
   });
 
-  it("defaults keep online to 5 and presence to random", () => {
+  it("defaults presence to random and has no keep online setting", () => {
     const f = initialForm(null, "create");
-    expect(f.settings.USER_TOKEN_KEEP_ONLINE).toBe(5);
     expect(f.settings.USER_TOKEN_PRESENCE).toBe("random");
-    expect(initialForm(M, "edit").settings.USER_TOKEN_KEEP_ONLINE).toBe(5);
+    expect("USER_TOKEN_KEEP_ONLINE" in DEFAULT_MAPPING_SETTINGS).toBe(false);
+    expect("USER_TOKEN_KEEP_ONLINE" in f.settings).toBe(false);
   });
 
-  it("clamps keep online to a whole number of at least 0", () => {
-    expect(normalizeKeepOnline(3)).toBe(3);
-    expect(normalizeKeepOnline("7")).toBe(7);
-    expect(normalizeKeepOnline(2.9)).toBe(2);
-    expect(normalizeKeepOnline(-4)).toBe(0);
-    expect(normalizeKeepOnline(0)).toBe(0);
-    expect(normalizeKeepOnline("abc")).toBe(5);
-    expect(normalizeKeepOnline(undefined)).toBe(5);
+  it("a keep online value stored by an older version is neither loaded nor sent", () => {
+    const f = initialForm({ ...M, settings: { USER_TOKEN_KEEP_ONLINE: 2 } }, "edit");
+    expect("USER_TOKEN_KEEP_ONLINE" in f.settings).toBe(false);
+    expect("USER_TOKEN_KEEP_ONLINE" in buildPayload(f).settings).toBe(false);
+    expect("USER_TOKEN_KEEP_ONLINE" in initialForm({ ...M, settings: { USER_TOKEN_KEEP_ONLINE: 2 } }, "clone").settings).toBe(false);
   });
 
   it("normalizes presence to the four values", () => {
@@ -117,13 +113,10 @@ describe("mapping modal model", () => {
   });
 
   it("loads and saves the token pool settings normalized", () => {
-    const f = initialForm({ ...M, settings: { USER_TOKEN_KEEP_ONLINE: "2", USER_TOKEN_PRESENCE: "nope" } }, "edit");
-    expect(f.settings.USER_TOKEN_KEEP_ONLINE).toBe(2);
+    const f = initialForm({ ...M, settings: { USER_TOKEN_PRESENCE: "nope" } }, "edit");
     expect(f.settings.USER_TOKEN_PRESENCE).toBe("random");
-    f.settings.USER_TOKEN_KEEP_ONLINE = "-1";
     f.settings.USER_TOKEN_PRESENCE = "busy";
     const p = buildPayload(f);
-    expect(p.settings.USER_TOKEN_KEEP_ONLINE).toBe(0);
     expect(p.settings.USER_TOKEN_PRESENCE).toBe("busy");
   });
 
