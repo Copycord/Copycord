@@ -1,6 +1,6 @@
 // "Token Message Cloning" section of the mapping modal (#user-tokens-section): the
 // USE_USER_TOKENS switch, strategy, sticky options, delays, the per mapping token manager and the
-// warm pool options (Keep online, Token status, Rotate status). Live account status is on the System page.
+// warm pool options (Token status, Rotate status; every working token is kept online). Live account status is on the System page.
 // The option values live in the mapping form state, so Save sends them with the rest. The
 // token list is server state: add, bulk add, enable, remove, verify and delete all go straight
 // to /api/guild-mappings/{id}/user-tokens. Only masked values are shown and nothing is logged.
@@ -20,7 +20,7 @@ import type { MappingSettingValue, MappingSettings } from "../../../../types/das
 import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
 import { ToolbarSelect } from "../../../channels/ToolbarSelect";
-import { normalizeKeepOnline, normalizePresence, normalizeStrategy, toBool } from "./model";
+import { normalizePresence, normalizeStrategy, toBool } from "./model";
 import { DESC, ROW, SECTION, SectionSummary, Switch, ToggleRow } from "./parts";
 import {
   BULK_LABELS,
@@ -273,17 +273,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
   }, [menuOpen]);
 
   const shown = useMemo(() => filterTokens(tokens ?? [], query), [tokens, query]);
-
-  const enabledIds = useMemo(() => (tokens ?? []).filter((t) => t.enabled).map((t) => t.id), [tokens]);
-  const keepOnline = normalizeKeepOnline(settings.USER_TOKEN_KEEP_ONLINE);
   const presence = normalizePresence(settings.USER_TOKEN_PRESENCE);
-  // Without a token list (create, clone, still loading) there is no ceiling yet.
-  const keepMax = tokens === null ? undefined : enabledIds.length;
-
-  const setKeepOnline = (raw: string) => {
-    const n = raw.trim() === "" ? 0 : normalizeKeepOnline(raw);
-    setSetting("USER_TOKEN_KEEP_ONLINE", keepMax === undefined ? n : Math.min(n, keepMax));
-  };
 
   const addToken = async () => {
     if (!mappingId) return;
@@ -760,26 +750,6 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
         </div>
 
         <div id="user-token-pool" className="user-token-pool mt-1.5">
-          <div className={ROW}>
-            <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
-              <label htmlFor="ut_keep_online" className="mapping-toggle-name text-[13px] font-medium text-text">
-                Keep online
-              </label>
-              <span className={DESC}>Accounts held connected so sends start at once. 0 turns it off.</span>
-            </div>
-            <div className="user-token-keep flex flex-none items-center">
-              <input
-                type="number"
-                id="ut_keep_online"
-                className={NUM}
-                min={0}
-                max={keepMax}
-                step={1}
-                value={keepOnline}
-                onChange={(e) => setKeepOnline(e.target.value)}
-              />
-            </div>
-          </div>
           <div className={ROW}>
             <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
               <label htmlFor="ut_presence" className="mapping-toggle-name text-[13px] font-medium text-text">
