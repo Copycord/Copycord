@@ -498,13 +498,8 @@ class UserTokenSender:
             token,
             f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}",
             method="PATCH",
-            json_body={
-                "content": text,
-                "allowed_mentions": {
-                    "parse": ["users", "roles", "everyone"],
-                    "replied_user": False,
-                },
-            },
+            # The web client's edit carries the content and nothing else.
+            json_body={"content": text},
             timeout=30,
             ctx=f"editing message {message_id}",
             use_proxy=use_proxy,

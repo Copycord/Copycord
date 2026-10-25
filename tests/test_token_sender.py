@@ -1195,6 +1195,28 @@ class TestReplyPayload:
             "replied_user": False,
         }
 
+
+def test_edit_body_is_the_content_alone():
+    """The web client's PATCH of a message carries {"content"} and no allowed_mentions."""
+    import asyncio
+
+    s = _make_sender()
+    seen = {}
+
+    async def fake_request(token, url, **kwargs):
+        seen["method"] = kwargs.get("method")
+        seen["body"] = kwargs.get("json_body")
+        return 200, None
+
+    s._token_value_for = lambda *a, **k: "tok"
+    s._request_with_token = fake_request
+    asyncio.run(
+        s.edit_message(mapping_id="m", channel_id=1, message_id=2, token_id="t", content="900p36546")
+    )
+    assert seen["method"] == "PATCH"
+    assert seen["body"] == {"content": "900p36546"}
+
+
 class TestBodyKeyOrder:
     """Captured bodies are not uniformly ordered.
 
