@@ -857,7 +857,8 @@ class TestForeground:
         await asyncio.sleep(0.02)
         await stop(client, task)
 
-        assert focus_delays == [(2.0, 10.0)]
+        assert focus_delays == [sc_gateway.FOREGROUND_DELAY]
+        assert sc_gateway.FOREGROUND_DELAY == (0.5, 3.0)
         frames = _focus_frames(ws)
         hb = client.heartbeat_session_id
         assert [m["op"] for m in frames] == [40, 41, 40, 8]

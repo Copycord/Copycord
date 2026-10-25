@@ -80,8 +80,8 @@ LAG_WARN_MS = 250.0
 LAG_GAP_FACTOR = 2.0
 
 # A pool session sends only once its gateway tab is focused, or this long after
-# READY if the focus never came (it is due 2 to 10 s after READY).
-FOREGROUND_GRACE = 12.0
+# READY if the focus never came (it is due 0.5 to 3 s after READY).
+FOREGROUND_GRACE = 5.0
 
 # Every pool session's gateway focuses its tab after READY; other selfclient
 # users keep the unfocused default.

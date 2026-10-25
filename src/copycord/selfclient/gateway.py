@@ -122,9 +122,10 @@ QOS_VERSION = 31
 PRESENCE_DELAY = 90.0
 
 # Seconds after READY before a foreground client focuses its tab, drawn per
-# socket. The 2026-10-24 login capture focused 2 s after its first op 40 and
-# 10 s after IDENTIFY.
-FOREGROUND_DELAY = (2.0, 10.0)
+# socket. Kept short so a warm pool token can send soon after it connects; the
+# draw still spreads a burst of connects. The 2026-10-24 login capture focused
+# 2 s after its first op 40 and 10 s after IDENTIFY.
+FOREGROUND_DELAY = (0.5, 3.0)
 
 # op 40 `qos.reasons` of a focused tab.
 FOREGROUND_REASONS = ("foregrounded",)
