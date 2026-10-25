@@ -133,11 +133,168 @@ def test_missing_git_off_windows_raises_with_the_package_manager(monkeypatch, ne
     _, seen = net
     monkeypatch.setattr(git_runtime, "_windows", lambda: False)
     monkeypatch.setattr(git_runtime.sys, "platform", "linux")
+    monkeypatch.setattr(git_runtime.ui, "is_interactive", lambda: False)
     monkeypatch.setattr(git_runtime.shutil, "which",
                         lambda name: "/usr/bin/dnf" if name == "dnf" else None)
     with pytest.raises(git_runtime.GitError, match="sudo dnf install git"):
         git_runtime.ensure_git()
     assert seen == []
+
+
+class Pkg:
+    """A fake Linux or macOS machine: the tools on PATH, root or not, and every command run."""
+
+    def __init__(self, monkeypatch, platform="linux", tools=("apt-get", "sudo"), root=False):
+        self.tools = set(tools)
+        self.calls = []
+        self.fail = {}  # argv[0] after sudo -n -> exit code
+        monkeypatch.setattr(git_runtime, "_windows", lambda: False)
+        monkeypatch.setattr(git_runtime.sys, "platform", platform)
+        monkeypatch.setattr(git_runtime.ui, "is_interactive", lambda: True)
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.setattr(git_runtime, "_is_root", lambda: root)
+        monkeypatch.setattr(git_runtime, "_git_version", lambda git: "2.43.0")
+        monkeypatch.setattr(git_runtime.shutil, "which",
+                            lambda name: f"/usr/bin/{name}" if name in self.tools else None)
+        monkeypatch.setattr(git_runtime.subprocess, "run", self.run)
+
+    def run(self, argv, **kwargs):
+        argv = list(argv)
+        self.calls.append(argv)
+        cmd = argv[2:] if argv[:2] == ["sudo", "-n"] else argv
+        if cmd[0] == "env":
+            cmd = cmd[2:]
+        rc = self.fail.get(cmd[0], 0)
+        if rc == 0 and "git" in cmd and cmd[0] != "sudo":
+            self.tools.add("git")
+        return git_runtime.subprocess.CompletedProcess(argv, rc, "E: something broke\n" if rc else "")
+
+
+APT = "env DEBIAN_FRONTEND=noninteractive apt-get".split()
+
+
+def test_non_interactive_raises_the_hint_and_runs_nothing(monkeypatch):
+    pkg = Pkg(monkeypatch)
+    monkeypatch.setattr(git_runtime.ui, "is_interactive", lambda: False)
+    with pytest.raises(git_runtime.GitError, match="sudo apt install git"):
+        git_runtime.ensure_git()
+    assert pkg.calls == []
+
+
+@pytest.mark.parametrize("ci", ["1", "true"])
+def test_ci_never_installs(monkeypatch, ci):
+    pkg = Pkg(monkeypatch)
+    monkeypatch.setenv("CI", ci)
+    with pytest.raises(git_runtime.GitError, match="sudo apt install git"):
+        git_runtime.ensure_git()
+    assert pkg.calls == []
+
+
+def test_interactive_false_wins_over_a_terminal(monkeypatch):
+    pkg = Pkg(monkeypatch)
+    with pytest.raises(git_runtime.GitError, match="git is not installed"):
+        git_runtime.ensure_git(interactive=False)
+    assert pkg.calls == []
+
+
+def test_apt_asks_sudo_then_updates_and_installs(monkeypatch, capsys):
+    pkg = Pkg(monkeypatch)
+    assert git_runtime.ensure_git() == Path("/usr/bin")
+    assert pkg.calls == [
+        ["sudo", "-v"],
+        ["sudo", "-n", *APT, "update", "-qq"],
+        ["sudo", "-n", *APT, "install", "-y", "-qq", "git"],
+    ]
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "needs administrator rights to install git with apt-get" in text
+    assert "installing git with apt-get" in text
+    assert "installed git 2.43.0" in text
+    assert text.index("administrator rights") < text.index("installed git")
+
+
+def test_root_skips_sudo(monkeypatch):
+    pkg = Pkg(monkeypatch, tools=("apt-get",), root=True)
+    assert git_runtime.ensure_git() == Path("/usr/bin")
+    assert pkg.calls == [[*APT, "update", "-qq"], [*APT, "install", "-y", "-qq", "git"]]
+
+
+def test_no_sudo_and_not_root_is_a_clear_error(monkeypatch):
+    pkg = Pkg(monkeypatch, tools=("apt-get",))
+    with pytest.raises(git_runtime.GitError, match="sudo is not installed; install sudo or run this again as root"):
+        git_runtime.ensure_git()
+    assert pkg.calls == []
+
+
+def test_sudo_refused_installs_nothing(monkeypatch):
+    pkg = Pkg(monkeypatch)
+    pkg.fail["sudo"] = 1
+    with pytest.raises(git_runtime.GitError, match=r"sudo did not get administrator rights \(exit 1\)"):
+        git_runtime.ensure_git()
+    assert pkg.calls == [["sudo", "-v"]]
+
+
+@pytest.mark.parametrize("tools, commands", [
+    (("apk",), [["apk", "add", "--no-cache", "git"]]),
+    (("apt-get",), [[*APT, "update", "-qq"], [*APT, "install", "-y", "-qq", "git"]]),
+    (("pacman",), [["pacman", "-Sy", "--noconfirm", "git"]]),
+    (("dnf",), [["dnf", "install", "-y", "-q", "git"]]),
+    (("yum",), [["yum", "install", "-y", "-q", "git"]]),
+    # The first one found wins.
+    (("apk", "apt-get", "dnf"), [["apk", "add", "--no-cache", "git"]]),
+    (("dnf", "yum"), [["dnf", "install", "-y", "-q", "git"]]),
+])
+def test_each_package_manager(monkeypatch, tools, commands):
+    pkg = Pkg(monkeypatch, tools=(*tools, "sudo"))
+    git_runtime.ensure_git()
+    assert pkg.calls == [["sudo", "-v"]] + [["sudo", "-n", *c] for c in commands]
+
+
+def test_no_known_package_manager_gives_the_hint(monkeypatch):
+    pkg = Pkg(monkeypatch, tools=("sudo",))
+    with pytest.raises(git_runtime.GitError, match="no known package manager.*your package manager"):
+        git_runtime.ensure_git()
+    assert pkg.calls == []
+
+
+def test_macos_uses_brew_without_sudo(monkeypatch):
+    pkg = Pkg(monkeypatch, platform="darwin", tools=("brew", "sudo"))
+    assert git_runtime.ensure_git() == Path("/usr/bin")
+    assert pkg.calls == [["brew", "install", "git"]]
+
+
+def test_macos_without_brew_gives_the_hint(monkeypatch):
+    pkg = Pkg(monkeypatch, platform="darwin", tools=("sudo",))
+    with pytest.raises(git_runtime.GitError, match="Homebrew is not installed.*xcode-select --install"):
+        git_runtime.ensure_git()
+    assert pkg.calls == []
+
+
+def test_package_manager_failure_names_it_and_the_exit_code(monkeypatch):
+    pkg = Pkg(monkeypatch, tools=("dnf", "sudo"))
+    pkg.fail["dnf"] = 7
+    with pytest.raises(git_runtime.GitError, match=r"dnf could not install git \(exit 7\): E: something broke"):
+        git_runtime.ensure_git()
+
+
+def test_installed_but_not_on_path(monkeypatch):
+    Pkg(monkeypatch, platform="darwin", tools=("brew",))
+    monkeypatch.setattr(git_runtime.subprocess, "run",
+                        lambda argv, **kw: git_runtime.subprocess.CompletedProcess(argv, 0, ""))
+    with pytest.raises(git_runtime.GitError, match="not on PATH"):
+        git_runtime.ensure_git()
+
+
+def test_windows_never_uses_a_package_manager(home, net, monkeypatch):
+    responses, _ = net
+    data = mingit_zip()
+    sha = hashlib.sha256(data).hexdigest()
+    responses[RELEASE_URL] = release(sha)
+    responses[ZIP_URL] = data
+    monkeypatch.setattr(git_runtime.ui, "is_interactive", lambda: True)
+    monkeypatch.setattr(git_runtime, "install_via_package_manager",
+                        lambda *a, **k: pytest.fail("package manager used on Windows"))
+    assert git_runtime.ensure_git() == home / "git" / NAME[: -len(".zip")] / "cmd"
 
 
 def test_install_hints():
