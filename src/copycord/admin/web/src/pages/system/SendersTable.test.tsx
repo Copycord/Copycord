@@ -455,7 +455,8 @@ describe("SendersTable header and search", () => {
 
 describe("SendersTable enabled chip", () => {
   const chip = () => document.getElementById("system-senders-chip");
-  const label = () => chip()?.querySelector("[data-chip-label]")?.textContent;
+  // The loaded chip's label; the loading box holds the same labels, unseen, for its size.
+  const label = () => document.querySelector("#system-senders-chip[data-section-chip] [data-chip-label]")?.textContent;
   const cells = (el: Element) => [...el.children].map((c) => [c.textContent, c.getAttribute("class")]);
   const BASE = ["inline-grid", "shrink-0", "rounded-[20px]", "px-2.5", "py-1", "text-[11px]", "leading-none", "font-semibold"];
 
