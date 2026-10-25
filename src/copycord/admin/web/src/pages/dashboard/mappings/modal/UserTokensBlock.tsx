@@ -562,6 +562,14 @@ export function UserTokensBlock({
           <strong className="text-warn">Proxies:</strong> Token message cloning requires proxies. Without them the mapping falls
           back to the default webhook behavior. Configure proxies in the Proxy section of the dashboard.
         </div>
+        <div className="user-token-system-notice mb-3 rounded-input border border-info/35 bg-info-a12 px-3 py-2.5 text-xs leading-normal text-text">
+          <strong className="text-info">Accounts:</strong> Each account's status, online time, last send and messages sent are
+          listed in the Token Message Cloning table on the{" "}
+          <a href="/system" target="_blank" rel="noopener noreferrer" className="text-info underline-offset-2 hover:underline">
+            System page
+          </a>
+          .
+        </div>
 
         <ToggleRow
           id="map_USE_USER_TOKENS"

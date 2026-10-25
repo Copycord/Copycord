@@ -34,6 +34,16 @@ describe("UserTokensBlock proxy notice", () => {
     expect(notice).toHaveTextContent("default webhook behavior");
     expect(notice).toHaveTextContent("Configure proxies");
   });
+
+  it("points to the System page table in a card after the proxy notice, opening a new tab", () => {
+    renderBlock({});
+    const card = document.querySelector(".user-token-proxy-notice")!.nextElementSibling as HTMLElement;
+    expect(card).toHaveClass("user-token-system-notice");
+    expect(card).toHaveTextContent("Token Message Cloning table");
+    const link = within(card).getByRole("link", { name: "System page" });
+    expect(link).toHaveAttribute("href", "/system");
+    expect(link).toHaveAttribute("target", "_blank");
+  });
 });
 
 describe("UserTokensBlock sticky per author", () => {
