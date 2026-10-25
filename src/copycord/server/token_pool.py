@@ -24,7 +24,11 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from copycord.common.proxy_pool import get_pool as get_proxy_pool
-from copycord.common.token_proxy import NoProxyAvailable
+from copycord.common.token_proxy import (
+    NoProxyAvailable,
+    notice_tokens_disabled,
+    proxies_configured,
+)
 from copycord.selfclient import Client
 from copycord.selfclient.errors import ConnectionClosed, HTTPException, LoginFailure
 
@@ -60,6 +64,8 @@ READY_TIMEOUT = 60.0
 
 BACKOFF_BASE = 5.0
 BACKOFF_CAP = 300.0
+# Sessions with no free proxy share one warning per this many seconds.
+PROXY_WARN_INTERVAL = 60.0
 
 LAG_INTERVAL = 1.0
 LAG_WARN_MS = 250.0
@@ -136,6 +142,8 @@ class _Session:
         # Set on a socket drop, cleared on READY or RESUMED.
         self.dropped = False
         self.failures = 0
+        # Set while its last attempt ended with NoProxyAvailable.
+        self.waiting_proxy = False
 
     def set_state(self, state: str) -> None:
         if state != self.state:
@@ -205,6 +213,8 @@ class TokenSessionPool:
         self._shuffle_due: Dict[str, float] = {}
         self._last_shuffle: Optional[float] = None
         self._shuffle_task: Optional[asyncio.Task] = None
+        # When the waiting-for-a-proxy warning was last logged, on ``_clock``.
+        self._proxy_warned_at: Optional[float] = None
         self._connecting = 0
         self._lag_warned = False
         self._widen_next_gap = False
@@ -459,15 +469,42 @@ class TokenSessionPool:
                 sess.failures += 1
                 delay = min(BACKOFF_CAP, BACKOFF_BASE * (2 ** (sess.failures - 1)))
                 delay = min(BACKOFF_CAP, delay * self._rng.uniform(1.0, 1.25))
-                self._log.warning(
-                    "[token-pool] Session %s ended (%s); retrying in %.0fs",
-                    sess.key,
-                    type(exc).__name__ if exc is not None else "closed",
-                    delay,
-                )
+                sess.waiting_proxy = isinstance(exc, NoProxyAvailable)
+                if sess.waiting_proxy:
+                    self._log.debug(
+                        "[token-pool] Session %s has no proxy; retrying in %.0fs",
+                        sess.key,
+                        delay,
+                    )
+                    self._warn_waiting_proxy()
+                else:
+                    self._log.warning(
+                        "[token-pool] Session %s ended (%s); retrying in %.0fs",
+                        sess.key,
+                        type(exc).__name__ if exc is not None else "closed",
+                        delay,
+                    )
                 await _sleep(delay)
         finally:
             await self._teardown(sess)
+
+    def _warn_waiting_proxy(self) -> None:
+        """One warning per PROXY_WARN_INTERVAL with how many sessions wait for a proxy; the notice when there are none."""
+        if not proxies_configured(self._proxy_pool):
+            notice_tokens_disabled(self._log)
+            return
+        now = self._clock()
+        last = self._proxy_warned_at
+        if last is not None and now - last < PROXY_WARN_INTERVAL:
+            return
+        self._proxy_warned_at = now
+        waiting = sum(1 for s in self._sessions.values() if s.waiting_proxy)
+        self._log.warning(
+            "[token-pool] %d token(s) are waiting for a free proxy (%d proxies configured, %d needed)",
+            waiting,
+            int(getattr(self._proxy_pool, "total", 0) or 0),
+            len(self._sessions),
+        )
 
     async def _connect_once(self, sess: _Session) -> None:
         """Start one connect under the gate, wait for READY, then hold the gate for the stagger gap."""
@@ -508,6 +545,7 @@ class TokenSessionPool:
                     ready.cancel()
                 if sess.is_online():
                     sess.failures = 0
+                    sess.waiting_proxy = False
                     sess.set_state(STATE_ONLINE)
                     self._arm_shuffle(sess.key)
                     self._log.info(
