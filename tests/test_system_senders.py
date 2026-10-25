@@ -185,7 +185,7 @@ def test_endpoint_merges_live_pool_and_never_returns_token_values(tc, monkeypatc
 
 
 def test_endpoint_passes_every_pool_presence_through(tc, monkeypatch):
-    statuses = ["online", "idle", "dnd", "invisible"]
+    statuses = ["online", "idle", "dnd"]
     rows = [_row(f"t{i}", f"V{i}", username=f"u{i}") for i in range(len(statuses))]
     monkeypatch.setattr(app_module, "db", FakeDB(rows))
     pool = _pool(**{f"t{i}": _entry("online", presence=s) for i, s in enumerate(statuses)})

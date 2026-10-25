@@ -36,14 +36,17 @@ class FakePool:
     def __init__(self, online=()):
         self.online = set(online)
         self.ensured = []
+        # token_id -> the rotate flag of its last ensure
+        self.rotate = {}
         self.closed = []
         self.close_all_calls = 0
         self.gate = None
 
-    async def ensure(self, token_id, token_value, *, keep_online, presence):
+    async def ensure(self, token_id, token_value, *, keep_online, presence, rotate=False):
         if self.gate is not None:
             await self.gate.wait()
         self.ensured.append((token_id, token_value, keep_online, presence))
+        self.rotate[token_id] = rotate
 
     async def close(self, token_id):
         self.closed.append(token_id)
@@ -104,13 +107,16 @@ class FakeProxies:
         return self.leases.get(token)
 
 
-def _settings(keep=5, presence="random", proxy=False, use=True):
-    return {
+def _settings(keep=5, presence="random", proxy=False, use=True, rotate=None):
+    settings = {
         "USE_USER_TOKENS": use,
         "USER_TOKEN_KEEP_ONLINE": keep,
         "USER_TOKEN_PRESENCE": presence,
         "USER_TOKEN_USE_PROXIES": proxy,
     }
+    if rotate is not None:
+        settings["USER_TOKEN_PRESENCE_ROTATE"] = rotate
+    return settings
 
 
 @pytest.fixture
@@ -176,6 +182,34 @@ def test_plan_unions_mappings_and_always_proxies(srv):
     assert x["presence"] == "busy"
 
 
+def test_plan_rotate_is_on_if_any_mapping_sharing_the_token_has_it_on(srv):
+    plan = srv.plan_token_pool(
+        [
+            _m("m1", _settings(keep=2, rotate=False), ("1", "X"), ("2", "Y")),
+            _m("m2", _settings(keep=2, presence="busy", rotate=True), ("3", "X"), ("4", "Z")),
+            _m("m3", _settings(keep=1), ("5", "W")),
+        ]
+    )
+    x = plan["tokens"]["X"]
+    assert x["rotate"] is True
+    # presence still follows the first mapping
+    assert x["presence"] == "random"
+    assert plan["tokens"]["Y"]["rotate"] is False
+    assert plan["tokens"]["Z"]["rotate"] is True
+    # missing setting means off
+    assert plan["tokens"]["W"]["rotate"] is False
+
+
+@pytest.mark.parametrize(
+    "value,on",
+    [(True, True), (1, True), ("true", True), ("True", True), ("1", True),
+     (False, False), (0, False), ("false", False), ("", False), (None, False), ("0", False)],
+)
+def test_plan_reads_rotate_bool_ish(srv, value, on):
+    plan = srv.plan_token_pool([_m("m1", _settings(keep=1, rotate=value), ("1", "X"))])
+    assert plan["tokens"]["X"]["rotate"] is on
+
+
 def test_plan_counts_a_shared_token_once(srv):
     plan = srv.plan_token_pool(
         [
@@ -220,18 +254,38 @@ def test_plan_skips_dead_tokens_and_mappings_without_user_tokens(srv):
 async def test_reconcile_ensures_wanted_tokens_with_presence_and_global_keep(make_rx):
     rx = make_rx(
         [
-            ("m1", _settings(keep=1, presence="invisible"), [("1", "X", True), ("2", "Y", True)]),
+            ("m1", _settings(keep=1, presence="idle"), [("1", "X", True), ("2", "Y", True)]),
             ("m2", _settings(keep=2, presence="busy"), [("3", "Z", True), ("4", "W", True)]),
         ]
     )
     await rx._reconcile_token_pool()
 
     assert rx.token_pool.ensured == [
-        ("1", "X", 3, "invisible"),
+        ("1", "X", 3, "idle"),
         ("3", "Z", 3, "busy"),
         ("4", "W", 3, "busy"),
     ]
     assert rx._pool_ids == {"1", "3", "4"}
+    # rotation is off unless a mapping turns it on
+    assert rx.token_pool.rotate == {"1": False, "3": False, "4": False}
+
+
+@pytest.mark.asyncio
+async def test_reconcile_passes_rotate_ored_across_mappings(make_rx):
+    rx = make_rx(
+        [
+            ("m1", _settings(keep=1, rotate=False), [("1", "X", True)]),
+            ("m2", _settings(keep=2, rotate="true"), [("2", "X", True), ("3", "Y", True)]),
+            ("m3", _settings(keep=1), [("4", "Z", True)]),
+        ]
+    )
+    await rx._reconcile_token_pool()
+    assert rx.token_pool.rotate == {"1": True, "2": True, "3": True, "4": False}
+
+    # turning it off in m2 turns it off for the shared token on the next reconcile
+    rx.db.mappings[1] = ("m2", _settings(keep=2, rotate=False), rx.db.mappings[1][2])
+    await rx._reconcile_token_pool()
+    assert rx.token_pool.rotate == {"1": False, "2": False, "3": False, "4": False}
     assert rx.token_pool.close_all_calls == 0
 
 

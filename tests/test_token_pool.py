@@ -289,7 +289,8 @@ async def test_loop_lag_during_connect_warns_once_and_widens_next_gap(pool, capl
 
 @pytest.mark.parametrize(
     "presence,status",
-    [("online", "online"), ("idle", "idle"), ("busy", "dnd"), ("invisible", "invisible")],
+    # a stored invisible (the status was removed) now means online
+    [("online", "online"), ("idle", "idle"), ("busy", "dnd"), ("invisible", "online")],
 )
 async def test_presence_maps_to_discord_status(pool, fakes, presence, status):
     try:
@@ -489,19 +490,24 @@ async def test_weighted_pick_covers_idle_and_follows_the_weights():
     counts = {s: 0 for s in RANDOM_STATUSES}
     for _ in range(4000):
         counts[token_pool._pick_status(rng)] += 1
-    assert set(RANDOM_STATUSES) == {"online", "idle", "dnd", "invisible"}
+    assert set(RANDOM_STATUSES) == {"online", "idle", "dnd"}
     assert all(n > 0 for n in counts.values())
-    assert counts["online"] > counts["idle"] > counts["invisible"] > counts["dnd"]
+    assert counts["online"] > counts["idle"] > counts["dnd"]
     weights = dict(zip(RANDOM_STATUSES, token_pool.RANDOM_WEIGHTS))
-    assert weights == {"online": 50, "idle": 25, "dnd": 10, "invisible": 15}
+    assert weights == {"online": 50, "idle": 25, "dnd": 10}
+    assert "invisible" not in token_pool.PRESENCE_STATUS
+    assert set(token_pool.PRESENCE_STATUS) == {"online", "idle", "busy"}
 
 
 async def test_weighted_pick_never_repeats_the_excluded_status():
     rng = random.Random(3)
+    assert len(RANDOM_STATUSES) == 3
     for current in RANDOM_STATUSES:
         picks = {token_pool._pick_status(rng, exclude=current) for _ in range(300)}
         assert current not in picks
+        # the other two statuses both come up
         assert picks == set(RANDOM_STATUSES) - {current}
+        assert len(picks) == 2
 
 
 async def test_unknown_presence_falls_back_to_random(pool):
@@ -509,6 +515,26 @@ async def test_unknown_presence_falls_back_to_random(pool):
     assert pool._status_for("k1", "sleepy") in RANDOM_STATUSES
     assert pool._status_for("k1", "") == pool._status_for("k1", "random")
     assert pool._status_for("k2", " IDLE ") == "idle"
+
+
+async def test_stored_invisible_means_online_and_never_rotates(pool, fakes, clock):
+    assert pool._status_for("k1", "invisible") == "online"
+    assert pool._status_for("k1", " Invisible ") == "online"
+    assert token_pool._presence_mode("invisible") == "online"
+    assert token_pool._presence_mode("sleepy") == "random"
+    try:
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="invisible", rotate=True)
+        await until(lambda: pool.online_ids() == {"t1"})
+        await settle()
+        client = fakes.clients[0]
+        assert client.kwargs["status"] == "online"
+        assert pool.snapshot()["tokens"]["t1"]["presence"] == "online"
+        assert pool._shuffle_due == {}
+        clock[0] += 10 * token_pool.SHUFFLE_MAX_S
+        await settle()
+        assert client.presence_changes == []
+    finally:
+        await pool.close_all()
 
 
 # random status reshuffle
@@ -601,10 +627,10 @@ async def test_two_due_tokens_change_at_least_10_seconds_apart(pool, fakes, cloc
 
 async def test_fixed_modes_never_change(pool, fakes, clock):
     try:
-        for i, presence in enumerate(("online", "idle", "busy", "invisible")):
+        for i, presence in enumerate(("online", "idle", "busy")):
             # rotate on changes nothing for a fixed status
-            await pool.ensure(f"t{i}", f"tok-{i}", keep_online=4, presence=presence, rotate=True)
-        await until(lambda: len(pool.online_ids()) == 4)
+            await pool.ensure(f"t{i}", f"tok-{i}", keep_online=3, presence=presence, rotate=True)
+        await until(lambda: len(pool.online_ids()) == 3)
         await settle()
         assert pool._shuffle_due == {}
         assert pool._shuffle_task is None
