@@ -137,28 +137,13 @@ class _FakeRateLimit:
         return None
 
 
-class TestSelectionStrategies:
-
-    def test_round_robin_rotates_evenly(self):
-        s = _make_sender()
-        toks = [{"token_id": "a"}, {"token_id": "b"}, {"token_id": "c"}]
-        firsts = [
-            s._order_tokens(toks, 1, "round_robin", None)[0]["token_id"]
-            for _ in range(6)
-        ]
-        assert firsts == ["a", "b", "c", "a", "b", "c"]
-
-    def test_round_robin_independent_per_channel(self):
-        s = _make_sender()
-        toks = [{"token_id": "a"}, {"token_id": "b"}]
-        s._order_tokens(toks, 1, "round_robin", None)
-        assert s._order_tokens(toks, 2, "round_robin", None)[0]["token_id"] == "a"
+class TestStickyPerAuthor:
 
     def test_sticky_author_is_consistent(self):
         s = _make_sender()
         toks = [{"token_id": "a"}, {"token_id": "b"}, {"token_id": "c"}]
-        f1 = s._order_tokens(toks, 1, "sticky_author", "user123")[0]["token_id"]
-        f2 = s._order_tokens(toks, 1, "sticky_author", "user123")[0]["token_id"]
+        f1 = s._order_tokens(toks, 1, "user123")[0]["token_id"]
+        f2 = s._order_tokens(toks, 1, "user123")[0]["token_id"]
         assert f1 == f2
 
     def test_sticky_author_distinct_authors_get_distinct_tokens(self):
@@ -166,24 +151,44 @@ class TestSelectionStrategies:
         s = _make_sender()
         toks = [{"token_id": "a"}, {"token_id": "b"}, {"token_id": "c"}]
         picks = [
-            s._order_tokens(toks, 1, "sticky_author", a)[0]["token_id"]
+            s._order_tokens(toks, 1, a)[0]["token_id"]
             for a in ("userA", "userB", "userC")
         ]
         assert len(set(picks)) == 3
 
-        assert (
-            s._order_tokens(toks, 1, "sticky_author", "userA")[0]["token_id"]
-            == picks[0]
-        )
+        assert s._order_tokens(toks, 1, "userA")[0]["token_id"] == picks[0]
 
     def test_sticky_author_scoped_per_mapping(self):
         s = _make_sender()
         toks_x = [{"token_id": "x1"}, {"token_id": "x2"}]
         toks_y = [{"token_id": "y1"}, {"token_id": "y2"}]
-        px = s._order_tokens(toks_x, 1, "sticky_author", "u", "mapX")[0]["token_id"]
-        py = s._order_tokens(toks_y, 1, "sticky_author", "u", "mapY")[0]["token_id"]
+        px = s._order_tokens(toks_x, 1, "u", "mapX")[0]["token_id"]
+        py = s._order_tokens(toks_y, 1, "u", "mapY")[0]["token_id"]
         assert px in ("x1", "x2")
         assert py in ("y1", "y2")
+
+    def test_no_author_always_takes_the_first_token_by_id(self):
+        s = _make_sender()
+        toks = [{"token_id": "c"}, {"token_id": "a"}, {"token_id": "b"}]
+        orders = [
+            [t["token_id"] for t in s._order_tokens(toks, 1, None)] for _ in range(4)
+        ]
+        assert orders == [["a", "b", "c"]] * 4
+        assert s._sticky_author_token == {}
+
+    def test_sender_has_no_round_robin_state(self):
+        s = _make_sender()
+        assert not hasattr(s, "_rr_index_by_channel")
+
+    def test_send_has_no_strategy_parameter(self):
+        import inspect
+
+        for fn in (
+            UserTokenSender.send,
+            UserTokenSender.create_forum_thread,
+            UserTokenSender.create_text_thread,
+        ):
+            assert "strategy" not in inspect.signature(fn).parameters
 
 
 @pytest.mark.asyncio
@@ -241,7 +246,7 @@ async def test_links_only_skips_upload(monkeypatch):
 @pytest.mark.asyncio
 async def test_forced_token_id_is_tried_first(monkeypatch):
     """When the identity manager pre-selects a token, that account posts,
-    regardless of the strategy ordering."""
+    regardless of the sticky ordering."""
 
     class _DB:
         def get_enabled_mapping_tokens(self, mapping_id):
@@ -289,7 +294,6 @@ async def test_forced_token_id_is_tried_first(monkeypatch):
         mapping_id="m",
         target_channel_id=1,
         content="hi",
-        strategy="round_robin",
         forced_token_id="c",
     )
     assert ok == SEND_OK
@@ -594,67 +598,6 @@ async def test_send_serializes_typing_then_send_per_channel():
 
 
 @pytest.mark.asyncio
-async def test_no_consecutive_repeat_same_channel(monkeypatch):
-    """With multiple tokens, the same account should not be picked twice in a
-    row for one channel."""
-
-    class _DB:
-        def get_enabled_mapping_tokens(self, mapping_id):
-            return [
-                {"token_id": "a", "token_value": "ta", "username": "A"},
-                {"token_id": "b", "token_value": "tb", "username": "B"},
-                {"token_id": "c", "token_value": "tc", "username": "C"},
-            ]
-
-        def increment_mapping_token_usage(self, tid):
-            return None
-
-    used = []
-
-    async def fake_send_with_token(
-        self,
-        token,
-        channel_id,
-        text,
-        attachments,
-        *,
-        sticker_ids=None,
-        use_proxy=False,
-        reply_to=None,
-        guild_id=None,
-    ):
-
-        used.append(token)
-        return SEND_OK, 111
-
-    monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send_with_token)
-
-    s = UserTokenSender(
-        db=_DB(),
-        ratelimit=_FakeRateLimit(),
-        action_type="user_message",
-        session_provider=lambda: None,
-        logger=types.SimpleNamespace(
-            debug=lambda *a, **k: None,
-            warning=lambda *a, **k: None,
-            exception=lambda *a, **k: None,
-        ),
-    )
-
-    for _ in range(30):
-        ok = await s.send(
-            mapping_id="m",
-            target_channel_id=555,
-            content="hi",
-            embeds=None,
-            attachments=None,
-        )
-        assert ok == SEND_OK
-
-    assert all(used[i] != used[i + 1] for i in range(len(used) - 1))
-
-
-@pytest.mark.asyncio
 async def test_send_returns_false_without_tokens():
     class _DB:
         def get_enabled_mapping_tokens(self, mapping_id):
@@ -791,7 +734,6 @@ class TestCreateForumThread:
             forum_channel_id=1,
             thread_name="t",
             content="hi",
-            strategy="round_robin",
             forced_token_id="c",
         )
         assert new_id == 5
@@ -973,7 +915,6 @@ class TestCreateTextThread:
             mapping_id="m",
             parent_channel_id=1,
             thread_name="t",
-            strategy="round_robin",
             forced_token_id="b",
         )
         assert new_id == 9

@@ -129,7 +129,7 @@ H2 = "b" * 32
 URL2 = f"https://cdn.discordapp.com/avatars/429748829756325889/{H2}.png"
 MAPPING, AUTHOR, CLONE_GUILD = "m1", "author-1", 5000
 TOKENS = [{"token_id": "t1", "token_value": "TOK1", "user_id": "900"}]
-ON = {"USER_TOKEN_STICKY_AVATAR": True, "USER_TOKEN_STRATEGY": "sticky_author"}
+ON = {"USER_TOKEN_STICKY_AVATAR": True}
 
 
 def _db():

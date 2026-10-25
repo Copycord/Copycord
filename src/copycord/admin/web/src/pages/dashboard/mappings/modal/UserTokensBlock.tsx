@@ -1,6 +1,6 @@
 // "Token Message Cloning" section of the mapping modal (#user-tokens-section): the
-// USE_USER_TOKENS switch, strategy, sticky options, delays, the per mapping token manager and the
-// warm pool options (Keep online, Token status, Rotate status). Live account status is on the System page.
+// USE_USER_TOKENS switch, sticky per author options, delays, the per mapping token manager and the
+// warm pool options (Token status, Rotate status; every working token is kept online). Live account status is on the System page.
 // The option values live in the mapping form state, so Save sends them with the rest. The
 // token list is server state: add, bulk add, enable, remove, verify and delete all go straight
 // to /api/guild-mappings/{id}/user-tokens. Only masked values are shown and nothing is logged.
@@ -20,11 +20,10 @@ import type { MappingSettingValue, MappingSettings } from "../../../../types/das
 import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
 import { ToolbarSelect } from "../../../channels/ToolbarSelect";
-import { normalizeKeepOnline, normalizePresence, normalizeStrategy, toBool } from "./model";
+import { normalizePresence, toBool } from "./model";
 import { DESC, ROW, SECTION, SectionSummary, Switch, ToggleRow } from "./parts";
 import {
   BULK_LABELS,
-  STRATEGY_DESCS,
   brokenIds,
   bulkResultLabel,
   bulkSummary,
@@ -46,13 +45,9 @@ export interface UserTokensBlockProps {
   search: string;
 }
 
-// The strategy dropdown toggle: 34px, 13px, purple caret; the field dropdown adds the caret room.
-const STRATEGY_TOGGLE =
+// The field dropdown toggle: 34px, 13px, purple caret; the field dropdown adds the caret room.
+const SELECT_TOGGLE =
   "user-token-select dd-toggle min-h-[34px] rounded-btn border border-border-input bg-control py-2 pl-2.5 font-sans text-[13px] text-text outline-0 transition-[border,box-shadow,background] duration-200 focus:border-accent";
-const STRATEGIES = [
-  { value: "round_robin", label: "Rotate evenly" },
-  { value: "sticky_author", label: "Sticky per author" },
-];
 
 const PRESENCES = [
   { value: "random", label: "Random" },
@@ -210,8 +205,6 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
   const notify = useNotify();
   const confirm = useSafeConfirm();
   const on = (k: string) => toBool(settings[k]);
-  const strategy = normalizeStrategy(settings.USER_TOKEN_STRATEGY);
-  const sticky = strategy === "sticky_author";
 
   const [tokens, setTokens] = useState<UserToken[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -273,17 +266,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
   }, [menuOpen]);
 
   const shown = useMemo(() => filterTokens(tokens ?? [], query), [tokens, query]);
-
-  const enabledIds = useMemo(() => (tokens ?? []).filter((t) => t.enabled).map((t) => t.id), [tokens]);
-  const keepOnline = normalizeKeepOnline(settings.USER_TOKEN_KEEP_ONLINE);
   const presence = normalizePresence(settings.USER_TOKEN_PRESENCE);
-  // Without a token list (create, clone, still loading) there is no ceiling yet.
-  const keepMax = tokens === null ? undefined : enabledIds.length;
-
-  const setKeepOnline = (raw: string) => {
-    const n = raw.trim() === "" ? 0 : normalizeKeepOnline(raw);
-    setSetting("USER_TOKEN_KEEP_ONLINE", keepMax === undefined ? n : Math.min(n, keepMax));
-  };
 
   const addToken = async () => {
     if (!mappingId) return;
@@ -454,52 +437,26 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
         />
 
         <div id="user-token-options" className="user-token-options mt-1.5">
-          <div className={ROW}>
-            <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
-              <label htmlFor="ut_strategy" className="mapping-toggle-name text-[13px] font-medium text-text">
-                Account selection
-              </label>
-              <span id="ut_strategy_desc" className={DESC}>
-                {STRATEGY_DESCS[strategy]}
-              </span>
-            </div>
-            <div className="w-[200px] max-w-[55%] flex-none">
-              <ToolbarSelect
-                variant="field"
-                id="ut_strategy"
-                value={strategy}
-                options={STRATEGIES}
-                onChange={(v) => setSetting("USER_TOKEN_STRATEGY", v)}
-                toggleClassName={STRATEGY_TOGGLE}
-              />
-            </div>
+          <div id="user-token-sticky-options" className="user-token-sticky-options">
+            {switchRow(
+              "USER_TOKEN_STICKY_NICKNAME",
+              "Mirror author nickname",
+              "Rename the assigned account in the clone server to the host author's display name.",
+              "user_token_sticky_nickname",
+            )}
+            {switchRow(
+              "USER_TOKEN_STICKY_AVATAR",
+              "Mirror author avatar",
+              "Attempt to replace the avatar of the token via API to match the sender.",
+              "user_token_sticky_avatar",
+            )}
+            {switchRow(
+              "USER_TOKEN_STICKY_ROLES",
+              "Mirror author roles",
+              "Give the assigned account the cloned roles that match the host author's roles.",
+              "user_token_sticky_roles",
+            )}
           </div>
-
-          {sticky ? (
-            <div
-              id="user-token-sticky-options"
-              className="user-token-sticky-options mt-0.5 mr-0 mb-0.5 ml-2.5 border-l-2 border-border pl-3"
-            >
-              {switchRow(
-                "USER_TOKEN_STICKY_NICKNAME",
-                "Mirror author nickname",
-                "Rename the assigned account in the clone server to the host author's display name.",
-                "user_token_sticky_nickname",
-              )}
-              {switchRow(
-                "USER_TOKEN_STICKY_AVATAR",
-                "Mirror author avatar",
-                "Attempt to replace the avatar of the token via API to match the sender.",
-                "user_token_sticky_avatar",
-              )}
-              {switchRow(
-                "USER_TOKEN_STICKY_ROLES",
-                "Mirror author roles",
-                "Give the assigned account the cloned roles that match the host author's roles.",
-                "user_token_sticky_roles",
-              )}
-            </div>
-          ) : null}
 
           {switchRow(
             "USER_TOKEN_FALLBACK_WEBHOOK",
@@ -762,26 +719,6 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
         <div id="user-token-pool" className="user-token-pool mt-1.5">
           <div className={ROW}>
             <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
-              <label htmlFor="ut_keep_online" className="mapping-toggle-name text-[13px] font-medium text-text">
-                Keep online
-              </label>
-              <span className={DESC}>Accounts held connected so sends start at once. 0 turns it off.</span>
-            </div>
-            <div className="user-token-keep flex flex-none items-center">
-              <input
-                type="number"
-                id="ut_keep_online"
-                className={NUM}
-                min={0}
-                max={keepMax}
-                step={1}
-                value={keepOnline}
-                onChange={(e) => setKeepOnline(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className={ROW}>
-            <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
               <label htmlFor="ut_presence" className="mapping-toggle-name text-[13px] font-medium text-text">
                 Token status
               </label>
@@ -796,7 +733,7 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                 value={presence}
                 options={PRESENCES}
                 onChange={(v) => setSetting("USER_TOKEN_PRESENCE", v)}
-                toggleClassName={STRATEGY_TOGGLE}
+                toggleClassName={SELECT_TOGGLE}
               />
             </div>
           </div>

@@ -6,12 +6,12 @@ import { ConfirmProvider } from "../../../../components/ui/ConfirmDialog";
 import type { MappingSettings } from "../../../../types/dashboard-mappings";
 import { UserTokensBlock } from "./UserTokensBlock";
 
-function renderBlock(strategy: string) {
+function renderBlock(settings: MappingSettings) {
   const setSetting = vi.fn();
   render(
     <ToastProvider>
       <ConfirmProvider>
-        <UserTokensBlock mappingId={null} settings={{ USER_TOKEN_STRATEGY: strategy }} setSetting={setSetting} search="" />
+        <UserTokensBlock mappingId={null} settings={settings} setSetting={setSetting} search="" />
       </ConfirmProvider>
     </ToastProvider>,
   );
@@ -20,29 +20,25 @@ function renderBlock(strategy: string) {
   return setSetting;
 }
 
-describe("UserTokensBlock account selection", () => {
-  it("is the app dropdown named by its label, keeps the id ut_strategy and saves the picked strategy", () => {
-    const setSetting = renderBlock("round_robin");
-    const select = screen.getByRole("combobox", { name: "Account selection" });
-    expect(select).toHaveAttribute("id", "ut_strategy");
-    expect(select).toHaveTextContent("Rotate evenly");
-    expect(document.querySelector("select")).toBeNull();
+const STICKY_KEYS = ["user_token_sticky_nickname", "user_token_sticky_avatar", "user_token_sticky_roles"];
+const stickyRows = () =>
+  STICKY_KEYS.map((k) => document.querySelector(`#user-token-sticky-options [data-setting-key="${k}"]`));
 
-    fireEvent.click(select);
-    const list = screen.getByRole("listbox");
-    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["Rotate evenly", "Sticky per author"]);
-    fireEvent.click(within(list).getByRole("option", { name: "Sticky per author" }));
-    expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_STRATEGY", "sticky_author");
-    expect(select).toHaveAttribute("aria-expanded", "false");
+describe("UserTokensBlock sticky per author", () => {
+  it("has no account selection dropdown and always shows the three sticky options", () => {
+    renderBlock({});
+    expect(document.getElementById("ut_strategy")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Account selection" })).toBeNull();
+    expect(screen.queryByText("Rotate evenly")).toBeNull();
+    expect(screen.queryByText("Sticky per author")).toBeNull();
+    expect(stickyRows().every((r) => r !== null)).toBe(true);
   });
 
-  it("re-picking the current strategy changes nothing, like a native select", () => {
-    const setSetting = renderBlock("sticky_author");
-    const select = screen.getByRole("combobox", { name: "Account selection" });
-    expect(select).toHaveTextContent("Sticky per author");
-    fireEvent.click(select);
-    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "Sticky per author" }));
-    expect(setSetting).not.toHaveBeenCalled();
+  it("a stored round_robin value from an older version still shows the sticky options and is never written", () => {
+    const setSetting = renderBlock({ USER_TOKEN_STRATEGY: "round_robin" });
+    expect(stickyRows().every((r) => r !== null)).toBe(true);
+    expect(screen.queryByText("Rotate evenly")).toBeNull();
+    expect(setSetting.mock.calls.some(([k]) => k === "USER_TOKEN_STRATEGY")).toBe(false);
   });
 });
 
@@ -104,19 +100,17 @@ function renderPool(settings: Record<string, string | number | boolean> = {}) {
 describe("UserTokensBlock warm pool", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("keep online writes a whole number and clamps to the enabled token count", async () => {
+  it("has no keep online field: Token status then Rotate status follow the token list", async () => {
     mockApi();
     const setSetting = renderPool({ USER_TOKEN_KEEP_ONLINE: 2 });
     await screen.findByText("alpha");
-    const input = screen.getByLabelText("Keep online") as HTMLInputElement;
-    expect(input.value).toBe("2");
-    expect(input).toHaveAttribute("max", "3");
-    fireEvent.change(input, { target: { value: "1" } });
-    expect(setSetting).toHaveBeenLastCalledWith("USER_TOKEN_KEEP_ONLINE", 1);
-    fireEvent.change(input, { target: { value: "9" } });
-    expect(setSetting).toHaveBeenLastCalledWith("USER_TOKEN_KEEP_ONLINE", 3);
-    fireEvent.change(input, { target: { value: "" } });
-    expect(setSetting).toHaveBeenLastCalledWith("USER_TOKEN_KEEP_ONLINE", 0);
+    expect(document.getElementById("ut_keep_online")).toBeNull();
+    expect(screen.queryByText("Keep online")).toBeNull();
+    const pool = document.getElementById("user-token-pool")!;
+    expect(pool.children).toHaveLength(2);
+    expect(pool.children[0]).toHaveTextContent(/^Token status/);
+    expect(pool.children[1]).toHaveAttribute("data-setting-key", "user_token_presence_rotate");
+    expect(setSetting.mock.calls.some(([k]) => k === "USER_TOKEN_KEEP_ONLINE")).toBe(false);
   });
 
   it("token status is the app dropdown and writes USER_TOKEN_PRESENCE", async () => {
@@ -235,14 +229,11 @@ describe("UserTokensBlock warm pool", () => {
 
   it("shows no status dots or online count and never polls the pool; live status is on the System page", async () => {
     const fetchMock = mockApi();
-    renderPool({ USER_TOKEN_KEEP_ONLINE: 5 });
+    renderPool();
     await screen.findByText("alpha");
     expect(document.querySelectorAll("[data-dot], .user-token-dot").length).toBe(0);
-    expect(document.getElementById("ut_keep_online_count")).toBeNull();
     expect(screen.queryByText(/\d+\/\d+ online|^off$/)).toBeNull();
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/status"))).toBe(false);
-    // The keep online field is the only thing in its slot.
-    expect(screen.getByLabelText("Keep online").parentElement!.children).toHaveLength(1);
   });
 
   it("has no proxy switch: token cloning always sends through proxies", async () => {

@@ -172,6 +172,10 @@ class _Session:
 class TokenSessionPool:
     """Keeps up to ``keep_online`` sending tokens connected to the gateway.
 
+    ``keep_online`` is not a user setting: the server passes the number of
+    distinct working tokens it wants online, so in normal use every ensured
+    token gets a slot and the cap only matters to callers that pass less.
+
     ``proxy_for`` is called with the token value before every connect attempt
     and returns the proxy URL to use. None means the token has no proxy, so it
     does not connect: proxies are mandatory, never a direct connection. A None
@@ -235,8 +239,12 @@ class TokenSessionPool:
     ) -> None:
         """Register ``token_id`` and reconcile so at most ``keep_online`` sessions are live.
 
-        Sessions already live keep their slot; free slots go to tokens in the
-        order they were first ensured. ``keep_online <= 0`` closes them all.
+        The caller passes the total count of distinct tokens it wants online in
+        ``keep_online`` (the parameter stays for API stability; it is no longer a
+        user choice). Sessions already live keep their slot; free slots go to
+        tokens in the order they were first ensured. ``keep_online <= 0`` closes
+        them all; the server never sends that while it wants a token online and
+        closes the pool with ``close_all`` when it wants none.
         ``rotate`` lets a ``random`` token change status on the reshuffle clock;
         without it the one random pick is kept. Fixed statuses never rotate.
         """

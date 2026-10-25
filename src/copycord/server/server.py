@@ -166,19 +166,19 @@ def _setting_on(value) -> bool:
     return value is True or value == 1
 
 
-def plan_token_pool(
-    mappings: list[dict], *, skip_values: set = frozenset(), online_values: set = frozenset()
-) -> dict:
+def plan_token_pool(mappings: list[dict], *, skip_values: set = frozenset()) -> dict:
     """Decide which sending tokens the warm pool keeps online.
 
     ``mappings`` holds one dict per mapping, in mapping order, with ``mapping_id``,
     the resolved ``settings`` and its enabled ``tokens`` (``token_id``, ``token_value``).
-    A token value used by several mappings is one entry: its ids and mappings are the
-    union, ``use_proxy`` is always on (proxies are mandatory for tokens), ``keep_online`` is the
-    largest of theirs, ``presence`` is the first mapping's and ``rotate``
-    (``USER_TOKEN_PRESENCE_ROTATE``) is on if any of them has it on. Each mapping wants
-    ``min(keep_online, its tokens)`` online; a token another mapping already wants,
-    then one already online, is picked first so a shared token counts once.
+    Every working token of every mapping with ``USE_USER_TOKENS`` on is wanted online:
+    a row marked ``enabled`` false or a value in ``skip_values`` (dead in the sender) is
+    left out. A token value used by several mappings is one entry: its ids and mappings
+    are the union, ``use_proxy`` is always on (proxies are mandatory for tokens),
+    ``presence`` is the first mapping's and ``rotate`` (``USER_TOKEN_PRESENCE_ROTATE``)
+    is on if any of them has it on. ``keep_online`` is the number of distinct wanted
+    values, so the pool cap never trims a wanted token. A stored
+    ``USER_TOKEN_KEEP_ONLINE`` from an older version is ignored.
     """
     tokens: dict[str, dict] = {}
     wanted: list[str] = []
@@ -186,15 +186,12 @@ def plan_token_pool(
         settings = m.get("settings") or {}
         if not settings.get("USE_USER_TOKENS", False):
             continue
-        try:
-            keep = max(0, int(settings.get("USER_TOKEN_KEEP_ONLINE", 0) or 0))
-        except (TypeError, ValueError):
-            keep = 0
         presence = str(settings.get("USER_TOKEN_PRESENCE") or "random")
         rotate = _setting_on(settings.get("USER_TOKEN_PRESENCE_ROTATE", False))
         use_proxy = token_use_proxy(settings)
-        mine: list[str] = []
         for tok in m.get("tokens") or []:
+            if "enabled" in tok and not _setting_on(tok.get("enabled")):
+                continue
             value = (tok.get("token_value") or "").strip()
             if not value or value in skip_values:
                 continue
@@ -204,7 +201,6 @@ def plan_token_pool(
                     "ids": [],
                     "mappings": [],
                     "use_proxy": False,
-                    "keep_online": keep,
                     "presence": presence,
                     "rotate": False,
                 }
@@ -214,17 +210,7 @@ def plan_token_pool(
             if m.get("mapping_id") not in entry["mappings"]:
                 entry["mappings"].append(m.get("mapping_id"))
             entry["use_proxy"] = entry["use_proxy"] or use_proxy
-            entry["keep_online"] = max(entry["keep_online"], keep)
             entry["rotate"] = entry["rotate"] or rotate
-            if value not in mine:
-                mine.append(value)
-        need = min(keep, len(mine))
-        if need <= 0:
-            continue
-        ranked = sorted(
-            mine, key=lambda v: (v not in wanted, v not in online_values, mine.index(v))
-        )
-        for value in ranked[:need]:
             if value not in wanted:
                 wanted.append(value)
     return {"tokens": tokens, "wanted": wanted, "keep_online": len(wanted)}
@@ -984,19 +970,9 @@ class ServerReceiver:
     async def _reconcile_token_pool_once(self) -> None:
         mappings = self._load_token_pool_mappings()
         pool = self.token_pool
-        try:
-            online_ids = pool.online_ids()
-        except Exception:
-            online_ids = set()
-        online_values = {
-            (t.get("token_value") or "").strip()
-            for m in mappings
-            for t in m["tokens"]
-            if str(t.get("token_id")) in online_ids
-        }
         # The sender benches a REST 401 without telling the pool; skip those values.
         skip = set(getattr(self.user_token_sender, "_dead_tokens", None) or ())
-        plan = plan_token_pool(mappings, skip_values=skip, online_values=online_values)
+        plan = plan_token_pool(mappings, skip_values=skip)
         proxies = get_proxy_pool()
         if not proxies_configured(proxies):
             # Proxies are mandatory: nothing connects, and one notice says why.
@@ -1025,8 +1001,9 @@ class ServerReceiver:
         # lease before the connect, and REST, which reads the same lease, matches it.
         proxied = {v for v in plan["wanted"] if plan["tokens"][v]["use_proxy"]}
         self._pool_proxied = proxied
-        # The pool's keep_online is one global count; each ensure carries the total.
-        keep = plan["keep_online"]
+        # The pool's keep_online is one global count: every wanted value, so none is trimmed.
+        # Never below the wanted set: only the empty plan above closes everything.
+        keep = max(int(plan["keep_online"] or 0), len(plan["wanted"]))
         for value in plan["wanted"]:
             entry = plan["tokens"][value]
             if value in proxied and proxies.enabled:
@@ -8182,7 +8159,7 @@ class ServerReceiver:
     @staticmethod
     def _identity_active(settings: dict) -> bool:
         """True when the sticky-author identity manager should own token choice."""
-        return str(settings.get("USER_TOKEN_STRATEGY") or "") == "sticky_author" and (
+        return (
             bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
             or bool(settings.get("USER_TOKEN_STICKY_ROLES"))
             or bool(settings.get("USER_TOKEN_STICKY_AVATAR"))
@@ -8375,7 +8352,6 @@ class ServerReceiver:
                     embeds=embeds,
                     attachments=msg.get("attachments"),
                     author_id=msg.get("author_id"),
-                    strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                     typing=bool(settings.get("USER_TOKEN_TYPING", False)),
                     min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                     max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
@@ -8547,7 +8523,6 @@ class ServerReceiver:
                 attachments=msg.get("attachments"),
                 applied_tag_ids=[t for t in (applied_tag_ids or []) if t],
                 author_id=msg.get("author_id"),
-                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                 min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
@@ -8619,7 +8594,6 @@ class ServerReceiver:
                     int(starter_message_id) if starter_message_id else None
                 ),
                 author_id=msg.get("author_id"),
-                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                 min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 forced_token_id=forced_token_id,
@@ -8725,7 +8699,6 @@ class ServerReceiver:
                     content=(msg.get("content") or "").strip() or None,
                     sticker_ids=sticker_ids,
                     author_id=msg.get("author_id"),
-                    strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                     typing=bool(settings.get("USER_TOKEN_TYPING", False)),
                     min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                     max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),

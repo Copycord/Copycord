@@ -205,10 +205,10 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
           autoComplete="off"
           noValidate
           onSubmit={(e) => void submit(e)}
-          className="mapping-form min-h-0 flex-auto overflow-x-hidden overflow-y-auto px-6 pt-5"
+          className="mapping-form min-h-0 flex-auto overflow-x-hidden overflow-y-auto px-6"
         >
           <input type="hidden" id="map_mapping_id" name="mapping_id" value={form.mapping_id} readOnly />
-          <div className="mapping-section border-b border-border py-3.5">
+          <div className="mapping-section border-b border-border pt-[34px] pb-3.5">
             <TextField
               id="map_mapping_name"
               name="mapping_name"
@@ -257,7 +257,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
             </div>
           </div>
 
-          <div className="mapping-toolbar sticky top-0 z-[2] -mx-5 flex items-center gap-2 bg-surface-deep px-5 py-2.5">
+          <div className="mapping-toolbar sticky top-0 z-50 -mx-6 flex items-center gap-2 border-b border-border bg-surface-deep px-6 py-2.5">
             <div className="mapping-search-row min-w-0 flex-1">
               <input
                 id="mappingSettingsSearch"
@@ -338,7 +338,7 @@ export function MappingModal({ mapping, mode, onClose, onSaved }: MappingModalPr
             search={search}
           />
 
-          <div className="mapping-form-footer sticky bottom-0 z-[3] -mx-5 -mb-5 flex justify-end gap-2 rounded-b-panel bg-surface-deep px-5 py-3.5">
+          <div className="mapping-form-footer sticky bottom-0 z-50 -mx-6 -mb-5 flex justify-end gap-2 rounded-b-panel bg-surface-deep px-6 py-3.5">
             {dirty ? (
               <GhostButton type="button" id="mapping-cancel-btn" className="gap-[normal]!" onClick={() => setForm(baseline)}>
                 Cancel

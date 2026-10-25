@@ -7,9 +7,7 @@ import {
   initialForm,
   invalidFields,
   modeOf,
-  normalizeKeepOnline,
   normalizePresence,
-  normalizeStrategy,
   settingMatches,
   snapshot,
 } from "./model";
@@ -36,12 +34,12 @@ describe("mapping modal model", () => {
     expect(f.settings).toEqual(DEFAULT_MAPPING_SETTINGS);
   });
 
-  it("edit loads the row, normalizing strings, booleans and the legacy strategy", () => {
+  it("edit loads the row, normalizing strings and booleans and dropping the retired strategy", () => {
     const f = initialForm(M, "edit");
     expect(f).toMatchObject({ mapping_id: "m1", mapping_name: "Alpha", original_guild_id: "111", cloned_guild_id: "222" });
     expect(f.settings.CLONE_MESSAGES).toBe(false);
     expect(f.settings.ANONYMIZE_USERS).toBe(true);
-    expect(f.settings.USER_TOKEN_STRATEGY).toBe("round_robin");
+    expect("USER_TOKEN_STRATEGY" in f.settings).toBe(false);
     expect(f.settings.USER_TOKEN_MIN_DELAY).toBe(2);
     expect(f.settings.DELETE_ROLES).toBe(true);
   });
@@ -68,7 +66,7 @@ describe("mapping modal model", () => {
     expect(p.settings.USER_TOKEN_MAX_DELAY).toBe(3.5);
     expect(p.settings.USER_TOKEN_MIN_DELAY).toBe(0);
     expect(Object.keys(p.settings).length).toBe(Object.keys(DEFAULT_MAPPING_SETTINGS).length);
-    expect(Object.keys(p.settings).length).toBe(54);
+    expect(Object.keys(p.settings).length).toBe(52);
     expect(p.settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
   });
 
@@ -85,21 +83,18 @@ describe("mapping modal model", () => {
     expect(buildPayload(f).settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
   });
 
-  it("defaults keep online to 5 and presence to random", () => {
+  it("defaults presence to random and has no keep online setting", () => {
     const f = initialForm(null, "create");
-    expect(f.settings.USER_TOKEN_KEEP_ONLINE).toBe(5);
     expect(f.settings.USER_TOKEN_PRESENCE).toBe("random");
-    expect(initialForm(M, "edit").settings.USER_TOKEN_KEEP_ONLINE).toBe(5);
+    expect("USER_TOKEN_KEEP_ONLINE" in DEFAULT_MAPPING_SETTINGS).toBe(false);
+    expect("USER_TOKEN_KEEP_ONLINE" in f.settings).toBe(false);
   });
 
-  it("clamps keep online to a whole number of at least 0", () => {
-    expect(normalizeKeepOnline(3)).toBe(3);
-    expect(normalizeKeepOnline("7")).toBe(7);
-    expect(normalizeKeepOnline(2.9)).toBe(2);
-    expect(normalizeKeepOnline(-4)).toBe(0);
-    expect(normalizeKeepOnline(0)).toBe(0);
-    expect(normalizeKeepOnline("abc")).toBe(5);
-    expect(normalizeKeepOnline(undefined)).toBe(5);
+  it("a keep online value stored by an older version is neither loaded nor sent", () => {
+    const f = initialForm({ ...M, settings: { USER_TOKEN_KEEP_ONLINE: 2 } }, "edit");
+    expect("USER_TOKEN_KEEP_ONLINE" in f.settings).toBe(false);
+    expect("USER_TOKEN_KEEP_ONLINE" in buildPayload(f).settings).toBe(false);
+    expect("USER_TOKEN_KEEP_ONLINE" in initialForm({ ...M, settings: { USER_TOKEN_KEEP_ONLINE: 2 } }, "clone").settings).toBe(false);
   });
 
   it("normalizes presence to the four values", () => {
@@ -117,13 +112,10 @@ describe("mapping modal model", () => {
   });
 
   it("loads and saves the token pool settings normalized", () => {
-    const f = initialForm({ ...M, settings: { USER_TOKEN_KEEP_ONLINE: "2", USER_TOKEN_PRESENCE: "nope" } }, "edit");
-    expect(f.settings.USER_TOKEN_KEEP_ONLINE).toBe(2);
+    const f = initialForm({ ...M, settings: { USER_TOKEN_PRESENCE: "nope" } }, "edit");
     expect(f.settings.USER_TOKEN_PRESENCE).toBe("random");
-    f.settings.USER_TOKEN_KEEP_ONLINE = "-1";
     f.settings.USER_TOKEN_PRESENCE = "busy";
     const p = buildPayload(f);
-    expect(p.settings.USER_TOKEN_KEEP_ONLINE).toBe(0);
     expect(p.settings.USER_TOKEN_PRESENCE).toBe("busy");
   });
 
@@ -149,8 +141,13 @@ describe("mapping modal model", () => {
     expect(settingMatches("RENAME_CHANNELS", "categories")).toBe(true);
   });
 
-  it("normalizes the strategy", () => {
-    expect(normalizeStrategy("sticky_author")).toBe("sticky_author");
-    expect(normalizeStrategy("random")).toBe("round_robin");
+  it("has no strategy setting; a stored round_robin or sticky_author is neither loaded nor sent", () => {
+    expect("USER_TOKEN_STRATEGY" in DEFAULT_MAPPING_SETTINGS).toBe(false);
+    for (const stored of ["round_robin", "sticky_author"]) {
+      const f = initialForm({ ...M, settings: { USER_TOKEN_STRATEGY: stored } }, "edit");
+      expect("USER_TOKEN_STRATEGY" in f.settings).toBe(false);
+      expect("USER_TOKEN_STRATEGY" in buildPayload(f).settings).toBe(false);
+      expect("USER_TOKEN_STRATEGY" in initialForm({ ...M, settings: { USER_TOKEN_STRATEGY: stored } }, "clone").settings).toBe(false);
+    }
   });
 });
