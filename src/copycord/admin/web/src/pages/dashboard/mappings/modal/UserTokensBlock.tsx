@@ -10,13 +10,23 @@ import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { api, errorText } from "../../../../lib/api";
 import { Button, cx } from "../../../../components/ui";
-import { MODAL_BACKDROP, MODAL_CARD, MODAL_CLOSE, MODAL_HEADER, MODAL_OVERLAY, useScrollLock } from "../../../../components/Modal";
+import {
+  MODAL_BACKDROP,
+  MODAL_CARD,
+  MODAL_CLOSE,
+  MODAL_HEADER,
+  MODAL_OVERLAY,
+  useScrollLock,
+} from "../../../../components/Modal";
 import type {
   BulkResponse,
   UserToken,
   VerifyResponse,
 } from "../../../../types/user-tokens";
-import type { MappingSettingValue, MappingSettings } from "../../../../types/dashboard-mappings";
+import type {
+  MappingSettingValue,
+  MappingSettings,
+} from "../../../../types/dashboard-mappings";
 import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
 import { ToolbarSelect } from "../../../channels/ToolbarSelect";
@@ -98,18 +108,45 @@ function StatusText({ id, status }: { id: string; status: Status }) {
   );
 }
 
-const BSTATUS: Record<string, string> = { added: "text-good-pale", duplicate: "text-muted" };
+const BSTATUS: Record<string, string> = {
+  added: "text-good-pale",
+  duplicate: "text-muted",
+};
 
-function ResultRow({ label, status, cls }: { label: string; status: string; cls: string }) {
+function ResultRow({
+  label,
+  status,
+  cls,
+}: {
+  label: string;
+  status: string;
+  cls: string;
+}) {
   return (
     <div className="user-token-bulk-row flex items-center gap-2 px-0.5 py-1 text-xs">
       <span className="btok truncate font-mono text-muted">{label}</span>
-      <span className={cx("bstatus ml-auto shrink-0 font-semibold", cls, BSTATUS[cls] ?? "text-danger-pale")}>{status}</span>
+      <span
+        className={cx(
+          "bstatus ml-auto shrink-0 font-semibold",
+          cls,
+          BSTATUS[cls] ?? "text-danger-pale",
+        )}
+      >
+        {status}
+      </span>
     </div>
   );
 }
 
-function BulkModal({ mappingId, onClose, onChanged }: { mappingId: string; onClose: () => void; onChanged: () => void }) {
+function BulkModal({
+  mappingId,
+  onClose,
+  onChanged,
+}: {
+  mappingId: string;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
   useScrollLock(true);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -136,24 +173,37 @@ function BulkModal({ mappingId, onClose, onChanged }: { mappingId: string; onClo
     setBusy(true);
     setStatus({ text: "Validating… this can take a moment.", kind: "" });
     try {
-      const j = await api.post<BulkResponse>(tokensPath(mappingId, "/bulk"), { tokens: text.trim() });
+      const j = await api.post<BulkResponse>(tokensPath(mappingId, "/bulk"), {
+        tokens: text.trim(),
+      });
       if (!j.ok) {
         setStatus({ text: j.error || "Failed to add tokens.", kind: "error" });
         return;
       }
       setResults(j.results ?? []);
-      setStatus({ text: bulkSummary(j.added, j.total), kind: j.added ? "ok" : "error" });
+      setStatus({
+        text: bulkSummary(j.added, j.total),
+        kind: j.added ? "ok" : "error",
+      });
       setText("");
       onChanged();
     } catch (err) {
-      setStatus({ text: err instanceof Error && err.message ? err.message : "Network error.", kind: "error" });
+      setStatus({
+        text:
+          err instanceof Error && err.message ? err.message : "Network error.",
+        kind: "error",
+      });
     } finally {
       setBusy(false);
     }
   };
 
   return createPortal(
-    <div id="user-token-bulk-modal" className={`modal show ${MODAL_OVERLAY} z-[60]!`} aria-hidden="false">
+    <div
+      id="user-token-bulk-modal"
+      className={`modal show ${MODAL_OVERLAY} z-[60]!`}
+      aria-hidden="false"
+    >
       <div className={`modal-backdrop ${MODAL_BACKDROP}`} onClick={onClose} />
       <div
         role="dialog"
@@ -167,7 +217,13 @@ function BulkModal({ mappingId, onClose, onChanged }: { mappingId: string; onClo
               Bulk add user tokens
             </div>
           </div>
-          <button type="button" id="user-token-bulk-close" aria-label="Close" onClick={onClose} className={`verify-close ${MODAL_CLOSE}`}>
+          <button
+            type="button"
+            id="user-token-bulk-close"
+            aria-label="Close"
+            onClick={onClose}
+            className={`verify-close ${MODAL_CLOSE}`}
+          >
             ✕
           </button>
         </div>
@@ -184,14 +240,24 @@ function BulkModal({ mappingId, onClose, onChanged }: { mappingId: string; onClo
             onChange={(e) => setText(e.target.value)}
           />
           <div className="user-token-bulk-actions mt-2.5 flex items-center gap-2.5">
-            <Button variant="primary" id="user-token-bulk-submit" loading={busy} onClick={() => void submit()}>
+            <Button
+              variant="primary"
+              id="user-token-bulk-submit"
+              loading={busy}
+              onClick={() => void submit()}
+            >
               Verify &amp; add
             </Button>
             <StatusText id="user-token-bulk-status" status={status} />
           </div>
           <div id="user-token-bulk-results" className={RESULTS}>
             {results.map((r, i) => (
-              <ResultRow key={i} label={bulkResultLabel(r)} status={BULK_LABELS[r.status] ?? r.status} cls={r.status} />
+              <ResultRow
+                key={i}
+                label={bulkResultLabel(r)}
+                status={BULK_LABELS[r.status] ?? r.status}
+                cls={r.status}
+              />
             ))}
           </div>
         </div>
@@ -201,7 +267,11 @@ function BulkModal({ mappingId, onClose, onChanged }: { mappingId: string; onClo
   );
 }
 
-export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensBlockProps) {
+export function UserTokensBlock({
+  mappingId,
+  settings,
+  setSetting,
+}: UserTokensBlockProps) {
   const notify = useNotify();
   const confirm = useSafeConfirm();
   const on = (k: string) => toBool(settings[k]);
@@ -224,7 +294,9 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     const id = idRef.current;
     if (!id) return;
     try {
-      const j = await api.get<{ ok: boolean; tokens?: UserToken[] }>(tokensPath(id));
+      const j = await api.get<{ ok: boolean; tokens?: UserToken[] }>(
+        tokensPath(id),
+      );
       if (idRef.current !== id) return;
       if (!j.ok) throw new Error("load");
       setTokens(j.tokens ?? []);
@@ -250,7 +322,8 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      if (menuRef.current && !menuRef.current.contains(e.target as Node))
+        setMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -265,7 +338,10 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     };
   }, [menuOpen]);
 
-  const shown = useMemo(() => filterTokens(tokens ?? [], query), [tokens, query]);
+  const shown = useMemo(
+    () => filterTokens(tokens ?? [], query),
+    [tokens, query],
+  );
   const presence = normalizePresence(settings.USER_TOKEN_PRESENCE);
 
   const addToken = async () => {
@@ -278,7 +354,10 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     setAdding(true);
     setStatus({ text: "Validating…", kind: "" });
     try {
-      const j = await api.post<{ ok: boolean; error?: string }>(tokensPath(mappingId), { token });
+      const j = await api.post<{ ok: boolean; error?: string }>(
+        tokensPath(mappingId),
+        { token },
+      );
       if (!j.ok) {
         setStatus({ text: j.error || "Failed to add token.", kind: "error" });
         return;
@@ -288,7 +367,11 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
       setStatus({ text: "Token added.", kind: "ok" });
       await load();
     } catch (err) {
-      setStatus({ text: err instanceof Error && err.message ? err.message : "Network error.", kind: "error" });
+      setStatus({
+        text:
+          err instanceof Error && err.message ? err.message : "Network error.",
+        kind: "error",
+      });
     } finally {
       setAdding(false);
     }
@@ -297,7 +380,9 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
   const toggleToken = async (t: UserToken, enabled: boolean) => {
     if (!mappingId) return;
     try {
-      await api.patch(tokensPath(mappingId, `/${encodeURIComponent(t.id)}`), { enabled });
+      await api.patch(tokensPath(mappingId, `/${encodeURIComponent(t.id)}`), {
+        enabled,
+      });
     } catch (e) {
       notify(errorText(e, "Failed to update token"), "error");
     }
@@ -307,7 +392,14 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
   const removeToken = async (t: UserToken) => {
     if (!mappingId) return;
     const name = tokenName(t);
-    if (!(await confirm({ title: `Remove ${name}?`, confirmLabel: "Remove", confirmVariant: "ghost-red" }))) return;
+    if (
+      !(await confirm({
+        title: `Remove ${name}?`,
+        confirmLabel: "Remove",
+        confirmVariant: "ghost-red",
+      }))
+    )
+      return;
     try {
       await api.del(tokensPath(mappingId, `/${encodeURIComponent(t.id)}`));
     } catch {
@@ -317,10 +409,16 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
   };
 
   /** Returns the deleted count, or null when the request failed. */
-  const deleteTokens = async (body: { scope: "all" } | { ids: string[] }): Promise<number | null> => {
+  const deleteTokens = async (
+    body: { scope: "all" } | { ids: string[] },
+  ): Promise<number | null> => {
     if (!mappingId) return null;
     try {
-      const j = await api.post<{ ok: boolean; deleted?: number; error?: string }>(tokensPath(mappingId, "/delete"), body);
+      const j = await api.post<{
+        ok: boolean;
+        deleted?: number;
+        error?: string;
+      }>(tokensPath(mappingId, "/delete"), body);
       await load();
       if (!j.ok) {
         notify(j.error || "Failed to delete tokens.", "error");
@@ -348,7 +446,12 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     }
     setVerifying(false);
     if (!j.ok || !j.total) {
-      notify(j.ok ? "There are no tokens to verify." : j.error || "Failed to verify tokens.", j.ok ? "info" : "error");
+      notify(
+        j.ok
+          ? "There are no tokens to verify."
+          : j.error || "Failed to verify tokens.",
+        j.ok ? "info" : "error",
+      );
       return;
     }
     const body: ReactNode = (
@@ -356,9 +459,16 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
         <div className="user-token-verify-summary mb-2.5 flex items-center gap-2 text-xs font-semibold">
           <span className="uv-ok text-good-pale">{j.working} working</span>
           <span className="uv-sep font-normal text-muted">·</span>
-          <span className="uv-bad text-danger-pale">{j.broken} not working</span>
+          <span className="uv-bad text-danger-pale">
+            {j.broken} not working
+          </span>
         </div>
-        <div className={cx(RESULTS, "user-token-verify-list mt-0! max-h-[260px]! pr-1")}>
+        <div
+          className={cx(
+            RESULTS,
+            "user-token-verify-list mt-0! max-h-[260px]! pr-1",
+          )}
+        >
           {orderVerify(j.results ?? []).map((r) => (
             <ResultRow
               key={r.id}
@@ -371,7 +481,12 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
       </div>
     );
     if (!j.broken) {
-      await confirm({ title: "Token verification", body, confirmLabel: "Done", confirmVariant: "primary" });
+      await confirm({
+        title: "Token verification",
+        body,
+        confirmLabel: "Done",
+        confirmVariant: "primary",
+      });
       return;
     }
     const ok = await confirm({
@@ -382,7 +497,11 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     });
     if (!ok) return;
     const deleted = await deleteTokens({ ids: brokenIds(j.results ?? []) });
-    if (deleted != null) notify(`Removed ${deleted} non-working token${deleted === 1 ? "" : "s"}.`, "success");
+    if (deleted != null)
+      notify(
+        `Removed ${deleted} non-working token${deleted === 1 ? "" : "s"}.`,
+        "success",
+      );
   };
 
   const deleteAll = async () => {
@@ -391,7 +510,8 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
       title: "Delete all tokens?",
       body: (
         <>
-          This removes <strong>all</strong> user tokens from this mapping. This cannot be undone.
+          This removes <strong>all</strong> user tokens from this mapping. This
+          cannot be undone.
         </>
       ),
       confirmLabel: "Delete all",
@@ -399,10 +519,16 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
     });
     if (!ok) return;
     const deleted = await deleteTokens({ scope: "all" });
-    if (deleted != null) notify(`Deleted ${deleted} token${deleted === 1 ? "" : "s"}.`, "success");
+    if (deleted != null)
+      notify(`Deleted ${deleted} token${deleted === 1 ? "" : "s"}.`, "success");
   };
 
-  const switchRow = (key: string, name: string, desc: string, settingKey: string) => (
+  const switchRow = (
+    key: string,
+    name: string,
+    desc: string,
+    settingKey: string,
+  ) => (
     <ToggleRow
       id={`map_${key}`}
       settingKey={settingKey}
@@ -418,30 +544,39 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
 
   return (
     <details id="user-tokens-section" className={SECTION}>
-      <SectionSummary chip={{ text: on("USE_USER_TOKENS") ? "Enabled" : "Disabled", on: on("USE_USER_TOKENS") }}>
+      <SectionSummary
+        chip={{
+          text: on("USE_USER_TOKENS") ? "Enabled" : "Disabled",
+          on: on("USE_USER_TOKENS"),
+        }}
+      >
         Token Message Cloning
       </SectionSummary>
       <div className="mapping-section-body pt-1">
         <div className="user-token-disclaimer mb-3 rounded-input border border-danger-a35 bg-danger-a8 px-3 py-2.5 text-xs leading-normal text-text">
-          <strong className="text-danger-pale">Warning:</strong> This feature uses user tokens. Discord may rate limit your
-          accounts or permanently ban them at any time. Only use accounts you are willing to lose.
+          <strong className="text-danger-pale">Warning:</strong> This feature
+          uses user tokens. Discord may rate limit your accounts or permanently
+          ban them at any time. Only use accounts you are willing to lose.
         </div>
 
         <ToggleRow
           id="map_USE_USER_TOKENS"
           settingKey="use_user_tokens"
-          name="Send messages as users"
-          desc="Send cloned messages from real user accounts instead of webhooks. Accounts must be in the clone server."
+          name="Token Cloning"
+          desc="Send cloned messages from real user accounts instead of webhooks. Each token connects to the Discord gateway as a standard client. Every token's account must be manually invited to the clone server."
           checked={on("USE_USER_TOKENS")}
           onChange={(v) => setSetting("USE_USER_TOKENS", v)}
         />
 
         <div id="user-token-options" className="user-token-options mt-1.5">
-          <div id="user-token-sticky-options" className="user-token-sticky-options">
+          <div
+            id="user-token-sticky-options"
+            className="user-token-sticky-options"
+          >
             {switchRow(
               "USER_TOKEN_STICKY_NICKNAME",
               "Mirror author nickname",
-              "Rename the assigned account in the clone server to the host author's display name.",
+              "The bot sets the nickname of the token in your clone to match the host author's display name.",
               "user_token_sticky_nickname",
             )}
             {switchRow(
@@ -479,8 +614,12 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
 
           <div className={ROW}>
             <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
-              <span className="mapping-toggle-name text-[13px] font-medium text-text">Send delay</span>
-              <span className={DESC}>Random pause before each message, in seconds.</span>
+              <span className="mapping-toggle-name text-[13px] font-medium text-text">
+                Send delay
+              </span>
+              <span className={DESC}>
+                Random pause before each message, in seconds.
+              </span>
             </div>
             <div className="user-token-delay flex items-center gap-2">
               <input
@@ -493,9 +632,13 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                 step={0.5}
                 placeholder="min"
                 value={delayText(settings.USER_TOKEN_MIN_DELAY)}
-                onChange={(e) => setSetting("USER_TOKEN_MIN_DELAY", e.target.value)}
+                onChange={(e) =>
+                  setSetting("USER_TOKEN_MIN_DELAY", e.target.value)
+                }
               />
-              <span className="user-token-delay-sep text-xs text-muted">to</span>
+              <span className="user-token-delay-sep text-xs text-muted">
+                to
+              </span>
               <input
                 type="number"
                 id="ut_max_delay"
@@ -506,7 +649,9 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                 step={0.5}
                 placeholder="max"
                 value={delayText(settings.USER_TOKEN_MAX_DELAY)}
-                onChange={(e) => setSetting("USER_TOKEN_MAX_DELAY", e.target.value)}
+                onChange={(e) =>
+                  setSetting("USER_TOKEN_MAX_DELAY", e.target.value)
+                }
               />
             </div>
           </div>
@@ -517,13 +662,18 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
           className="user-tokens-manager mt-2 rounded-btn border border-border bg-white/[0.02] p-3"
         >
           {!mappingId ? (
-            <div id="user-tokens-save-first" className="user-tokens-hint px-0.5 py-1 text-xs text-muted opacity-85">
+            <div
+              id="user-tokens-save-first"
+              className="user-tokens-hint px-0.5 py-1 text-xs text-muted opacity-85"
+            >
               Save this mapping first, then reopen it to add user tokens.
             </div>
           ) : (
             <div id="user-tokens-editor">
               <div className="user-token-add">
-                <div className="user-token-add-label mb-1.5 text-xs font-semibold text-text">Add user token</div>
+                <div className="user-token-add-label mb-1.5 text-xs font-semibold text-text">
+                  Add user token
+                </div>
                 <div className="field field-token user-token-input-wrap relative m-0">
                   <div className="token-wrap relative w-full max-w-full">
                     <input
@@ -551,7 +701,19 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                       aria-label={reveal ? "Hide token" : "Show token"}
                       onClick={() => setReveal((r) => !r)}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="pointer-events-none block size-4 text-text">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="16"
+                        height="16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                        className="pointer-events-none block size-4 text-text"
+                      >
                         {reveal ? (
                           <path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
                         ) : (
@@ -608,7 +770,10 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                     >
                       {countLabel(tokens?.length ?? 0)}
                     </div>
-                    <div ref={menuRef} className="user-token-settings relative flex-none">
+                    <div
+                      ref={menuRef}
+                      className="user-token-settings relative flex-none"
+                    >
                       <button
                         type="button"
                         id="user-token-settings-open"
@@ -619,7 +784,18 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                         aria-label="Token options"
                         onClick={() => setMenuOpen((o) => !o)}
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="15"
+                          height="15"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          viewBox="0 0 24 24"
+                          aria-hidden="true"
+                        >
                           <circle cx="12" cy="12" r="3" />
                           <path d={GEAR} />
                         </svg>
@@ -637,7 +813,19 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                             className={MENU_ITEM}
                             onClick={() => void verifyAll()}
                           >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="flex-none opacity-85">
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="15"
+                              height="15"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                              className="flex-none opacity-85"
+                            >
                               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                               <polyline points="22 4 12 14.01 9 11.01" />
                             </svg>
@@ -647,10 +835,25 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                             type="button"
                             id="user-token-delete-all"
                             role="menuitem"
-                            className={cx(MENU_ITEM, "is-danger text-danger-pale hover:bg-danger-pale-a12")}
+                            className={cx(
+                              MENU_ITEM,
+                              "is-danger text-danger-pale hover:bg-danger-pale-a12",
+                            )}
                             onClick={() => void deleteAll()}
                           >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true" className="flex-none opacity-85">
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="15"
+                              height="15"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                              className="flex-none opacity-85"
+                            >
                               <polyline points="3 6 5 6 21 6" />
                               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                               <line x1="10" y1="11" x2="10" y2="17" />
@@ -671,13 +874,22 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
               >
                 {verifying ? (
                   <div className="user-token-verify-loading flex items-center justify-center gap-2.5 px-2 py-[26px] text-[13px] text-muted">
-                    <span aria-hidden="true" className="uv-spinner size-4 animate-spin rounded-full border-2 border-accent border-r-transparent" />
+                    <span
+                      aria-hidden="true"
+                      className="uv-spinner size-4 animate-spin rounded-full border-2 border-accent border-r-transparent"
+                    />
                     <span>Verifying tokens…</span>
                   </div>
                 ) : null}
-                {tokens === null && !loadError ? <div className={DESC}>Loading…</div> : null}
-                {loadError ? <div className={DESC}>Failed to load tokens.</div> : null}
-                {tokens !== null && !hasTokens ? <div className={DESC}>No user tokens yet. Add one above.</div> : null}
+                {tokens === null && !loadError ? (
+                  <div className={DESC}>Loading…</div>
+                ) : null}
+                {loadError ? (
+                  <div className={DESC}>Failed to load tokens.</div>
+                ) : null}
+                {tokens !== null && !hasTokens ? (
+                  <div className={DESC}>No user tokens yet. Add one above.</div>
+                ) : null}
                 {shown.map((t) => (
                   <div
                     key={t.id}
@@ -685,8 +897,12 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
                     data-token-id={t.id}
                   >
                     <div className="user-token-meta flex min-w-0 flex-col gap-0.5">
-                      <span className="user-token-name truncate text-[13px] font-medium text-text">{tokenName(t)}</span>
-                      <span className={cx(DESC, "user-token-sub font-mono")}>{tokenSub(t)}</span>
+                      <span className="user-token-name truncate text-[13px] font-medium text-text">
+                        {tokenName(t)}
+                      </span>
+                      <span className={cx(DESC, "user-token-sub font-mono")}>
+                        {tokenSub(t)}
+                      </span>
                     </div>
                     <div className="user-token-actions flex shrink-0 items-center gap-2.5">
                       <Switch
@@ -719,7 +935,10 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
         <div id="user-token-pool" className="user-token-pool mt-1.5">
           <div className={ROW}>
             <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
-              <label htmlFor="ut_presence" className="mapping-toggle-name text-[13px] font-medium text-text">
+              <label
+                htmlFor="ut_presence"
+                className="mapping-toggle-name text-[13px] font-medium text-text"
+              >
                 Token status
               </label>
               <span id="ut_presence_desc" className={DESC}>
@@ -751,7 +970,11 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
         </div>
       </div>
       {bulkOpen && mappingId ? (
-        <BulkModal mappingId={mappingId} onClose={() => setBulkOpen(false)} onChanged={() => void load()} />
+        <BulkModal
+          mappingId={mappingId}
+          onClose={() => setBulkOpen(false)}
+          onChanged={() => void load()}
+        />
       ) : null}
     </details>
   );
