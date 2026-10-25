@@ -17,7 +17,7 @@
 #
 # Installs uv if it is missing, then Copycord with `uv tool install`, either
 # from a release wheel (default) or from a git ref built locally, which needs
-# git and Node 22+. Run with -Help for the parameters.
+# git and Node 22+ (both downloaded per user when missing). Run with -Help for the parameters.
 
 param(
     # The aliases are the install.sh option names.
@@ -140,8 +140,9 @@ Test a branch, no release needed:
     $gitDir = if ($Opts.GitDir) { $Opts.GitDir } else { Join-Path $homeDir 'src' }
     $nodeHome = Join-Path $homeDir 'node'
     # Asset names drop .windows.1 and keep a later build number: v2.51.0.windows.2 -> 2.51.0.2.
-    if ($MinGitTag -notmatch '^v?(\d+(?:\.\d+)*)\.windows\.(\d+)$') { throw "copycord install: $MinGitTag is not a Git for Windows release tag" }
-    $minGitVersion = if ($Matches[2] -eq '1') { $Matches[1] } else { "$($Matches[1]).$($Matches[2])" }
+    if ($MinGitTag -match '^v?(\d+(?:\.\d+)*)\.windows\.(\d+)$') {
+        $minGitVersion = if ($Matches[2] -eq '1') { $Matches[1] } else { "$($Matches[1]).$($Matches[2])" }
+    } else { throw "copycord install: $MinGitTag is not a Git for Windows release tag" }
     $minGitName = "MinGit-$minGitVersion-64-bit"
     $gitHome = Join-Path $homeDir 'git'
     $minGitCmd = Join-Path (Join-Path $gitHome $minGitName) 'cmd'
@@ -539,7 +540,8 @@ Test a branch, no release needed:
                     Dry "download $minGitName.zip from the Git for Windows $MinGitTag release, check its sha256, unpack into $gitHome"
                 } else {
                     # 64-bit MinGit, which Windows on ARM runs too; no admin rights needed.
-                    if ($env:PROCESSOR_ARCHITECTURE -notin @('AMD64', 'ARM64')) { Fail "no MinGit build for $env:PROCESSOR_ARCHITECTURE; $gitHint" }
+                    $procArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+                    if ($procArch -notin @('AMD64', 'ARM64')) { Fail "no MinGit build for $procArch; $gitHint" }
                     Info "git $minGitVersion (MinGit) into $gitHome"
                     $zipName = "$minGitName.zip"
                     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("copycord-git-" + [guid]::NewGuid())
