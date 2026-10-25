@@ -35,16 +35,16 @@ STATE_CONNECTING = "connecting"
 STATE_ONLINE = "online"
 STATE_OFFLINE = "offline"
 
-# The setting's values and the Discord status each one sends; any other value is ``random``.
+# The setting's values (random | online | idle | busy) and the Discord status each
+# fixed one sends; see _presence_mode for anything else.
 PRESENCE_STATUS = {
     "online": "online",
     "idle": "idle",
     "busy": "dnd",
-    "invisible": "invisible",
 }
 # ``random`` picks from these, weighted like a real person's day.
-RANDOM_STATUSES = ("online", "idle", "dnd", "invisible")
-RANDOM_WEIGHTS = (50, 25, 10, 15)
+RANDOM_STATUSES = ("online", "idle", "dnd")
+RANDOM_WEIGHTS = (50, 25, 10)
 
 # A ``random`` token with rotation on changes status 20 to 90 minutes after its
 # last change (or after it went online), and no two tokens change within
@@ -89,6 +89,18 @@ def _identity_of(client: Any) -> Optional[dict]:
         "avatar_url": avatar_url,
         "user_id": str(user_id) if user_id else None,
     }
+
+
+def _presence_mode(presence: Optional[str]) -> str:
+    """The setting value in force: a ``PRESENCE_STATUS`` key or ``random``.
+
+    The invisible status was removed, so a stored ``invisible`` now means
+    ``online``; any other unknown value means ``random``.
+    """
+    presence = (presence or "").strip().lower()
+    if presence == "invisible":
+        return "online"
+    return presence if presence in PRESENCE_STATUS else "random"
 
 
 def _pick_status(rng: random.Random, exclude: Optional[str] = None) -> str:
@@ -366,7 +378,7 @@ class TokenSessionPool:
                 self._start(key)
 
     def _status_for(self, key: str, presence: str) -> str:
-        presence = (presence or "").strip().lower()
+        presence = _presence_mode(presence)
         if presence in PRESENCE_STATUS:
             return PRESENCE_STATUS[presence]
         status = self._random_status.get(key)
@@ -376,8 +388,7 @@ class TokenSessionPool:
         return status
 
     def _is_random(self, key: str) -> bool:
-        presence = (self._presence_by_key.get(key, "random") or "").strip().lower()
-        return presence not in PRESENCE_STATUS
+        return _presence_mode(self._presence_by_key.get(key, "random")) == "random"
 
     def _rotates(self, key: str) -> bool:
         """True when ``key`` is in ``random`` mode with rotation turned on."""
