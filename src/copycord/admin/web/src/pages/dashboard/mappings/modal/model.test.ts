@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DashboardMapping } from "../../../../types/dashboard-mappings";
 import {
   DEFAULT_MAPPING_SETTINGS,
+  PRESENCE_VALUES,
   buildPayload,
   initialForm,
   invalidFields,
@@ -101,13 +102,17 @@ describe("mapping modal model", () => {
     expect(normalizeKeepOnline(undefined)).toBe(5);
   });
 
-  it("normalizes presence to the five values", () => {
+  it("normalizes presence to the four values", () => {
+    expect(PRESENCE_VALUES).toEqual(["random", "online", "idle", "busy"]);
+    expect(normalizePresence("random")).toBe("random");
     expect(normalizePresence("busy")).toBe("busy");
     expect(normalizePresence("ONLINE")).toBe("online");
     expect(normalizePresence("idle")).toBe("idle");
     expect(normalizePresence("Idle")).toBe("idle");
-    expect(normalizePresence("invisible")).toBe("invisible");
+    expect(normalizePresence("invisible")).toBe("online");
+    expect(normalizePresence("Invisible")).toBe("online");
     expect(normalizePresence("dnd")).toBe("random");
+    expect(normalizePresence("offline")).toBe("random");
     expect(normalizePresence(undefined)).toBe("random");
   });
 
@@ -116,10 +121,17 @@ describe("mapping modal model", () => {
     expect(f.settings.USER_TOKEN_KEEP_ONLINE).toBe(2);
     expect(f.settings.USER_TOKEN_PRESENCE).toBe("random");
     f.settings.USER_TOKEN_KEEP_ONLINE = "-1";
-    f.settings.USER_TOKEN_PRESENCE = "invisible";
+    f.settings.USER_TOKEN_PRESENCE = "busy";
     const p = buildPayload(f);
     expect(p.settings.USER_TOKEN_KEEP_ONLINE).toBe(0);
-    expect(p.settings.USER_TOKEN_PRESENCE).toBe("invisible");
+    expect(p.settings.USER_TOKEN_PRESENCE).toBe("busy");
+  });
+
+  it("a saved invisible status loads and saves as online", () => {
+    const f = initialForm({ ...M, settings: { USER_TOKEN_PRESENCE: "invisible" } }, "edit");
+    expect(f.settings.USER_TOKEN_PRESENCE).toBe("online");
+    f.settings.USER_TOKEN_PRESENCE = "invisible";
+    expect(buildPayload(f).settings.USER_TOKEN_PRESENCE).toBe("online");
   });
 
   it("snapshot changes with any edit", () => {
