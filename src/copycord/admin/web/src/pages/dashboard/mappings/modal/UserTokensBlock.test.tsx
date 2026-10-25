@@ -254,7 +254,8 @@ describe("UserTokensBlock warm pool", () => {
     await screen.findByText("alpha");
     expect(document.getElementById("map_USER_TOKEN_USE_PROXIES")).toBeNull();
     expect(document.querySelector('[data-setting-key="user_token_use_proxies"]')).toBeNull();
-    expect(screen.queryByText(/prox(y|ies)/i)).toBeNull();
+    // Only the notice under the warning may mention proxies.
+    expect(screen.queryAllByText(/prox(y|ies)/i).filter((el) => !el.closest(".user-token-proxy-notice"))).toEqual([]);
     // Attachments as links is followed straight by the send delay row, no gap or label between.
     const links = document.querySelector('[data-setting-key="user_token_links_only"]')!;
     expect(links.nextElementSibling).toHaveTextContent(/^Send delay/);
