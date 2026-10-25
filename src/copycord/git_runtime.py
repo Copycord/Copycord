@@ -11,6 +11,7 @@ location and version.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import platform
@@ -144,7 +145,7 @@ def download_mingit(tag: str, home: Path) -> Path:
         try:
             _fetch(release_url, notes)
             release = json.loads(notes.read_text(encoding="utf-8", errors="replace"))
-        except Exception as e:
+        except (OSError, ValueError, http.client.HTTPException) as e:
             raise GitError(f"could not read the Git for Windows {tag} release ({release_url}): {e}; {hint}")
         if not isinstance(release, dict):
             raise GitError(f"could not read the Git for Windows {tag} release ({release_url}); {hint}")
@@ -155,7 +156,7 @@ def download_mingit(tag: str, home: Path) -> Path:
         archive = tmp_dir / name
         try:
             _fetch(url, archive)
-        except Exception as e:
+        except (OSError, http.client.HTTPException) as e:
             raise GitError(f"could not download {url}: {e}; {hint}")
         actual = _sha256(archive)
         if actual != expected:
