@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import random
+import time
 
 import pytest
 
@@ -938,3 +939,73 @@ async def test_other_endings_keep_their_per_session_warning(proxy_pool_of, fakes
         assert _waiting_lines(caplog) == []
     finally:
         await pool.close_all()
+
+
+# focus: every pool session's gateway is a focused tab
+
+
+def _focus_session(**gateway):
+    from types import SimpleNamespace
+
+    from copycord.server.token_pool import _Session
+
+    sess = _Session("k", "tok-focus", "online")
+    sess.client = SimpleNamespace(
+        is_ready=lambda: True,
+        is_closed=lambda: False,
+        gateway=SimpleNamespace(**gateway),
+    )
+    return sess
+
+
+async def test_pool_clients_get_the_foreground_gateway():
+    from copycord.selfclient.gateway import GatewayClient
+    from copycord.server import token_pool
+
+    assert token_pool._FOREGROUND_GATEWAY.func is GatewayClient
+    assert token_pool._FOREGROUND_GATEWAY.keywords == {"foreground": True}
+    gw = token_pool._FOREGROUND_GATEWAY("tok-not-real")
+    assert gw.foreground_enabled is True
+    assert GatewayClient("tok-not-real").foreground_enabled is False
+
+
+async def test_a_session_sends_once_focused_or_past_the_grace():
+    from copycord.server.token_pool import FOREGROUND_GRACE
+
+    sess = _focus_session(
+        foreground_enabled=True, foregrounded=False, heartbeat_session_id=None, ready_at=100.0
+    )
+    assert sess.is_online()
+    assert not sess.is_sendable(now=100.0 + FOREGROUND_GRACE - 0.1)
+    assert sess.is_sendable(now=100.0 + FOREGROUND_GRACE)
+    assert sess.heartbeat_session_id() is None
+    sess.client.gateway.foregrounded = True
+    sess.client.gateway.heartbeat_session_id = "hb"
+    assert sess.is_sendable(now=100.0)
+    assert sess.heartbeat_session_id() == "hb"
+    sess.dropped = True
+    assert not sess.is_sendable(now=1e9) and sess.heartbeat_session_id() is None
+
+
+@pytest.mark.asyncio
+async def test_pool_reads_focus_by_token_key():
+    from copycord.server.token_pool import TokenSessionPool, _token_key
+
+    pool = TokenSessionPool(
+        logger=logging.getLogger("t"), proxy_for=lambda _t: None, proxy_pool=object()
+    )
+    sess = _focus_session(
+        foreground_enabled=True, foregrounded=True, heartbeat_session_id="hb-k", ready_at=0.0
+    )
+    key = _token_key("tok-focus")
+    sess.key = key
+    pool._sessions[key] = sess
+    pool._key_by_id["7"] = key
+    assert pool.sendable_ids() == {"7"}
+    assert pool.heartbeat_session_id("tok-focus") == "hb-k"
+    assert pool.heartbeat_session_id("other") is None
+    sess.client.gateway.foregrounded = False
+    sess.client.gateway.ready_at = time.monotonic()
+    assert pool.sendable_ids() == set()
+    assert pool.online_ids() == {"7"}
+    assert pool.heartbeat_session_id("tok-focus") is None

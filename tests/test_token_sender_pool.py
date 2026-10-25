@@ -393,3 +393,55 @@ async def test_reap_idle_state_leaves_pool_alone():
     await s.reap_idle_state(idle_ttl=0)
 
     assert pool.reaped == 0
+
+
+class FocusPool(FakePool):
+    """A pool whose online sessions are not all focused yet."""
+
+    def __init__(self, online=(), focused=(), heartbeat=None):
+        super().__init__(online=online)
+        self.focused = set(focused)
+        self.heartbeat = dict(heartbeat or {})
+
+    def sendable_ids(self):
+        return self.online & self.focused
+
+    def heartbeat_session_id(self, token_value):
+        return self.heartbeat.get(token_value)
+
+
+@pytest.mark.asyncio
+async def test_online_but_unfocused_head_waits_for_its_focus(monkeypatch, polls):
+    tried = _record_sends(monkeypatch, status=SEND_OK)
+    pool = FocusPool(online={"a", "b"}, focused={"b"})
+    s = _sender(_DB(["a", "b"]), pool)
+    polls.hooks.append(lambda n: pool.focused.add("a") if n == 2 else None)
+
+    assert await _send(s, author_id="u") == SEND_OK
+
+    assert polls.count == 2
+    assert tried == ["ta"]
+
+
+@pytest.mark.asyncio
+async def test_unfocused_tokens_never_send(monkeypatch, polls):
+    tried = _record_sends(monkeypatch, status=SEND_OK)
+    pool = FocusPool(online={"a"}, focused=())
+    s = _sender(_DB(["a"]), pool)
+
+    assert await _send(s) == SEND_NO_TOKENS
+    assert tried == []
+
+
+@pytest.mark.asyncio
+async def test_headers_follow_the_pools_focus():
+    from copycord.common.selfbot_headers import build_headers
+
+    pool = FocusPool(heartbeat={"ta": "hb-1"})
+    s = _sender(_DB(["a", "b"]), pool)
+    assert s._build_headers("ta")["X-Super-Properties"] == build_headers(
+        "ta", heartbeat_session_id="hb-1"
+    )["X-Super-Properties"]
+    assert s._build_headers("tb")["X-Super-Properties"] == build_headers("tb")["X-Super-Properties"]
+    no_pool = _sender(_DB(["a"]))
+    assert no_pool._build_headers("ta")["X-Super-Properties"] == build_headers("ta")["X-Super-Properties"]

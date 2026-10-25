@@ -371,3 +371,78 @@ class TestReporter:
         assert client.is_ready()
         assert client.gateway.is_connected
         await stop(client, task)
+
+
+class _FocusGateway:
+    """The gateway attributes science reads for focus."""
+
+    def __init__(self):
+        self.foreground_enabled = True
+        self.foregrounded = False
+        self.heartbeat_session_id = None
+        self.heartbeat_initialized_ms = None
+        self.listeners = []
+
+    def on_foreground(self, handler):
+        self.listeners.append(handler)
+
+
+class TestForeground:
+    def test_unfocused_events_carry_no_heartbeat_session(self):
+        gw = _FocusGateway()
+        rep = sc.ScienceReporter("focus-science-token", None, gw)
+        assert gw.listeners == [rep.on_foreground]
+        event = rep.track("gateway_connected", {})
+        assert "client_heartbeat_session_id" not in event["properties"]
+        assert event["properties"]["client_app_state"] == "unfocused"
+        assert rep.ad_heartbeat() is None
+
+    def test_focused_events_carry_it_after_the_track_timestamp(self):
+        gw = _FocusGateway()
+        rep = sc.ScienceReporter("focus-science-token", None, gw)
+        gw.foregrounded, gw.heartbeat_session_id, gw.heartbeat_initialized_ms = True, "hb", 1234
+        event = rep.ad_heartbeat()
+        assert event["type"] == "client_ad_heartbeat"
+        assert list(event["properties"])[:6] == [
+            "client_track_timestamp",
+            "client_heartbeat_session_id",
+            "event_sequence_number",
+            "client_ad_session_id",
+            "client_heartbeat_initialization_timestamp",
+            "client_heartbeat_version",
+        ]
+        props = event["properties"]
+        assert props["client_heartbeat_session_id"] == "hb"
+        assert props["client_heartbeat_initialization_timestamp"] == 1234
+        assert props["client_heartbeat_version"] == 3
+        assert props["client_app_state"] == "focused"
+        assert rep.ad_heartbeat()["properties"]["client_ad_session_id"] == props["client_ad_session_id"]
+
+    def test_a_client_without_the_option_gets_no_listener(self):
+        gw = _FocusGateway()
+        gw.foreground_enabled = False
+        sc.ScienceReporter("focus-science-token", None, gw)
+        assert gw.listeners == []
+
+    @pytest.mark.asyncio
+    async def test_ad_heartbeat_loop_runs_while_focused(self, monkeypatch):
+        gw = _FocusGateway()
+        rep = sc.ScienceReporter("focus-science-token", None, gw)
+        waits = []
+        real_sleep = asyncio.sleep
+
+        async def fake_sleep(seconds):
+            waits.append(seconds)
+            if len(waits) == 2:
+                gw.foregrounded = False
+            await real_sleep(0)
+
+        monkeypatch.setattr(sc.asyncio, "sleep", fake_sleep)
+        monkeypatch.setattr(sc.random, "uniform", lambda a, b: (a, b))
+        gw.foregrounded, gw.heartbeat_session_id = True, "hb"
+        rep.on_foreground()
+        await asyncio.wait_for(rep._ad_task, timeout=3.0)
+        beats = [e for e in rep.queue if e["type"] == "client_ad_heartbeat"]
+        assert len(beats) == 2
+        assert waits == [sc.AD_HEARTBEAT_INTERVAL, sc.AD_HEARTBEAT_INTERVAL]
+        await rep.close()
