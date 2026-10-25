@@ -17,7 +17,7 @@
 #
 # Installs uv if it is missing, then Copycord with `uv tool install`, either
 # from a release wheel (default) or from a git ref built locally, which needs
-# git and Node 22+. Run with -Help for the parameters.
+# git and Node 22+ (both downloaded per user when missing). Run with -Help for the parameters.
 
 param(
     # The aliases are the install.sh option names.
@@ -53,6 +53,9 @@ function Install-Copycord {
     $NodeMinMajor = 22
     # Keep in step with NODE_VERSION in src/copycord/node_runtime.py.
     $NodeVersion = if ($env:COPYCORD_NODE_VERSION) { $env:COPYCORD_NODE_VERSION } else { '22.12.0' }
+    # MinGit for the git method when git is missing. Keep in step with MINGIT_TAG
+    # in src/copycord/git_runtime.py; its sha256 is read from that release.
+    $MinGitTag = 'v2.51.0.windows.1'
     # A fixed uv version, so `uv tool install` behaves the same on every run.
     $UvVersion = if ($env:COPYCORD_UV_VERSION) { $env:COPYCORD_UV_VERSION } else { '0.9.5' }
     $UvInstaller = "https://astral.sh/uv/$UvVersion/install.ps1"
@@ -136,6 +139,13 @@ Test a branch, no release needed:
     $env:COPYCORD_HOME = $homeDir
     $gitDir = if ($Opts.GitDir) { $Opts.GitDir } else { Join-Path $homeDir 'src' }
     $nodeHome = Join-Path $homeDir 'node'
+    # Asset names drop .windows.1 and keep a later build number: v2.51.0.windows.2 -> 2.51.0.2.
+    if ($MinGitTag -match '^v?(\d+(?:\.\d+)*)\.windows\.(\d+)$') {
+        $minGitVersion = if ($Matches[2] -eq '1') { $Matches[1] } else { "$($Matches[1]).$($Matches[2])" }
+    } else { throw "copycord install: $MinGitTag is not a Git for Windows release tag" }
+    $minGitName = "MinGit-$minGitVersion-64-bit"
+    $gitHome = Join-Path $homeDir 'git'
+    $minGitCmd = Join-Path (Join-Path $gitHome $minGitName) 'cmd'
     $api = "https://api.github.com/repos/$repo/releases"
     $repoUrl = "https://github.com/$repo"
     if ($method -eq 'release') { $version = $version.TrimStart('v') } else { $ref = if ($version) { $version } else { 'main' } }
@@ -251,6 +261,11 @@ Test a branch, no release needed:
         if ($node) { [void][int]::TryParse(((& node -v) -replace '^v', '').Split('.')[0], [ref]$major) }
         if ($major -lt $NodeMinMajor -or -not (Get-Command npm -ErrorAction SilentlyContinue)) { $needNode = $true }
     }
+    # A MinGit from an earlier run is used again.
+    if ($method -eq 'git' -and -not (Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $minGitCmd 'git.exe'))) {
+        $env:Path = "$minGitCmd;$env:Path"
+    }
+    $needGit = $method -eq 'git' -and -not (Get-Command git -ErrorAction SilentlyContinue)
     $uv = Get-Command uv -ErrorAction SilentlyContinue
 
     # An upgrade or reinstall ends with `copycord doctor --fix`.
@@ -426,6 +441,8 @@ Test a branch, no release needed:
             PlanLine 'repo' $repoUrl
             PlanLine 'ref' $ref
             PlanLine 'checkout' $gitDir
+            if ($needGit) { PlanLine 'git' "git $minGitVersion (MinGit) into $gitHome (per user)" }
+            else { PlanLine 'git' (Get-Command git).Source }
             if ($needNode) { PlanLine 'node' "Node $NodeVersion into $nodeHome (per user)" }
             else { PlanLine 'node' "$(& node -v) at $((Get-Command node).Source)" }
         }
@@ -436,6 +453,7 @@ Test a branch, no release needed:
     }
 
     $script:stepTotal = if ($method -eq 'git') { 5 } else { 4 }
+    if ($needGit) { $script:stepTotal++ }
     if ($needNode) { $script:stepTotal++ }
     if ($upgrade) { $script:stepTotal++ }
     if ($verify) { $script:stepTotal++ }
@@ -515,8 +533,55 @@ Test a branch, no release needed:
         } else {
             # --- git method -------------------------------------------------
 
-            if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-                Fail 'git is not installed; install it (winget install --id Git.Git) and run this again'
+            if ($needGit) {
+                Step "Installing git $minGitVersion"
+                $gitHint = 'install git yourself (winget install --id Git.Git) and run this again'
+                if ($dryRun) {
+                    Dry "download $minGitName.zip from the Git for Windows $MinGitTag release, check its sha256, unpack into $gitHome"
+                } else {
+                    # 64-bit MinGit, which Windows on ARM runs too; no admin rights needed.
+                    $procArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+                    if ($procArch -notin @('AMD64', 'ARM64')) { Fail "no MinGit build for $procArch; $gitHint" }
+                    Info "git $minGitVersion (MinGit) into $gitHome"
+                    $zipName = "$minGitName.zip"
+                    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("copycord-git-" + [guid]::NewGuid())
+                    New-Item -ItemType Directory -Path $tmp | Out-Null
+                    try {
+                        # The release publishes the sha256 as an asset digest and in its notes;
+                        # without one the zip is not installed.
+                        $hdr = $Headers.Clone()
+                        if ($env:GITHUB_TOKEN) { $hdr['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
+                        try {
+                            $gitRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/git-for-windows/git/releases/tags/$MinGitTag" -Headers $hdr -TimeoutSec 60
+                        } catch {
+                            Fail "could not read the Git for Windows $MinGitTag release: $($_.Exception.Message); $gitHint"
+                        }
+                        $sums = @()
+                        $asset = @($gitRelease.assets | Where-Object { $_.name -eq $zipName }) | Select-Object -First 1
+                        if ($asset -and $asset.PSObject.Properties['digest'] -and "$($asset.digest)" -match '^sha256:([0-9a-fA-F]{64})$') { $sums += $Matches[1].ToLower() }
+                        foreach ($row in ("$($gitRelease.body)" -split "`n")) {
+                            $cells = @($row.Trim().Trim('|').Split('|') | ForEach-Object { $_.Trim([char[]]'`* ') })
+                            if ($cells.Count -ge 2 -and $cells[0] -eq $zipName -and $cells[1] -match '^[0-9a-fA-F]{64}$') { $sums += $cells[1].ToLower() }
+                        }
+                        $sums = @($sums | Select-Object -Unique)
+                        if ($sums.Count -eq 0) { Fail "the Git for Windows $MinGitTag release publishes no sha256 for $zipName, so it cannot be checked; $gitHint" }
+                        if ($sums.Count -gt 1) { Fail "the Git for Windows $MinGitTag release lists different checksums for $zipName; $gitHint" }
+                        $expected = $sums[0]
+                        $zip = Join-Path $tmp $zipName
+                        Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/git-for-windows/git/releases/download/$MinGitTag/$zipName" -OutFile $zip -TimeoutSec 300
+                        $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+                        if ($actual -ne $expected) { Fail "MinGit sha256 mismatch: expected $expected, got $actual; nothing was installed" }
+                        $minGitDir = Join-Path $gitHome $minGitName
+                        New-Item -ItemType Directory -Force -Path $gitHome | Out-Null
+                        Remove-Item -Recurse -Force $minGitDir -ErrorAction SilentlyContinue
+                        Expand-Archive -Path $zip -DestinationPath $minGitDir
+                    } finally {
+                        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+                    }
+                    if (-not (Test-Path (Join-Path $minGitCmd 'git.exe'))) { Fail "$zipName has no cmd\git.exe; $gitHint" }
+                    $env:Path = "$minGitCmd;$env:Path"
+                    Done "installed $(& git --version) for Copycord"
+                }
             }
             if ((Test-Path $gitDir) -and -not (Test-Path (Join-Path $gitDir '.git')) -and (Get-ChildItem $gitDir -Force | Select-Object -First 1)) {
                 Fail "$gitDir exists and is not a git checkout; move it or pass -GitDir"

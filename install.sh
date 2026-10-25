@@ -557,6 +557,9 @@ fi
 
 if [ "$METHOD" = "git" ]; then STEP_TOTAL=5; else STEP_TOTAL=4; fi
 [ "$need_node" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
+if [ "$METHOD" = "git" ] && [ "$DRY_RUN" != "1" ] && ! command -v git >/dev/null 2>&1; then
+    STEP_TOTAL=$((STEP_TOTAL + 1))
+fi
 [ "$UPGRADE" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
 [ "$VERIFY" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
@@ -714,9 +717,83 @@ build_frontend() {
     (cd "$GIT_DIR_PATH/src/copycord/admin/web" && npm ci --no-audit --no-fund && npm run build)
 }
 
+git_hint() {
+    # The package manager command for git; the installer never downloads git itself.
+    if [ "$(uname -s)" = "Darwin" ]; then echo "xcode-select --install (or brew install git)"
+    elif command -v apt-get >/dev/null 2>&1; then echo "sudo apt install git"
+    elif command -v dnf >/dev/null 2>&1; then echo "sudo dnf install git"
+    elif command -v yum >/dev/null 2>&1; then echo "sudo yum install git"
+    elif command -v pacman >/dev/null 2>&1; then echo "sudo pacman -S git"
+    elif command -v zypper >/dev/null 2>&1; then echo "sudo zypper install git"
+    elif command -v apk >/dev/null 2>&1; then echo "sudo apk add git"
+    else echo "your package manager"
+    fi
+}
+
+git_can_prompt() {
+    # A person at a terminal: stdin is one, or (curl ... | sh) stdout is and
+    # /dev/tty opens, which is where sudo asks. Never in CI.
+    case "${CI:-}" in "" | 0 | false | no) ;; *) return 1 ;; esac
+    [ -t 0 ] && return 0
+    [ -t 1 ] && (: </dev/tty) 2>/dev/null
+}
+
+git_pkg_run() {
+    # git_pkg_run CMD...: one package manager command, as root.
+    if [ -n "$GIT_SUDO" ]; then $GIT_SUDO "$@"; else "$@"; fi
+}
+
+git_pkg_install() {
+    # Installs git with brew (macOS) or the Linux package manager, as root
+    # through sudo when needed; sudo asks for the password on the terminal.
+    if [ "$(uname -s)" = "Darwin" ]; then
+        command -v brew >/dev/null 2>&1 \
+            || die "git is not installed and Homebrew is not either; install git with $(git_hint) and run this again"
+        run "git with brew" brew install git
+        return 0
+    fi
+    if command -v apk >/dev/null 2>&1; then pkg=apk
+    elif command -v apt-get >/dev/null 2>&1; then pkg=apt-get
+    elif command -v pacman >/dev/null 2>&1; then pkg=pacman
+    elif command -v dnf >/dev/null 2>&1; then pkg=dnf
+    elif command -v yum >/dev/null 2>&1; then pkg=yum
+    else die "git is not installed and no known package manager was found; install git with $(git_hint) and run this again"
+    fi
+    GIT_SUDO=""
+    if [ "$(id -u)" != "0" ]; then
+        command -v sudo >/dev/null 2>&1 \
+            || die "git is not installed, and installing it with $pkg needs root, but sudo is not installed; install sudo or run this again as root"
+        say "  Copycord needs administrator rights to install git with $pkg; sudo may ask for your password."
+        sudo -v || die "sudo did not get administrator rights; install git with $(git_hint) and run this again"
+        # Credentials are cached now; -n fails rather than prompting behind the spinner.
+        GIT_SUDO="sudo -n"
+    fi
+    case "$pkg" in
+        apk) run "git with apk" git_pkg_run apk add --no-cache git ;;
+        apt-get)
+            run "apt-get update" git_pkg_run env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+            run "git with apt-get" git_pkg_run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git
+            ;;
+        pacman) run "git with pacman" git_pkg_run pacman -Sy --noconfirm git ;;
+        dnf) run "git with dnf" git_pkg_run dnf install -y -q git ;;
+        yum) run "git with yum" git_pkg_run yum install -y -q git ;;
+    esac
+}
+
 install_git() {
-    command -v git >/dev/null 2>&1 \
-        || die "git is not installed; install it (e.g. sudo apt install git, or xcode-select --install) and run this again"
+    if ! command -v git >/dev/null 2>&1; then
+        if [ "$DRY_RUN" = "1" ]; then
+            dry "install git with $(git_hint)"
+        elif git_can_prompt; then
+            step "Installing git"
+            git_pkg_install
+            command -v git >/dev/null 2>&1 \
+                || die "git was installed but is not on PATH; open a new terminal and run this again"
+            done_line "installed $(git --version)"
+        else
+            die "git is not installed and the git method needs it; install it with $(git_hint) and run this again"
+        fi
+    fi
     if [ -e "$GIT_DIR_PATH" ] && [ ! -d "$GIT_DIR_PATH/.git" ] \
         && [ -n "$(ls -A "$GIT_DIR_PATH" 2>/dev/null)" ]; then
         die "$GIT_DIR_PATH exists and is not a git checkout; move it or pass --git-dir"
