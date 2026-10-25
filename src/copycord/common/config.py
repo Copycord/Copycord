@@ -149,9 +149,11 @@ class Config:
             "USE_USER_TOKENS": False,
             "USER_TOKEN_STRATEGY": "round_robin",
             # warm pool: how many sending tokens stay on the gateway, and their status:
-            # random | online | idle | busy | invisible (random keeps changing over time)
+            # random | online | idle | busy. random picks one status per account;
+            # with USER_TOKEN_PRESENCE_ROTATE on it then changes every 20 to 90 minutes.
             "USER_TOKEN_KEEP_ONLINE": 5,
             "USER_TOKEN_PRESENCE": "random",
+            "USER_TOKEN_PRESENCE_ROTATE": False,
             "USER_TOKEN_FALLBACK_WEBHOOK": True,
             "USER_TOKEN_TYPING": False,
             "USER_TOKEN_MIN_DELAY": 0,

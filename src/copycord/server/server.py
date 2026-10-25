@@ -154,6 +154,13 @@ TOKEN_POOL_STARTUP_DELAY = 10.0
 TOKEN_POOL_WATCH = 5.0
 
 
+def _setting_on(value) -> bool:
+    """A bool-ish setting: True, 1 and "true" (any case) are on, anything else is off."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return value is True or value == 1
+
+
 def plan_token_pool(
     mappings: list[dict], *, skip_values: set = frozenset(), online_values: set = frozenset()
 ) -> dict:
@@ -163,7 +170,8 @@ def plan_token_pool(
     the resolved ``settings`` and its enabled ``tokens`` (``token_id``, ``token_value``).
     A token value used by several mappings is one entry: its ids and mappings are the
     union, ``use_proxy`` is always on (proxies are mandatory for tokens), ``keep_online`` is the
-    largest of theirs and ``presence`` is the first mapping's. Each mapping wants
+    largest of theirs, ``presence`` is the first mapping's and ``rotate``
+    (``USER_TOKEN_PRESENCE_ROTATE``) is on if any of them has it on. Each mapping wants
     ``min(keep_online, its tokens)`` online; a token another mapping already wants,
     then one already online, is picked first so a shared token counts once.
     """
@@ -178,6 +186,7 @@ def plan_token_pool(
         except (TypeError, ValueError):
             keep = 0
         presence = str(settings.get("USER_TOKEN_PRESENCE") or "random")
+        rotate = _setting_on(settings.get("USER_TOKEN_PRESENCE_ROTATE", False))
         use_proxy = token_use_proxy(settings)
         mine: list[str] = []
         for tok in m.get("tokens") or []:
@@ -192,6 +201,7 @@ def plan_token_pool(
                     "use_proxy": False,
                     "keep_online": keep,
                     "presence": presence,
+                    "rotate": False,
                 }
             token_id = str(tok.get("token_id"))
             if token_id not in entry["ids"]:
@@ -200,6 +210,7 @@ def plan_token_pool(
                 entry["mappings"].append(m.get("mapping_id"))
             entry["use_proxy"] = entry["use_proxy"] or use_proxy
             entry["keep_online"] = max(entry["keep_online"], keep)
+            entry["rotate"] = entry["rotate"] or rotate
             if value not in mine:
                 mine.append(value)
         need = min(keep, len(mine))
@@ -1009,7 +1020,11 @@ class ServerReceiver:
                     logger.debug("[token-pool] Proxy lease failed", exc_info=True)
             for token_id in entry["ids"]:
                 await pool.ensure(
-                    token_id, value, keep_online=keep, presence=entry["presence"]
+                    token_id,
+                    value,
+                    keep_online=keep,
+                    presence=entry["presence"],
+                    rotate=entry["rotate"],
                 )
                 self._pool_ids.add(token_id)
 
