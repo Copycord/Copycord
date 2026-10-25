@@ -3027,6 +3027,17 @@ def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
     return items
 
 
+def _token_cloning_enabled(mappings: list[dict]) -> bool:
+    """True when any mapping has USE_USER_TOKENS on once its settings are laid over the defaults."""
+    for m in mappings or []:
+        settings = (m or {}).get("settings")
+        if not isinstance(settings, dict):
+            settings = {}
+        if bool({**DEFAULTS, **settings}.get("USE_USER_TOKENS", False)):
+            return True
+    return False
+
+
 @app.get("/api/system/senders", response_class=JSONResponse)
 async def api_system_senders():
     """The sending accounts for the System page, live state from the same status /api/status serves; no token values."""
@@ -3034,7 +3045,8 @@ async def api_system_senders():
     server = status.get("server") or {}
     pool = server.get("token_pool") if server.get("state") == "running" else None
     items = _merge_senders(db.list_all_user_tokens(), pool)
-    return JSONResponse({"ok": True, "items": items})
+    enabled = _token_cloning_enabled(db.list_guild_mappings())
+    return JSONResponse({"ok": True, "enabled": enabled, "items": items})
 
 
 @app.get("/filters/{mapping_id}")

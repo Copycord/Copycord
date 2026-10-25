@@ -137,11 +137,15 @@ def test_sort_online_first_then_username():
 
 
 class FakeDB:
-    def __init__(self, rows):
+    def __init__(self, rows, mappings=()):
         self.rows = rows
+        self.mappings = list(mappings)
 
     def list_all_user_tokens(self):
         return [dict(r) for r in self.rows]
+
+    def list_guild_mappings(self):
+        return [dict(m) for m in self.mappings]
 
 
 @pytest.fixture()
@@ -206,6 +210,44 @@ def test_endpoint_ignores_a_stale_pool_when_the_server_is_stopped(tc, monkeypatc
     )
     items = tc.get("/api/system/senders").json()["items"]
     assert [(i["state"], i["presence"], i["since"]) for i in items] == [("offline", None, None)]
+
+
+def _mapping(mid, settings):
+    return {"mapping_id": mid, "settings": settings}
+
+
+def _enabled(tc, monkeypatch, mappings):
+    monkeypatch.setattr(app_module, "db", FakeDB([_row("t1", "V", username="a")], mappings))
+    monkeypatch.setattr(
+        app_module, "_collect_status", AsyncMock(return_value=_status("stopped", None)),
+    )
+    body = tc.get("/api/system/senders").json()
+    assert body["ok"] is True
+    return body["enabled"]
+
+
+def test_endpoint_enabled_false_when_no_mapping_has_token_cloning_on(tc, monkeypatch):
+    assert _enabled(tc, monkeypatch, []) is False
+    assert _enabled(tc, monkeypatch, [
+        _mapping("m1", {"USE_USER_TOKENS": False}),
+        _mapping("m2", {"CLONE_MESSAGES": True}),
+    ]) is False
+
+
+def test_endpoint_enabled_true_when_one_mapping_has_token_cloning_on(tc, monkeypatch):
+    assert _enabled(tc, monkeypatch, [
+        _mapping("m1", {"USE_USER_TOKENS": False}),
+        _mapping("m2", {"USE_USER_TOKENS": True}),
+    ]) is True
+
+
+def test_endpoint_enabled_resolves_an_inherited_setting_through_the_defaults(tc, monkeypatch):
+    inherits = [_mapping("m1", {}), _mapping("m2", None)]
+    assert _enabled(tc, monkeypatch, inherits) is False
+    monkeypatch.setitem(app_module.DEFAULTS, "USE_USER_TOKENS", True)
+    assert _enabled(tc, monkeypatch, inherits) is True
+    # An explicit off still beats an on default.
+    assert _enabled(tc, monkeypatch, [_mapping("m1", {"USE_USER_TOKENS": False})]) is False
 
 
 def test_endpoint_needs_login(tmp_path, monkeypatch):
