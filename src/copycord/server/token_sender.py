@@ -893,10 +893,15 @@ class UserTokenSender:
         return ordered[idx:] + ordered[:idx]
 
     def _online_ids(self) -> set:
-        """Token ids with a live pool session; empty without a pool or when it fails."""
+        """Token ids whose pool session may send: online with its gateway tab
+        focused (or past the pool's grace after READY); empty without a pool or
+        when it fails."""
         if self._pool is None:
             return set()
         try:
+            sendable = getattr(self._pool, "sendable_ids", None)
+            if callable(sendable):
+                return set(sendable())
             return set(self._pool.online_ids())
         except Exception:
             self._log.debug("[user-send] Pool online_ids failed", exc_info=True)
@@ -943,7 +948,7 @@ class UserTokenSender:
             return False
         self._offline_warned[key] = now
         self._log.warning(
-            "[user-send] Token %s has no gateway session after %.0fs; not sending with it",
+            "[user-send] Token %s has no focused gateway session after %.0fs; not sending with it",
             tok.get("username") or key,
             ONLINE_WAIT,
         )
@@ -1813,9 +1818,27 @@ class UserTokenSender:
             return ""
 
     def _build_headers(self, token: str, referer: str | None = None) -> dict:
-        """Realistic Discord desktop-client headers, unique & stable per token."""
+        """Realistic Discord desktop-client headers, unique & stable per token.
+
+        While the token's pool session has its tab focused the super properties
+        say "focused" and carry its client_heartbeat_session_id.
+        """
 
         return {
-            **build_headers(token, referer=referer),
+            **build_headers(
+                token, referer=referer, heartbeat_session_id=self._heartbeat_session_id(token)
+            ),
             **SUPPRESSED_PROFILE_HEADERS,
         }
+
+    def _heartbeat_session_id(self, token: str) -> Optional[str]:
+        """The pool's focused heartbeat session id for ``token``, or None."""
+        lookup = getattr(self._pool, "heartbeat_session_id", None) if self._pool else None
+        if not callable(lookup):
+            return None
+        try:
+            hb = lookup(token)
+        except Exception:
+            self._log.debug("[user-send] Pool heartbeat_session_id failed", exc_info=True)
+            return None
+        return hb if isinstance(hb, str) and hb else None

@@ -212,8 +212,9 @@ def make_fingerprint(token: str) -> dict:
         "client_event_source": None,
         "client_launch_id": launch_id,
         "launch_signature": launch_signature,
-        # A tab that loaded unfocused and stays so. Such a tab never makes a
-        # heartbeat session id, so client_heartbeat_session_id never follows.
+        # A tab that loaded unfocused. Once its gateway tab is focused (the
+        # warm pool), focused_super_props_b64 makes it "focused" and adds
+        # client_heartbeat_session_id.
         "client_app_state": "unfocused",
     }
 
@@ -329,10 +330,34 @@ def _fingerprint(token: str) -> dict:
     return fp
 
 
-def build_headers(token: str, *, referer: str | None = None) -> dict:
-    """Full header dict for a user-token REST request."""
+def focused_super_props_b64(token: str, heartbeat_session_id: str) -> str:
+    """X-Super-Properties of a focused tab: client_app_state "focused" and then
+    client_heartbeat_session_id, the op 41 session id, last (the 2026-10-24
+    login capture's key order)."""
+    fp = _fingerprint(token)
+    cached = fp.get("focused_super_props")
+    if cached is not None and cached[0] == heartbeat_session_id:
+        return cached[1]
+    props = dict(fp["super_props"])
+    props["client_app_state"] = "focused"
+    props["client_heartbeat_session_id"] = heartbeat_session_id
+    encoded = _b64_props(props)
+    fp["focused_super_props"] = (heartbeat_session_id, encoded)
+    return encoded
+
+
+def build_headers(
+    token: str, *, referer: str | None = None, heartbeat_session_id: str | None = None
+) -> dict:
+    """Full header dict for a user-token REST request. ``heartbeat_session_id``
+    is set while the token's gateway tab is focused."""
     fp = _fingerprint(token)
     h = fp["headers"]
+    super_props = (
+        focused_super_props_b64(token, heartbeat_session_id)
+        if heartbeat_session_id
+        else fp["super_props_b64"]
+    )
     return {
         "Accept": h["Accept"],
         "Accept-Language": h["Accept-Language"],
@@ -352,7 +377,7 @@ def build_headers(token: str, *, referer: str | None = None) -> dict:
         "X-Discord-Locale": h["X-Discord-Locale"],
         "X-Discord-Timezone": _timezone_for(token),
         "X-Installation-Id": h["X-Installation-Id"],
-        "X-Super-Properties": fp["super_props_b64"],
+        "X-Super-Properties": super_props,
     }
 
 

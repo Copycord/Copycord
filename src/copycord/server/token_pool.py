@@ -19,6 +19,7 @@ is the CPU spike, so a slot waits a jittered gap only after the loop lagged.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import random
 import time
@@ -32,6 +33,7 @@ from copycord.common.token_proxy import (
 )
 from copycord.selfclient import Client
 from copycord.selfclient.errors import ConnectionClosed, HTTPException, LoginFailure
+from copycord.selfclient.gateway import GatewayClient
 
 # Patched by tests; every stagger and backoff wait goes through it.
 _sleep = asyncio.sleep
@@ -76,6 +78,14 @@ LAG_INTERVAL = 1.0
 LAG_WARN_MS = 250.0
 # The next stagger gap is multiplied by this after a lag warning.
 LAG_GAP_FACTOR = 2.0
+
+# A pool session sends only once its gateway tab is focused, or this long after
+# READY if the focus never came (it is due 2 to 10 s after READY).
+FOREGROUND_GRACE = 12.0
+
+# Every pool session's gateway focuses its tab after READY; other selfclient
+# users keep the unfocused default.
+_FOREGROUND_GATEWAY = functools.partial(GatewayClient, foreground=True)
 
 
 def _token_key(token_value: str) -> str:
@@ -163,6 +173,35 @@ class _Session:
             and client.is_ready()
             and not client.is_closed()
         )
+
+    def _gateway(self) -> Any:
+        return getattr(self.client, "gateway", None) if self.client is not None else None
+
+    def heartbeat_session_id(self) -> Optional[str]:
+        """The op 41 session id while the session is online with its tab focused, else None."""
+        gateway = self._gateway()
+        if not self.is_online() or not getattr(gateway, "foregrounded", False):
+            return None
+        hb = getattr(gateway, "heartbeat_session_id", None)
+        return str(hb) if hb else None
+
+    def is_sendable(self, now: Optional[float] = None) -> bool:
+        """Online and focused, or online FOREGROUND_GRACE seconds past READY.
+
+        A gateway without the foreground state (a test fake) counts as focused.
+        """
+        if not self.is_online():
+            return False
+        gateway = self._gateway()
+        if gateway is None or not hasattr(gateway, "foregrounded"):
+            return True
+        if not getattr(gateway, "foreground_enabled", False) or gateway.foregrounded:
+            return True
+        ready_at = getattr(gateway, "ready_at", None)
+        if ready_at is None:
+            return False
+        now = time.monotonic() if now is None else now
+        return now - ready_at >= FOREGROUND_GRACE
 
     def refresh(self) -> None:
         """Bring ``state`` in line with the client after a drop or a late READY."""
@@ -278,6 +317,26 @@ class TokenSessionPool:
             if sess is not None and sess.is_online():
                 out.add(token_id)
         return out
+
+    def sendable_ids(self) -> set:
+        """Token ids that may send now: online and with the gateway tab focused
+        (or FOREGROUND_GRACE seconds past READY without it)."""
+        now = time.monotonic()
+        out = set()
+        for token_id, key in self._key_by_id.items():
+            sess = self._sessions.get(key)
+            if sess is not None and sess.is_sendable(now):
+                out.add(token_id)
+        return out
+
+    def heartbeat_session_id(self, token_value: str) -> Optional[str]:
+        """The focused tab's op 41 session id for this token value, keyed by
+        its token key, or None while it is not online and focused."""
+        token_value = (token_value or "").strip()
+        if not token_value:
+            return None
+        sess = self._sessions.get(_token_key(token_value))
+        return sess.heartbeat_session_id() if sess is not None else None
 
     def dead_ids(self) -> set:
         """Token ids whose token got a 401 or a 4004 close; never retried."""
@@ -540,6 +599,8 @@ class TokenSessionPool:
                         max_messages=0,
                         status=sess.status,
                         refresh_build=False,
+                        # A sending token is a tab in use: focused after READY.
+                        gateway_factory=_FOREGROUND_GATEWAY,
                     )
                 except Exception as exc:
                     sess.runner = asyncio.ensure_future(_raise(exc))
