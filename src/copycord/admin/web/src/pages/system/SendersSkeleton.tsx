@@ -47,16 +47,58 @@ export function SendersCountBar() {
   return <Skeleton.Text className={COUNT} width={72} />;
 }
 
-/** Title left, the account count right, as the Messages header without its subtitle. */
-export function SendersHeader({ count }: { count: ReactNode }) {
+// The Enabled or Disabled chip of the mapping popup's section headers (SectionSummary in
+// dashboard/mappings/modal/parts.tsx). Both labels share one grid cell, the other one invisible, so the
+// box is as wide as "Disabled" in either state and the loading box matches it exactly.
+const CHIP = "inline-grid shrink-0 rounded-[20px] px-2.5 py-1 text-center text-[11px] leading-none font-semibold";
+const CHIP_ON = "bg-ok-a12 text-ok";
+const CHIP_OFF = "bg-wash-6 text-muted";
+const CHIP_CELL = "[grid-area:1/1]";
+
+function ChipLabels({ on }: { on: boolean }) {
+  return (
+    <>
+      <span data-chip-label="" className={CHIP_CELL}>
+        {on ? "Enabled" : "Disabled"}
+      </span>
+      <span aria-hidden="true" className={cx(CHIP_CELL, "invisible")}>
+        {on ? "Disabled" : "Enabled"}
+      </span>
+    </>
+  );
+}
+
+/** Whether token message cloning is on for any mapping, in the mapping popup's chip. */
+export function SendersChip({ on }: { on: boolean }) {
+  return (
+    <span id="system-senders-chip" data-section-chip={on ? "on" : "off"} className={cx(CHIP, on ? CHIP_ON : CHIP_OFF)}>
+      <ChipLabels on={on} />
+    </span>
+  );
+}
+
+/** The chip until the first answer: its exact box, shimmering. */
+export function SendersChipBox() {
+  return (
+    <Skeleton.Box id="system-senders-chip" className={CHIP}>
+      <ChipLabels on={false} />
+    </Skeleton.Box>
+  );
+}
+
+/** Title left; the account count and the Enabled or Disabled chip right, as the Messages header without its subtitle. */
+export function SendersHeader({ count, chip = null }: { count: ReactNode; chip?: ReactNode }) {
   return (
     <div className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
       <h2 id="system-senders-title" className="m-0 text-[22px] font-bold text-text">
         Token Message Cloning
       </h2>
-      <span id="system-senders-count" className={COUNT} aria-live="polite">
-        {count}
-      </span>
+      <div className="flex items-center gap-2.5">
+        <span id="system-senders-count" className={COUNT} aria-live="polite">
+          {count}
+        </span>
+        {chip}
+      </div>
     </div>
   );
 }
@@ -164,7 +206,7 @@ export function SendersLoadingRows({ rows = readLastCount(SENDERS_COUNT_KEY, 3, 
 export function SendersTableSkeleton() {
   return (
     <section aria-labelledby="system-senders-title" className={SENDERS_SECTION}>
-      <SendersHeader count={<SendersCountBar />} />
+      <SendersHeader count={<SendersCountBar />} chip={<SendersChipBox />} />
       <div inert>
         <SendersToolbar query="" onQuery={() => {}} />
       </div>

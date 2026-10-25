@@ -35,6 +35,8 @@ import {
   SENDERS_TABLE,
   SENDERS_TABLE_STYLE,
   SENDERS_WRAP,
+  SendersChip,
+  SendersChipBox,
   SendersCountBar,
   SendersHead,
   SendersHeader,
@@ -160,7 +162,7 @@ function SenderRow({ s, now }: { s: Sender; now: number }) {
 const accounts = (n: number) => `${n.toLocaleString()} ${n === 1 ? "account" : "accounts"}`;
 
 export function SendersTable() {
-  const { items, error, busy } = useSenders();
+  const { items, enabled, error, busy } = useSenders();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SenderSort | null>(null);
   const reveal = useReveal(items !== undefined || error);
@@ -171,6 +173,9 @@ export function SendersTable() {
 
   const count =
     items === undefined ? (error ? null : <SendersCountBar />) : searching ? `${rows!.length.toLocaleString()} of ${accounts(items.length)}` : accounts(items.length);
+  // The chip's box is held until the first answer; a first poll that fails shows no chip.
+  const chip =
+    enabled !== undefined ? <SendersChip on={enabled} /> : items === undefined && !error ? <SendersChipBox /> : null;
   const note =
     items === undefined
       ? error
@@ -184,7 +189,7 @@ export function SendersTable() {
 
   return (
     <section aria-labelledby="system-senders-title" className={SENDERS_SECTION}>
-      <SendersHeader count={count} />
+      <SendersHeader count={count} chip={chip} />
       <div>
         <SendersToolbar query={query} onQuery={setQuery} />
       </div>

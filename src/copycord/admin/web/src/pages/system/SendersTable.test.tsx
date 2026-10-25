@@ -304,8 +304,13 @@ describe("SendersTable loading", () => {
         .map((h) => [h.textContent, h.className, h.style.width, h.querySelector("button")?.className]);
     const firstCells = (root: HTMLElement) => [...root.querySelector("tr[data-skeleton-row]")!.querySelectorAll("td")].map((c) => c.className);
     // The section's tree of tags and classes, down to the table and the count box: header, toolbar card, search, wrap.
+    // The chip swaps its loading box for the loaded one and has cases of its own below.
     const leaf = (el: Element) => el.tagName === "TABLE" || el.id === "system-senders-count";
-    const shape = (el: Element): unknown => [el.tagName, el.getAttribute("class"), leaf(el) ? [] : [...el.children].map(shape)];
+    const shape = (el: Element): unknown => [
+      el.tagName,
+      el.getAttribute("class"),
+      leaf(el) ? [] : [...el.children].filter((c) => c.id !== "system-senders-chip").map(shape),
+    ];
     const section = (root: HTMLElement) => root.querySelector("section")!;
     expect(heads(skel.container)).toEqual(heads(page.container));
     expect(firstCells(skel.container)).toEqual(firstCells(page.container));
@@ -445,6 +450,95 @@ describe("SendersTable header and search", () => {
     expect(screen.getAllByRole("columnheader")).toHaveLength(6);
     expect(document.getElementById("system-senders-count")).toHaveTextContent(/^0 of 7 accounts$/);
     expect(screen.queryByText("No sending accounts yet")).toBeNull();
+  });
+});
+
+describe("SendersTable enabled chip", () => {
+  const chip = () => document.getElementById("system-senders-chip");
+  const label = () => chip()?.querySelector("[data-chip-label]")?.textContent;
+  const cells = (el: Element) => [...el.children].map((c) => [c.textContent, c.getAttribute("class")]);
+  const BASE = ["inline-grid", "shrink-0", "rounded-[20px]", "px-2.5", "py-1", "text-[11px]", "leading-none", "font-semibold"];
+
+  it("shows Enabled in the mapping popup's on chip, right of the count", async () => {
+    serve(() => json({ ok: true, enabled: true, items: ITEMS }));
+    render(<SendersTable />);
+    await waitFor(() => expect(chip()).toHaveAttribute("data-section-chip", "on"));
+    expect(label()).toBe("Enabled");
+    expect(chip()!.className.split(" ")).toEqual(expect.arrayContaining([...BASE, "bg-ok-a12", "text-ok"]));
+    expect(chip()!.querySelector("[data-skeleton]")).toBeNull();
+    expect(chip()!.hasAttribute("data-skeleton")).toBe(false);
+    expect(document.getElementById("system-senders-count")!.nextElementSibling).toBe(chip());
+  });
+
+  it("shows Disabled in the off chip", async () => {
+    serve(() => json({ ok: true, enabled: false, items: ITEMS }));
+    render(<SendersTable />);
+    await waitFor(() => expect(chip()).toHaveAttribute("data-section-chip", "off"));
+    expect(label()).toBe("Disabled");
+    expect(chip()!.className.split(" ")).toEqual(expect.arrayContaining([...BASE, "bg-wash-6", "text-muted"]));
+  });
+
+  it("follows a later poll and keeps the chip when a refetch fails", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const fetchMock = serve(
+      () => json({ ok: true, enabled: false, items: ITEMS }),
+      () => json({ ok: true, enabled: true, items: ITEMS }),
+      () => json({ ok: false }, 500),
+    );
+    render(<SendersTable />);
+    await vi.waitFor(() => expect(label()).toBe("Disabled"));
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
+    });
+    await vi.waitFor(() => expect(label()).toBe("Enabled"));
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    // The failed poll has landed once the next one is scheduled.
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(chip()).toHaveAttribute("data-section-chip", "on");
+    expect(label()).toBe("Enabled");
+  });
+
+  it("holds the chip's exact box while loading, with no label shown", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await gate;
+        return json({ ok: true, enabled: true, items: ITEMS });
+      }),
+    );
+    render(<SendersTable />);
+    const box = chip()!;
+    expect(box).toHaveAttribute("data-skeleton");
+    expect(box).toHaveAttribute("aria-hidden", "true");
+    expect(box).not.toHaveAttribute("data-section-chip");
+    expect(box.className.split(" ")).toEqual(expect.arrayContaining([...BASE, "cc-skeleton", "text-transparent"]));
+    expect(document.querySelector("[data-section-chip]")).toBeNull();
+    const loadingCells = cells(box);
+    release();
+    await waitFor(() => expect(chip()).toHaveAttribute("data-section-chip", "on"));
+    // The same two labels in one grid cell, so the loaded chip is exactly as wide as its loading box.
+    expect(cells(chip()!).map(([t]) => t).sort()).toEqual(loadingCells.map(([t]) => t).sort());
+    expect(cells(chip()!).map(([, c]) => c).sort()).toEqual(loadingCells.map(([, c]) => c).sort());
+
+    const skel = render(<SendersTableSkeleton />);
+    const skelBox = skel.container.querySelector("#system-senders-chip")!;
+    expect(skelBox.className).toBe(box.className);
+    expect(cells(skelBox)).toEqual(loadingCells);
+  });
+
+  it("shows no chip when the first poll fails", async () => {
+    serve(() => json({ ok: false }, 500));
+    render(<SendersTable />);
+    await waitFor(() => expect(screen.getByText("Could not load sending accounts")).toBeInTheDocument());
+    expect(chip()).toBeNull();
   });
 });
 
