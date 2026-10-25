@@ -8,7 +8,7 @@ import urllib.error
 import pytest
 
 from copycord import __main__ as cli
-from copycord import node_runtime, service, update, winupdate
+from copycord import git_runtime, node_runtime, service, update, winupdate
 
 GIT_SPEC = "git+https://github.com/Copycord/Copycord@{}"
 RELEASES = "https://api.github.com/repos/Copycord/Copycord/releases"
@@ -451,6 +451,56 @@ def test_release_update_never_sets_up_node(env, data_dir, monkeypatch):
     monkeypatch.setattr(node_runtime, "ensure_npm", lambda env=None: pytest.fail("Node set up"))
     assert cli.main(["update"]) == 0
     assert rec.envs == [None]
+
+
+def test_dev_without_git_stops_with_one_message(env, data_dir, monkeypatch, capsys):
+    rec, on_path, _ = env
+    on_path.discard("git")
+
+    def no_git(env=None):
+        raise git_runtime.GitError("git is not installed; install git with sudo apt install git")
+
+    monkeypatch.setattr(git_runtime, "ensure_git", no_git)
+    monkeypatch.setattr(node_runtime, "ensure_npm", lambda env=None: pytest.fail("Node set up"))
+    assert cli.main(["update", "--channel", "dev", "--ref", "v4/warm-pool"]) == 1
+    assert rec.calls == []
+    err = capsys.readouterr().err
+    assert "git not available" in err and "sudo apt install git" in err
+    assert "Git executable not found" not in err
+    assert not (data_dir / "update.json").exists()
+
+
+def test_dev_without_git_installs_with_the_home_git(env, data_dir, tmp_path, monkeypatch):
+    rec, on_path, _ = env
+    on_path.discard("git")
+    git_bin = tmp_path / "cchome" / "git" / "MinGit-2.51.0-64-bit" / "cmd"
+    monkeypatch.setattr(git_runtime, "ensure_git", lambda env=None: git_bin)
+    monkeypatch.setenv("PATH", "/usr/bin")
+    assert cli.main(["update", "--channel", "dev", "--ref", "v4/warm-pool"]) == 0
+    # The spec stays git+, so the install still records vcs=git.
+    assert rec.calls == [uv(GIT_SPEC.format("v4/warm-pool"))]
+    path = rec.envs[0]["PATH"].split(os.pathsep)
+    assert path[0] == str(git_bin) and path.count(str(git_bin)) == 1
+
+
+def test_release_update_never_sets_up_git(env, data_dir, monkeypatch):
+    rec, on_path, _ = env
+    on_path.discard("git")
+    monkeypatch.setattr(git_runtime, "ensure_git", lambda env=None: pytest.fail("git set up"))
+    assert cli.main(["update"]) == 0
+    assert rec.envs == [None]
+
+
+def test_uv_git_error_gets_a_clear_message(env, data_dir, monkeypatch, capsys):
+    def run_cmd(cmd, capture=True, env=None):
+        return subprocess.CompletedProcess(
+            list(cmd), 2, "", "error: Git operation failed\n  Caused by: Git executable not found.\n")
+
+    monkeypatch.setattr(service, "run_cmd", run_cmd)
+    assert cli.main(["update", "--channel", "dev"]) == 2
+    err = capsys.readouterr().err
+    assert "could not run git" in err
+    assert err.index("could not run git") < err.index("Git executable not found")
 
 
 def test_dev_with_npm_on_path_passes_its_dir(env, data_dir):
