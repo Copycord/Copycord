@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
 import { ConfirmProvider } from "../../../../components/ui/ConfirmDialog";
+import type { MappingSettings } from "../../../../types/dashboard-mappings";
 import { UserTokensBlock } from "./UserTokensBlock";
 
 function renderBlock(strategy: string) {
@@ -98,12 +100,25 @@ describe("UserTokensBlock warm pool", () => {
     const setSetting = renderPool();
     const select = screen.getByRole("combobox", { name: "Token status" });
     expect(select).toHaveTextContent("Random");
-    expect(document.getElementById("ut_presence_desc")).toHaveTextContent("Each account's status changes now and then on its own.");
+    expect(document.getElementById("ut_presence_desc")).toHaveTextContent("Picks a random status for each account.");
     fireEvent.click(select);
     const list = screen.getByRole("listbox");
-    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["Random", "Online", "Idle", "Busy", "Invisible"]);
+    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["Random", "Online", "Idle", "Busy"]);
     fireEvent.click(within(list).getByRole("option", { name: "Idle" }));
     expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_PRESENCE", "idle");
+    await screen.findByText("alpha");
+  });
+
+  it("a saved invisible status shows as Online and Invisible is not offered", async () => {
+    mockApi();
+    renderPool({ USER_TOKEN_PRESENCE: "invisible" });
+    const select = screen.getByRole("combobox", { name: "Token status" });
+    expect(select).toHaveTextContent("Online");
+    expect(document.getElementById("ut_presence_desc")).toHaveTextContent("Every kept online account shows as Online.");
+    expect(screen.getByRole("checkbox", { name: "Rotate status" })).toBeDisabled();
+    fireEvent.click(select);
+    expect(within(screen.getByRole("listbox")).queryByRole("option", { name: "Invisible" })).toBeNull();
+    expect(screen.queryByText(/appears offline/)).toBeNull();
     await screen.findByText("alpha");
   });
 
@@ -113,6 +128,84 @@ describe("UserTokensBlock warm pool", () => {
     const select = screen.getByRole("combobox", { name: "Token status" });
     expect(select).toHaveTextContent("Idle");
     expect(document.getElementById("ut_presence_desc")).toHaveTextContent("Every kept online account shows as Idle.");
+    await screen.findByText("alpha");
+  });
+
+  it("rotate status sits under token status with its description and writes USER_TOKEN_PRESENCE_ROTATE", async () => {
+    mockApi();
+    const setSetting = renderPool({ USER_TOKEN_PRESENCE: "random" });
+    const toggle = screen.getByRole("checkbox", { name: "Rotate status" });
+    expect(toggle).toHaveAttribute("id", "map_USER_TOKEN_PRESENCE_ROTATE");
+    expect(toggle).toBeEnabled();
+    expect(toggle).not.toBeChecked();
+    const row = document.querySelector('[data-setting-key="user_token_presence_rotate"]')!;
+    expect(row).toHaveTextContent("Change each account's status every 20 to 90 minutes.");
+    expect(row.previousElementSibling).toHaveTextContent(/^Token status/);
+    fireEvent.click(toggle);
+    expect(setSetting).toHaveBeenLastCalledWith("USER_TOKEN_PRESENCE_ROTATE", true);
+    await screen.findByText("alpha");
+  });
+
+  it("rotate status is on and enabled for Random when saved on", async () => {
+    mockApi();
+    const setSetting = renderPool({ USER_TOKEN_PRESENCE: "random", USER_TOKEN_PRESENCE_ROTATE: true });
+    const toggle = screen.getByRole("checkbox", { name: "Rotate status" });
+    expect(toggle).toBeEnabled();
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(setSetting).toHaveBeenLastCalledWith("USER_TOKEN_PRESENCE_ROTATE", false);
+    await screen.findByText("alpha");
+  });
+
+  it.each(["online", "idle", "busy"])("rotate status is shown but disabled and off for %s", async (presence) => {
+    mockApi();
+    renderPool({ USER_TOKEN_PRESENCE: presence, USER_TOKEN_PRESENCE_ROTATE: true });
+    const toggle = screen.getByRole("checkbox", { name: "Rotate status" });
+    expect(toggle).toBeInTheDocument();
+    expect(toggle).toBeDisabled();
+    expect(toggle).not.toBeChecked();
+    expect(document.querySelector('[data-setting-key="user_token_presence_rotate"]')).toHaveClass("is-disabled");
+    await screen.findByText("alpha");
+  });
+
+  it("the saved rotate value survives a round trip through a fixed status", async () => {
+    mockApi();
+    const spy = vi.fn();
+    function Harness() {
+      const [settings, setSettings] = useState<MappingSettings>({ USER_TOKEN_PRESENCE: "random", USER_TOKEN_PRESENCE_ROTATE: true });
+      return (
+        <UserTokensBlock
+          mappingId="m1"
+          settings={settings}
+          setSetting={(k, v) => {
+            spy(k, v);
+            setSettings((s) => ({ ...s, [k]: v }));
+          }}
+          search=""
+        />
+      );
+    }
+    render(
+      <ToastProvider>
+        <ConfirmProvider>
+          <Harness />
+        </ConfirmProvider>
+      </ToastProvider>,
+    );
+    const toggle = () => screen.getByRole("checkbox", { name: "Rotate status" });
+    const pick = (name: string) => {
+      fireEvent.click(screen.getByRole("combobox", { name: "Token status" }));
+      fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name }));
+    };
+    expect(toggle()).toBeChecked();
+    pick("Busy");
+    expect(toggle()).toBeDisabled();
+    expect(toggle()).not.toBeChecked();
+    expect(document.getElementById("ut_presence_desc")).toHaveTextContent("Every kept online account shows as Busy (Do Not Disturb).");
+    pick("Random");
+    expect(toggle()).toBeEnabled();
+    expect(toggle()).toBeChecked();
+    expect(spy.mock.calls.map(([k]) => k)).toEqual(["USER_TOKEN_PRESENCE", "USER_TOKEN_PRESENCE"]);
     await screen.findByText("alpha");
   });
 

@@ -54,7 +54,6 @@ export const STATUS: Record<SenderStatus, { label: string; dot?: string; text?: 
   // Discord's own idle yellow; the theme has no token for it.
   idle: { label: STATUS_LABEL.idle, dot: cx(DOT, "bg-[#F0B232]") },
   busy: { label: STATUS_LABEL.busy, dot: cx(DOT, "bg-danger") },
-  invisible: { label: STATUS_LABEL.invisible, dot: cx(DOT, "bg-muted") },
   connecting: { label: STATUS_LABEL.connecting, dot: cx(RING, "motion-safe:animate-pulse") },
   offline: { label: STATUS_LABEL.offline, dot: RING },
   revoked: { label: STATUS_LABEL.revoked, text: "text-warn" },

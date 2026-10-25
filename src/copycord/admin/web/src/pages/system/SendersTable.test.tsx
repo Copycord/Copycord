@@ -26,7 +26,7 @@ function sender(id: string, over: Partial<Sender> = {}): Sender {
 const ITEMS: Sender[] = [
   sender("a", { state: "online", presence: "online", since: NOW - 125, last_used: NOW - 300, use_count: 1284 }),
   sender("b", { state: "online", presence: "dnd", since: NOW - 60, use_count: 977 }),
-  sender("c", { state: "online", presence: "invisible", since: NOW - 3600, use_count: 612 }),
+  sender("c", { state: "online", presence: "online", since: NOW - 3600, use_count: 612 }),
   sender("d", { state: "connecting", avatar_url: null }),
   sender("e", { state: "offline", last_used: NOW - 720, use_count: 305 }),
   sender("f", { state: "revoked", display_name: null, last_used: NOW - 7200, use_count: 88 }),
@@ -87,14 +87,15 @@ describe("SendersTable", () => {
     await waitFor(() => expect(rowOf("a")).toBeTruthy());
 
     const status = (id: string) => rowOf(id).getAttribute("data-status");
-    expect(ITEMS.map((s) => status(s.id))).toEqual(["online", "busy", "invisible", "connecting", "offline", "revoked", "disabled"]);
-    expect(ITEMS.map((s) => cellText(s.id, 2))).toEqual(["Online", "Busy", "Invisible", "Connecting", "Offline", "Revoked", "Disabled"]);
+    expect(ITEMS.map((s) => status(s.id))).toEqual(["online", "busy", "online", "connecting", "offline", "revoked", "disabled"]);
+    expect(ITEMS.map((s) => cellText(s.id, 2))).toEqual(["Online", "Busy", "Online", "Connecting", "Offline", "Revoked", "Disabled"]);
+    expect(screen.queryByText("Invisible")).toBeNull();
 
     // Dots: filled for live presence, a ring while connecting or offline, pulsing only while connecting, none otherwise.
     const dot = (id: string) => rowOf(id).querySelector("[data-dot]");
     expect(dot("a")!.className).toContain("bg-good");
     expect(dot("b")!.className).toContain("bg-danger");
-    expect(dot("c")!.className).toContain("bg-muted");
+    expect(dot("c")!.className).toContain("bg-good");
     expect(dot("d")!.className).toContain("motion-safe:animate-pulse");
     expect(dot("e")!.className).toContain("border-muted");
     expect(dot("e")!.className).not.toContain("animate");
@@ -405,7 +406,7 @@ describe("SendersTable header and search", () => {
     fireEvent.change(box, { target: { value: "busy" } });
     expect(order()).toEqual(["b"]);
     fireEvent.change(box, { target: { value: "online" } });
-    expect(order()).toEqual(["a"]);
+    expect(order()).toEqual(["a", "c"]);
     fireEvent.change(box, { target: { value: "relay" } });
     expect(order()).toEqual(["a", "b", "c", "d", "e", "f"]);
     expect(count).toHaveTextContent(/^6 of 7 accounts$/);
@@ -440,7 +441,7 @@ describe("SendersTable sort", () => {
   it.each([
     ["Account", ["g", "a", "b", "c", "d", "e", "f"], ["f", "e", "d", "c", "b", "a", "g"]],
     ["Username", ["a", "b", "c", "d", "e", "f", "g"], ["f", "e", "d", "c", "b", "a", "g"]],
-    ["Status", ["a", "b", "c", "d", "e", "g", "f"], ["f", "g", "e", "d", "c", "b", "a"]],
+    ["Status", ["a", "c", "b", "d", "e", "g", "f"], ["f", "g", "e", "d", "b", "a", "c"]],
     ["Online for", ["b", "a", "c", "d", "e", "f", "g"], ["c", "a", "b", "d", "e", "f", "g"]],
     ["Last send", ["f", "e", "a", "b", "c", "d", "g"], ["a", "e", "f", "b", "c", "d", "g"]],
     ["Messages sent", ["d", "g", "f", "e", "c", "b", "a"], ["a", "b", "c", "e", "f", "g", "d"]],
@@ -526,9 +527,9 @@ describe("SendersTable idle", () => {
     render(<SendersTable />);
     await waitFor(() => expect(rowOf("h")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Status" }));
-    expect(order()).toEqual(["a", "h", "b", "c", "d", "e", "g", "f"]);
+    expect(order()).toEqual(["a", "c", "h", "b", "d", "e", "g", "f"]);
     fireEvent.click(screen.getByRole("button", { name: "Status" }));
-    expect(order()).toEqual(["f", "g", "e", "d", "c", "b", "h", "a"]);
+    expect(order()).toEqual(["f", "g", "e", "d", "b", "h", "a", "c"]);
   });
 
   it("finds an idle account by searching idle", async () => {

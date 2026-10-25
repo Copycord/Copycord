@@ -65,10 +65,11 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
   USER_TOKEN_STICKY_ROLES: false,
   USER_TOKEN_KEEP_ONLINE: 5,
   USER_TOKEN_PRESENCE: "random",
+  USER_TOKEN_PRESENCE_ROTATE: false,
 };
 
 export const DEFAULT_KEEP_ONLINE = 5;
-export const PRESENCE_VALUES = ["random", "online", "idle", "busy", "invisible"] as const;
+export const PRESENCE_VALUES = ["random", "online", "idle", "busy"] as const;
 export type TokenPresence = (typeof PRESENCE_VALUES)[number];
 
 export const FRIENDLY_NAMES: Record<string, string> = {
@@ -232,9 +233,10 @@ export function normalizeKeepOnline(v: unknown): number {
   return Math.max(0, Math.floor(n));
 }
 
-/** Token presence: one of the five choices, anything else falls back to random. */
+/** Token presence: one of the four choices. A stored invisible (no longer offered) becomes online, anything else random. */
 export function normalizePresence(v: unknown): TokenPresence {
   const s = String(v ?? "").toLowerCase();
+  if (s === "invisible") return "online";
   return (PRESENCE_VALUES as readonly string[]).includes(s) ? (s as TokenPresence) : "random";
 }
 
@@ -288,6 +290,8 @@ export function buildPayload(form: MappingFormState): MappingSavePayload {
   settings.USER_TOKEN_MAX_DELAY = num(settings.USER_TOKEN_MAX_DELAY);
   settings.USER_TOKEN_KEEP_ONLINE = normalizeKeepOnline(settings.USER_TOKEN_KEEP_ONLINE);
   settings.USER_TOKEN_PRESENCE = normalizePresence(settings.USER_TOKEN_PRESENCE);
+  // Sent as saved even under a fixed status; the server only reads it with Random.
+  settings.USER_TOKEN_PRESENCE_ROTATE = toBool(settings.USER_TOKEN_PRESENCE_ROTATE);
   return {
     mapping_name: form.mapping_name.trim(),
     original_guild_id: form.original_guild_id.trim(),
