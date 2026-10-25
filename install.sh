@@ -714,9 +714,22 @@ build_frontend() {
     (cd "$GIT_DIR_PATH/src/copycord/admin/web" && npm ci --no-audit --no-fund && npm run build)
 }
 
+git_hint() {
+    # The package manager command for git; the installer never downloads git itself.
+    if [ "$(uname -s)" = "Darwin" ]; then echo "xcode-select --install (or brew install git)"
+    elif command -v apt-get >/dev/null 2>&1; then echo "sudo apt install git"
+    elif command -v dnf >/dev/null 2>&1; then echo "sudo dnf install git"
+    elif command -v yum >/dev/null 2>&1; then echo "sudo yum install git"
+    elif command -v pacman >/dev/null 2>&1; then echo "sudo pacman -S git"
+    elif command -v zypper >/dev/null 2>&1; then echo "sudo zypper install git"
+    elif command -v apk >/dev/null 2>&1; then echo "sudo apk add git"
+    else echo "your package manager"
+    fi
+}
+
 install_git() {
     command -v git >/dev/null 2>&1 \
-        || die "git is not installed; install it (e.g. sudo apt install git, or xcode-select --install) and run this again"
+        || die "git is not installed and the git method needs it; install it with $(git_hint) and run this again"
     if [ -e "$GIT_DIR_PATH" ] && [ ! -d "$GIT_DIR_PATH/.git" ] \
         && [ -n "$(ls -A "$GIT_DIR_PATH" 2>/dev/null)" ]; then
         die "$GIT_DIR_PATH exists and is not a git checkout; move it or pass --git-dir"
