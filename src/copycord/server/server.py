@@ -8159,7 +8159,7 @@ class ServerReceiver:
     @staticmethod
     def _identity_active(settings: dict) -> bool:
         """True when the sticky-author identity manager should own token choice."""
-        return str(settings.get("USER_TOKEN_STRATEGY") or "") == "sticky_author" and (
+        return (
             bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
             or bool(settings.get("USER_TOKEN_STICKY_ROLES"))
             or bool(settings.get("USER_TOKEN_STICKY_AVATAR"))
@@ -8352,7 +8352,6 @@ class ServerReceiver:
                     embeds=embeds,
                     attachments=msg.get("attachments"),
                     author_id=msg.get("author_id"),
-                    strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                     typing=bool(settings.get("USER_TOKEN_TYPING", False)),
                     min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                     max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
@@ -8524,7 +8523,6 @@ class ServerReceiver:
                 attachments=msg.get("attachments"),
                 applied_tag_ids=[t for t in (applied_tag_ids or []) if t],
                 author_id=msg.get("author_id"),
-                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                 min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
@@ -8596,7 +8594,6 @@ class ServerReceiver:
                     int(starter_message_id) if starter_message_id else None
                 ),
                 author_id=msg.get("author_id"),
-                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                 min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 forced_token_id=forced_token_id,
@@ -8702,7 +8699,6 @@ class ServerReceiver:
                     content=(msg.get("content") or "").strip() or None,
                     sticker_ids=sticker_ids,
                     author_id=msg.get("author_id"),
-                    strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                     typing=bool(settings.get("USER_TOKEN_TYPING", False)),
                     min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                     max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),

@@ -280,7 +280,6 @@ class UserTokenSender:
         self._pool = pool
         # (token_id, token_value) pairs the pool reported dead and we benched.
         self._pool_dead_synced: set = set()
-        self._rr_index_by_channel: dict = {}
         self._sticky_author_token: dict = {}
         self._pace_locks: dict = {}
         self._token_locks: dict = {}
@@ -304,7 +303,6 @@ class UserTokenSender:
         attachments: Optional[list] = None,
         sticker_ids: Optional[list] = None,
         author_id=None,
-        strategy: str = "round_robin",
         typing: bool = False,
         min_delay: float = 0.0,
         max_delay: float = 0.0,
@@ -377,7 +375,7 @@ class UserTokenSender:
                 ]
                 order = forced + rest
         else:
-            order = self._order_tokens(tokens, chan, strategy, author_id, mapping_id)
+            order = self._order_tokens(tokens, chan, author_id, mapping_id)
         if not (forced_token_id is not None and sticky_exclusive):
             order = self._prefer_online(order)
             await self._acquire_online(order)
@@ -559,7 +557,6 @@ class UserTokenSender:
         applied_tag_ids: Optional[list] = None,
         auto_archive_duration: int = 60,
         author_id=None,
-        strategy: str = "round_robin",
         min_delay: float = 0.0,
         max_delay: float = 0.0,
         links_only: bool = False,
@@ -608,9 +605,7 @@ class UserTokenSender:
                 ]
                 order = forced + rest
         else:
-            order = self._order_tokens(
-                tokens, forum_id, strategy, author_id, mapping_id
-            )
+            order = self._order_tokens(tokens, forum_id, author_id, mapping_id)
         if not (forced_token_id is not None and sticky_exclusive):
             order = self._prefer_online(order)
             await self._acquire_online(order)
@@ -672,7 +667,6 @@ class UserTokenSender:
         starter_message_id: Optional[int] = None,
         auto_archive_duration: int = 60,
         author_id=None,
-        strategy: str = "round_robin",
         min_delay: float = 0.0,
         max_delay: float = 0.0,
         forced_token_id: Optional[str] = None,
@@ -711,9 +705,7 @@ class UserTokenSender:
                 ]
                 order = forced + rest
         else:
-            order = self._order_tokens(
-                tokens, parent_id, strategy, author_id, mapping_id
-            )
+            order = self._order_tokens(tokens, parent_id, author_id, mapping_id)
         if not (forced_token_id is not None and sticky_exclusive):
             order = self._prefer_online(order)
             await self._acquire_online(order)
@@ -821,44 +813,32 @@ class UserTokenSender:
             benched = True
         return benched
 
-    def _order_tokens(
-        self, tokens: list, chan: int, strategy: str, author_id, mapping_id=None
-    ):
-        """Return the tokens in the order to try, per the selected strategy."""
+    def _order_tokens(self, tokens: list, chan: int, author_id, mapping_id=None):
+        """Return the tokens in the order to try: the author's sticky token first.
+
+        A send with no author id gets the tokens sorted by id, so the first
+        available token is always the same one.
+        """
         toks = list(tokens)
         if len(toks) <= 1:
             return toks
 
-        if strategy == "sticky_author" and author_id:
-
-            ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
-            ids = [str(t.get("token_id")) for t in ordered]
-            key = (str(mapping_id), str(author_id))
-            self._author_last_seen[key] = time.monotonic()
-            assigned = self._sticky_author_token.get(key)
-            if assigned not in ids:
-                counts = {tid: 0 for tid in ids}
-                for (mid, _aid), tid in self._sticky_author_token.items():
-                    if mid == str(mapping_id) and tid in counts:
-                        counts[tid] += 1
-                assigned = min(ids, key=lambda tid: counts[tid])
-                self._sticky_author_token[key] = assigned
-            idx = ids.index(assigned)
-            return ordered[idx:] + ordered[:idx]
-
         ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
-        self._channel_last_seen[chan] = time.monotonic()
-        online = self._online_ids()
-        live = [t for t in ordered if str(t.get("token_id")) in online]
-        if live:
-            # Step over the online tokens only, so one account never posts twice in a row
-            # while others are online; the offline ones stay behind as fallbacks.
-            rest = [t for t in ordered if str(t.get("token_id")) not in online]
-            idx = self._rr_index_by_channel.get(chan, 0) % len(live)
-            self._rr_index_by_channel[chan] = (idx + 1) % len(live)
-            return live[idx:] + live[:idx] + rest
-        idx = self._rr_index_by_channel.get(chan, 0) % len(ordered)
-        self._rr_index_by_channel[chan] = (idx + 1) % len(ordered)
+        if not author_id:
+            return ordered
+
+        ids = [str(t.get("token_id")) for t in ordered]
+        key = (str(mapping_id), str(author_id))
+        self._author_last_seen[key] = time.monotonic()
+        assigned = self._sticky_author_token.get(key)
+        if assigned not in ids:
+            counts = {tid: 0 for tid in ids}
+            for (mid, _aid), tid in self._sticky_author_token.items():
+                if mid == str(mapping_id) and tid in counts:
+                    counts[tid] += 1
+            assigned = min(ids, key=lambda tid: counts[tid])
+            self._sticky_author_token[key] = assigned
+        idx = ids.index(assigned)
         return ordered[idx:] + ordered[:idx]
 
     def _online_ids(self) -> set:
@@ -973,7 +953,6 @@ class UserTokenSender:
             if lock is not None and lock.locked():
                 continue
             self._pace_locks.pop(chan, None)
-            self._rr_index_by_channel.pop(chan, None)
             self._channel_last_seen.pop(chan, None)
             reaped += 1
         return reaped

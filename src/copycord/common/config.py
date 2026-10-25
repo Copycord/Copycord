@@ -147,7 +147,6 @@ class Config:
             "APPEND_AUTHOR": False,
             "ON_DEMAND_WEBHOOKS": True,
             "USE_USER_TOKENS": False,
-            "USER_TOKEN_STRATEGY": "round_robin",
             # warm pool: every working sending token stays on the gateway; its status is
             # random | online | idle | busy. random picks one status per account;
             # with USER_TOKEN_PRESENCE_ROTATE on it then changes every 20 to 90 minutes.
