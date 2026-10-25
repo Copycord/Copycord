@@ -236,10 +236,11 @@ async def test_pool_none_is_unchanged(monkeypatch):
     db = _DB(["a", "b", "c"])
     s = _sender(db)
 
-    for _ in range(6):
-        assert await _send(s) == SEND_OK
+    for author in ("u1", "u2", "u3", "u1", "u2", "u3"):
+        assert await _send(s, author_id=author) == SEND_OK
+    assert await _send(s) == SEND_OK
 
-    assert tried == ["ta", "tb", "tc", "ta", "tb", "tc"]
+    assert tried == ["ta", "tb", "tc", "ta", "tb", "tc", "ta"]
     assert db.disabled == []
     assert s._pool is None
     order = [{"token_id": "x"}, {"token_id": "y"}]
