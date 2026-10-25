@@ -556,9 +556,7 @@ class TokenSessionPool:
                     sess.waiting_proxy = False
                     sess.set_state(STATE_ONLINE)
                     self._arm_shuffle(sess.key)
-                    self._log.info(
-                        "[token-pool] Session %s online as %s", sess.key, sess.status
-                    )
+                    self._log.debug("[token-pool] Session %s connected", sess.key)
             except asyncio.CancelledError:
                 # A stopped session frees the gate at once.
                 cancelled = True
