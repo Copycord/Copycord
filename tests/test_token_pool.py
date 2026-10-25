@@ -471,6 +471,8 @@ async def test_reap_idle_closes_sessions_not_seen_for_ttl(pool, fakes):
     try:
         await ensure_all(pool, [("a", "tok-a"), ("b", "tok-b")], keep_online=5)
         await until(lambda: pool.online_ids() == {"a", "b"})
+        # Both connect at once; let each connect task mark its session online.
+        await settle()
         assert await pool.reap_idle(idle_ttl=3600) == 0
         assert await pool.reap_idle(idle_ttl=0) == 2
         assert pool.online_ids() == set()
