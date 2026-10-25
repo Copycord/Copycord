@@ -59,5 +59,7 @@ export interface Sender {
 /** GET /api/system/senders */
 export interface SendersResponse {
   ok: boolean;
+  /** Token message cloning is on for at least one mapping (its setting resolved over the defaults). */
+  enabled: boolean;
   items: Sender[];
 }

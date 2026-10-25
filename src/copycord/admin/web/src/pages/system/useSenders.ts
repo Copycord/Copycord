@@ -1,7 +1,7 @@
 // The sending accounts on the System page: /api/system/senders every 5 s while the tab is visible,
 // at once when it comes back. Stale while revalidate: a refetch keeps the last rows on screen and a
 // failed one keeps them too. A newer poll aborts the one still running and its late answer is ignored.
-//   const { items, error, busy } = useSenders();
+//   const { items, enabled, error, busy } = useSenders();
 
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
@@ -13,6 +13,8 @@ export const SENDERS_POLL_MS = 5000;
 export interface SendersState {
   /** Undefined until the first answer. */
   items: Sender[] | undefined;
+  /** Token message cloning is on for a mapping; undefined until the first answer. */
+  enabled: boolean | undefined;
   /** The last poll failed. */
   error: boolean;
   /** A poll is in flight. */
@@ -21,6 +23,7 @@ export interface SendersState {
 
 export function useSenders(): SendersState {
   const [items, setItems] = useState<Sender[] | undefined>(undefined);
+  const [enabled, setEnabled] = useState<boolean | undefined>(undefined);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -44,6 +47,7 @@ export function useSenders(): SendersState {
         if (!alive || current !== mine) return;
         if (!res?.ok || !Array.isArray(res.items)) throw new Error("bad reply");
         setItems(res.items);
+        if (typeof res.enabled === "boolean") setEnabled(res.enabled);
         setError(false);
       } catch {
         if (!alive || current !== mine) return;
@@ -70,5 +74,5 @@ export function useSenders(): SendersState {
     };
   }, []);
 
-  return { items, error, busy };
+  return { items, enabled, error, busy };
 }
