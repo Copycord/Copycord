@@ -68,18 +68,55 @@ def token_use_proxy(settings=None) -> bool:
     return USE_PROXY
 
 
-def proxies_configured() -> bool:
-    """True when the proxy pool has at least one proxy loaded."""
-    from copycord.common.proxy_pool import get_pool
-
+def proxies_configured(pool=None) -> bool:
+    """True when ``pool`` (the shared proxy pool by default) has at least one proxy loaded."""
     try:
-        return bool(get_pool().enabled)
+        if pool is None:
+            from copycord.common.proxy_pool import get_pool
+
+            pool = get_pool()
+        return bool(pool.enabled)
     except Exception:
         return False
 
 
-def warn_no_proxy(logger, token_ref: str, ctx: str = "") -> bool:
-    """Log one warning per masked token id per minute. True when it logged."""
+TOKENS_DISABLED_NOTICE = (
+    "Token message cloning is disabled: no proxies are configured. "
+    "Add proxies in the Proxy settings to enable it."
+)
+TOKENS_ENABLED_NOTICE = "Proxies found: token message cloning is enabled."
+# Set once the disabled notice is logged; cleared when proxies come back.
+_tokens_disabled_noticed = False
+
+
+def notice_tokens_disabled(logger) -> bool:
+    """Log the disabled notice once until proxies come back. True when it logged."""
+    global _tokens_disabled_noticed
+    if _tokens_disabled_noticed:
+        return False
+    _tokens_disabled_noticed = True
+    logger.warning(TOKENS_DISABLED_NOTICE)
+    return True
+
+
+def notice_tokens_enabled(logger) -> bool:
+    """Log the enabled line once if the disabled notice was logged, and clear it. True when it logged."""
+    global _tokens_disabled_noticed
+    if not _tokens_disabled_noticed:
+        return False
+    _tokens_disabled_noticed = False
+    logger.info(TOKENS_ENABLED_NOTICE)
+    return True
+
+
+def warn_no_proxy(logger, token_ref: str, ctx: str = "", *, pool=None) -> bool:
+    """Log one warning per masked token id per minute. True when it logged.
+
+    With no proxies configured at all this logs the one disabled notice
+    instead, never a line per token.
+    """
+    if not proxies_configured(pool):
+        return notice_tokens_disabled(logger)
     now = time.monotonic()
     last = _last_warned.get(token_ref)
     if last is not None and now - last < _WARN_INTERVAL:

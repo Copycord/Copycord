@@ -3762,6 +3762,20 @@ async def api_scraper_tokens_put(request: Request):
 _PROXY_FILE = DATA_DIR / "proxies.txt"
 
 
+def _notify_proxies_changed() -> None:
+    """Tell the server to reload its proxy pool and reconcile the warm token pool after the proxy list is saved."""
+    try:
+        asyncio.create_task(
+            _ws_cmd(
+                SERVER_AGENT_URL,
+                {"type": "reload_proxies"},
+                timeout=1.0,
+            )
+        )
+    except Exception:
+        LOGGER.warning("reload_proxies ws send failed", exc_info=True)
+
+
 @app.get("/api/scraper/proxies", response_class=JSONResponse)
 async def api_scraper_proxies_get():
     """Return saved proxy list."""
@@ -3791,6 +3805,7 @@ async def api_scraper_proxies_put(request: Request):
         _PROXY_FILE.write_text(
             "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
         )
+        _notify_proxies_changed()
         return JSONResponse({"ok": True, "count": len(lines)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -3878,6 +3893,7 @@ async def api_server_proxies_put(request: Request):
         _set_favorite_proxies(
             [f for f in _get_favorite_proxies() if f in set(lines)]
         )
+        _notify_proxies_changed()
         return JSONResponse({"ok": True, "count": len(lines)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
