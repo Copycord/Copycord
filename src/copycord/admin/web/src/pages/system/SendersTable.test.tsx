@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Sender } from "../../types/system";
 import { SendersTableSkeleton } from "./SendersSkeleton";
@@ -157,6 +157,20 @@ describe("SendersTable", () => {
     expect(circle.className).toContain("size-6");
     expect(circle.style.backgroundColor).toBe(rgb("#5865F2"));
     expect(circle.textContent).toBe("");
+  });
+
+  it("locks the avatars in place: not draggable, not selectable, and a drag start is cancelled", async () => {
+    serve(ok(ITEMS));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("a")).toBeTruthy());
+    const img = rowOf("a").querySelector("img")!;
+    expect(img).toHaveAttribute("draggable", "false");
+    expect(img.className).toContain("select-none");
+    expect(img.className).toContain("pointer-events-none");
+    const drag = createEvent.dragStart(img);
+    fireEvent(img, drag);
+    expect(drag.defaultPrevented).toBe(true);
+    expect(rowOf("d").querySelector('[data-avatar="default"]')!.className).toContain("select-none");
   });
 
   it("ticks Online for every second", async () => {

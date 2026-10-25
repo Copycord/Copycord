@@ -70,17 +70,28 @@ function Avatar({ url, id }: { url: string | null; id: string }) {
   const index = defaultAvatarIndex(url, id);
   const color = { backgroundColor: DEFAULT_AVATAR_COLORS[index] };
   if (!url || failedUrl === url) {
-    return <span aria-hidden="true" data-avatar="default" data-avatar-index={index} className={AVATAR} style={color} />;
+    return (
+      <span
+        aria-hidden="true"
+        data-avatar="default"
+        data-avatar-index={index}
+        className={cx(AVATAR, "select-none")}
+        style={color}
+      />
+    );
   }
+  // Locked in place: the browser's image drag ghost and text selection are switched off.
   return (
     <img
       src={url}
       alt=""
       loading="lazy"
+      draggable={false}
       data-avatar="img"
       data-avatar-index={index}
-      className={cx(AVATAR, "object-cover")}
+      className={cx(AVATAR, "pointer-events-none select-none object-cover")}
       style={color}
+      onDragStart={(e) => e.preventDefault()}
       onError={() => setFailedUrl(url)}
     />
   );
