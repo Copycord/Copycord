@@ -225,6 +225,51 @@ class TestGuildMappingsAPI:
         assert eff["CLONE_EMOJI"] is True
 
     @pytest.mark.asyncio
+    async def test_retired_keep_online_loads_and_saves(self, client):
+        """A mapping stored with the removed USER_TOKEN_KEEP_ONLINE still lists, resolves and saves."""
+        from types import SimpleNamespace
+
+        import copycord.admin.app as app_mod
+        from copycord.common.common_helpers import resolve_mapping_settings
+        from copycord.common.config import Config
+
+        cfg = SimpleNamespace(default_mapping_settings=lambda: Config.default_mapping_settings(None))
+        assert "USER_TOKEN_KEEP_ONLINE" not in cfg.default_mapping_settings()
+        assert "USER_TOKEN_KEEP_ONLINE" not in app_mod.DEFAULTS
+        assert "USER_TOKEN_KEEP_ONLINE" not in app_mod.BOOL_KEYS
+
+        mid = db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name="Keep",
+            original_guild_id=575,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=676,
+            cloned_guild_name="",
+            settings={"USER_TOKEN_KEEP_ONLINE": 0, "USER_TOKEN_PRESENCE": "idle"},
+        )
+        resp = await client.get("/api/guild-mappings")
+        assert resp.status_code == 200
+        (row,) = resp.json()["mappings"]
+        assert row["settings"]["USER_TOKEN_PRESENCE"] == "idle"
+        eff = resolve_mapping_settings(db, cfg, original_guild_id=575, cloned_guild_id=676)
+        assert eff["USER_TOKEN_PRESENCE"] == "idle"
+
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}",
+            json={
+                "mapping_name": "Keep",
+                "original_guild_id": "575",
+                "cloned_guild_id": "676",
+                "settings": dict(row["settings"], USER_TOKEN_PRESENCE="busy"),
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        eff = resolve_mapping_settings(db, cfg, original_guild_id=575, cloned_guild_id=676)
+        assert eff["USER_TOKEN_PRESENCE"] == "busy"
+
+    @pytest.mark.asyncio
     async def test_presence_rotate_defaults_off_and_round_trips(self, client):
         from types import SimpleNamespace
 
@@ -927,7 +972,7 @@ class TestTokenPoolGlue:
                 "mapping_name": "Pool glue",
                 "original_guild_id": "111",
                 "cloned_guild_id": "222",
-                "settings": {"USER_TOKEN_KEEP_ONLINE": 3, "USER_TOKEN_PRESENCE": "busy"},
+                "settings": {"USER_TOKEN_PRESENCE": "busy", "USER_TOKEN_PRESENCE_ROTATE": True},
             },
         )
         assert resp.status_code == 200
