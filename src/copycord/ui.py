@@ -10,7 +10,8 @@
 """
 Terminal styling for the copycord CLI, plain ANSI.
 
-Color follows NO_COLOR, FORCE_COLOR, TERM and whether the stream is a TTY.
+Color follows NO_COLOR, FORCE_COLOR, TERM and whether the stream is a TTY;
+on Windows also whether the console can do VT escape codes (windows_vt()).
 Without color the layout and symbols stay the same; the symbols fall back to
 ASCII only where the stream's encoding cannot print them.
 
@@ -55,6 +56,55 @@ LOGO = (
 TAGLINE = "Ultimate Discord server mirroring and utility toolkit"
 
 
+_ENABLE_VT = 0x0004  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+# Std handle id -> whether escape codes work on it, once tried.
+_vt_state: dict = {}
+
+
+def _enable_windows_vt(handle_id: int) -> bool:
+    """Turn on VT processing for the console behind GetStdHandle(handle_id);
+    False when it is no console or the console cannot do it (the classic
+    console of older Windows), with its mode left as it was."""
+    try:
+        import atexit
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(handle_id)
+        mode = ctypes.c_ulong()
+        if not handle or not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        old = mode.value
+        if old & _ENABLE_VT:
+            return True
+        if not kernel32.SetConsoleMode(handle, old | _ENABLE_VT):
+            return False
+        # Some consoles take the call but not the flag; check it held.
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)) or not mode.value & _ENABLE_VT:
+            kernel32.SetConsoleMode(handle, old)
+            return False
+        atexit.register(kernel32.SetConsoleMode, handle, old)
+        return True
+    except Exception:
+        return False
+
+
+def windows_vt(stream: Optional[TextIO] = None) -> bool:
+    """True when escape codes written to stream are understood: always off
+    Windows; on Windows once VT processing is on for its console (stderr's for
+    stderr, else stdout's). Tried once per handle."""
+    if os.name != "nt":
+        return True
+    stream = sys.stdout if stream is None else stream
+    try:
+        handle_id = -12 if stream.fileno() == 2 else -11
+    except Exception:
+        handle_id = -11
+    if handle_id not in _vt_state:
+        _vt_state[handle_id] = _enable_windows_vt(handle_id)
+    return _vt_state[handle_id]
+
+
 def use_color(stream: Optional[TextIO] = None) -> bool:
     stream = sys.stdout if stream is None else stream
     if os.environ.get("NO_COLOR"):
@@ -64,9 +114,11 @@ def use_color(stream: Optional[TextIO] = None) -> bool:
     if os.environ.get("TERM") == "dumb":
         return False
     try:
-        return stream.isatty()
+        if not stream.isatty():
+            return False
     except (AttributeError, ValueError):
         return False
+    return windows_vt(stream)
 
 
 def is_interactive() -> bool:
@@ -737,7 +789,8 @@ class Spinner:
         self.stream = sys.stderr if stream is None else stream
         # Drawn before the spinner, e.g. the left edge of a section box.
         self.prefix = prefix
-        self.active = use_color(self.stream) and _unicode(self.stream)
+        # It redraws with escape codes, so FORCE_COLOR alone is not enough.
+        self.active = use_color(self.stream) and _unicode(self.stream) and windows_vt(self.stream)
         self.progress = self.active and _taskbar_progress(self.stream)
         self._started = 0.0
         self._stop = threading.Event()
@@ -861,6 +914,9 @@ def raw_keys_available() -> bool:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             return False
     except (AttributeError, ValueError):
+        return False
+    # The selector redraws with cursor codes; without VT the typed prompt.
+    if not windows_vt(sys.stdout):
         return False
     if os.name == "nt":
         try:
