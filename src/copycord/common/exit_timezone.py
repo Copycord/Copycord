@@ -137,7 +137,7 @@ async def resolve_exit_timezone(proxy: Optional[str] = None) -> Optional[str]:
         label = _mask_proxy_url(key) if key else "direct"
         if zone:
             _WARNED.discard(key)
-            logger.info("Exit timezone for %s: %s", label, zone)
+            logger.debug("Exit timezone for %s: %s", label, zone)
         elif key not in _WARNED:
             _WARNED.add(key)
             logger.warning(
