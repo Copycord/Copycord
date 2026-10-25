@@ -1002,7 +1002,8 @@ class ServerReceiver:
         proxied = {v for v in plan["wanted"] if plan["tokens"][v]["use_proxy"]}
         self._pool_proxied = proxied
         # The pool's keep_online is one global count: every wanted value, so none is trimmed.
-        keep = plan["keep_online"]
+        # Never below the wanted set: only the empty plan above closes everything.
+        keep = max(int(plan["keep_online"] or 0), len(plan["wanted"]))
         for value in plan["wanted"]:
             entry = plan["tokens"][value]
             if value in proxied and proxies.enabled:
