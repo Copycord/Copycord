@@ -3,7 +3,9 @@ git for installs of a git ref, which uv clones with the git command.
 
 Uses git on PATH, else on Windows a per-user MinGit under <home>/git/,
 downloading it from the Git for Windows release and checking it against the
-sha256 that release publishes. macOS and Linux never download git; a missing
+sha256 that release publishes. On macOS and Linux an interactive session
+installs git with the system package manager (brew, or apk, apt-get, pacman,
+dnf or yum under sudo, which asks for the password itself); otherwise a missing
 git is an error naming the package manager command. install.ps1 uses the same
 location and version.
 """
@@ -14,6 +16,7 @@ import os
 import platform
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import urllib.request
@@ -46,6 +49,16 @@ _LINUX_PACKAGERS = (
     ("pacman", "sudo pacman -S git"),
     ("zypper", "sudo zypper install git"),
     ("apk", "sudo apk add git"),
+)
+
+# What an interactive install runs, first found wins; each command runs as root.
+_LINUX_INSTALLS = (
+    ("apk", (["apk", "add", "--no-cache", "git"],)),
+    ("apt-get", (["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "update", "-qq"],
+                 ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "-qq", "git"])),
+    ("pacman", (["pacman", "-Sy", "--noconfirm", "git"],)),
+    ("dnf", (["dnf", "install", "-y", "-q", "git"],)),
+    ("yum", (["yum", "install", "-y", "-q", "git"],)),
 )
 
 
@@ -165,14 +178,104 @@ def _windows() -> bool:
     return sys.platform == "win32"
 
 
-def ensure_git(env: Optional[Mapping[str, str]] = None) -> Path:
-    """The directory holding git, downloading MinGit on Windows if needed."""
+def can_prompt(env: Optional[Mapping[str, str]] = None) -> bool:
+    """True when a person is at a terminal: stdin and stdout are TTYs and CI is not set."""
+    env = os.environ if env is None else env
+    ci = (env.get("CI") or "").strip().lower()
+    return ui.is_interactive() and ci in ("", "0", "false", "no")
+
+
+def _is_root() -> bool:
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid is not None and geteuid() == 0
+
+
+def _last_line(text: str) -> str:
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
+def _git_version(git: str) -> str:
+    try:
+        out = subprocess.run([git, "--version"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    m = re.search(r"(\d+(?:\.\d+)+)", out or "")
+    return m.group(1) if m else ""
+
+
+def package_manager(sys_platform: Optional[str] = None,
+                    which: Optional[Callable[[str], Optional[str]]] = None):
+    """(name, commands) that install git here, or None when there is no known package manager."""
+    sys_platform = sys.platform if sys_platform is None else sys_platform
+    which = shutil.which if which is None else which
+    if sys_platform == "darwin":
+        return ("brew", (["brew", "install", "git"],)) if which("brew") else None
+    for name, commands in _LINUX_INSTALLS:
+        if which(name):
+            return name, commands
+    return None
+
+
+def install_via_package_manager(sys_platform: Optional[str] = None) -> Path:
+    """Install git with brew (macOS) or the Linux package manager, as root; the
+    directory holding git. sudo asks for the password on the terminal itself."""
+    sys_platform = sys.platform if sys_platform is None else sys_platform
+    hint = install_hint(sys_platform)
+    found = package_manager(sys_platform)
+    if found is None:
+        what = "Homebrew is not installed" if sys_platform == "darwin" else "no known package manager was found"
+        raise GitError(f"git is not installed and {what}; {hint}")
+    name, commands = found
+    prefix: list = []
+    # Homebrew refuses to run as root, so brew never goes through sudo.
+    if name != "brew" and not _is_root():
+        if not shutil.which("sudo"):
+            raise GitError(f"git is not installed, and installing it with {name} needs root, "
+                           "but sudo is not installed; install sudo or run this again as root, "
+                           f"or {hint}")
+        ui.note(f"Copycord needs administrator rights to install git with {name}; "
+                "sudo may ask for your password.")
+        rc = subprocess.run(["sudo", "-v"]).returncode
+        if rc != 0:
+            raise GitError(f"sudo did not get administrator rights (exit {rc}); {hint}")
+        # Credentials are cached now; -n fails rather than prompting behind the spinner.
+        prefix = ["sudo", "-n"]
+    ui.info(f"installing git with {name}")
+    for argv in commands:
+        with ui.Spinner(f"Running {' '.join(argv[2:] if argv[0] == 'env' else argv)}"):
+            res = subprocess.run(prefix + list(argv), stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if res.returncode != 0:
+            last = _last_line(res.stdout)
+            raise GitError(f"{name} could not install git (exit {res.returncode})"
+                           + (f": {last}" if last else "") + f"; {hint}")
+    git = shutil.which("git")
+    if not git:
+        raise GitError(f"{name} installed git but it is not on PATH; "
+                       "open a new terminal and run the update again")
+    version = _git_version(git)
+    ui.ok(f"installed git {version}" if version else "installed git", git)
+    return Path(git).parent
+
+
+def ensure_git(env: Optional[Mapping[str, str]] = None,
+               interactive: Optional[bool] = None) -> Path:
+    """The directory holding git, downloading MinGit on Windows if needed.
+
+    On macOS and Linux a missing git is installed with the package manager
+    when interactive (default: can_prompt()); otherwise it is an error.
+    """
     found = shutil.which("git")
     if found:
         ui.ok("git found", found)
         return Path(found).parent
     if not _windows():
-        raise GitError(f"git is not installed; {install_hint()}")
+        if interactive is None:
+            interactive = can_prompt(env)
+        if not interactive:
+            raise GitError(f"git is not installed; {install_hint()}")
+        return install_via_package_manager()
     machine = platform.machine()
     if machine.lower() not in _WINDOWS_MACHINES:
         raise GitError(f"no MinGit build for {machine}; {install_hint('win32')}")
