@@ -457,7 +457,7 @@ def test_dev_without_git_stops_with_one_message(env, data_dir, monkeypatch, caps
     rec, on_path, _ = env
     on_path.discard("git")
 
-    def no_git(env=None):
+    def no_git(env=None, interactive=None):
         raise git_runtime.GitError("git is not installed; install git with sudo apt install git")
 
     monkeypatch.setattr(git_runtime, "ensure_git", no_git)
@@ -474,7 +474,7 @@ def test_dev_without_git_installs_with_the_home_git(env, data_dir, tmp_path, mon
     rec, on_path, _ = env
     on_path.discard("git")
     git_bin = tmp_path / "cchome" / "git" / "MinGit-2.51.0-64-bit" / "cmd"
-    monkeypatch.setattr(git_runtime, "ensure_git", lambda env=None: git_bin)
+    monkeypatch.setattr(git_runtime, "ensure_git", lambda env=None, interactive=None: git_bin)
     monkeypatch.setenv("PATH", "/usr/bin")
     assert cli.main(["update", "--channel", "dev", "--ref", "v4/warm-pool"]) == 0
     # The spec stays git+, so the install still records vcs=git.
@@ -483,10 +483,24 @@ def test_dev_without_git_installs_with_the_home_git(env, data_dir, tmp_path, mon
     assert path[0] == str(git_bin) and path.count(str(git_bin)) == 1
 
 
+@pytest.mark.parametrize("args, interactive", [([], None), (["--yes"], False)])
+def test_yes_never_installs_git(env, data_dir, tmp_path, monkeypatch, args, interactive):
+    seen = []
+
+    def ensure_git(env=None, interactive=None):
+        seen.append(interactive)
+        return tmp_path
+
+    monkeypatch.setattr(git_runtime, "ensure_git", ensure_git)
+    assert cli.main(["update", "--channel", "dev", *args]) == 0
+    assert seen == [interactive]
+
+
 def test_release_update_never_sets_up_git(env, data_dir, monkeypatch):
     rec, on_path, _ = env
     on_path.discard("git")
-    monkeypatch.setattr(git_runtime, "ensure_git", lambda env=None: pytest.fail("git set up"))
+    monkeypatch.setattr(git_runtime, "ensure_git",
+                        lambda env=None, interactive=None: pytest.fail("git set up"))
     assert cli.main(["update"]) == 0
     assert rec.envs == [None]
 

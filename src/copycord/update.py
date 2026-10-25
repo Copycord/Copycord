@@ -892,7 +892,8 @@ def update(
         cmd_env = None
         if git:
             try:
-                git_dir = git_runtime.ensure_git()
+                # --yes and the auto-update never ask, so they never install git.
+                git_dir = git_runtime.ensure_git(interactive=False if (yes or auto) else None)
             except git_runtime.GitError as e:
                 ui.box(
                     [
@@ -1301,7 +1302,7 @@ def rollback(reason: str, new: str, restart: bool) -> bool:
     env = None
     if spec.startswith("git+"):
         try:
-            git_dir = git_runtime.ensure_git()
+            git_dir = git_runtime.ensure_git(interactive=False)
         except git_runtime.GitError as e:
             return _rollback_failed(f"{what}. Putting {old} back needs git: {e}")
         try:
