@@ -10,7 +10,7 @@ import { cx } from "../../../../components/ui";
 export const SECTION =
   "mapping-section mapping-settings-section group/sec border-b border-border pt-3.5 pb-1.5 last-of-type:border-b-0";
 
-export function SectionSummary({ children }: { children: ReactNode }) {
+export function SectionSummary({ children, chip }: { children: ReactNode; chip?: { text: string; on: boolean } }) {
   return (
     <summary className="mapping-section-header group/sum flex cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 text-[11px] font-bold tracking-[0.6px] text-text-2 uppercase transition-colors duration-100 select-none hover:bg-white/[0.03] [&::-webkit-details-marker]:hidden">
       <span
@@ -20,6 +20,16 @@ export function SectionSummary({ children }: { children: ReactNode }) {
         ▾
       </span>
       <span>{children}</span>
+      {chip ? (
+        <span
+          data-section-chip={chip.on ? "on" : "off"}
+          className={`ml-auto shrink-0 rounded-[20px] px-2.5 py-1 text-[11px] leading-none font-semibold tracking-normal normal-case ${
+            chip.on ? "bg-ok-a12 text-ok" : "bg-wash-6 text-muted"
+          }`}
+        >
+          {chip.text}
+        </span>
+      ) : null}
     </summary>
   );
 }

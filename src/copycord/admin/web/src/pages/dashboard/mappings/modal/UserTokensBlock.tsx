@@ -435,7 +435,9 @@ export function UserTokensBlock({ mappingId, settings, setSetting }: UserTokensB
 
   return (
     <details id="user-tokens-section" className={SECTION}>
-      <SectionSummary>Token Message Cloning</SectionSummary>
+      <SectionSummary chip={{ text: on("USE_USER_TOKENS") ? "Enabled" : "Disabled", on: on("USE_USER_TOKENS") }}>
+        Token Message Cloning
+      </SectionSummary>
       <div className="mapping-section-body pt-1">
         <div className="user-token-disclaimer mb-3 rounded-input border border-danger-a35 bg-danger-a8 px-3 py-2.5 text-xs leading-normal text-text">
           <strong className="text-danger-pale">Warning:</strong> This feature uses user tokens. Discord may rate limit your

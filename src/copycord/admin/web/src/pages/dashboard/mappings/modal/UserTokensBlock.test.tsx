@@ -46,6 +46,30 @@ describe("UserTokensBlock account selection", () => {
   });
 });
 
+describe("UserTokensBlock state chip", () => {
+  const chipFor = (settings: MappingSettings) => {
+    const { unmount } = render(
+      <ToastProvider>
+        <ConfirmProvider>
+          <UserTokensBlock mappingId={null} settings={settings} setSetting={vi.fn()} search="" />
+        </ConfirmProvider>
+      </ToastProvider>,
+    );
+    const chip = document.querySelector<HTMLElement>("#user-tokens-section summary [data-section-chip]")!;
+    const out = { text: chip.textContent, state: chip.getAttribute("data-section-chip"), cls: chip.className };
+    unmount();
+    return out;
+  };
+
+  it("shows Disabled on the far right of the section header when user tokens are off, and Enabled when on", () => {
+    const off = chipFor({ USE_USER_TOKENS: false });
+    expect(off).toMatchObject({ text: "Disabled", state: "off" });
+    expect(off.cls).toContain("ml-auto");
+    expect(off.cls).not.toContain("border");
+    expect(chipFor({ USE_USER_TOKENS: true })).toMatchObject({ text: "Enabled", state: "on" });
+  });
+});
+
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 
 const TOKENS = [
