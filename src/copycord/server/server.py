@@ -154,7 +154,6 @@ def _channel_name_blacklisted(name: str, patterns: list[str]) -> bool:
 # Debounce for a reconcile asked for by a mapping change, and the safety loop period.
 TOKEN_POOL_DEBOUNCE = 2.0
 TOKEN_POOL_INTERVAL = 60.0
-TOKEN_POOL_STARTUP_DELAY = 10.0
 # How often the online set is checked for a status republish between reconciles.
 TOKEN_POOL_WATCH = 5.0
 
@@ -1088,9 +1087,8 @@ class ServerReceiver:
             logger.debug("[token-pool] status publish failed", exc_info=True)
 
     async def _token_pool_loop(self) -> None:
-        """First reconcile shortly after READY, then one every TOKEN_POOL_INTERVAL; watch the online set between."""
+        """First reconcile at once on READY, then one every TOKEN_POOL_INTERVAL; watch the online set between."""
         loop = asyncio.get_running_loop()
-        await asyncio.sleep(TOKEN_POOL_STARTUP_DELAY)
         next_full = 0.0
         while not self._shutting_down:
             try:
