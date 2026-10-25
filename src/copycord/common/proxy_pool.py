@@ -25,6 +25,8 @@ _PROXY_FILE = DATA_DIR / "proxies.txt"
 
 MAX_FAILURES = 3
 DEFAULT_SUSPEND_SECONDS = 300
+# "Pool exhausted" is one warning per interval for the whole pool, not one per token asking.
+EXHAUSTED_WARN_INTERVAL = 60.0
 
 _HP_UP = re.compile(r"^(?P<host>[^:]+):(?P<port>\d+):(?P<user>[^:]+):(?P<pass>.+)$")
 _UP_HP = re.compile(r"^(?P<user>[^:@]+):(?P<pass>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)$")
@@ -93,6 +95,8 @@ class ProxyPool:
         self._lock = asyncio.Lock()
         # instance-level so the server can point it at PROXY_SUSPEND_DURATION
         self.SUSPEND_SECONDS = DEFAULT_SUSPEND_SECONDS
+        self._clock = time.monotonic
+        self._exhausted_warned_at: Optional[float] = None
 
     @property
     def enabled(self) -> bool:
@@ -119,7 +123,18 @@ class ProxyPool:
         self._preferred = {
             t: p for t, p in self._preferred.items() if p in normalised
         }
-        logger.info("Loaded %d proxies", len(normalised))
+        # a lease on a removed proxy is dropped too: the token leases a listed proxy on its next request
+        dropped = [t for t, p in self._leases.items() if p not in normalised]
+        for t in dropped:
+            self._in_use.discard(self._leases.pop(t))
+        self._in_use &= set(normalised)
+        if not normalised:
+            self._exhausted_warned_at = None
+        logger.info(
+            "Loaded %d proxies%s",
+            len(normalised),
+            f", dropped {len(dropped)} lease(s) on removed proxies" if dropped else "",
+        )
         return len(normalised)
 
     @staticmethod
@@ -182,11 +197,7 @@ class ProxyPool:
 
             candidates = [p for p in self._all if _free(p)]
             if not candidates:
-                logger.warning(
-                    "Proxy pool exhausted: %d total, %d leased, none free/healthy",
-                    len(self._all),
-                    len(self._in_use),
-                )
+                self._note_exhausted()
                 return None
 
             chosen = random.choice(candidates)
@@ -201,6 +212,24 @@ class ProxyPool:
                 len(self._all),
             )
             return chosen
+
+    def _note_exhausted(self) -> None:
+        """Warn once per EXHAUSTED_WARN_INTERVAL however many tokens ask; the rest go to debug."""
+        now = self._clock()
+        last = self._exhausted_warned_at
+        if last is None or now - last >= EXHAUSTED_WARN_INTERVAL:
+            self._exhausted_warned_at = now
+            logger.warning(
+                "Proxy pool exhausted: %d total, %d leased, none free/healthy",
+                len(self._all),
+                len(self._in_use),
+            )
+        else:
+            logger.debug(
+                "Proxy pool exhausted: %d total, %d leased, none free/healthy",
+                len(self._all),
+                len(self._in_use),
+            )
 
     async def release(self, token: str) -> None:
         """Return a token's leased proxy to the free pool; the preference is kept."""
