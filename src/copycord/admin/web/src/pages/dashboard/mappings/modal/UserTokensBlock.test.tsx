@@ -24,6 +24,18 @@ const STICKY_KEYS = ["user_token_sticky_nickname", "user_token_sticky_avatar", "
 const stickyRows = () =>
   STICKY_KEYS.map((k) => document.querySelector(`#user-token-sticky-options [data-setting-key="${k}"]`));
 
+describe("UserTokensBlock proxy notice", () => {
+  it("shows the proxy notice right after the user token warning", () => {
+    renderBlock({});
+    const warning = document.querySelector(".user-token-disclaimer")!;
+    const notice = warning.nextElementSibling as HTMLElement;
+    expect(notice).toHaveClass("user-token-proxy-notice");
+    expect(notice).toHaveTextContent("requires proxies");
+    expect(notice).toHaveTextContent("default webhook behavior");
+    expect(notice).toHaveTextContent("Configure proxies");
+  });
+});
+
 describe("UserTokensBlock sticky per author", () => {
   it("has no account selection dropdown and always shows the three sticky options", () => {
     renderBlock({});

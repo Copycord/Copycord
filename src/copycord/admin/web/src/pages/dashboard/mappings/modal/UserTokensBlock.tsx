@@ -558,6 +558,10 @@ export function UserTokensBlock({
           uses user tokens. Discord may rate limit your accounts or permanently
           ban them at any time. Only use accounts you are willing to lose.
         </div>
+        <div className="user-token-proxy-notice mb-3 rounded-input border border-warn/35 bg-warn-a10 px-3 py-2.5 text-xs leading-normal text-text">
+          <strong className="text-warn">Proxies:</strong> Token message cloning requires proxies. Without them the mapping falls
+          back to the default webhook behavior. Configure proxies in the Proxy section of the dashboard.
+        </div>
 
         <ToggleRow
           id="map_USE_USER_TOKENS"
