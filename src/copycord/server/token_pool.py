@@ -12,8 +12,8 @@
 Each session is a selfclient ``Client`` running in this process, on the same
 event loop as ``UserTokenSender``, so the token keeps one TLS identity for
 REST and the gateway. Every session has its own proxy, so up to
-CONNECT_CONCURRENCY sessions connect at once, each slot followed by a jittered
-gap, because parsing READY is the CPU spike.
+CONNECT_CONCURRENCY sessions connect at once with no fixed gap. Parsing READY
+is the CPU spike, so a slot waits a jittered gap only after the loop lagged.
 """
 
 from __future__ import annotations
@@ -58,9 +58,10 @@ SHUFFLE_MIN_S = 1200
 SHUFFLE_MAX_S = 5400
 SHUFFLE_GAP_S = 10
 
-# Each token connects through its own proxy, so connects overlap; the cap keeps
-# the READY parsing CPU spike bounded.
+# Each token connects through its own proxy, so connects overlap with no fixed
+# gap; the cap keeps the READY parsing CPU spike bounded.
 CONNECT_CONCURRENCY = 10
+# The wait a slot takes only after the event loop lagged during a connect.
 STAGGER_MIN = 2.0
 STAGGER_MAX = 6.0
 # A connect not READY by then frees its slot so one stuck token holds no one up.
@@ -519,7 +520,7 @@ class TokenSessionPool:
         )
 
     async def _connect_once(self, sess: _Session) -> None:
-        """Start one connect under a gate slot, wait for READY, then hold the slot for the stagger gap."""
+        """Start one connect under a gate slot and wait for READY; a lag seen meanwhile holds the slot for a gap."""
         async with self._gate:
             sess.set_state(STATE_CONNECTING)
             sess.dropped = False
@@ -567,7 +568,9 @@ class TokenSessionPool:
                 raise
             finally:
                 self._connecting -= 1
-                if not cancelled:
+                # No fixed gap: the next connect starts at once. Only a loop lag
+                # seen during a connect makes its slot wait before taking the next.
+                if not cancelled and self._widen_next_gap:
                     await _sleep(self._next_gap())
 
     @staticmethod

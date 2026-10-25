@@ -255,37 +255,52 @@ async def test_shared_token_counts_once_against_keep_online(pool, fakes):
         await pool.close_all()
 
 
-async def test_a_slot_holds_the_stagger_gap_after_its_connect(pool, fakes, sleeps):
-    pool._gate = asyncio.Semaphore(1)
+async def test_connects_wait_no_gap_when_the_loop_is_fine(pool, fakes, sleeps):
     try:
         pairs = [("t1", "tok-1"), ("t2", "tok-2"), ("t3", "tok-3")]
         await ensure_all(pool, pairs, keep_online=3)
         await until(lambda: pool.online_ids() == {"t1", "t2", "t3"})
         await settle()
-        kinds = [kind for kind, _ in fakes.events]
-        # each login is followed by its gap before the next login starts
-        assert kinds[:6] == ["login", "sleep"] * 3
-        gaps = [d for kind, d in fakes.events if kind == "sleep"]
-        assert len(gaps) == 3
-        assert all(2.0 <= g <= 6.0 for g in gaps)
+        assert [kind for kind, _ in fakes.events if kind == "sleep"] == []
     finally:
         await pool.close_all()
 
 
-async def test_connects_overlap_up_to_the_concurrency_limit(pool, fakes, monkeypatch):
+async def test_a_lag_seen_during_a_connect_holds_its_slot_for_a_widened_gap(pool, fakes, sleeps):
+    pool._widen_next_gap = True
+    try:
+        await ensure_all(pool, [("t1", "tok-1"), ("t2", "tok-2")], keep_online=2)
+        await until(lambda: pool.online_ids() == {"t1", "t2"})
+        await settle()
+        gaps = [d for kind, d in fakes.events if kind == "sleep"]
+        # Only the first connect pays, doubled; the lag flag is spent after it.
+        assert len(gaps) == 1
+        assert 2.0 * token_pool.LAG_GAP_FACTOR <= gaps[0] <= 6.0 * token_pool.LAG_GAP_FACTOR
+    finally:
+        await pool.close_all()
+
+
+async def test_connects_overlap_up_to_the_concurrency_limit(pool, fakes):
     release = asyncio.Event()
 
-    async def held_sleep(delay, *_, **__):
-        await release.wait()
+    class SlowClient(FakeClient):
+        async def connect(self, *, reconnect=True):
+            await release.wait()
+            await super().connect(reconnect=reconnect)
 
-    monkeypatch.setattr(token_pool, "_sleep", held_sleep)
+    def factory(**kwargs):
+        client = SlowClient(fakes, **kwargs)
+        fakes.clients.append(client)
+        return client
+
+    pool._factory = factory
     total = token_pool.CONNECT_CONCURRENCY + 2
     pairs = [(f"t{i}", f"tok-{i}") for i in range(total)]
     try:
         await ensure_all(pool, pairs, keep_online=total)
         await settle()
         logins = [t for kind, t in fakes.events if kind == "login"]
-        # Every slot is busy in its gap, so no more than the limit is in flight.
+        # Every slot is waiting for READY, so no more than the limit is in flight.
         assert token_pool.CONNECT_CONCURRENCY > 1
         assert len(logins) == token_pool.CONNECT_CONCURRENCY
         release.set()
