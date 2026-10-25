@@ -806,3 +806,94 @@ async def test_close_all_stops_the_reshuffle(pool, fakes, clock):
     clock[0] += 10 * token_pool.SHUFFLE_MAX_S
     await settle()
     assert all(c.presence_changes == [] for c in fakes.clients)
+
+
+# no free proxy
+
+
+def _waiting_lines(caplog):
+    return [r for r in caplog.records if "waiting for a free proxy" in r.getMessage()]
+
+
+@pytest.fixture()
+def proxy_pool_of(fakes, sleeps, monkeypatch):
+    """A pool whose proxy_for leases only the given tokens, over a proxy pool of ``total`` proxies."""
+    from types import SimpleNamespace
+
+    from copycord.common import token_proxy
+
+    monkeypatch.setattr(token_proxy, "_tokens_disabled_noticed", False)
+
+    def build(leased, total):
+        pool = TokenSessionPool(
+            logger=logging.getLogger("test.token_pool"),
+            proxy_for=lambda token: "http://proxy.invalid:8080" if token in leased else None,
+            client_factory=fakes.factory,
+            proxy_pool=SimpleNamespace(enabled=total > 0, total=total),
+        )
+        now = [1000.0]
+        pool._clock = lambda: now[0]
+        return pool, now
+
+    return build
+
+
+async def test_no_free_proxy_is_one_rate_limited_warning_with_counts(proxy_pool_of, fakes, caplog):
+    caplog.set_level(logging.DEBUG, logger="test.token_pool")
+    pool, now = proxy_pool_of({"tok-1", "tok-2"}, total=2)
+    pairs = [("t1", "tok-1"), ("t2", "tok-2"), ("t3", "tok-3"), ("t4", "tok-4")]
+    try:
+        await ensure_all(pool, pairs, keep_online=4)
+        await until(lambda: pool.online_ids() == {"t1", "t2"})
+        await until(lambda: sum(s.waiting_proxy for s in pool._sessions.values()) == 2)
+        # many retries since, all inside one window
+        await until(lambda: caplog.text.count("has no proxy; retrying") >= 6)
+        assert len(_waiting_lines(caplog)) == 1
+        assert _waiting_lines(caplog)[0].levelno == logging.WARNING
+        assert "ended (NoProxyAvailable)" not in caplog.text
+        debug = [r for r in caplog.records if "has no proxy; retrying" in r.getMessage()]
+        assert debug and all(r.levelno == logging.DEBUG for r in debug)
+
+        now[0] += token_pool.PROXY_WARN_INTERVAL - 1
+        await until(lambda: caplog.text.count("has no proxy; retrying") >= 12)
+        assert len(_waiting_lines(caplog)) == 1
+
+        now[0] += 2
+        await until(lambda: len(_waiting_lines(caplog)) == 2)
+        assert _waiting_lines(caplog)[1].getMessage() == (
+            "[token-pool] 2 token(s) are waiting for a free proxy (2 proxies configured, 4 needed)"
+        )
+        await settle()
+        assert len(_waiting_lines(caplog)) == 2
+        assert "tok-3" not in caplog.text and "tok-4" not in caplog.text
+    finally:
+        await pool.close_all()
+
+
+async def test_pool_with_zero_proxies_logs_only_the_disabled_notice(proxy_pool_of, caplog):
+    from copycord.common import token_proxy
+
+    caplog.set_level(logging.DEBUG, logger="test.token_pool")
+    pool, now = proxy_pool_of(set(), total=0)
+    try:
+        await ensure_all(pool, [("t1", "tok-1"), ("t2", "tok-2")], keep_online=2)
+        await until(lambda: caplog.text.count("has no proxy; retrying") >= 6)
+        now[0] += 10 * token_pool.PROXY_WARN_INTERVAL
+        await until(lambda: caplog.text.count("has no proxy; retrying") >= 12)
+        warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+        assert warnings == [token_proxy.TOKENS_DISABLED_NOTICE]
+    finally:
+        await pool.close_all()
+
+
+async def test_other_endings_keep_their_per_session_warning(proxy_pool_of, fakes, caplog):
+    caplog.set_level(logging.WARNING, logger="test.token_pool")
+    pool, _now = proxy_pool_of({"tok-1"}, total=1)
+    fakes.fail("login", "tok-1", RuntimeError("boom"), RuntimeError("boom"))
+    try:
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="online")
+        await until(lambda: pool.online_ids() == {"t1"})
+        assert caplog.text.count("ended (RuntimeError); retrying in") == 2
+        assert _waiting_lines(caplog) == []
+    finally:
+        await pool.close_all()

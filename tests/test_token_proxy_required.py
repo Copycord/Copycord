@@ -83,6 +83,7 @@ def no_proxies(monkeypatch):
     monkeypatch.setattr(sh, "_TLS_LAST_USED", {})
     monkeypatch.setattr(sh, "_TLS_SHARED", {})
     monkeypatch.setattr(token_proxy, "_last_warned", {})
+    monkeypatch.setattr(token_proxy, "_tokens_disabled_noticed", False)
     FakeSession.made = []
     return pool
 
@@ -158,13 +159,41 @@ async def test_send_without_proxy_makes_no_request_and_marks_nothing_dead(no_pro
     assert FakeSession.made == []
     assert db.disabled == []
     assert s._dead_tokens == set()
-    # one warning per token, by masked id, never the token value
+    # no proxies at all: the one disabled notice, not a line per token
+    assert log.warnings == [token_proxy.TOKENS_DISABLED_NOTICE]
+
+
+@pytest.mark.asyncio
+async def test_zero_proxies_logs_the_notice_once_and_no_per_token_line(no_proxies):
+    log = _Log()
+    s = _sender(_DB(["a", "b", "c"]), log)
+    for _ in range(3):
+        assert await s.send(mapping_id="m", target_channel_id=1, content="hi") == SEND_NO_TOKENS
+    assert log.warnings == [token_proxy.TOKENS_DISABLED_NOTICE]
+    assert not any("No proxy available" in w for w in log.warnings)
+    assert FakeSession.made == []
+
+
+@pytest.mark.asyncio
+async def test_no_lease_with_proxies_configured_warns_per_token(no_proxies):
+    no_proxies.reload(["http://only.proxy.test:1"])
+    assert await no_proxies.lease("someone-else") == "http://only.proxy.test:1"
+    log = _Log()
+    s = _sender(_DB(["a", "b"]), log)
+
+    assert await s.send(mapping_id="m", target_channel_id=1, content="hi") == SEND_NO_TOKENS
+
     assert len(log.warnings) == 2
+    assert all(w.startswith("[user-send] No proxy available for token ") for w in log.warnings)
     assert all("tok-a" not in w and "tok-b" not in w for w in log.warnings)
+    assert token_proxy.TOKENS_DISABLED_NOTICE not in log.warnings
+    assert FakeSession.made == []
 
 
 @pytest.mark.asyncio
 async def test_no_proxy_warning_is_rate_limited_per_token(no_proxies):
+    no_proxies.reload(["http://only.proxy.test:1"])
+    await no_proxies.lease("someone-else")
     log = _Log()
     s = _sender(_DB(["a"]), log)
     for _ in range(3):
@@ -173,6 +202,27 @@ async def test_no_proxy_warning_is_rate_limited_per_token(no_proxies):
         )
         assert status == SEND_NO_TOKENS
     assert len(log.warnings) == 1
+    assert "No proxy available" in log.warnings[0]
+
+
+def test_notice_logs_once_per_state_change(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(token_proxy, "_tokens_disabled_noticed", False)
+    log = logging.getLogger("test.token_proxy")
+    caplog.set_level(logging.INFO, logger="test.token_proxy")
+    assert token_proxy.notice_tokens_enabled(log) is False
+    assert token_proxy.notice_tokens_disabled(log) is True
+    assert token_proxy.notice_tokens_disabled(log) is False
+    assert token_proxy.notice_tokens_enabled(log) is True
+    assert token_proxy.notice_tokens_enabled(log) is False
+    assert token_proxy.notice_tokens_disabled(log) is True
+    assert [r.getMessage() for r in caplog.records] == [
+        token_proxy.TOKENS_DISABLED_NOTICE,
+        token_proxy.TOKENS_ENABLED_NOTICE,
+        token_proxy.TOKENS_DISABLED_NOTICE,
+    ]
+    assert "—" not in token_proxy.TOKENS_DISABLED_NOTICE
 
 
 @pytest.mark.asyncio
