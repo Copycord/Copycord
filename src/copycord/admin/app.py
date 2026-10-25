@@ -73,6 +73,8 @@ from copycord.version import is_dev_build
 from copycord.common.db import DBManager, backups_dir
 from copycord.common.paths import data_dir, out_candidates, out_dir
 from copycord.common.http_session import close_shared_session, shared_session
+from copycord.common.proxy_pool import ProxyPool, _normalise_proxy_url
+from copycord.common.token_proxy import PROXIES_REQUIRED_ERROR
 from copycord.common.timezone import configured_tz_name
 from copycord.common import inprocess
 from copycord.common import install_identity
@@ -269,6 +271,7 @@ BOOL_KEYS = [
     "USER_TOKEN_STICKY_NICKNAME",
     "USER_TOKEN_STICKY_AVATAR",
     "USER_TOKEN_STICKY_ROLES",
+    "USER_TOKEN_PRESENCE_ROTATE",
     "CLONE_GUILD_ICON",
     "CLONE_GUILD_BANNER",
     "CLONE_GUILD_SPLASH",
@@ -324,10 +327,12 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "USER_TOKEN_FALLBACK_WEBHOOK": True,
     "USER_TOKEN_TYPING": False,
     "USER_TOKEN_LINKS_ONLY": False,
-    "USER_TOKEN_USE_PROXIES": False,
+    # ignored: proxies are mandatory for user tokens
+    "USER_TOKEN_USE_PROXIES": True,
     "USER_TOKEN_STICKY_NICKNAME": False,
     "USER_TOKEN_STICKY_AVATAR": False,
     "USER_TOKEN_STICKY_ROLES": False,
+    "USER_TOKEN_PRESENCE_ROTATE": False,
     "COPYCORD_AUTOSTART": "false",
     "LOG_MAX_SIZE_MB": "10",
 }
@@ -1036,8 +1041,11 @@ def _user_guilds_invalidate(token: str | None = None) -> None:
     _user_guilds_blocked_until.pop(key, None)
 
 
-async def _fetch_user_guilds(token: str, key: str) -> list[dict]:
-    """Page /users/@me/guilds once. On 429 serve the cached list if any, else wait once when short."""
+async def _fetch_user_guilds(token: str, key: str, *, proxy: str | None = None) -> list[dict]:
+    """Page /users/@me/guilds once. On 429 serve the cached list if any, else wait once when short.
+
+    ``proxy``: a sending token's check goes through it, never from this address.
+    """
     base_url = f"{DISCORD_API_BASE}/users/@me/guilds"
     headers = _selfbot_headers(token)
     sess = shared_session()
@@ -1047,7 +1055,7 @@ async def _fetch_user_guilds(token: str, key: str) -> list[dict]:
     try:
         while True:
             url = f"{base_url}?limit=200&after={after}"
-            async with sess.get(url, headers=headers, timeout=15) as resp:
+            async with sess.get(url, headers=headers, timeout=15, proxy=proxy) as resp:
                 status = resp.status
                 if status == 429:
                     try:
@@ -1119,7 +1127,9 @@ async def _fetch_user_guilds(token: str, key: str) -> list[dict]:
     return guilds
 
 
-async def _user_guilds(token: str, *, refresh: bool = False) -> list[dict]:
+async def _user_guilds(
+    token: str, *, refresh: bool = False, proxy: str | None = None
+) -> list[dict]:
     """The account's guilds as [{"id", "name"}], cached per token for USER_GUILDS_TTL.
 
     Concurrent callers share one in-flight Discord request. While Discord's rate limit for
@@ -1146,7 +1156,7 @@ async def _user_guilds(token: str, *, refresh: bool = False) -> list[dict]:
 
         async def _run() -> list[dict]:
             try:
-                return await _fetch_user_guilds(token, key)
+                return await _fetch_user_guilds(token, key, proxy=proxy)
             finally:
                 _user_guilds_inflight.pop(key, None)
 
@@ -1155,7 +1165,9 @@ async def _user_guilds(token: str, *, refresh: bool = False) -> list[dict]:
     return await asyncio.shield(task)
 
 
-async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
+async def _selfbot_in_guild(
+    client_token: str, guild_id: int, *, proxy: str | None = None
+) -> bool:
     """Return True if the user account is a member of guild_id, from the shared guild list."""
     if not client_token or not guild_id:
         LOGGER.debug(
@@ -1169,12 +1181,12 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
 
     async def _lookup(refresh: bool) -> bool:
         try:
-            guilds = await _user_guilds(client_token, refresh=refresh)
+            guilds = await _user_guilds(client_token, refresh=refresh, proxy=proxy)
         except DiscordGuildsError as e:
             if e.status != 429 or e.retry_after is None or e.retry_after > 10:
                 raise
             await asyncio.sleep(e.retry_after)
-            guilds = await _user_guilds(client_token, refresh=refresh)
+            guilds = await _user_guilds(client_token, refresh=refresh, proxy=proxy)
         return any(g["id"] == wanted for g in guilds)
 
     try:
@@ -1203,8 +1215,66 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
         return False
 
 
-async def _selfbot_identity(token: str) -> dict | None:
-    """Return {"id", "username"} for a user token, or None if invalid."""
+def _user_token_proxies() -> list[str]:
+    """The usable proxies in proxies.txt, normalised the way the server's ProxyPool loads them."""
+    return [u for u in (_normalise_proxy_url(l) for l in ProxyPool._read_file()) if u]
+
+
+def _token_check_proxy(token: str) -> str | None:
+    """A stable proxy for an admin-side token check, so the token never calls Discord directly."""
+    proxies = _user_token_proxies()
+    if not proxies:
+        return None
+    digest = hashlib.sha1(token.encode("utf-8")).hexdigest()
+    return proxies[int(digest, 16) % len(proxies)]
+
+
+def _proxies_required_response() -> JSONResponse:
+    return JSONResponse({"ok": False, "error": PROXIES_REQUIRED_ERROR}, status_code=400)
+
+
+def _default_avatar_url(user_id) -> str | None:
+    """Discord's default avatar for a user id, or None when the id is unknown."""
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    return f"https://cdn.discordapp.com/embed/avatars/{(uid >> 22) % 6}.png"
+
+
+def _token_default_avatar_url(token_id: str) -> str:
+    """A stable default avatar while the account's user id is unknown, picked from the
+    token's row id (never the token value) so the colour holds until the real one is saved."""
+    index = int(hashlib.sha1(str(token_id).encode()).hexdigest(), 16) % 6
+    return f"https://cdn.discordapp.com/embed/avatars/{index}.png"
+
+
+def _user_avatar_url(user_id, avatar_hash) -> str | None:
+    """The CDN URL for an avatar hash, else the default avatar for the id."""
+    if avatar_hash and user_id:
+        ext = "gif" if str(avatar_hash).startswith("a_") else "png"
+        return f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.{ext}?size=1024"
+    return _default_avatar_url(user_id)
+
+
+def _store_token_identity(token_value: str, ident: dict | None) -> None:
+    """Save a /users/@me answer on every row of the token, for the System page senders table."""
+    if not ident or not token_value:
+        return
+    try:
+        db.update_token_identity(
+            token_value=token_value,
+            username=ident.get("username") or None,
+            display_name=ident.get("global_name") or None,
+            avatar_url=ident.get("avatar_url"),
+            user_id=ident.get("id") or None,
+        )
+    except Exception:
+        LOGGER.debug("token identity save failed token=%s", _redact_token(token_value), exc_info=True)
+
+
+async def _selfbot_identity(token: str, *, proxy: str | None = None) -> dict | None:
+    """Return {"id", "username", "global_name", "avatar_url"} for a user token, or None if invalid."""
     if not token:
         return None
 
@@ -1213,7 +1283,7 @@ async def _selfbot_identity(token: str) -> dict | None:
     headers = _selfbot_headers(token)
     try:
         async with contextlib.nullcontext(shared_session()) as sess:
-            async with sess.get(url, headers=headers, timeout=10) as resp:
+            async with sess.get(url, headers=headers, timeout=10, proxy=proxy) as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.json()
@@ -1224,7 +1294,12 @@ async def _selfbot_identity(token: str) -> dict | None:
                 discriminator = str(data.get("discriminator") or "0")
                 if discriminator and discriminator not in ("0", "0000"):
                     username = f"{username}#{discriminator}"
-                return {"id": uid, "username": username}
+                return {
+                    "id": uid,
+                    "username": username,
+                    "global_name": data.get("global_name") or None,
+                    "avatar_url": _user_avatar_url(uid, data.get("avatar")),
+                }
     except Exception as e:
         LOGGER.debug(
             "_selfbot_identity | exception=%s token=%s",
@@ -2804,6 +2879,9 @@ def _enrich_from_bus(ctrl: dict, bus: dict) -> dict:
         out["running"] = bus["running"]
     if "discord" not in out and isinstance(bus.get("discord"), dict):
         out["discord"] = bus["discord"]
+    if "token_pool" not in out and "token_pool" in bus:
+        tp = bus.get("token_pool")
+        out["token_pool"] = tp if isinstance(tp, dict) else None
     out.setdefault("status", "")
     return out
 
@@ -2875,6 +2953,100 @@ async def _bots_running() -> bool:
 
 
 task_routes.set_bots_check(_bots_running)
+
+
+_POOL_STATES = ("online", "connecting", "offline")
+
+
+def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
+    """One item per token value: its DB rows merged with the live pool entry of any of its ids.
+
+    ``pool`` is the server's token_pool status, or None when the server is stopped.
+    """
+    pool_tokens = pool.get("tokens") if isinstance(pool, dict) else None
+    if not isinstance(pool_tokens, dict):
+        pool_tokens = {}
+
+    groups: dict[str, list[dict]] = {}
+    for r in rows or []:
+        value = (r.get("token_value") or "").strip()
+        if value:
+            groups.setdefault(value, []).append(r)
+
+    items = []
+    for group in groups.values():
+        entries = [
+            e
+            for e in (pool_tokens.get(str(r.get("token_id"))) for r in group)
+            if isinstance(e, dict)
+        ]
+        # Ids of one value share one session; prefer the most live entry if they ever differ.
+        entry = next(
+            (e for s in _POOL_STATES for e in entries if e.get("state") == s), None
+        )
+        if any(e.get("dead") for e in entries):
+            state = "revoked"
+        elif not any(r.get("enabled") for r in group):
+            state = "disabled"
+        elif entry is not None:
+            state = entry["state"]
+        else:
+            state = "offline"
+        online = state == "online"
+
+        def first(field):
+            return next((r.get(field) for r in group if r.get(field)), None)
+
+        username = first("username")
+        since = entry.get("since") if online and entry else None
+        last_used = [r["last_used"] for r in group if r.get("last_used") is not None]
+        items.append(
+            {
+                "id": str(group[0].get("token_id")),
+                "username": username,
+                "display_name": first("display_name") or username,
+                "avatar_url": first("avatar_url")
+                or _default_avatar_url(first("user_id"))
+                or _token_default_avatar_url(str(group[0].get("token_id"))),
+                "state": state,
+                "presence": (entry.get("presence") or None) if online and entry else None,
+                "since": int(since) if isinstance(since, (int, float)) else None,
+                "last_used": max(last_used) if last_used else None,
+                "use_count": sum(int(r.get("use_count") or 0) for r in group),
+            }
+        )
+
+    items.sort(
+        key=lambda i: (
+            i["state"] != "online",
+            i["username"] is None,
+            (i["username"] or "").lower(),
+            i["id"],
+        )
+    )
+    return items
+
+
+def _token_cloning_enabled(mappings: list[dict]) -> bool:
+    """True when any mapping has USE_USER_TOKENS on once its settings are laid over the defaults."""
+    for m in mappings or []:
+        settings = (m or {}).get("settings")
+        if not isinstance(settings, dict):
+            settings = {}
+        if bool({**DEFAULTS, **settings}.get("USE_USER_TOKENS", False)):
+            return True
+    return False
+
+
+@app.get("/api/system/senders", response_class=JSONResponse)
+async def api_system_senders():
+    """The sending accounts for the System page, live state from the same status /api/status serves; no token values."""
+    status = await _collect_status()
+    server = status.get("server") or {}
+    pool = server.get("token_pool") if server.get("state") == "running" else None
+    items = _merge_senders(db.list_all_user_tokens(), pool)
+    enabled = _token_cloning_enabled(db.list_guild_mappings())
+    return JSONResponse({"ok": True, "enabled": enabled, "items": items})
 
 
 @app.get("/filters/{mapping_id}")
@@ -3602,6 +3774,20 @@ async def api_scraper_tokens_put(request: Request):
 _PROXY_FILE = DATA_DIR / "proxies.txt"
 
 
+def _notify_proxies_changed() -> None:
+    """Tell the server to reload its proxy pool and reconcile the warm token pool after the proxy list is saved."""
+    try:
+        asyncio.create_task(
+            _ws_cmd(
+                SERVER_AGENT_URL,
+                {"type": "reload_proxies"},
+                timeout=1.0,
+            )
+        )
+    except Exception:
+        LOGGER.warning("reload_proxies ws send failed", exc_info=True)
+
+
 @app.get("/api/scraper/proxies", response_class=JSONResponse)
 async def api_scraper_proxies_get():
     """Return saved proxy list."""
@@ -3631,6 +3817,7 @@ async def api_scraper_proxies_put(request: Request):
         _PROXY_FILE.write_text(
             "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
         )
+        _notify_proxies_changed()
         return JSONResponse({"ok": True, "count": len(lines)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -3718,6 +3905,7 @@ async def api_server_proxies_put(request: Request):
         _set_favorite_proxies(
             [f for f in _get_favorite_proxies() if f in set(lines)]
         )
+        _notify_proxies_changed()
         return JSONResponse({"ok": True, "count": len(lines)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -4734,6 +4922,20 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
     old_host_id = int(existing["original_guild_id"] or 0) if existing else 0
     old_clone_id = int(existing["cloned_guild_id"] or 0) if existing else 0
 
+    # Proxies are mandatory for user tokens. Refuse only the save that turns them on
+    # with tokens attached; any other save of a mapping using tokens gets a warning.
+    proxy_warning = None
+    if bool(settings.get("USE_USER_TOKENS", False)) and not _user_token_proxies():
+        try:
+            has_tokens = bool(db.get_enabled_mapping_tokens(mapping_id))
+        except Exception:
+            has_tokens = False
+        was_on = bool(((existing or {}).get("settings") or {}).get("USE_USER_TOKENS", False))
+        if has_tokens and not was_on:
+            return _proxies_required_response()
+        if has_tokens:
+            proxy_warning = PROXIES_REQUIRED_ERROR
+
     client_token = db.get_config("CLIENT_TOKEN", "")
     server_token = db.get_config("SERVER_TOKEN", "")
 
@@ -4786,13 +4988,31 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
         settings=settings,
     )
 
-    return JSONResponse({"ok": True, "mapping_id": mapping_id})
+    _notify_user_tokens_changed()
+    out = {"ok": True, "mapping_id": mapping_id}
+    if proxy_warning:
+        out["proxy_warning"] = proxy_warning
+    return JSONResponse(out)
 
 
 @app.delete("/api/guild-mappings/{mapping_id}", response_class=JSONResponse)
 async def api_delete_mapping(mapping_id: str):
     db.delete_guild_mapping(mapping_id)
     return JSONResponse({"ok": True})
+
+
+def _notify_user_tokens_changed() -> None:
+    """Tell the server to reconcile its warm token pool after a mapping's tokens or token settings change."""
+    try:
+        asyncio.create_task(
+            _ws_cmd(
+                SERVER_AGENT_URL,
+                {"type": "reload_user_tokens"},
+                timeout=1.0,
+            )
+        )
+    except Exception:
+        LOGGER.warning("reload_user_tokens ws send failed", exc_info=True)
 
 
 def _mask_token(tok: str) -> str:
@@ -4844,12 +5064,17 @@ async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
     if not token:
         return JSONResponse({"ok": False, "error": "Missing token."}, status_code=400)
 
+    # Proxies are mandatory for user tokens: refuse before any Discord call.
+    proxy = _token_check_proxy(token)
+    if not proxy:
+        return _proxies_required_response()
+
     try:
         clone_gid = int(m.get("cloned_guild_id") or 0)
     except Exception:
         clone_gid = 0
 
-    in_clone = await _selfbot_in_guild(token, clone_gid)
+    in_clone = await _selfbot_in_guild(token, clone_gid, proxy=proxy)
     if not in_clone:
         return JSONResponse(
             {
@@ -4859,7 +5084,7 @@ async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
             status_code=400,
         )
 
-    ident = await _selfbot_identity(token)
+    ident = await _selfbot_identity(token, proxy=proxy)
     username = (ident or {}).get("username") or None
     user_id = (ident or {}).get("id") or None
 
@@ -4873,7 +5098,9 @@ async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
             status_code=400,
         )
 
+    _store_token_identity(token, ident)
     row = db.get_mapping_token(token_id)
+    _notify_user_tokens_changed()
     return JSONResponse(
         {"ok": True, "token": _serialize_mapping_token(row)}, status_code=200
     )
@@ -4906,6 +5133,9 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
             seen_input.add(t)
             tokens.append(t)
 
+    if tokens and not _user_token_proxies():
+        return _proxies_required_response()
+
     try:
         clone_gid = int(m.get("cloned_guild_id") or 0)
     except Exception:
@@ -4922,16 +5152,18 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
             results.append({"masked": masked, "status": "duplicate"})
             continue
 
-        in_clone = await _selfbot_in_guild(t, clone_gid)
+        proxy = _token_check_proxy(t)
+        in_clone = await _selfbot_in_guild(t, clone_gid, proxy=proxy)
         if not in_clone:
             results.append({"masked": masked, "status": "invalid"})
             continue
 
-        ident = await _selfbot_identity(t)
+        ident = await _selfbot_identity(t, proxy=proxy)
         username = (ident or {}).get("username") or None
         user_id = (ident or {}).get("id") or None
         try:
             db.add_mapping_token(mapping_id, t, username=username, user_id=user_id)
+            _store_token_identity(t, ident)
             existing.add(t)
             added += 1
             results.append({"masked": masked, "status": "added", "username": username})
@@ -4940,6 +5172,8 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
         except Exception:
             results.append({"masked": masked, "status": "error"})
 
+    if added:
+        _notify_user_tokens_changed()
     return JSONResponse(
         {
             "ok": True,
@@ -4968,6 +5202,8 @@ async def api_verify_mapping_tokens(mapping_id: str):
         clone_gid = 0
 
     rows = db.list_mapping_tokens(mapping_id)
+    if rows and not _user_token_proxies():
+        return _proxies_required_response()
 
     results = []
     working = 0
@@ -4975,7 +5211,10 @@ async def api_verify_mapping_tokens(mapping_id: str):
     # Check sequentially to avoid hammering Discord's rate limits.
     for r in rows:
         token_value = r.get("token_value") or ""
-        ok = bool(await _selfbot_in_guild(token_value, clone_gid))
+        proxy = _token_check_proxy(token_value) if token_value else None
+        ok = bool(proxy) and bool(
+            await _selfbot_in_guild(token_value, clone_gid, proxy=proxy)
+        )
         if ok:
             working += 1
         else:
@@ -5015,6 +5254,7 @@ async def api_bulk_delete_mapping_tokens(mapping_id: str, payload: dict = Body(.
     scope = str(payload.get("scope") or "").strip().lower()
     if scope == "all":
         deleted = db.delete_all_mapping_tokens(mapping_id)
+        _notify_user_tokens_changed()
         return JSONResponse({"ok": True, "deleted": deleted})
 
     ids = payload.get("ids")
@@ -5031,6 +5271,8 @@ async def api_bulk_delete_mapping_tokens(mapping_id: str, payload: dict = Body(.
             if db.delete_mapping_token(tid):
                 deleted += 1
 
+    if deleted:
+        _notify_user_tokens_changed()
     return JSONResponse({"ok": True, "deleted": deleted})
 
 
@@ -5046,7 +5288,11 @@ async def api_update_mapping_token(
         return JSONResponse({"ok": False, "error": "Token not found."}, status_code=404)
 
     if "enabled" in payload:
+        turning_on = bool(payload.get("enabled")) and not bool(row.get("enabled"))
+        if turning_on and not _user_token_proxies():
+            return _proxies_required_response()
         db.set_mapping_token_enabled(token_id, bool(payload.get("enabled")))
+        _notify_user_tokens_changed()
 
     updated = db.get_mapping_token(token_id)
     return JSONResponse({"ok": True, "token": _serialize_mapping_token(updated)})
@@ -5061,6 +5307,7 @@ async def api_delete_mapping_token(mapping_id: str, token_id: str):
     if not row or str(row.get("mapping_id")) != str(mapping_id):
         return JSONResponse({"ok": False, "error": "Token not found."}, status_code=404)
     db.delete_mapping_token(token_id)
+    _notify_user_tokens_changed()
     return JSONResponse({"ok": True})
 
 

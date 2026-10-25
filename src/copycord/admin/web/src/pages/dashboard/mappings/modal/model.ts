@@ -53,7 +53,6 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
   APPEND_AUTHOR: false,
   ON_DEMAND_WEBHOOKS: true,
   USE_USER_TOKENS: false,
-  USER_TOKEN_STRATEGY: "round_robin",
   USER_TOKEN_FALLBACK_WEBHOOK: true,
   USER_TOKEN_TYPING: false,
   USER_TOKEN_MIN_DELAY: 0,
@@ -63,7 +62,12 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
   USER_TOKEN_STICKY_NICKNAME: false,
   USER_TOKEN_STICKY_AVATAR: false,
   USER_TOKEN_STICKY_ROLES: false,
+  USER_TOKEN_PRESENCE: "random",
+  USER_TOKEN_PRESENCE_ROTATE: false,
 };
+
+export const PRESENCE_VALUES = ["random", "online", "idle", "busy"] as const;
+export type TokenPresence = (typeof PRESENCE_VALUES)[number];
 
 export const FRIENDLY_NAMES: Record<string, string> = {
   ENABLE_CLONING: "Enable Cloning",
@@ -213,9 +217,11 @@ export function toBool(raw: unknown): boolean {
   return !!raw;
 }
 
-/** Any unknown strategy (including the retired "random") is treated as rotate. */
-export function normalizeStrategy(v: unknown): string {
-  return v === "sticky_author" ? "sticky_author" : "round_robin";
+/** Token presence: one of the four choices. A stored invisible (no longer offered) becomes online, anything else random. */
+export function normalizePresence(v: unknown): TokenPresence {
+  const s = String(v ?? "").toLowerCase();
+  if (s === "invisible") return "online";
+  return (PRESENCE_VALUES as readonly string[]).includes(s) ? (s as TokenPresence) : "random";
 }
 
 export function modeOf(mapping: DashboardMapping | null | undefined, mode?: "clone"): MappingMode {
@@ -229,7 +235,7 @@ export function initialForm(mapping: DashboardMapping | null | undefined, mode: 
   const settings: MappingSettings = {};
   for (const [key, def] of Object.entries(DEFAULT_MAPPING_SETTINGS)) {
     const raw = source && key in source ? source[key] : def;
-    if (key === "USER_TOKEN_STRATEGY") settings[key] = normalizeStrategy(raw);
+    if (key === "USER_TOKEN_PRESENCE") settings[key] = normalizePresence(raw);
     else if (typeof def === "boolean") settings[key] = toBool(raw);
     else settings[key] = (raw as MappingSettingValue | null | undefined) ?? def;
   }
@@ -261,9 +267,11 @@ const num = (v: MappingSettingValue | undefined): number => {
 
 export function buildPayload(form: MappingFormState): MappingSavePayload {
   const settings: MappingSettings = { ...form.settings };
-  settings.USER_TOKEN_STRATEGY = String(settings.USER_TOKEN_STRATEGY ?? "round_robin");
   settings.USER_TOKEN_MIN_DELAY = num(settings.USER_TOKEN_MIN_DELAY);
   settings.USER_TOKEN_MAX_DELAY = num(settings.USER_TOKEN_MAX_DELAY);
+  settings.USER_TOKEN_PRESENCE = normalizePresence(settings.USER_TOKEN_PRESENCE);
+  // Sent as saved even under a fixed status; the server only reads it with Random.
+  settings.USER_TOKEN_PRESENCE_ROTATE = toBool(settings.USER_TOKEN_PRESENCE_ROTATE);
   return {
     mapping_name: form.mapping_name.trim(),
     original_guild_id: form.original_guild_id.trim(),

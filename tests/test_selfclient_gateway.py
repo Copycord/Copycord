@@ -308,6 +308,62 @@ class TestPresence:
             ("afk", True),
         ]
 
+    @pytest.mark.asyncio
+    async def test_idle_frame_carries_since_and_afk(self, monkeypatch):
+        clock = [1_700_000_000.25]
+        monkeypatch.setattr(sc_gateway.time, "time", lambda: clock[0])
+        ws = FakeWS()
+        client, _ = make_client(ws)
+        client._ws = ws
+
+        await client.change_presence(status="idle")
+        assert list(ws.frames(3)[-1]["d"].items()) == [
+            ("status", "idle"),
+            ("since", 1_700_000_000_250),
+            ("activities", []),
+            ("afk", True),
+        ]
+
+        # a resend while still idle keeps when it went idle
+        clock[0] += 60
+        await client._send_presence_update()
+        assert ws.frames(3)[-1]["d"]["since"] == 1_700_000_000_250
+
+        # other statuses are unchanged: since 0
+        await client.change_presence(status="dnd")
+        assert list(ws.frames(3)[-1]["d"].items()) == [
+            ("status", "dnd"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", True),
+        ]
+
+        # idle again is a new idle spell
+        clock[0] += 60
+        await client.change_presence(status="idle")
+        assert ws.frames(3)[-1]["d"]["since"] == 1_700_000_120_250
+        assert [f["d"]["status"] for f in ws.frames(3)] == ["idle", "idle", "dnd", "idle"]
+        client._ws = None
+
+    @pytest.mark.asyncio
+    async def test_identify_presence_is_unchanged_for_idle(self):
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws, status="idle", presence_delay=0.05)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(3))
+        await stop(client, task)
+
+        # IDENTIFY keeps the web client's placeholder; the idle op 3 follows READY.
+        assert list(ws.frames(2)[0]["d"]["presence"].items()) == [
+            ("status", "unknown"),
+            ("since", 0),
+            ("activities", []),
+            ("afk", False),
+        ]
+        d = ws.frames(3)[0]["d"]
+        assert d["status"] == "idle" and d["afk"] is True
+        assert isinstance(d["since"], int) and d["since"] > 0
+
 
 # heartbeat
 
@@ -539,10 +595,20 @@ class FakePool:
         self.failures = 0
         self.successes = []
 
-    async def lease(self, token):
+    @property
+    def total(self):
+        return len(self.proxies)
+
+    def current(self, token):
         return self.proxies[0]
 
-    async def report_failure(self, token):
+    async def lease(self, token, *, exclude=None):
+        return self.proxies[0]
+
+    async def release(self, token):
+        pass
+
+    async def report_failure(self, token, *, exclude=()):
         self.failures += 1
         self.proxies.pop(0)
         return self.proxies[0]
@@ -747,3 +813,107 @@ class TestDispatch:
             ("user_ids", ["7", "8"]),
             ("presences", False),
         ]
+
+
+# foreground (the warm pool's focused tab)
+
+
+def _focus_frames(ws):
+    return [m for m in ws.sent if m.get("op") in (40, 41, 8)]
+
+
+def _active_beat(seq):
+    return {"op": 40, "d": {"seq": seq, "qos": {"active": True, "ver": 31, "reasons": ["foregrounded"]}}}
+
+
+@pytest.fixture
+def focus_delays(monkeypatch):
+    """Records the drawn foreground delays and makes them near zero."""
+    drawn = []
+    real_uniform = sc_gateway.random.uniform
+
+    def uniform(a, b):
+        if (a, b) == sc_gateway.FOREGROUND_DELAY:
+            drawn.append((a, b))
+            return 0.01
+        return real_uniform(a, b)
+
+    monkeypatch.setattr(sc_gateway.random, "uniform", uniform)
+    return drawn
+
+
+class TestForeground:
+    @pytest.mark.asyncio
+    async def test_focus_sends_the_captured_order_once(self, focus_delays):
+        import uuid as _uuid
+
+        from copycord.selfclient import fingerprint
+
+        ws = FakeWS([hello(interval_ms=3_600_000), ready()])
+        client, _ = make_client(ws, foreground=True)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(8))
+        assert await client.foreground() is False, "once per socket"
+        await asyncio.sleep(0.02)
+        await stop(client, task)
+
+        assert focus_delays == [sc_gateway.FOREGROUND_DELAY]
+        assert sc_gateway.FOREGROUND_DELAY == (0.5, 3.0)
+        frames = _focus_frames(ws)
+        hb = client.heartbeat_session_id
+        assert [m["op"] for m in frames] == [40, 41, 40, 8]
+        assert frames[0] == _active_beat(1) and frames[2] == _active_beat(1)
+        assert list(frames[1]["d"]) == ["initialization_timestamp", "session_id", "client_launch_id"]
+        assert frames[1]["d"]["session_id"] == hb
+        assert _uuid.UUID(hb).version == 4
+        assert frames[1]["d"]["initialization_timestamp"] == client.heartbeat_initialized_ms
+        assert (
+            frames[1]["d"]["client_launch_id"]
+            == fingerprint.gateway_properties(TOKEN)["client_launch_id"]
+        )
+        assert frames[3]["d"] == {"guild_id": ["1"], "user_ids": ["42"], "presences": False}
+        assert client._heartbeat_payload()["d"]["qos"] == _active_beat(1)["d"]["qos"]
+
+    @pytest.mark.asyncio
+    async def test_without_the_option_nothing_changes(self, focus_delays):
+        ws = FakeWS([hello(interval_ms=3_600_000), ready()])
+        client, _ = make_client(ws)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: client.is_connected and ws.frames(37))
+        await asyncio.sleep(0.05)
+        await stop(client, task)
+
+        assert focus_delays == []
+        assert not ws.frames(41) and not ws.frames(8)
+        assert client.foregrounded is False and client.heartbeat_session_id is None
+        assert client._heartbeat_payload()["d"]["qos"] == {"active": False, "ver": 31, "reasons": []}
+
+    @pytest.mark.asyncio
+    async def test_resume_keeps_focus_and_identify_resets_it(self, focus_delays):
+        first = FakeWS([hello(interval_ms=3_600_000), ready()])
+        second = FakeWS([hello(interval_ms=3_600_000), {"op": 0, "t": "RESUMED", "s": 2, "d": {}}])
+        third = FakeWS([hello(interval_ms=3_600_000)])
+        client, _ = make_client(first, second, third, foreground=True)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: first.frames(8))
+        hb = client.heartbeat_session_id
+        first.feed({"op": 7, "d": None})
+        await wait_until(lambda: client.is_connected and second.frames(37))
+        await asyncio.sleep(0.05)
+
+        assert second.sent[0]["op"] == 6
+        assert not second.frames(41), "a RESUME sends no new op 41"
+        assert client.foregrounded and client.heartbeat_session_id == hb
+        assert client._heartbeat_payload()["d"]["qos"]["active"] is True
+
+        second.feed({"op": 9, "d": False})
+        await wait_until(lambda: third.frames(2))
+        assert client.foregrounded is False and client.heartbeat_session_id is None
+        assert client._heartbeat_payload()["d"]["qos"]["active"] is False
+        third.feed(ready(session="sess-2", seq=1))
+        await wait_until(lambda: third.frames(41))
+        await stop(client, task)
+
+        assert [m["op"] for m in _focus_frames(third)] == [40, 41, 40, 8]
+        assert client.heartbeat_session_id not in (None, hb)
+        assert len(focus_delays) == 2

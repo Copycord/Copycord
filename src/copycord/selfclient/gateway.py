@@ -22,12 +22,14 @@ import json
 import logging
 import random
 import time
+import uuid
 import zlib
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
+from copycord.common.token_proxy import lease_with_timezone
 
 from . import fingerprint, qos
 from .enums import API_VERSION, FATAL_CLOSE_CODES, Capabilities, CloseCode, GatewayOp
@@ -118,6 +120,15 @@ QOS_VERSION = 31
 # Seconds after READY on a fresh connect before the one op 3 an unfocused tab
 # sends (the overnight capture: IDENTIFY 02:05:19, op 3 02:06:49).
 PRESENCE_DELAY = 90.0
+
+# Seconds after READY before a foreground client focuses its tab, drawn per
+# socket. Kept short so a warm pool token can send soon after it connects; the
+# draw still spreads a burst of connects. The 2026-10-24 login capture focused
+# 2 s after its first op 40 and 10 s after IDENTIFY.
+FOREGROUND_DELAY = (0.5, 3.0)
+
+# op 40 `qos.reasons` of a focused tab.
+FOREGROUND_REASONS = ("foregrounded",)
 
 # op 4 the web client sends right after IDENTIFY: in no voice channel.
 IDLE_VOICE_STATE = {
@@ -491,10 +502,14 @@ class GatewayClient:
         proxy_pool: Any = None,
         connector: Optional[Connector] = None,
         presence_delay: float = PRESENCE_DELAY,
+        foreground: bool = False,
+        foreground_delay: Tuple[float, float] = FOREGROUND_DELAY,
     ) -> None:
         self.token = token
-        # Online by default and never idle: Copycord never goes idle on its own.
+        # Online by default; idle only when the caller asks for it.
         self.status = status
+        # Epoch ms the status turned idle, sent as op 3 `since` while idle.
+        self._idle_since: Optional[int] = None
         self.custom_status = custom_status
         self.activity = activity
         self.reconnect = reconnect
@@ -509,6 +524,20 @@ class GatewayClient:
         self.proxy_pool = proxy_pool
         self._connector = connector
         self.presence_delay = presence_delay
+        # Off: a tab that loaded unfocused and stays so. On (the warm pool): the
+        # tab is focused foreground_delay seconds after every fresh READY.
+        self.foreground_enabled = foreground
+        self.foreground_delay = foreground_delay
+        # Set by foreground() on an IDENTIFY socket and kept across RESUMEs:
+        # the op 41 session_id REST sends as client_heartbeat_session_id, and
+        # its initialization_timestamp.
+        self.foregrounded: bool = False
+        self.heartbeat_session_id: Optional[str] = None
+        self.heartbeat_initialized_ms: Optional[int] = None
+        # time.monotonic() of the last READY; None until one.
+        self.ready_at: Optional[float] = None
+        self._foreground_task: Optional[asyncio.Task] = None
+        self._foreground_listeners: List[Callable[[], Any]] = []
 
         self._guild_ids: List[str] = []
         self._subscribed_guilds: set = set()
@@ -559,6 +588,64 @@ class GatewayClient:
         """Call ``handler(event, d)`` for every dispatch."""
         self._dispatch_handlers.append(handler)
 
+    def on_foreground(self, handler: Callable[[], Any]) -> None:
+        """Call ``handler()`` each time foreground() focuses a socket."""
+        self._foreground_listeners.append(handler)
+
+    async def foreground(self) -> bool:
+        """Focus the tab on this socket, once: what the login capture sent when
+        its tab gained focus. True when it sent the frames.
+
+        op 40 active with reasons ["foregrounded"], op 41 with a new heartbeat
+        session id, op 40 again, then op 8 for the account in its first guild
+        (the capture's asked for the guild it opened). Later beats stay active.
+        """
+        if self.foregrounded or self._ws is None:
+            return False
+        self.foregrounded = True
+        self.heartbeat_session_id = str(uuid.uuid4())
+        self.heartbeat_initialized_ms = int(time.time() * 1000)
+        await self._send_heartbeat()
+        await self._send(
+            {
+                "op": GatewayOp.UPDATE_TIME_SPENT_SESSION_ID,
+                "d": {
+                    "initialization_timestamp": self.heartbeat_initialized_ms,
+                    "session_id": self.heartbeat_session_id,
+                    "client_launch_id": self._gateway_properties().get("client_launch_id"),
+                },
+            }
+        )
+        await self._send_heartbeat()
+        if self._guild_ids and self.user_id:
+            await self.request_guild_members(self._guild_ids[0], user_ids=[self.user_id])
+        for handler in list(self._foreground_listeners):
+            try:
+                handler()
+            except Exception:
+                log.debug("foreground listener failed", exc_info=True)
+        return True
+
+    def _reset_foreground(self) -> None:
+        """A fresh IDENTIFY socket is a tab that loaded unfocused."""
+        self.foregrounded = False
+        self.heartbeat_session_id = None
+        self.heartbeat_initialized_ms = None
+        self.ready_at = None
+
+    async def _delayed_foreground(self, ws: Any, delay: float) -> None:
+        await asyncio.sleep(delay)
+        if self._ws is ws:
+            await self.foreground()
+
+    def _arm_foreground(self) -> None:
+        if not self.foreground_enabled or self.foregrounded:
+            return
+        low, high = self.foreground_delay
+        self._foreground_task = asyncio.create_task(
+            self._delayed_foreground(self._ws, random.uniform(low, high))
+        )
+
     @property
     def is_connected(self) -> bool:
         return self._ws is not None and self.disconnected_since is None
@@ -600,6 +687,7 @@ class GatewayClient:
         finally:
             await self._cancel_task("_heartbeat_task")
             await self._cancel_task("_presence_task")
+            await self._cancel_task("_foreground_task")
 
         if self.fatal_close is not None:
             code, reason = self.fatal_close
@@ -612,6 +700,7 @@ class GatewayClient:
         self._stopped = True
         await self._cancel_task("_heartbeat_task")
         await self._cancel_task("_presence_task")
+        await self._cancel_task("_foreground_task")
         ws = self._ws
         if ws is not None:
             try:
@@ -668,6 +757,8 @@ class GatewayClient:
         activity: Optional[Dict[str, Any]] = None,
     ) -> None:
         if status is not None:
+            if status != self.status:
+                self._idle_since = None
             self.status = status
         if custom_status is not None:
             self.custom_status = custom_status or None
@@ -685,14 +776,12 @@ class GatewayClient:
     async def _current_proxy(self) -> Optional[str]:
         pool = self.proxy_pool
         if pool is not None and getattr(pool, "enabled", False):
-            try:
-                proxy = await pool.lease(self.token)
-            except Exception as exc:
-                log.warning("proxy lease failed: %r", exc)
-                return None
-        else:
-            proxy = self.proxy
-        await note_token_proxy(self.token, proxy)
+            # Rotates past proxies whose exit timezone lookup fails; NoProxyAvailable
+            # when none resolves, so the socket is not opened (run() backs off).
+            return await lease_with_timezone(pool, self.token)
+        proxy = self.proxy
+        if not await note_token_proxy(self.token, proxy):
+            raise GatewayDialError("exit timezone lookup failed for the token's proxy")
         return proxy
 
     async def _rotate_proxy(self) -> None:
@@ -760,6 +849,7 @@ class GatewayClient:
             await self._cancel_task("_heartbeat_task")
             # A RESUME on the next socket sends op 3 itself.
             await self._cancel_task("_presence_task")
+            await self._cancel_task("_foreground_task")
             # Read before our own close below, so a code we sent is not taken for Discord's.
             code, reason = _close_info(ws, closed_exc)
             try:
@@ -902,9 +992,13 @@ class GatewayClient:
     async def send_connect_frames(self) -> bool:
         """What the web client sends on HELLO, before its first op 40: RESUME
         when the session can resume, else IDENTIFY. True when it resumed."""
-        # Copycord is a tab that loaded unfocused and stays so. Such a tab never
-        # makes a heartbeat session id: no op 41, on connect or after.
+        # Without the foreground option Copycord is a tab that loaded unfocused
+        # and stays so: no op 41, on connect or after. A foreground client sends
+        # op 41 only from foreground(), after READY.
         if self.can_resume:
+            # A focused tab stays focused across a RESUME: the same heartbeat
+            # session id, active beats, no new op 41. No capture has a RESUME
+            # while focused, so this keeps the unfocused resume order.
             # The web client's order: op 6, op 3 (the current presence), op 4,
             # then op 40 a while later. op 37 for every subscribed guild goes
             # before op 40, a deliberate difference: the browser resubscribes
@@ -915,6 +1009,7 @@ class GatewayClient:
             await self._send_resume_subscriptions()
             return True
         # The web client's order: op 2, op 4, then op 40 a while later.
+        self._reset_foreground()
         await self._send_identify()
         await self._send_voice_state()
         return False
@@ -931,14 +1026,15 @@ class GatewayClient:
             await asyncio.sleep(self.heartbeat_interval)
 
     def _heartbeat_payload(self) -> Dict[str, Any]:
-        """op 40, always inactive: an unfocused tab is never foregrounded (the
-        overnight capture had qos.active false on every beat until focus)."""
+        """op 40: inactive until foreground(), active with reasons
+        ["foregrounded"] after it (the login capture's beats on either side of focus)."""
+        if self.foregrounded:
+            qos_state = {"active": True, "ver": QOS_VERSION, "reasons": list(FOREGROUND_REASONS)}
+        else:
+            qos_state = {"active": False, "ver": QOS_VERSION, "reasons": []}
         return {
             "op": GatewayOp.QOS_HEARTBEAT,
-            "d": {
-                "seq": self.sequence,
-                "qos": {"active": False, "ver": QOS_VERSION, "reasons": []},
-            },
+            "d": {"seq": self.sequence, "qos": qos_state},
         }
 
     async def _send_heartbeat(self) -> None:
@@ -1047,10 +1143,16 @@ class GatewayClient:
             # A new session keeps no subscriptions from the old one.
             self._subscribed_guilds.clear()
             await self.subscribe_guilds(self._guild_ids, force=True)
+            self.ready_at = time.monotonic()
+            await self._cancel_task("_foreground_task")
+            self._arm_foreground()
 
         elif event == "RESUMED":
             # op 37 already went out right after op 6.
             log.info("RESUMED session=%s seq=%s", self.session_id, self.sequence)
+            # A socket that dropped before its focus still gets it.
+            await self._cancel_task("_foreground_task")
+            self._arm_foreground()
 
         elif event == "GUILD_CREATE":
             gid = data_dict.get("id")
@@ -1100,13 +1202,21 @@ class GatewayClient:
         if self.activity:
             activities.append(self.activity)
         # The web client's shape; an unfocused tab reports afk. The status is
-        # the configured one (online by default), never a switch to idle.
+        # the configured one (online by default). Idle carries `since`, the ms
+        # timestamp it went idle, kept across resends; every other status sends 0.
+        since = 0
+        if self.status == "idle":
+            if self._idle_since is None:
+                self._idle_since = int(time.time() * 1000)
+            since = self._idle_since
+        else:
+            self._idle_since = None
         await self._send(
             {
                 "op": GatewayOp.PRESENCE_UPDATE,
                 "d": {
                     "status": self.status,
-                    "since": 0,
+                    "since": since,
                     "activities": activities,
                     "afk": True,
                 },
@@ -1164,6 +1274,7 @@ class GatewayClient:
 __all__ = [
     "GATEWAY_HOST",
     "CAPABILITIES",
+    "FOREGROUND_DELAY",
     "SUBSCRIPTION_FEATURES",
     "RESUME_SUBSCRIPTION_FEATURES",
     "MAX_SUBSCRIPTION_PAYLOAD",

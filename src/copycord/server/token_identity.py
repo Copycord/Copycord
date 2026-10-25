@@ -15,6 +15,7 @@ import time
 
 import discord
 
+from copycord.common.token_proxy import token_use_proxy
 from copycord.server.token_avatar import avatar_hash_from_url, set_avatar
 
 
@@ -326,7 +327,7 @@ class TokenIdentityManager:
                 str(avatar_url),
                 http_session=self._session_provider(),
                 logger=self._log,
-                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                use_proxy=token_use_proxy(settings),
             )
         except Exception:
             self._log.debug("[avatar] mirror failed", exc_info=True)

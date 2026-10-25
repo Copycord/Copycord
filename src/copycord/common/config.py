@@ -147,7 +147,11 @@ class Config:
             "APPEND_AUTHOR": False,
             "ON_DEMAND_WEBHOOKS": True,
             "USE_USER_TOKENS": False,
-            "USER_TOKEN_STRATEGY": "round_robin",
+            # warm pool: every working sending token stays on the gateway; its status is
+            # random | online | idle | busy. random picks one status per account;
+            # with USER_TOKEN_PRESENCE_ROTATE on it then changes every 20 to 90 minutes.
+            "USER_TOKEN_PRESENCE": "random",
+            "USER_TOKEN_PRESENCE_ROTATE": False,
             "USER_TOKEN_FALLBACK_WEBHOOK": True,
             "USER_TOKEN_TYPING": False,
             "USER_TOKEN_MIN_DELAY": 0,
@@ -156,8 +160,8 @@ class Config:
             "USER_TOKEN_STICKY_NICKNAME": False,
             "USER_TOKEN_STICKY_AVATAR": False,
             "USER_TOKEN_STICKY_ROLES": False,
-            # off by default: proxies.txt is shared with the client, so users must opt in for token sends
-            "USER_TOKEN_USE_PROXIES": False,
+            # kept for old databases; ignored: proxies are mandatory for token sends
+            "USER_TOKEN_USE_PROXIES": True,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

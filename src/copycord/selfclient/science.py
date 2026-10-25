@@ -17,7 +17,14 @@ after READY, and connection_resumed with the socket's gateway_connected after
 a RESUME. Such a tab makes no heartbeat session id, so there is no
 client_heartbeat, no session_start_client, and no event carries
 client_heartbeat_session_id. Shapes and key orders follow a
-Chrome 155 capture (2026-10-20). Events tracked before READY carry no
+Chrome 155 capture (2026-10-20).
+
+A gateway client with the foreground option (the warm pool) focuses its tab
+after READY. From then on, as in the 2026-10-24 login capture, every event
+carries client_heartbeat_session_id right after client_track_timestamp and
+client_app_state "focused", and client_ad_heartbeat goes out at focus and
+every AD_HEARTBEAT_INTERVAL seconds while focused. The capture's UI events
+(channel_opened, ack_messages and the like) are not sent. Events tracked before READY carry no
 client_uuid, as in that capture: the browser's generator needs the user id.
 
 Nothing here may break the gateway: every failure is logged at debug.
@@ -34,6 +41,7 @@ import random
 import secrets
 import struct
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -53,6 +61,12 @@ PERFORMANCE_MEMORY = 0
 
 # Events tracked after READY wait this long so a burst goes out as one batch.
 FLUSH_DELAY = 3.0
+
+# Seconds between client_ad_heartbeat events while focused: the login capture
+# tracked them 28.9 s apart (client_track_timestamp 1792898520273 and
+# 1792898549174), the only two in its 75 s.
+AD_HEARTBEAT_INTERVAL = (28.0, 30.0)
+AD_HEARTBEAT_VERSION = 3
 
 # Events kept while no analytics token is known; the oldest are dropped first.
 MAX_QUEUED = 100
@@ -243,8 +257,61 @@ class ScienceReporter:
         self._connected_ms: Optional[int] = None
         self._failed_attempts = 0
         self._connections = 0
+        # client_ad_heartbeat: its loop, and the ad session id per heartbeat session.
+        self._ad_task: Optional[asyncio.Task] = None
+        self._ad_session: Optional[Tuple[str, str]] = None
+        on_foreground = getattr(gateway, "on_foreground", None)
+        if callable(on_foreground) and getattr(gateway, "foreground_enabled", False):
+            on_foreground(self.on_foreground)
 
     # what the browser tracks
+
+    def _heartbeat_session_id(self) -> Optional[str]:
+        """The gateway's op 41 session id while its tab is focused, else None."""
+        gateway = self.gateway
+        if not getattr(gateway, "foregrounded", False):
+            return None
+        hb = getattr(gateway, "heartbeat_session_id", None)
+        return str(hb) if hb else None
+
+    def on_foreground(self) -> None:
+        """The gateway focused a socket: client_ad_heartbeat now and on its cadence."""
+        if self._closed:
+            return
+        task = self._ad_task
+        if task is not None and not task.done():
+            task.cancel()
+        try:
+            self._ad_task = asyncio.ensure_future(self._ad_loop())
+        except RuntimeError as exc:  # no running loop
+            log.debug("science ad heartbeat not scheduled: %r", exc)
+
+    async def _ad_loop(self) -> None:
+        hb = self._heartbeat_session_id()
+        while hb is not None and hb == self._heartbeat_session_id() and not self._closed:
+            try:
+                self.ad_heartbeat()
+            except Exception as exc:
+                log.debug("science client_ad_heartbeat failed: %r", exc, exc_info=True)
+            await asyncio.sleep(random.uniform(*AD_HEARTBEAT_INTERVAL))
+
+    def ad_heartbeat(self) -> Optional[Dict[str, Any]]:
+        """Track one client_ad_heartbeat, in the capture's key order; None while unfocused."""
+        hb = self._heartbeat_session_id()
+        if hb is None:
+            return None
+        if self._ad_session is None or self._ad_session[0] != hb:
+            self._ad_session = (hb, str(uuid.uuid4()))
+        return self.track(
+            "client_ad_heartbeat",
+            {
+                "client_ad_session_id": self._ad_session[1],
+                "client_heartbeat_initialization_timestamp": getattr(
+                    self.gateway, "heartbeat_initialized_ms", None
+                ),
+                "client_heartbeat_version": AD_HEARTBEAT_VERSION,
+            },
+        )
 
     def connect_attempt(self) -> None:
         now = _now_ms()
@@ -382,7 +449,11 @@ class ScienceReporter:
             "uptime_app": max(0, (_now_ms() - self.started_ms) // 1000),
             "launch_signature": props.get("launch_signature"),
             "client_rtc_state": CLIENT_RTC_STATE,
-            "client_app_state": props.get("client_app_state", "unfocused"),
+            "client_app_state": (
+                "focused"
+                if self._heartbeat_session_id()
+                else props.get("client_app_state", "unfocused")
+            ),
             "client_viewport_width": width,
             "client_viewport_height": height,
         }
@@ -393,10 +464,11 @@ class ScienceReporter:
         """Queue one event; it goes out with the next flush. ``hold`` schedules
         none, for an event that waits for a later one."""
         self.sequence += 1
-        props: Dict[str, Any] = {
-            "client_track_timestamp": _now_ms(),
-            "event_sequence_number": self.sequence,
-        }
+        props: Dict[str, Any] = {"client_track_timestamp": _now_ms()}
+        hb = self._heartbeat_session_id()
+        if hb is not None:
+            props["client_heartbeat_session_id"] = hb
+        props["event_sequence_number"] = self.sequence
         props.update(properties)
         props.update(self._common())
         if self.user_id:
@@ -499,6 +571,10 @@ class ScienceReporter:
     async def close(self) -> None:
         """Stop sending; queued events are dropped."""
         self._closed = True
+        ad, self._ad_task = self._ad_task, None
+        if ad is not None and not ad.done():
+            ad.cancel()
+            await asyncio.gather(ad, return_exceptions=True)
         tasks, self._tasks = list(self._tasks), set()
         for task in tasks:
             task.cancel()
@@ -508,6 +584,7 @@ class ScienceReporter:
 
 __all__ = [
     "ACCESSIBILITY_FEATURES",
+    "AD_HEARTBEAT_INTERVAL",
     "SCIENCE_PATH",
     "ClientUUID",
     "ScienceReporter",

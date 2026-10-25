@@ -1,12 +1,7 @@
-// Pure helpers for the Token Message Cloning block: strategy text, token search, the
+// Pure helpers for the Token Message Cloning block: token search, the
 // bulk and verify summaries and the request paths. No token value is ever read here.
 
 import type { BulkResult, UserToken, VerifyResult } from "../../../../types/user-tokens";
-
-export const STRATEGY_DESCS: Record<string, string> = {
-  round_robin: "Cycles through your accounts in turn so each sends an equal share.",
-  sticky_author: "Each source user always sends from the same account, keeping identities consistent.",
-};
 
 export const BULK_LABELS: Record<string, string> = {
   added: "Added",

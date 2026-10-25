@@ -19,17 +19,29 @@ from typing import Optional
 from curl_cffi import CurlWsFlag
 
 from copycord.common import traffic_capture
+from copycord.common.proxy_pool import get_pool as get_proxy_pool
 from copycord.common.selfbot_headers import (
     _token_log_id,
     build_headers,
     gateway_properties,
     get_tls_session,
 )
+from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable, warn_no_proxy
 from copycord.selfclient import qos
 from copycord.selfclient.gateway import IDLE_VOICE_STATE, QOS_VERSION
 
 DISCORD_API_BASE = "https://discord.com/api/v9"
-GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json&compress=zlib-stream"
+
+
+def _leased_proxy(token: str) -> str:
+    """The token's proxy; NoProxyAvailable when it has none, so nothing goes direct."""
+    proxy = get_proxy_pool().current(token)
+    if not proxy:
+        raise NoProxyAvailable("token has no proxy lease")
+    return proxy
+
+
+GATEWAY_URL ="wss://gateway.discord.gg/?v=9&encoding=json&compress=zlib-stream"
 
 
 _OP_DISPATCH = 0
@@ -131,7 +143,7 @@ class GatewaySession:
     socket never returns it, so many of these would exhaust the proxy pool.
     """
 
-    def __init__(self, token: str, logger, *, use_proxy: bool = False):
+    def __init__(self, token: str, logger, *, use_proxy: bool = USE_PROXY):
         self._token = token
         self._log = logger
         self._use_proxy = use_proxy
@@ -158,12 +170,17 @@ class GatewaySession:
 
         Sets fatal when the close code says this token is finished.
         """
-        session = await get_tls_session(self._token, use_proxy=self._use_proxy)
+        try:
+            session = await get_tls_session(self._token, use_proxy=self._use_proxy)
+            proxy = _leased_proxy(self._token)
+        except NoProxyAvailable:
+            warn_no_proxy(self._log, _token_log_id(self._token), "avatar gateway")
+            return False
         capture = self._capture = traffic_capture.recorder_for(self._token)
         # No headers of our own: curl_cffi's impersonation profile sets them.
         self._capture_ws = capture.ws_open(GATEWAY_URL, {}) if capture is not None else None
         try:
-            self._ws = await session.ws_connect(GATEWAY_URL)
+            self._ws = await session.ws_connect(GATEWAY_URL, proxy=proxy)
         except Exception as e:
             self._log.debug("[avatar] gateway connect failed: %s", e)
             self._capture_closed(error=e)
@@ -337,7 +354,7 @@ async def set_avatar(
     *,
     http_session,
     logger,
-    use_proxy: bool = False,
+    use_proxy: bool = USE_PROXY,
 ) -> bool:
     """Point one account's profile picture at avatar_url. True only if Discord accepted it."""
     ref = _token_log_id(token)
@@ -358,7 +375,7 @@ async def set_avatar(
 
     try:
         session = await get_tls_session(token, use_proxy=use_proxy)
-        from copycord.common.proxy_pool import get_pool
+        proxy = _leased_proxy(token)
 
         url = f"{DISCORD_API_BASE}/users/@me"
         body = {"avatar": to_data_uri(data, ctype)}
@@ -371,7 +388,7 @@ async def set_avatar(
                 json=body,
                 headers=headers,
                 timeout=60,
-                proxy=get_pool().current(token),
+                proxy=proxy,
             )
         except Exception as e:
             if capture is not None:

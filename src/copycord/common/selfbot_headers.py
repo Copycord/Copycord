@@ -30,6 +30,7 @@ from copycord.common.exit_timezone import (
 )
 from copycord.common.http_session import shared_session
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
+from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable, lease_with_timezone
 
 try:
     from curl_cffi.requests import AsyncSession as _CurlAsyncSession
@@ -211,8 +212,9 @@ def make_fingerprint(token: str) -> dict:
         "client_event_source": None,
         "client_launch_id": launch_id,
         "launch_signature": launch_signature,
-        # A tab that loaded unfocused and stays so. Such a tab never makes a
-        # heartbeat session id, so client_heartbeat_session_id never follows.
+        # A tab that loaded unfocused. Once its gateway tab is focused (the
+        # warm pool), focused_super_props_b64 makes it "focused" and adds
+        # client_heartbeat_session_id.
         "client_app_state": "unfocused",
     }
 
@@ -328,10 +330,34 @@ def _fingerprint(token: str) -> dict:
     return fp
 
 
-def build_headers(token: str, *, referer: str | None = None) -> dict:
-    """Full header dict for a user-token REST request."""
+def focused_super_props_b64(token: str, heartbeat_session_id: str) -> str:
+    """X-Super-Properties of a focused tab: client_app_state "focused" and then
+    client_heartbeat_session_id, the op 41 session id, last (the 2026-10-24
+    login capture's key order)."""
+    fp = _fingerprint(token)
+    cached = fp.get("focused_super_props")
+    if cached is not None and cached[0] == heartbeat_session_id:
+        return cached[1]
+    props = dict(fp["super_props"])
+    props["client_app_state"] = "focused"
+    props["client_heartbeat_session_id"] = heartbeat_session_id
+    encoded = _b64_props(props)
+    fp["focused_super_props"] = (heartbeat_session_id, encoded)
+    return encoded
+
+
+def build_headers(
+    token: str, *, referer: str | None = None, heartbeat_session_id: str | None = None
+) -> dict:
+    """Full header dict for a user-token REST request. ``heartbeat_session_id``
+    is set while the token's gateway tab is focused."""
     fp = _fingerprint(token)
     h = fp["headers"]
+    super_props = (
+        focused_super_props_b64(token, heartbeat_session_id)
+        if heartbeat_session_id
+        else fp["super_props_b64"]
+    )
     return {
         "Accept": h["Accept"],
         "Accept-Language": h["Accept-Language"],
@@ -351,7 +377,7 @@ def build_headers(token: str, *, referer: str | None = None) -> dict:
         "X-Discord-Locale": h["X-Discord-Locale"],
         "X-Discord-Timezone": _timezone_for(token),
         "X-Installation-Id": h["X-Installation-Id"],
-        "X-Super-Properties": fp["super_props_b64"],
+        "X-Super-Properties": super_props,
     }
 
 
@@ -410,15 +436,27 @@ def _tls_session_lock(token: str) -> asyncio.Lock:
     return lock
 
 
-async def get_tls_session(token: str, *, use_proxy: bool = False):
-    """Return a curl_cffi ``AsyncSession`` dedicated to this token."""
+async def require_token_proxy(token: str) -> str:
+    """The proxy leased to ``token``, leasing one if needed and rotating past proxies whose
+    exit timezone lookup fails; NoProxyAvailable when there is none."""
+    return await lease_with_timezone(_get_proxy_pool(), token)
+
+
+async def get_tls_session(token: str, *, use_proxy: bool = USE_PROXY):
+    """Return a curl_cffi ``AsyncSession`` dedicated to this token.
+
+    Proxies are mandatory for user tokens: ``use_proxy`` is ignored, and with no
+    proxy lease this raises NoProxyAvailable before any session is made or primed.
+    """
     shared = _shared_tls_session(token)
     if shared is not None:
+        await require_token_proxy(token)
         return shared
     if _CurlAsyncSession is None:
         raise RuntimeError("curl_cffi is not installed")
 
     async with _tls_session_lock(token):
+        proxy = await require_token_proxy(token)
         sess = _TLS_SESSIONS.get(token)
         is_new = sess is None
         if sess is None:
@@ -435,11 +473,7 @@ async def get_tls_session(token: str, *, use_proxy: bool = False):
                 raise
             _TLS_SESSIONS[token] = sess
 
-        proxy = None
         if token not in _TLS_PRIMED:
-            pool = _get_proxy_pool()
-            if use_proxy and pool.enabled:
-                proxy = await pool.lease(token)
             await _note_token_proxy(token, proxy)
             await _prime_tls_session(sess, token, proxy=proxy)
             _TLS_PRIMED.add(token)
@@ -470,6 +504,9 @@ def _mask_proxy_for_log(proxy: str) -> str:
 
 async def _prime_tls_session(sess, token: str, proxy: str | None = None) -> None:
     """Warm the session's cookie jar through the token's leased proxy, so cookies match the source IP."""
+    if not proxy:
+        # never prime a user token's session from the server's own address
+        raise NoProxyAvailable("cookie priming needs the token's proxy")
     try:
         await sess.get("https://discord.com", timeout=12, proxy=proxy)
     except Exception as e:

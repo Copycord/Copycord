@@ -1394,6 +1394,8 @@ class DBManager:
                     added_at        INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
                     last_used       INTEGER,
                     use_count       INTEGER DEFAULT 0,
+                    display_name    TEXT,
+                    avatar_url      TEXT,
                     UNIQUE(mapping_id, token_value),
                     FOREIGN KEY (mapping_id) REFERENCES guild_mappings(mapping_id) ON DELETE CASCADE
                 );
@@ -1409,6 +1411,8 @@ class DBManager:
                 "added_at",
                 "last_used",
                 "use_count",
+                "display_name",
+                "avatar_url",
             },
             copy_map={
                 "token_id": "token_id",
@@ -1421,6 +1425,8 @@ class DBManager:
                 "added_at": "added_at",
                 "last_used": "last_used",
                 "use_count": "use_count",
+                "display_name": "display_name",
+                "avatar_url": "avatar_url",
             },
             post_sql=[
                 "CREATE INDEX IF NOT EXISTS idx_mapping_user_tokens_mapping ON mapping_user_tokens(mapping_id);",
@@ -5511,6 +5517,65 @@ class DBManager:
                 """,
                 (int(time.time()), token_id),
             )
+
+    def list_all_user_tokens(self) -> list[dict]:
+        """Every mapping user token row with the fields the senders table needs (includes token_value for grouping)."""
+        with self.lock:
+            cur = self.conn.execute(
+                """
+                SELECT token_id, token_value, username, display_name, avatar_url,
+                       user_id, enabled, last_used, use_count
+                FROM mapping_user_tokens
+                ORDER BY added_at ASC, token_id ASC
+                """
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    @_in_tx
+    def update_token_identity(
+        self,
+        *,
+        token_id: str | None = None,
+        token_value: str | None = None,
+        username: str | None = None,
+        display_name: str | None = None,
+        avatar_url: str | None = None,
+        user_id: str | None = None,
+    ) -> int:
+        """Store the account identity on every row of one token value, found by token_value or by any of its token_ids.
+
+        display_name and avatar_url are replaced as given; username and user_id only when given. Returns the rows updated.
+        """
+        if token_value is None:
+            if token_id is None:
+                raise ValueError("token_id or token_value is required")
+            with self.lock:
+                row = self.conn.execute(
+                    "SELECT token_value FROM mapping_user_tokens WHERE token_id = ?",
+                    (str(token_id),),
+                ).fetchone()
+            if row is None:
+                return 0
+            token_value = row["token_value"]
+        with self.lock:
+            cur = self.conn.execute(
+                """
+                UPDATE mapping_user_tokens
+                SET username = COALESCE(?, username),
+                    user_id = COALESCE(?, user_id),
+                    display_name = ?,
+                    avatar_url = ?
+                WHERE token_value = ?
+                """,
+                (
+                    username,
+                    str(user_id) if user_id is not None else None,
+                    display_name,
+                    avatar_url,
+                    token_value,
+                ),
+            )
+            return cur.rowcount
 
     # mapping_token_identities CRUD
 

@@ -20,7 +20,9 @@ to curl_cffi (its impersonation profile adds defaults and fixes the order on the
 wire; wire_probe.py adds a "wire_probe" record of that side), the JSON bodies, every gateway frame
 sent and every one received after zlib-stream decoding. X-Super-Properties stays
 base64 in the headers, as Chrome sends it and discord-capture records it, and is
-also given decoded as superProperties.
+also given decoded as superProperties. The user-token sender's REST calls
+(server/token_sender.py: messages, threads, edits, deletes, typing, upload slots,
+the nitro check) are recorded too, a multipart body as its field names and payload_json.
 
 Secrets are redacted before anything is written, with discord-capture's rules
 and its "<redacted len=N>" form: Authorization and cookie headers, token keys
@@ -308,6 +310,7 @@ class TrafficRecorder:
         self.id = token_id
         self._now = now
         self.started = self._ms()
+        self.last = self.started
         self.path = data_dir() / CAPTURE_DIR / f"{dir_stamp(self.started)}-{token_id}" / EVENTS_FILE
         self._file = None
         self._lock = threading.Lock()
@@ -366,6 +369,7 @@ class TrafficRecorder:
     def _emit(self, type_: str, fields: Optional[Dict[str, Any]] = None, ts: Optional[int] = None) -> None:
         try:
             ts = self._ms() if ts is None else ts
+            self.last = ts
             rec: Dict[str, Any] = {"ts": ts, "time": local_time(ts), "type": type_}
             for k, v in (fields or {}).items():
                 if v is not None:
@@ -627,6 +631,19 @@ def stop(token: Optional[str], reason: str = "client closed") -> None:
         logger.debug("traffic capture stop failed: %r", e, exc_info=True)
 
 
+def stop_if_quiet(token: Optional[str], quiet_for: float, reason: str = "idle") -> None:
+    """stop() only if nothing was recorded for quiet_for seconds, so a token whose
+    gateway is still up (heartbeats every ~41 s) keeps its capture open."""
+    if not token or not is_dev():
+        return
+    try:
+        rec = _RECORDERS.get(_token_id(str(token)))
+        if rec is not None and not rec.stopped and rec._ms() - rec.last >= quiet_for * 1000:
+            rec.stop(reason)
+    except Exception as e:
+        logger.debug("traffic capture stop failed: %r", e, exc_info=True)
+
+
 def stop_all(reason: str = "process exit") -> None:
     for rec in list(_RECORDERS.values()):
         if not rec.stopped:
@@ -663,5 +680,6 @@ __all__ = [
     "redact_url",
     "stop",
     "stop_all",
+    "stop_if_quiet",
     "summarize_ready",
 ]

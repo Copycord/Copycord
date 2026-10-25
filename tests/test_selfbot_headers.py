@@ -303,3 +303,36 @@ class TestNoBuildFile:
 def test_context_properties_encodes_location():
     val = sh.context_properties("chat_input")
     assert json.loads(base64.b64decode(val)) == {"location": "chat_input"}
+
+
+class TestFocusedSuperProperties:
+    def test_focused_differs_in_exactly_two_fields_in_the_capture_order(self):
+        token = "focus-token-not-real"
+        plain, plain_props = _props(token)
+        focused = sh.build_headers(token, heartbeat_session_id="hb-uuid")
+        focused_props = json.loads(base64.b64decode(focused["X-Super-Properties"]))
+
+        assert list(focused_props) == list(plain_props) + ["client_heartbeat_session_id"]
+        assert list(plain_props)[-1] == "client_app_state"
+        assert plain_props["client_app_state"] == "unfocused"
+        assert focused_props["client_app_state"] == "focused"
+        assert focused_props["client_heartbeat_session_id"] == "hb-uuid"
+        changed = {k for k in focused_props if focused_props[k] != plain_props.get(k)}
+        assert changed == {"client_app_state", "client_heartbeat_session_id"}
+        assert {k: v for k, v in focused.items() if k != "X-Super-Properties"} == {
+            k: v for k, v in plain.items() if k != "X-Super-Properties"
+        }
+
+    def test_without_a_heartbeat_session_the_headers_are_unchanged(self):
+        token = "plain-token-not-real"
+        fp = sh._fingerprint(token)
+        sh.build_headers(token, heartbeat_session_id="hb-1")
+        assert sh.build_headers(token)["X-Super-Properties"] == fp["super_props_b64"]
+        assert sh.build_headers(token, heartbeat_session_id=None) == sh.build_headers(token)
+
+    def test_a_new_heartbeat_session_id_is_used(self):
+        token = "renew-token-not-real"
+        first = sh.build_headers(token, heartbeat_session_id="hb-1")["X-Super-Properties"]
+        second = sh.build_headers(token, heartbeat_session_id="hb-2")["X-Super-Properties"]
+        assert json.loads(base64.b64decode(second))["client_heartbeat_session_id"] == "hb-2"
+        assert first != second

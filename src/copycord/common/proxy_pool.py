@@ -14,7 +14,7 @@ import logging
 import random
 import re
 import time
-from typing import Optional
+from typing import Iterable, Optional, Union
 
 from copycord.common.paths import data_dir
 
@@ -25,6 +25,8 @@ _PROXY_FILE = DATA_DIR / "proxies.txt"
 
 MAX_FAILURES = 3
 DEFAULT_SUSPEND_SECONDS = 300
+# "Pool exhausted" is one warning per interval for the whole pool, not one per token asking.
+EXHAUSTED_WARN_INTERVAL = 60.0
 
 _HP_UP = re.compile(r"^(?P<host>[^:]+):(?P<port>\d+):(?P<user>[^:]+):(?P<pass>.+)$")
 _UP_HP = re.compile(r"^(?P<user>[^:@]+):(?P<pass>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)$")
@@ -93,6 +95,8 @@ class ProxyPool:
         self._lock = asyncio.Lock()
         # instance-level so the server can point it at PROXY_SUSPEND_DURATION
         self.SUSPEND_SECONDS = DEFAULT_SUSPEND_SECONDS
+        self._clock = time.monotonic
+        self._exhausted_warned_at: Optional[float] = None
 
     @property
     def enabled(self) -> bool:
@@ -119,7 +123,18 @@ class ProxyPool:
         self._preferred = {
             t: p for t, p in self._preferred.items() if p in normalised
         }
-        logger.info("Loaded %d proxies", len(normalised))
+        # a lease on a removed proxy is dropped too: the token leases a listed proxy on its next request
+        dropped = [t for t, p in self._leases.items() if p not in normalised]
+        for t in dropped:
+            self._in_use.discard(self._leases.pop(t))
+        self._in_use &= set(normalised)
+        if not normalised:
+            self._exhausted_warned_at = None
+        logger.info(
+            "Loaded %d proxies%s",
+            len(normalised),
+            f", dropped {len(dropped)} lease(s) on removed proxies" if dropped else "",
+        )
         return len(normalised)
 
     @staticmethod
@@ -145,8 +160,11 @@ class ProxyPool:
             info["failures"] = 0
         return False
 
-    async def lease(self, token: str, *, exclude: Optional[str] = None) -> Optional[str]:
-        """Return the proxy leased to ``token``, assigning a free healthy one if needed. ``exclude`` skips one proxy."""
+    async def lease(
+        self, token: str, *, exclude: Optional[Union[str, Iterable[str]]] = None
+    ) -> Optional[str]:
+        """Return the proxy leased to ``token``, assigning a free healthy one if needed. ``exclude`` skips one proxy or a collection of them."""
+        skip = {exclude} if isinstance(exclude, str) else set(exclude or ())
         async with self._lock:
             existing = self._leases.get(token)
             if existing:
@@ -159,7 +177,7 @@ class ProxyPool:
             def _free(proxy: str) -> bool:
                 return (
                     proxy in self._all
-                    and proxy != exclude
+                    and proxy not in skip
                     and proxy not in self._in_use
                     and not self._is_suspended(proxy, now)
                 )
@@ -179,11 +197,7 @@ class ProxyPool:
 
             candidates = [p for p in self._all if _free(p)]
             if not candidates:
-                logger.warning(
-                    "Proxy pool exhausted: %d total, %d leased, none free/healthy",
-                    len(self._all),
-                    len(self._in_use),
-                )
+                self._note_exhausted()
                 return None
 
             chosen = random.choice(candidates)
@@ -199,6 +213,24 @@ class ProxyPool:
             )
             return chosen
 
+    def _note_exhausted(self) -> None:
+        """Warn once per EXHAUSTED_WARN_INTERVAL however many tokens ask; the rest go to debug."""
+        now = self._clock()
+        last = self._exhausted_warned_at
+        if last is None or now - last >= EXHAUSTED_WARN_INTERVAL:
+            self._exhausted_warned_at = now
+            logger.warning(
+                "Proxy pool exhausted: %d total, %d leased, none free/healthy",
+                len(self._all),
+                len(self._in_use),
+            )
+        else:
+            logger.debug(
+                "Proxy pool exhausted: %d total, %d leased, none free/healthy",
+                len(self._all),
+                len(self._in_use),
+            )
+
     async def release(self, token: str) -> None:
         """Return a token's leased proxy to the free pool; the preference is kept."""
         async with self._lock:
@@ -212,8 +244,10 @@ class ProxyPool:
                     len(self._all),
                 )
 
-    async def report_failure(self, token: str) -> Optional[str]:
-        """Release a proxy that failed a real connection, suspend it after repeated failures, and lease a replacement."""
+    async def report_failure(self, token: str, *, exclude: Iterable[str] = ()) -> Optional[str]:
+        """Release a proxy that failed a real connection, suspend it after repeated failures, and lease a replacement.
+
+        The replacement skips the failed proxy and anything in ``exclude``."""
         async with self._lock:
             proxy = self._leases.pop(token, None)
             if proxy:
@@ -233,7 +267,7 @@ class ProxyPool:
                         )
                 # suspension only starts after several failures; without this the sticky path returns it
                 self._preferred.pop(token, None)
-        return await self.lease(token, exclude=proxy)
+        return await self.lease(token, exclude={proxy, *exclude} - {None})
 
     def report_success(self, proxy: str) -> None:
         """Clear a proxy's failure count after a successful request."""

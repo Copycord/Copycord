@@ -40,13 +40,20 @@ def pytest_sessionfinish(session, exitstatus):
     shutil.rmtree(_SESSION_DATA_DIR, ignore_errors=True)
 
 
+OFFLINE_PROXY_ZONE = "America/Chicago"
+
+
 @pytest.fixture(autouse=True)
 def _no_exit_ip_lookup(request, monkeypatch):
-    """The exit-IP timezone lookup never reaches ipinfo.io from a test; it
-    fails (so the fallback zone applies) unless a test fakes _fetch_json."""
+    """The exit-IP timezone lookup never reaches ipinfo.io from a test. A direct
+    lookup fails (so the fallback zone applies) and a proxied one answers
+    OFFLINE_PROXY_ZONE (a failed proxy lookup would refuse the token), unless a
+    test fakes _fetch_json."""
     from copycord.common import exit_timezone
 
     async def _offline(proxy, timeout):
+        if proxy:
+            return {"timezone": OFFLINE_PROXY_ZONE}
         raise OSError("network disabled in tests")
 
     monkeypatch.setattr(exit_timezone, "_fetch_json", _offline)
@@ -63,6 +70,46 @@ def _fresh_qos_tokens():
     qos.set_store(qos.QosTokenStore())
     yield
     qos.set_store(qos.QosTokenStore())
+
+
+FAKE_PROXY = "http://proxy.test:8080"
+
+
+class FakeLeasedPool:
+    """A proxy pool where every token holds FAKE_PROXY; no address is ever dialled."""
+
+    enabled = True
+    total = 1
+
+    def current(self, token):
+        return FAKE_PROXY
+
+    async def lease(self, token, *, exclude=None):
+        return FAKE_PROXY
+
+    async def release(self, token):
+        pass
+
+    async def report_failure(self, token, *, exclude=()):
+        return FAKE_PROXY
+
+    def report_success(self, proxy):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _sender_has_a_proxy(monkeypatch):
+    """Proxies are mandatory for user tokens; sender tests run with a leased fake one.
+    A test about the no-proxy path patches get_proxy_pool itself."""
+    import sys
+
+    for name in ("copycord.server.token_sender", "copycord.server.token_avatar"):
+        mod = sys.modules.get(name)
+        if mod is not None:
+            monkeypatch.setattr(mod, "get_proxy_pool", lambda: FakeLeasedPool())
+    admin = sys.modules.get("copycord.admin.app")
+    if admin is not None:
+        monkeypatch.setattr(admin, "_user_token_proxies", lambda: [FAKE_PROXY])
 
 
 @pytest.fixture(autouse=True)

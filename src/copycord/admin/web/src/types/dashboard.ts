@@ -17,9 +17,26 @@ export interface BotStatus {
   status?: string;
 }
 
-/** GET /api/status, only the fields the Bots panel and the Tasks Run task button read. */
+/** One token in the server's warm pool. */
+export interface TokenPoolEntry {
+  state: "connecting" | "online" | "offline";
+  presence: "online" | "dnd" | "invisible";
+  since: number | null;
+  dead: boolean;
+  session: string;
+}
+
+/** The server's warm token pool, null while it has not started. Tokens are keyed by token id. */
+export interface TokenPoolStatus {
+  keep_online: number;
+  live: number;
+  max_loop_lag_ms: number;
+  tokens: Record<string, TokenPoolEntry>;
+}
+
+/** GET /api/status, only the fields the Bots panel, the Tasks Run task button and the token block read. */
 export interface StatusResponse {
-  server?: Partial<BotStatus> & Record<string, unknown>;
+  server?: Partial<BotStatus> & { token_pool?: TokenPoolStatus | null } & Record<string, unknown>;
   client?: Partial<BotStatus> & Record<string, unknown>;
   /** Both bots in the running state, as the server derives it. */
   both_running?: boolean;

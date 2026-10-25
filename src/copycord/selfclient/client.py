@@ -265,6 +265,11 @@ class Client:
             return None
 
     async def _tracked_connector(self, url: str, headers: Dict[str, str], proxy: Optional[str]) -> Any:
+        if proxy and proxy != self.proxy:
+            # The gateway rotated in the shared pool; REST follows so both keep one IP.
+            self.proxy = proxy
+            if self.http is not None:
+                self.http.set_proxy(proxy)
         science = self.science
         if science is not None:
             science.connect_attempt()

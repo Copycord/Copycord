@@ -12,16 +12,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 import re
 import threading
 import time
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import aiohttp
 from curl_cffi import CurlMime
 from curl_cffi.requests.exceptions import RequestException as CurlRequestException
 
+from copycord.common import traffic_capture
+from copycord.common.env import is_dev
 from copycord.common.exit_timezone import note_token_proxy
 from copycord.common.proxy_pool import get_pool as get_proxy_pool
 from copycord.common.selfbot_headers import (
@@ -33,6 +36,10 @@ from copycord.common.selfbot_headers import (
     context_properties,
     get_tls_session,
 )
+from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable, warn_no_proxy
+
+if TYPE_CHECKING:
+    from copycord.server.token_pool import TokenSessionPool
 
 DISCORD_API_BASE = "https://discord.com/api/v9"
 
@@ -181,6 +188,88 @@ SEND_TRANSIENT = "transient"
 SEND_UNSUPPORTED = "unsupported"
 SEND_NO_TOKENS = "no_tokens"
 
+# How long a send waits for its account's gateway session, polling every ONLINE_POLL seconds.
+ONLINE_WAIT = 20.0
+ONLINE_POLL = 0.25
+# One "not online" warning per token per this many seconds.
+_OFFLINE_WARN_INTERVAL = 60.0
+
+
+async def _sleep(seconds: float) -> None:
+    """The online wait's sleep; tests patch it so they need no real time."""
+    await asyncio.sleep(seconds)
+
+
+def _leased_proxy(token: str) -> str:
+    """The token's proxy for this request; NoProxyAvailable if the lease is gone, so nothing goes direct."""
+    proxy = get_proxy_pool().current(token)
+    if not proxy:
+        raise NoProxyAvailable("token lost its proxy lease")
+    return proxy
+
+
+# Dev mode's traffic record (traffic_capture.py). Each helper is a no-op when the
+# recorder is None and never raises into a send: a failure only logs at debug.
+_capture_log = logging.getLogger("server.token_sender.capture")
+
+
+def _capture_for(token: str):
+    try:
+        if not is_dev():
+            return None
+        return traffic_capture.recorder_for(token)
+    except Exception:
+        _capture_log.debug("traffic capture unavailable", exc_info=True)
+        return None
+
+
+def _capture_request(capture, method: str, url: str, headers: dict, kwargs: dict) -> Optional[str]:
+    """One request attempt with the headers and body handed to curl_cffi.
+
+    A multipart body is recorded as its field names and parsed payload_json
+    (the builders leave them on the CurlMime as _capture_body), never file bytes.
+    """
+    if capture is None:
+        return None
+    try:
+        if "json" in kwargs:
+            body, has_body = kwargs["json"], True
+        elif "multipart" in kwargs:
+            body = getattr(kwargs["multipart"], "_capture_body", None) or {"multipart": None}
+            has_body = True
+        else:
+            body, has_body = None, False
+        return capture.request(method, url, headers, body=body, has_body=has_body)
+    except Exception:
+        _capture_log.debug("traffic capture request failed", exc_info=True)
+        return None
+
+
+def _capture_response(capture, rid: Optional[str], status) -> None:
+    if capture is None:
+        return
+    try:
+        capture.response(rid, status)
+    except Exception:
+        _capture_log.debug("traffic capture response failed", exc_info=True)
+
+
+def _capture_failed(capture, rid: Optional[str], error) -> None:
+    if capture is None:
+        return
+    try:
+        capture.failed(rid, error)
+    except Exception:
+        _capture_log.debug("traffic capture failure record failed", exc_info=True)
+
+
+def _note_multipart(mime, fields: list, payload) -> None:
+    """What _capture_request records for this multipart body."""
+    try:
+        mime._capture_body = {"multipart": fields, "payload_json": payload}
+    except Exception:
+        _capture_log.debug("traffic capture multipart note failed", exc_info=True)
+
 
 class UserTokenSender:
     def __init__(
@@ -191,13 +280,17 @@ class UserTokenSender:
         action_type,
         session_provider: Callable[[], aiohttp.ClientSession],
         logger,
+        pool: Optional["TokenSessionPool"] = None,
     ):
         self._db = db
         self._ratelimit = ratelimit
         self._action = action_type
         self._session_provider = session_provider
         self._log = logger
-        self._rr_index_by_channel: dict = {}
+        # The warm gateway pool; None keeps every send path REST-only, as before.
+        self._pool = pool
+        # (token_id, token_value) pairs the pool reported dead and we benched.
+        self._pool_dead_synced: set = set()
         self._sticky_author_token: dict = {}
         self._pace_locks: dict = {}
         self._token_locks: dict = {}
@@ -208,6 +301,8 @@ class UserTokenSender:
         self._author_last_seen: dict = {}
 
         self._dead_tokens: set = set()
+        # token_id -> monotonic time of its last "not online" warning.
+        self._offline_warned: dict = {}
 
         self._nitro_by_token: dict = {}
 
@@ -221,14 +316,13 @@ class UserTokenSender:
         attachments: Optional[list] = None,
         sticker_ids: Optional[list] = None,
         author_id=None,
-        strategy: str = "round_robin",
         typing: bool = False,
         min_delay: float = 0.0,
         max_delay: float = 0.0,
         links_only: bool = False,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         sent_as: Optional[list] = None,
         sent_ids: Optional[list] = None,
         reply_to: Optional[dict] = None,
@@ -264,6 +358,8 @@ class UserTokenSender:
                 "[user-send] Failed to load tokens for mapping %s", mapping_id
             )
             return SEND_NO_TOKENS
+        if self._sync_pool_dead(tokens):
+            tokens = self._filter_dead(tokens)
 
         if not tokens:
             return SEND_NO_TOKENS
@@ -292,24 +388,28 @@ class UserTokenSender:
                 ]
                 order = forced + rest
         else:
-            order = self._order_tokens(tokens, chan, strategy, author_id, mapping_id)
+            order = self._order_tokens(tokens, chan, author_id, mapping_id)
+        exclusive = forced_token_id is not None and sticky_exclusive
 
-        type_token = next(
-            (tv for tv in ((t.get("token_value") or "").strip() for t in order) if tv),
-            None,
-        )
+        type_token = self._first_value(order)
 
         async def _deliver() -> str:
+            # Waits here, inside the channel's turn, so a later message cannot overtake it.
+            ready = await self._online_only(order, exclusive=exclusive)
+            if not ready:
+                return SEND_NO_TOKENS
+            if not exclusive:
+                await self._acquire_online(ready)
             await self._pace_channel(
                 chan,
                 min_delay,
                 max_delay,
                 typing=typing,
-                token=type_token,
+                token=self._first_value(ready),
                 use_proxy=use_proxy,
             )
             last = SEND_NO_TOKENS
-            for tok in order:
+            for tok in ready:
                 token_value = (tok.get("token_value") or "").strip()
                 if not token_value:
                     continue
@@ -357,7 +457,7 @@ class UserTokenSender:
             )
             return last
 
-        if (typing and type_token) or float(max_delay or 0.0) > 0:
+        if self._pool is not None or (typing and type_token) or float(max_delay or 0.0) > 0:
             async with self._chan_lock(chan):
                 return await _deliver()
         return await _deliver()
@@ -391,7 +491,7 @@ class UserTokenSender:
         token_id: Optional[str],
         content: Optional[str],
         embeds: Optional[list] = None,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         guild_id=None,
     ) -> str:
         """Edit a message, as the account that posted it.
@@ -412,13 +512,8 @@ class UserTokenSender:
             token,
             f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}",
             method="PATCH",
-            json_body={
-                "content": text,
-                "allowed_mentions": {
-                    "parse": ["users", "roles", "everyone"],
-                    "replied_user": False,
-                },
-            },
+            # The web client's edit carries the content and nothing else.
+            json_body={"content": text},
             timeout=30,
             ctx=f"editing message {message_id}",
             use_proxy=use_proxy,
@@ -434,7 +529,7 @@ class UserTokenSender:
         channel_id: int,
         message_id: int,
         token_id: Optional[str],
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         guild_id=None,
     ) -> str:
         """Delete a message, as the account that posted it.
@@ -471,13 +566,12 @@ class UserTokenSender:
         applied_tag_ids: Optional[list] = None,
         auto_archive_duration: int = 60,
         author_id=None,
-        strategy: str = "round_robin",
         min_delay: float = 0.0,
         max_delay: float = 0.0,
         links_only: bool = False,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> Optional[int]:
         """Create a forum thread whose starter message is authored by one of the mapping's user tokens."""
         if not mapping_id or not forum_channel_id or not thread_name:
@@ -492,6 +586,8 @@ class UserTokenSender:
                 "[user-send] Failed to load tokens for mapping %s", mapping_id
             )
             return None
+        if self._sync_pool_dead(tokens):
+            tokens = self._filter_dead(tokens)
         if not tokens:
             return None
 
@@ -518,9 +614,31 @@ class UserTokenSender:
                 ]
                 order = forced + rest
         else:
-            order = self._order_tokens(
-                tokens, forum_id, strategy, author_id, mapping_id
+            order = self._order_tokens(tokens, forum_id, author_id, mapping_id)
+        exclusive = forced_token_id is not None and sticky_exclusive
+
+        if self._pool is None:
+            return await self._create_forum_with(
+                order, forum_id, thread_name, text, atts_to_upload, stkr_ids, tag_ids,
+                auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
             )
+        # Waits inside the channel's turn, so a later post cannot overtake it.
+        async with self._chan_lock(forum_id):
+            return await self._create_forum_with(
+                order, forum_id, thread_name, text, atts_to_upload, stkr_ids, tag_ids,
+                auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+            )
+
+    async def _create_forum_with(
+        self, order, forum_id, thread_name, text, atts_to_upload, stkr_ids, tag_ids,
+        auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+    ) -> Optional[int]:
+        """create_forum_thread's delivery: wait for the account, pace, then post."""
+        order = await self._online_only(order, exclusive=exclusive)
+        if not order:
+            return None
+        if not exclusive:
+            await self._acquire_online(order)
 
         await self._pace_channel(forum_id, min_delay, max_delay)
 
@@ -579,12 +697,11 @@ class UserTokenSender:
         starter_message_id: Optional[int] = None,
         auto_archive_duration: int = 60,
         author_id=None,
-        strategy: str = "round_robin",
         min_delay: float = 0.0,
         max_delay: float = 0.0,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> Optional[int]:
         """Create a text-channel thread as one of the mapping's user tokens."""
         if not mapping_id or not parent_channel_id or not thread_name:
@@ -599,6 +716,8 @@ class UserTokenSender:
                 "[user-send] Failed to load tokens for mapping %s", mapping_id
             )
             return None
+        if self._sync_pool_dead(tokens):
+            tokens = self._filter_dead(tokens)
         if not tokens:
             return None
 
@@ -616,9 +735,31 @@ class UserTokenSender:
                 ]
                 order = forced + rest
         else:
-            order = self._order_tokens(
-                tokens, parent_id, strategy, author_id, mapping_id
+            order = self._order_tokens(tokens, parent_id, author_id, mapping_id)
+        exclusive = forced_token_id is not None and sticky_exclusive
+
+        if self._pool is None:
+            return await self._create_text_with(
+                order, parent_id, thread_name, starter_message_id,
+                auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
             )
+        # Waits inside the channel's turn, so a later post cannot overtake it.
+        async with self._chan_lock(parent_id):
+            return await self._create_text_with(
+                order, parent_id, thread_name, starter_message_id,
+                auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+            )
+
+    async def _create_text_with(
+        self, order, parent_id, thread_name, starter_message_id,
+        auto_archive_duration, min_delay, max_delay, exclusive, use_proxy,
+    ) -> Optional[int]:
+        """create_text_thread's delivery: wait for the account, pace, then post."""
+        order = await self._online_only(order, exclusive=exclusive)
+        if not order:
+            return None
+        if not exclusive:
+            await self._acquire_online(order)
 
         await self._pace_channel(parent_id, min_delay, max_delay)
 
@@ -695,36 +836,139 @@ class UserTokenSender:
             tok.get("username") or token_id,
         )
 
-    def _order_tokens(
-        self, tokens: list, chan: int, strategy: str, author_id, mapping_id=None
-    ):
-        """Return the tokens in the order to try, per the selected strategy."""
+    def _sync_pool_dead(self, tokens: list) -> bool:
+        """Bench the tokens the warm pool saw rejected (401 or 4004). True if any were.
+
+        The pool already stops a dead token's session by itself, so this only
+        carries its verdict into the sender and the DB, once per token.
+        """
+        if self._pool is None:
+            return False
+        try:
+            dead = self._pool.dead_ids()
+        except Exception:
+            self._log.debug("[user-send] Pool dead_ids failed", exc_info=True)
+            return False
+        if not dead:
+            return False
+        benched = False
+        for tok in tokens:
+            token_id = tok.get("token_id")
+            if token_id is None or str(token_id) not in dead:
+                continue
+            key = (str(token_id), (tok.get("token_value") or "").strip())
+            if key in self._pool_dead_synced:
+                continue
+            self._pool_dead_synced.add(key)
+            self._mark_token_dead(tok)
+            benched = True
+        return benched
+
+    def _order_tokens(self, tokens: list, chan: int, author_id, mapping_id=None):
+        """Return the tokens in the order to try: the author's sticky token first.
+
+        A send with no author id gets the tokens sorted by id, so the first
+        available token is always the same one.
+        """
         toks = list(tokens)
         if len(toks) <= 1:
             return toks
 
-        if strategy == "sticky_author" and author_id:
-
-            ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
-            ids = [str(t.get("token_id")) for t in ordered]
-            key = (str(mapping_id), str(author_id))
-            self._author_last_seen[key] = time.monotonic()
-            assigned = self._sticky_author_token.get(key)
-            if assigned not in ids:
-                counts = {tid: 0 for tid in ids}
-                for (mid, _aid), tid in self._sticky_author_token.items():
-                    if mid == str(mapping_id) and tid in counts:
-                        counts[tid] += 1
-                assigned = min(ids, key=lambda tid: counts[tid])
-                self._sticky_author_token[key] = assigned
-            idx = ids.index(assigned)
-            return ordered[idx:] + ordered[:idx]
-
         ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
-        self._channel_last_seen[chan] = time.monotonic()
-        idx = self._rr_index_by_channel.get(chan, 0) % len(ordered)
-        self._rr_index_by_channel[chan] = (idx + 1) % len(ordered)
+        if not author_id:
+            return ordered
+
+        ids = [str(t.get("token_id")) for t in ordered]
+        key = (str(mapping_id), str(author_id))
+        self._author_last_seen[key] = time.monotonic()
+        assigned = self._sticky_author_token.get(key)
+        if assigned not in ids:
+            counts = {tid: 0 for tid in ids}
+            for (mid, _aid), tid in self._sticky_author_token.items():
+                if mid == str(mapping_id) and tid in counts:
+                    counts[tid] += 1
+            assigned = min(ids, key=lambda tid: counts[tid])
+            self._sticky_author_token[key] = assigned
+        idx = ids.index(assigned)
         return ordered[idx:] + ordered[:idx]
+
+    def _online_ids(self) -> set:
+        """Token ids whose pool session may send: online with its gateway tab
+        focused (or past the pool's grace after READY); empty without a pool or
+        when it fails."""
+        if self._pool is None:
+            return set()
+        try:
+            sendable = getattr(self._pool, "sendable_ids", None)
+            if callable(sendable):
+                return set(sendable())
+            return set(self._pool.online_ids())
+        except Exception:
+            self._log.debug("[user-send] Pool online_ids failed", exc_info=True)
+            return set()
+
+    @staticmethod
+    def _first_value(order: list) -> Optional[str]:
+        """The first non-empty token value in ``order``, or None."""
+        return next(
+            (tv for tv in ((t.get("token_value") or "").strip() for t in order) if tv),
+            None,
+        )
+
+    async def _online_only(self, order: list, *, exclusive: bool = False) -> list:
+        """The tokens of ``order`` with a live gateway session, in order; [] means none may send.
+
+        A token only sends while it is online, so it looks like a real user.
+        The head (the sticky or forced account) gets up to ONLINE_WAIT seconds
+        to come online; after that the other tokens that are online now are
+        used instead. ``exclusive`` allows only the head. Holds no pool lock.
+        """
+        if self._pool is None:
+            return order
+        if not order:
+            return []
+        head = str(order[0].get("token_id"))
+        online = self._online_ids()
+        polls = int(ONLINE_WAIT / ONLINE_POLL)
+        while head not in online and polls > 0:
+            await _sleep(ONLINE_POLL)
+            polls -= 1
+            online = self._online_ids()
+        if head not in online:
+            self._warn_offline(order[0])
+        candidates = order[:1] if exclusive else order
+        return [t for t in candidates if str(t.get("token_id")) in online]
+
+    def _warn_offline(self, tok: dict) -> bool:
+        """Log one warning per token per minute that it was skipped for being offline. True when it logged."""
+        key = str(tok.get("token_id"))
+        now = time.monotonic()
+        last = self._offline_warned.get(key)
+        if last is not None and now - last < _OFFLINE_WARN_INTERVAL:
+            return False
+        self._offline_warned[key] = now
+        self._log.warning(
+            "[user-send] Token %s has no focused gateway session after %.0fs; not sending with it",
+            tok.get("username") or key,
+            ONLINE_WAIT,
+        )
+        return True
+
+    async def _acquire_online(self, order: list) -> None:
+        """Tell the pool which online token this send will try first."""
+        if self._pool is None:
+            return
+        ids = [
+            str(t.get("token_id"))
+            for t in order
+            if t.get("token_id") is not None and (t.get("token_value") or "").strip()
+        ]
+        if not ids:
+            return
+        try:
+            await self._pool.acquire_online(ids)
+        except Exception:
+            self._log.debug("[user-send] Pool acquire_online failed", exc_info=True)
 
     def _chan_lock(self, chan: int) -> asyncio.Lock:
         """Per-channel lock."""
@@ -752,6 +996,7 @@ class UserTokenSender:
         if delay > 0:
             await asyncio.sleep(delay)
 
+    # Never calls pool.reap_idle: keep-online sessions stay warm; the server's pool reconcile decides who is online.
     async def reap_idle_state(self, idle_ttl: float = 3600) -> dict:
         """Drop bookkeeping for tokens, channels and sticky authors idle for idle_ttl seconds.
 
@@ -785,6 +1030,8 @@ class UserTokenSender:
             self._token_locks.pop(token, None)
             self._token_cooldown.pop(token, None)
             self._token_last_seen.pop(token, None)
+            # Dev mode only; a token whose gateway still records keeps its capture.
+            traffic_capture.stop_if_quiet(token, idle_ttl, "sender idle")
             reaped += 1
         return reaped
 
@@ -798,7 +1045,6 @@ class UserTokenSender:
             if lock is not None and lock.locked():
                 continue
             self._pace_locks.pop(chan, None)
-            self._rr_index_by_channel.pop(chan, None)
             self._channel_last_seen.pop(chan, None)
             reaped += 1
         return reaped
@@ -814,7 +1060,7 @@ class UserTokenSender:
             self._author_last_seen.pop(key, None)
         return len(stale)
 
-    async def _token_has_nitro(self, token: str, *, use_proxy: bool = False) -> bool:
+    async def _token_has_nitro(self, token: str, *, use_proxy: bool = USE_PROXY) -> bool:
         """Whether this account may use custom emoji outside their own guild.
 
         One lookup per account for the life of the process. On any failure we
@@ -859,7 +1105,7 @@ class UserTokenSender:
             self._log.debug("[user-send] emoji lookup failed", exc_info=True)
             return set()
 
-    async def _tls_session(self, token: str, *, use_proxy: bool = False):
+    async def _tls_session(self, token: str, *, use_proxy: bool = USE_PROXY):
         """The per-token curl_cffi session. Overridden in tests."""
         return await get_tls_session(token, use_proxy=use_proxy)
 
@@ -873,7 +1119,7 @@ class UserTokenSender:
         timeout: int = 30,
         ctx: str = "",
         extra_headers: Optional[dict] = None,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         method: str = "POST",
         not_found_status: str = SEND_UNDELIVERABLE,
         referer: Optional[str] = None,
@@ -886,14 +1132,18 @@ class UserTokenSender:
         """
         r429 = 0
         rnet = 0
+        # Dev mode only: None otherwise.
+        capture = _capture_for(token)
         async with self._token_lock(token):
             while True:
                 await self._await_cooldown(token)
                 proxy = get_proxy_pool().current(token)
                 try:
                     session = await self._tls_session(token, use_proxy=use_proxy)
-                    proxy = get_proxy_pool().current(token)
-                    await note_token_proxy(token, proxy)
+                    proxy = _leased_proxy(token)
+                    if not await note_token_proxy(token, proxy):
+                        # never a fallback zone for a proxied token: unavailable for this send
+                        raise NoProxyAvailable("exit timezone lookup failed for the token's proxy")
                     headers = self._build_headers(token, referer)
                     if extra_headers:
                         headers = {**headers, **extra_headers}
@@ -907,12 +1157,18 @@ class UserTokenSender:
                         kwargs = {}
                     kwargs.update(headers=headers, timeout=timeout, proxy=proxy)
 
-                    if method == "POST":
-                        resp = await session.post(url, **kwargs)
-                    else:
-                        resp = await session.request(method, url, **kwargs)
+                    rid = _capture_request(capture, method, url, headers, kwargs)
+                    try:
+                        if method == "POST":
+                            resp = await session.post(url, **kwargs)
+                        else:
+                            resp = await session.request(method, url, **kwargs)
+                    except Exception as e:
+                        _capture_failed(capture, rid, e)
+                        raise
 
                     status = resp.status_code
+                    _capture_response(capture, rid, status)
 
                     if status in (200, 201, 204):
                         if proxy:
@@ -979,6 +1235,12 @@ class UserTokenSender:
                         body[:300],
                     )
                     return SEND_UNDELIVERABLE, None
+                except NoProxyAvailable:
+                    # Token unavailable for this send, never dead: the caller moves on
+                    # to the next token, then the bot or webhook. With no proxies at
+                    # all this is the one disabled notice, not a line per token.
+                    warn_no_proxy(self._log, _token_log_id(token), ctx, pool=get_proxy_pool())
+                    return SEND_NO_TOKENS, None
                 except CurlRequestException as e:
                     rnet += 1
                     self._log.warning(
@@ -1000,7 +1262,7 @@ class UserTokenSender:
         *,
         typing: bool = False,
         token: Optional[str] = None,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> None:
         """Wait a message's send-delay before it goes out."""
         lo = max(0.0, float(min_delay or 0.0))
@@ -1016,18 +1278,26 @@ class UserTokenSender:
             await asyncio.sleep(delay)
 
     async def _type_for(
-        self, chan: int, token: str, duration: float, *, use_proxy: bool = False
+        self, chan: int, token: str, duration: float, *, use_proxy: bool = USE_PROXY
     ) -> None:
         """Show the typing indicator in ``chan`` for ``duration`` seconds."""
         headers = self._build_headers(token)
         url = f"{DISCORD_API_BASE}/channels/{chan}/typing"
+        # Dev mode only: None otherwise.
+        capture = _capture_for(token)
 
         async def _fire():
             self._token_last_seen[token] = time.monotonic()
             try:
                 session = await self._tls_session(token, use_proxy=use_proxy)
-                proxy = get_proxy_pool().current(token)
-                await session.post(url, headers=headers, timeout=10, proxy=proxy)
+                proxy = _leased_proxy(token)
+                rid = _capture_request(capture, "POST", url, headers, {})
+                try:
+                    resp = await session.post(url, headers=headers, timeout=10, proxy=proxy)
+                except Exception as e:
+                    _capture_failed(capture, rid, e)
+                    raise
+                _capture_response(capture, rid, getattr(resp, "status_code", 0))
             except Exception:
                 pass
 
@@ -1093,7 +1363,7 @@ class UserTokenSender:
         """
         try:
             session = await self._tls_session(token, use_proxy=use_proxy)
-            proxy = get_proxy_pool().current(token)
+            proxy = _leased_proxy(token)
             resp = await session.request(
                 "PUT",
                 upload_url,
@@ -1152,7 +1422,7 @@ class UserTokenSender:
         attachments: list,
         *,
         sticker_ids: Optional[list] = None,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
         reply_to: Optional[dict] = None,
         guild_id=None,
     ) -> str:
@@ -1267,7 +1537,7 @@ class UserTokenSender:
         sticker_ids: Optional[list] = None,
         applied_tag_ids: Optional[list] = None,
         auto_archive_duration: int = 60,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> Optional[int]:
         """POST a forum thread + starter message as one account."""
         session = self._session_provider()
@@ -1343,7 +1613,7 @@ class UserTokenSender:
         *,
         starter_message_id: Optional[int] = None,
         auto_archive_duration: int = 60,
-        use_proxy: bool = False,
+        use_proxy: bool = USE_PROXY,
     ) -> Optional[int]:
         """Create a text-channel thread as one account."""
         body: dict = {
@@ -1444,6 +1714,9 @@ class UserTokenSender:
         )
         for i, (fn, data, ct) in enumerate(files):
             mime.addpart(f"files[{i}]", content_type=ct, filename=fn, data=data)
+        _note_multipart(
+            mime, ["payload_json"] + [f"files[{i}]" for i in range(len(files))], payload
+        )
         return mime
 
     def _build_forum_multipart(self, thread_body: dict, files: list) -> "CurlMime":
@@ -1462,6 +1735,9 @@ class UserTokenSender:
         )
         for i, (fn, data, ct) in enumerate(files):
             mime.addpart(f"files[{i}]", content_type=ct, filename=fn, data=data)
+        _note_multipart(
+            mime, ["payload_json"] + [f"files[{i}]" for i in range(len(files))], body
+        )
         return mime
 
     def _compose_text(self, content: Optional[str], embeds: Optional[list]) -> str:
@@ -1542,9 +1818,27 @@ class UserTokenSender:
             return ""
 
     def _build_headers(self, token: str, referer: str | None = None) -> dict:
-        """Realistic Discord desktop-client headers, unique & stable per token."""
+        """Realistic Discord desktop-client headers, unique & stable per token.
+
+        While the token's pool session has its tab focused the super properties
+        say "focused" and carry its client_heartbeat_session_id.
+        """
 
         return {
-            **build_headers(token, referer=referer),
+            **build_headers(
+                token, referer=referer, heartbeat_session_id=self._heartbeat_session_id(token)
+            ),
             **SUPPRESSED_PROFILE_HEADERS,
         }
+
+    def _heartbeat_session_id(self, token: str) -> Optional[str]:
+        """The pool's focused heartbeat session id for ``token``, or None."""
+        lookup = getattr(self._pool, "heartbeat_session_id", None) if self._pool else None
+        if not callable(lookup):
+            return None
+        try:
+            hb = lookup(token)
+        except Exception:
+            self._log.debug("[user-send] Pool heartbeat_session_id failed", exc_info=True)
+            return None
+        return hb if isinstance(hb, str) and hb else None

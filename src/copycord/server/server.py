@@ -47,6 +47,12 @@ from copycord.common.selfbot_headers import (
     TLS_SESSION_IDLE_TTL,
 )
 from copycord.common.proxy_pool import get_pool as get_proxy_pool
+from copycord.common.token_proxy import (
+    notice_tokens_disabled,
+    notice_tokens_enabled,
+    proxies_configured,
+    token_use_proxy,
+)
 from copycord.common.websockets import WebsocketManager, AdminBus
 from copycord.common.db import DBManager
 from copycord.common.http_session import close_shared_session
@@ -63,6 +69,7 @@ from copycord.server.token_sender import (
     SEND_TRANSIENT,
 )
 from copycord.server.token_identity import TokenIdentityManager
+from copycord.server.token_pool import TokenSessionPool
 from copycord.server.emojis import EmojiManager
 from copycord.server.stickers import StickerManager
 from copycord.server.roles import RoleManager
@@ -142,6 +149,70 @@ def _channel_name_blacklisted(name: str, patterns: list[str]) -> bool:
             if p in name_lower:
                 return True
     return False
+
+
+# Debounce for a reconcile asked for by a mapping change, and the safety loop period.
+TOKEN_POOL_DEBOUNCE = 2.0
+TOKEN_POOL_INTERVAL = 60.0
+# How often the online set is checked for a status republish between reconciles.
+TOKEN_POOL_WATCH = 5.0
+
+
+def _setting_on(value) -> bool:
+    """A bool-ish setting: True, 1 and "true" (any case) are on, anything else is off."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return value is True or value == 1
+
+
+def plan_token_pool(mappings: list[dict], *, skip_values: set = frozenset()) -> dict:
+    """Decide which sending tokens the warm pool keeps online.
+
+    ``mappings`` holds one dict per mapping, in mapping order, with ``mapping_id``,
+    the resolved ``settings`` and its enabled ``tokens`` (``token_id``, ``token_value``).
+    Every working token of every mapping with ``USE_USER_TOKENS`` on is wanted online:
+    a row marked ``enabled`` false or a value in ``skip_values`` (dead in the sender) is
+    left out. A token value used by several mappings is one entry: its ids and mappings
+    are the union, ``use_proxy`` is always on (proxies are mandatory for tokens),
+    ``presence`` is the first mapping's and ``rotate`` (``USER_TOKEN_PRESENCE_ROTATE``)
+    is on if any of them has it on. ``keep_online`` is the number of distinct wanted
+    values, so the pool cap never trims a wanted token. A stored
+    ``USER_TOKEN_KEEP_ONLINE`` from an older version is ignored.
+    """
+    tokens: dict[str, dict] = {}
+    wanted: list[str] = []
+    for m in mappings:
+        settings = m.get("settings") or {}
+        if not settings.get("USE_USER_TOKENS", False):
+            continue
+        presence = str(settings.get("USER_TOKEN_PRESENCE") or "random")
+        rotate = _setting_on(settings.get("USER_TOKEN_PRESENCE_ROTATE", False))
+        use_proxy = token_use_proxy(settings)
+        for tok in m.get("tokens") or []:
+            if "enabled" in tok and not _setting_on(tok.get("enabled")):
+                continue
+            value = (tok.get("token_value") or "").strip()
+            if not value or value in skip_values:
+                continue
+            entry = tokens.get(value)
+            if entry is None:
+                entry = tokens[value] = {
+                    "ids": [],
+                    "mappings": [],
+                    "use_proxy": False,
+                    "presence": presence,
+                    "rotate": False,
+                }
+            token_id = str(tok.get("token_id"))
+            if token_id not in entry["ids"]:
+                entry["ids"].append(token_id)
+            if m.get("mapping_id") not in entry["mappings"]:
+                entry["mappings"].append(m.get("mapping_id"))
+            entry["use_proxy"] = entry["use_proxy"] or use_proxy
+            entry["rotate"] = entry["rotate"] or rotate
+            if value not in wanted:
+                wanted.append(value)
+    return {"tokens": tokens, "wanted": wanted, "keep_online": len(wanted)}
 
 
 class _GuildPrefixFilter(logging.Filter):
@@ -256,12 +327,27 @@ class ServerReceiver:
             role="server", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
         self.ratelimit = RateLimitManager()
+        # Token values whose session goes through a proxy; set by _reconcile_token_pool.
+        self._pool_proxied: set[str] = set()
+        # Token ids handed to the pool by the last reconcile.
+        self._pool_ids: set[str] = set()
+        self._pool_lock = asyncio.Lock()
+        self._pool_again = False
+        self._pool_debounce_task: Optional[asyncio.Task] = None
+        self._pool_loop_task: Optional[asyncio.Task] = None
+        self._pool_online_seen: Optional[frozenset] = None
+        # Last account identity stored per pool session, so the DB is written only on change.
+        self._pool_identity_saved: dict[str, dict] = {}
+        self.token_pool = TokenSessionPool(
+            logger=logger, proxy_for=self._token_pool_proxy_for
+        )
         self.user_token_sender = UserTokenSender(
             db=self.db,
             ratelimit=self.ratelimit,
             action_type=ActionType.USER_MESSAGE,
             session_provider=self._ensure_aiohttp_session,
             logger=logger,
+            pool=self.token_pool,
         )
         self.token_identity = TokenIdentityManager(
             bot=self.bot,
@@ -829,9 +915,196 @@ class ServerReceiver:
                         running=True,
                         status=f"Logged in as {self.bot.user.name}",
                         discord={"ready": True},
+                        token_pool=self._token_pool_status(),
                     )
             except Exception:
                 logger.debug("[status] heartbeat publish failed", exc_info=True)
+
+    # warm token pool
+
+    def _token_pool_proxy_for(self, token_value: str) -> Optional[str]:
+        """The proxy the token's REST calls already lease; None (no connect) when it has none."""
+        if token_value not in self._pool_proxied:
+            return None
+        return get_proxy_pool().current(token_value)
+
+    def _load_token_pool_mappings(self) -> list[dict]:
+        """Every mapping with its resolved settings and enabled tokens, for plan_token_pool."""
+        out = []
+        for row in self.db.list_guild_mappings() or []:
+            mapping_id = row.get("mapping_id")
+            orig = row.get("original_guild_id")
+            clone = row.get("cloned_guild_id")
+            try:
+                settings = resolve_mapping_settings(
+                    self.db,
+                    self.config,
+                    original_guild_id=int(orig) if orig else None,
+                    cloned_guild_id=int(clone) if clone else None,
+                )
+            except Exception:
+                settings = {}
+            try:
+                tokens = self.db.get_enabled_mapping_tokens(str(mapping_id)) or []
+            except Exception:
+                logger.debug("[token-pool] Token load failed for %s", mapping_id, exc_info=True)
+                tokens = []
+            out.append({"mapping_id": str(mapping_id), "settings": settings, "tokens": tokens})
+        return out
+
+    async def _reconcile_token_pool(self) -> None:
+        """Bring the warm pool in line with the mappings; overlapping calls coalesce into one rerun."""
+        if self._pool_lock.locked():
+            self._pool_again = True
+            return
+        async with self._pool_lock:
+            self._pool_again = True
+            while self._pool_again and not self._shutting_down:
+                self._pool_again = False
+                try:
+                    await self._reconcile_token_pool_once()
+                except Exception:
+                    logger.exception("[token-pool] Reconcile failed")
+
+    async def _reconcile_token_pool_once(self) -> None:
+        mappings = self._load_token_pool_mappings()
+        pool = self.token_pool
+        # The sender benches a REST 401 without telling the pool; skip those values.
+        skip = set(getattr(self.user_token_sender, "_dead_tokens", None) or ())
+        plan = plan_token_pool(mappings, skip_values=skip)
+        proxies = get_proxy_pool()
+        if not proxies_configured(proxies):
+            # Proxies are mandatory: nothing connects, and one notice says why.
+            for token_id in sorted(self._pool_ids):
+                await pool.close(token_id)
+            self._pool_ids = set()
+            self._pool_proxied = set()
+            await pool.close_all()
+            if plan["wanted"]:
+                notice_tokens_disabled(logger)
+            return
+        notice_tokens_enabled(logger)
+        wanted_ids = {
+            tid for value in plan["wanted"] for tid in plan["tokens"][value]["ids"]
+        }
+        # Disabled, deleted, dead or no longer wanted rows give their slot back first.
+        for token_id in sorted(self._pool_ids - wanted_ids):
+            await pool.close(token_id)
+        self._pool_ids &= wanted_ids
+        if not plan["wanted"]:
+            self._pool_proxied = set()
+            await pool.close_all()
+            return
+
+        # One session and one proxy per token value. Lease here so proxy_for finds the
+        # lease before the connect, and REST, which reads the same lease, matches it.
+        proxied = {v for v in plan["wanted"] if plan["tokens"][v]["use_proxy"]}
+        self._pool_proxied = proxied
+        # The pool's keep_online is one global count: every wanted value, so none is trimmed.
+        # Never below the wanted set: only the empty plan above closes everything.
+        keep = max(int(plan["keep_online"] or 0), len(plan["wanted"]))
+        for value in plan["wanted"]:
+            entry = plan["tokens"][value]
+            if value in proxied and proxies.enabled:
+                try:
+                    await proxies.lease(value)
+                except Exception:
+                    logger.debug("[token-pool] Proxy lease failed", exc_info=True)
+            for token_id in entry["ids"]:
+                await pool.ensure(
+                    token_id,
+                    value,
+                    keep_online=keep,
+                    presence=entry["presence"],
+                    rotate=entry["rotate"],
+                )
+                self._pool_ids.add(token_id)
+
+    def _schedule_token_pool_reconcile(self, delay: float = TOKEN_POOL_DEBOUNCE) -> None:
+        """Reconcile ``delay`` seconds after the last call; a running reconcile is never cancelled."""
+        task = self._pool_debounce_task
+        if task is not None and not task.done():
+            task.cancel()
+
+        async def _later():
+            await asyncio.sleep(delay)
+            await asyncio.shield(self._reconcile_token_pool())
+
+        self._pool_debounce_task = asyncio.create_task(
+            _later(), name="token-pool-reconcile"
+        )
+
+    def _token_pool_status(self) -> Optional[dict]:
+        try:
+            snap = self.token_pool.snapshot()
+        except Exception:
+            logger.debug("[token-pool] snapshot failed", exc_info=True)
+            return None
+        self._persist_token_identities(snap)
+        return snap
+
+    def _persist_token_identities(self, snap: Optional[dict]) -> None:
+        """Store each ready session's account identity on its token rows, only when it changed."""
+        for token_id, entry in ((snap or {}).get("tokens") or {}).items():
+            ident = entry.get("identity")
+            if not ident:
+                continue
+            key = entry.get("session") or str(token_id)
+            if self._pool_identity_saved.get(key) == ident:
+                continue
+            try:
+                self.db.update_token_identity(
+                    token_id=str(token_id),
+                    username=ident.get("username"),
+                    display_name=ident.get("display_name"),
+                    avatar_url=ident.get("avatar_url"),
+                    user_id=ident.get("user_id"),
+                )
+            except Exception:
+                logger.debug("[token-pool] identity save failed for %s", token_id, exc_info=True)
+                continue
+            self._pool_identity_saved[key] = dict(ident)
+
+    async def _publish_token_pool_status(self, *, force: bool = False) -> None:
+        """Republish the server status with the pool snapshot when the online set changed."""
+        try:
+            online = frozenset(self.token_pool.online_ids())
+        except Exception:
+            online = frozenset()
+        if not force and online == self._pool_online_seen:
+            return
+        self._pool_online_seen = online
+        try:
+            if self.bot.is_ready() and not self.bot.is_closed():
+                # The admin replaces the whole status payload, so send every field.
+                await self.bus.status(
+                    running=True,
+                    status=f"Logged in as {self.bot.user.name}",
+                    discord={"ready": True},
+                    token_pool=self._token_pool_status(),
+                )
+        except Exception:
+            logger.debug("[token-pool] status publish failed", exc_info=True)
+
+    async def _token_pool_loop(self) -> None:
+        """First reconcile at once on READY, then one every TOKEN_POOL_INTERVAL; watch the online set between."""
+        loop = asyncio.get_running_loop()
+        next_full = 0.0
+        while not self._shutting_down:
+            try:
+                if loop.time() >= next_full:
+                    next_full = loop.time() + TOKEN_POOL_INTERVAL
+                    await self._reconcile_token_pool()
+                    await self._publish_token_pool_status(force=True)
+                else:
+                    await self._publish_token_pool_status()
+            except Exception:
+                logger.exception("[token-pool] loop tick failed")
+            await asyncio.sleep(TOKEN_POOL_WATCH)
+
+    async def _close_token_pool(self) -> None:
+        async with self._pool_lock:
+            await self.token_pool.close_all()
 
     def _start_verify(self) -> None:
         """Subscribe to the admin bus for the UI's verify requests, once per process. VerifyController
@@ -888,7 +1161,17 @@ class ServerReceiver:
 
         msg = f"Logged in as {self.bot.user.name}"
 
-        await self.bus.status(running=True, status=msg, discord={"ready": True})
+        await self.bus.status(
+            running=True,
+            status=msg,
+            discord={"ready": True},
+            token_pool=self._token_pool_status(),
+        )
+
+        if self._pool_loop_task is None or self._pool_loop_task.done():
+            self._pool_loop_task = asyncio.create_task(
+                self._token_pool_loop(), name="token-pool"
+            )
 
         if (
             getattr(self, "_status_hb_task", None) is None
@@ -1802,6 +2085,17 @@ class ServerReceiver:
             elif typ == "reload_channel_name_blacklist":
                 await self._load_channel_name_blacklist_cache()
                 logger.info("[chan-blacklist] Cache reloaded from DB")
+                # Sent when a mapping's settings are saved.
+                self._schedule_token_pool_reconcile()
+
+            elif typ == "reload_user_tokens":
+                # A mapping, its tokens or its token settings changed.
+                self._schedule_token_pool_reconcile()
+
+            elif typ == "reload_proxies":
+                # The proxy list was saved; the pool connects or stops on the new count.
+                get_proxy_pool().reload()
+                self._schedule_token_pool_reconcile()
 
             elif typ == "fetch_message":
                 return await self._fetch_message_live(data or {})
@@ -7863,7 +8157,7 @@ class ServerReceiver:
     @staticmethod
     def _identity_active(settings: dict) -> bool:
         """True when the sticky-author identity manager should own token choice."""
-        return str(settings.get("USER_TOKEN_STRATEGY") or "") == "sticky_author" and (
+        return (
             bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
             or bool(settings.get("USER_TOKEN_STICKY_ROLES"))
             or bool(settings.get("USER_TOKEN_STICKY_AVATAR"))
@@ -8056,14 +8350,13 @@ class ServerReceiver:
                     embeds=embeds,
                     attachments=msg.get("attachments"),
                     author_id=msg.get("author_id"),
-                    strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                     typing=bool(settings.get("USER_TOKEN_TYPING", False)),
                     min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                     max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                     links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                     forced_token_id=forced,
                     sticky_exclusive=exclusive,
-                    use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                    use_proxy=token_use_proxy(settings),
                     sent_as=sent_as,
                     sent_ids=sent_ids,
                     reply_to=reply_to,
@@ -8228,13 +8521,12 @@ class ServerReceiver:
                 attachments=msg.get("attachments"),
                 applied_tag_ids=[t for t in (applied_tag_ids or []) if t],
                 author_id=msg.get("author_id"),
-                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                 min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                 forced_token_id=forced_token_id,
                 sticky_exclusive=identity_active,
-                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                use_proxy=token_use_proxy(settings),
             )
         except Exception:
             logger.exception(
@@ -8300,12 +8592,11 @@ class ServerReceiver:
                     int(starter_message_id) if starter_message_id else None
                 ),
                 author_id=msg.get("author_id"),
-                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                 min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 forced_token_id=forced_token_id,
                 sticky_exclusive=identity_active,
-                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                use_proxy=token_use_proxy(settings),
             )
         except Exception:
             logger.exception(
@@ -8406,14 +8697,13 @@ class ServerReceiver:
                     content=(msg.get("content") or "").strip() or None,
                     sticker_ids=sticker_ids,
                     author_id=msg.get("author_id"),
-                    strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                     typing=bool(settings.get("USER_TOKEN_TYPING", False)),
                     min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                     max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                     links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                     forced_token_id=forced,
                     sticky_exclusive=exclusive,
-                    use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                    use_proxy=token_use_proxy(settings),
                     sent_as=sent_as,
                     sent_ids=sent_ids,
                     reply_to=reply_to,
@@ -10149,7 +10439,7 @@ class ServerReceiver:
                 token_id=token_id,
                 content=content,
                 embeds=embeds,
-                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                use_proxy=token_use_proxy(settings),
                 guild_id=clone_gid,
             )
 
@@ -12705,7 +12995,7 @@ class ServerReceiver:
             channel_id=cloned_cid,
             message_id=cloned_mid,
             token_id=token_id,
-            use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+            use_proxy=token_use_proxy(settings),
             guild_id=clone_gid,
         )
 
@@ -13504,6 +13794,15 @@ class ServerReceiver:
         await _cancel_and_wait(
             getattr(self, "_tls_reap_task", None), "reap-idle-tls-sessions"
         )
+        await _cancel_and_wait(getattr(self, "_pool_loop_task", None), "token-pool")
+        await _cancel_and_wait(
+            getattr(self, "_pool_debounce_task", None), "token-pool-reconcile"
+        )
+        if getattr(self, "token_pool", None) is not None:
+            try:
+                await asyncio.wait_for(self._close_token_pool(), 10)
+            except Exception:
+                logger.debug("[shutdown] token pool close failed", exc_info=True)
 
         setattr(self, "_suppress_backfill_dm", True)
         try:
