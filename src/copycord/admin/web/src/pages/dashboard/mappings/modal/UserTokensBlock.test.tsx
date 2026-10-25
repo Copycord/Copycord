@@ -6,12 +6,12 @@ import { ConfirmProvider } from "../../../../components/ui/ConfirmDialog";
 import type { MappingSettings } from "../../../../types/dashboard-mappings";
 import { UserTokensBlock } from "./UserTokensBlock";
 
-function renderBlock(strategy: string) {
+function renderBlock(settings: MappingSettings) {
   const setSetting = vi.fn();
   render(
     <ToastProvider>
       <ConfirmProvider>
-        <UserTokensBlock mappingId={null} settings={{ USER_TOKEN_STRATEGY: strategy }} setSetting={setSetting} search="" />
+        <UserTokensBlock mappingId={null} settings={settings} setSetting={setSetting} search="" />
       </ConfirmProvider>
     </ToastProvider>,
   );
@@ -20,29 +20,25 @@ function renderBlock(strategy: string) {
   return setSetting;
 }
 
-describe("UserTokensBlock account selection", () => {
-  it("is the app dropdown named by its label, keeps the id ut_strategy and saves the picked strategy", () => {
-    const setSetting = renderBlock("round_robin");
-    const select = screen.getByRole("combobox", { name: "Account selection" });
-    expect(select).toHaveAttribute("id", "ut_strategy");
-    expect(select).toHaveTextContent("Rotate evenly");
-    expect(document.querySelector("select")).toBeNull();
+const STICKY_KEYS = ["user_token_sticky_nickname", "user_token_sticky_avatar", "user_token_sticky_roles"];
+const stickyRows = () =>
+  STICKY_KEYS.map((k) => document.querySelector(`#user-token-sticky-options [data-setting-key="${k}"]`));
 
-    fireEvent.click(select);
-    const list = screen.getByRole("listbox");
-    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["Rotate evenly", "Sticky per author"]);
-    fireEvent.click(within(list).getByRole("option", { name: "Sticky per author" }));
-    expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_STRATEGY", "sticky_author");
-    expect(select).toHaveAttribute("aria-expanded", "false");
+describe("UserTokensBlock sticky per author", () => {
+  it("has no account selection dropdown and always shows the three sticky options", () => {
+    renderBlock({});
+    expect(document.getElementById("ut_strategy")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Account selection" })).toBeNull();
+    expect(screen.queryByText("Rotate evenly")).toBeNull();
+    expect(screen.queryByText("Sticky per author")).toBeNull();
+    expect(stickyRows().every((r) => r !== null)).toBe(true);
   });
 
-  it("re-picking the current strategy changes nothing, like a native select", () => {
-    const setSetting = renderBlock("sticky_author");
-    const select = screen.getByRole("combobox", { name: "Account selection" });
-    expect(select).toHaveTextContent("Sticky per author");
-    fireEvent.click(select);
-    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "Sticky per author" }));
-    expect(setSetting).not.toHaveBeenCalled();
+  it("a stored round_robin value from an older version still shows the sticky options and is never written", () => {
+    const setSetting = renderBlock({ USER_TOKEN_STRATEGY: "round_robin" });
+    expect(stickyRows().every((r) => r !== null)).toBe(true);
+    expect(screen.queryByText("Rotate evenly")).toBeNull();
+    expect(setSetting.mock.calls.some(([k]) => k === "USER_TOKEN_STRATEGY")).toBe(false);
   });
 });
 

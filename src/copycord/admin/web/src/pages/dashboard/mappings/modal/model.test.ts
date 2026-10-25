@@ -8,7 +8,6 @@ import {
   invalidFields,
   modeOf,
   normalizePresence,
-  normalizeStrategy,
   settingMatches,
   snapshot,
 } from "./model";
@@ -35,12 +34,12 @@ describe("mapping modal model", () => {
     expect(f.settings).toEqual(DEFAULT_MAPPING_SETTINGS);
   });
 
-  it("edit loads the row, normalizing strings, booleans and the legacy strategy", () => {
+  it("edit loads the row, normalizing strings and booleans and dropping the retired strategy", () => {
     const f = initialForm(M, "edit");
     expect(f).toMatchObject({ mapping_id: "m1", mapping_name: "Alpha", original_guild_id: "111", cloned_guild_id: "222" });
     expect(f.settings.CLONE_MESSAGES).toBe(false);
     expect(f.settings.ANONYMIZE_USERS).toBe(true);
-    expect(f.settings.USER_TOKEN_STRATEGY).toBe("round_robin");
+    expect("USER_TOKEN_STRATEGY" in f.settings).toBe(false);
     expect(f.settings.USER_TOKEN_MIN_DELAY).toBe(2);
     expect(f.settings.DELETE_ROLES).toBe(true);
   });
@@ -67,7 +66,7 @@ describe("mapping modal model", () => {
     expect(p.settings.USER_TOKEN_MAX_DELAY).toBe(3.5);
     expect(p.settings.USER_TOKEN_MIN_DELAY).toBe(0);
     expect(Object.keys(p.settings).length).toBe(Object.keys(DEFAULT_MAPPING_SETTINGS).length);
-    expect(Object.keys(p.settings).length).toBe(53);
+    expect(Object.keys(p.settings).length).toBe(52);
     expect(p.settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
   });
 
@@ -142,8 +141,13 @@ describe("mapping modal model", () => {
     expect(settingMatches("RENAME_CHANNELS", "categories")).toBe(true);
   });
 
-  it("normalizes the strategy", () => {
-    expect(normalizeStrategy("sticky_author")).toBe("sticky_author");
-    expect(normalizeStrategy("random")).toBe("round_robin");
+  it("has no strategy setting; a stored round_robin or sticky_author is neither loaded nor sent", () => {
+    expect("USER_TOKEN_STRATEGY" in DEFAULT_MAPPING_SETTINGS).toBe(false);
+    for (const stored of ["round_robin", "sticky_author"]) {
+      const f = initialForm({ ...M, settings: { USER_TOKEN_STRATEGY: stored } }, "edit");
+      expect("USER_TOKEN_STRATEGY" in f.settings).toBe(false);
+      expect("USER_TOKEN_STRATEGY" in buildPayload(f).settings).toBe(false);
+      expect("USER_TOKEN_STRATEGY" in initialForm({ ...M, settings: { USER_TOKEN_STRATEGY: stored } }, "clone").settings).toBe(false);
+    }
   });
 });
