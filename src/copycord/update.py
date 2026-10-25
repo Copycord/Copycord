@@ -12,7 +12,8 @@ copycord update: reinstall Copycord from the saved channel with the tool that
 installed it, back up the database first, then restart the service.
 
 The channel is saved in <data dir>/update.json. stable and beta install a
-release wheel; dev builds a git ref, which needs npm for the admin UI.
+release wheel; dev builds a git ref, which needs git (uv clones it) and npm
+for the admin UI.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ import urllib.request
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
 
-from copycord import node_runtime, service, ui, winupdate
+from copycord import git_runtime, node_runtime, service, ui, winupdate
 
 DEFAULT_REPO = "Copycord/Copycord"
 REPO_URL = f"https://github.com/{DEFAULT_REPO}"
@@ -887,9 +888,22 @@ def update(
             except Exception as e:
                 _err("auto-update: could not record the installed version, not updating", str(e))
                 return 1
-        # Only a git build needs npm, for the admin UI.
+        # Only a git build needs git (uv clones the ref) and npm, for the admin UI.
         cmd_env = None
         if git:
+            try:
+                git_dir = git_runtime.ensure_git()
+            except git_runtime.GitError as e:
+                ui.box(
+                    [
+                        "Installing Copycord from a git ref needs git, which could",
+                        "not be set up:",
+                        str(e),
+                        f"Or stay on a release: {ui.cmd('copycord update --channel stable')}",
+                    ],
+                    title="git not available", status="fail", stream=sys.stderr,
+                )
+                return 1
             try:
                 npm_dir = node_runtime.ensure_npm()
             except node_runtime.NodeError as e:
@@ -903,7 +917,7 @@ def update(
                     title="Node.js not available", status="fail", stream=sys.stderr,
                 )
                 return 1
-            cmd_env = node_runtime.with_path(npm_dir)
+            cmd_env = git_runtime.with_path(git_dir, node_runtime.with_path(npm_dir))
 
         # Read before the install replaces the files.
         try:
@@ -923,9 +937,15 @@ def update(
         result, log = _install(cmd, hint, cmd_env, windows, launchers, restart, text + "...")
         if result.returncode != 0:
             sys.stdout.flush()
-            _err(f"update failed (exit {result.returncode})", f"reinstall with: {hint}")
-            tail = (log.read_text(encoding="utf-8", errors="replace").splitlines()
-                    if log.is_file() else [])[-20:]
+            lines = (log.read_text(encoding="utf-8", errors="replace").splitlines()
+                     if log.is_file() else [])
+            if git and any("Git executable not found" in line for line in lines):
+                _err(f"update failed: {cmd[0]} could not run git",
+                     f"{git_runtime.install_hint()}, or stay on a release: "
+                     "copycord update --channel stable")
+            else:
+                _err(f"update failed (exit {result.returncode})", f"reinstall with: {hint}")
+            tail = lines[-20:]
             tail = [t for t in tail if not t.startswith(("launchers: ", "moved aside: ", "could not move"))]
             for line in tail:
                 ui.note(f"  {line}", sys.stderr)
@@ -1281,7 +1301,11 @@ def rollback(reason: str, new: str, restart: bool) -> bool:
     env = None
     if spec.startswith("git+"):
         try:
-            env = node_runtime.with_path(node_runtime.ensure_npm())
+            git_dir = git_runtime.ensure_git()
+        except git_runtime.GitError as e:
+            return _rollback_failed(f"{what}. Putting {old} back needs git: {e}")
+        try:
+            env = git_runtime.with_path(git_dir, node_runtime.with_path(node_runtime.ensure_npm()))
         except node_runtime.NodeError as e:
             return _rollback_failed(f"{what}. Putting {old} back needs Node.js/npm: {e}")
     windows = sys.platform == "win32" and kind in (UV_TOOL, PIPX)

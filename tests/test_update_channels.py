@@ -175,9 +175,9 @@ class Recorder:
 
 @pytest.fixture()
 def env(data_dir, fake_net, monkeypatch):
-    """uv tool install, uv and npm on PATH, service not installed, faked GitHub."""
+    """uv tool install, uv, git and npm on PATH, service not installed, faked GitHub."""
     monkeypatch.setattr(update, "detect_installer", lambda: update.UV_TOOL)
-    on_path = {"uv", "pipx", "npm"}
+    on_path = {"uv", "pipx", "npm", "git"}
     monkeypatch.setattr(
         update.shutil, "which", lambda name: f"/usr/bin/{name}" if name in on_path else None
     )
