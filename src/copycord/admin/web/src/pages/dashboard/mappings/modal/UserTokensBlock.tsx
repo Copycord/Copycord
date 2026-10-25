@@ -59,14 +59,12 @@ const PRESENCES = [
   { value: "online", label: "Online" },
   { value: "idle", label: "Idle" },
   { value: "busy", label: "Busy" },
-  { value: "invisible", label: "Invisible" },
 ];
 const PRESENCE_DESCS: Record<string, string> = {
   random: "Picks a random status for each account.",
   online: "Every kept online account shows as Online.",
   idle: "Every kept online account shows as Idle.",
   busy: "Every kept online account shows as Busy (Do Not Disturb).",
-  invisible: "Every kept online account stays connected but appears offline.",
 };
 
 // .user-token-num, .user-token-menu-item and .user-token-bulk-results.

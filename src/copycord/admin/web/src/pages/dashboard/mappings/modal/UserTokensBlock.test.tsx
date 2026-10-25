@@ -103,9 +103,22 @@ describe("UserTokensBlock warm pool", () => {
     expect(document.getElementById("ut_presence_desc")).toHaveTextContent("Picks a random status for each account.");
     fireEvent.click(select);
     const list = screen.getByRole("listbox");
-    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["Random", "Online", "Idle", "Busy", "Invisible"]);
+    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["Random", "Online", "Idle", "Busy"]);
     fireEvent.click(within(list).getByRole("option", { name: "Idle" }));
     expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_PRESENCE", "idle");
+    await screen.findByText("alpha");
+  });
+
+  it("a saved invisible status shows as Online and Invisible is not offered", async () => {
+    mockApi();
+    renderPool({ USER_TOKEN_PRESENCE: "invisible" });
+    const select = screen.getByRole("combobox", { name: "Token status" });
+    expect(select).toHaveTextContent("Online");
+    expect(document.getElementById("ut_presence_desc")).toHaveTextContent("Every kept online account shows as Online.");
+    expect(screen.getByRole("checkbox", { name: "Rotate status" })).toBeDisabled();
+    fireEvent.click(select);
+    expect(within(screen.getByRole("listbox")).queryByRole("option", { name: "Invisible" })).toBeNull();
+    expect(screen.queryByText(/appears offline/)).toBeNull();
     await screen.findByText("alpha");
   });
 
@@ -144,7 +157,7 @@ describe("UserTokensBlock warm pool", () => {
     await screen.findByText("alpha");
   });
 
-  it.each(["online", "idle", "busy", "invisible"])("rotate status is shown but disabled and off for %s", async (presence) => {
+  it.each(["online", "idle", "busy"])("rotate status is shown but disabled and off for %s", async (presence) => {
     mockApi();
     renderPool({ USER_TOKEN_PRESENCE: presence, USER_TOKEN_PRESENCE_ROTATE: true });
     const toggle = screen.getByRole("checkbox", { name: "Rotate status" });
