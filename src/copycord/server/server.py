@@ -47,7 +47,12 @@ from copycord.common.selfbot_headers import (
     TLS_SESSION_IDLE_TTL,
 )
 from copycord.common.proxy_pool import get_pool as get_proxy_pool
-from copycord.common.token_proxy import token_use_proxy
+from copycord.common.token_proxy import (
+    notice_tokens_disabled,
+    notice_tokens_enabled,
+    proxies_configured,
+    token_use_proxy,
+)
 from copycord.common.websockets import WebsocketManager, AdminBus
 from copycord.common.db import DBManager
 from copycord.common.http_session import close_shared_session
@@ -992,6 +997,18 @@ class ServerReceiver:
         # The sender benches a REST 401 without telling the pool; skip those values.
         skip = set(getattr(self.user_token_sender, "_dead_tokens", None) or ())
         plan = plan_token_pool(mappings, skip_values=skip, online_values=online_values)
+        proxies = get_proxy_pool()
+        if not proxies_configured(proxies):
+            # Proxies are mandatory: nothing connects, and one notice says why.
+            for token_id in sorted(self._pool_ids):
+                await pool.close(token_id)
+            self._pool_ids = set()
+            self._pool_proxied = set()
+            await pool.close_all()
+            if plan["wanted"]:
+                notice_tokens_disabled(logger)
+            return
+        notice_tokens_enabled(logger)
         wanted_ids = {
             tid for value in plan["wanted"] for tid in plan["tokens"][value]["ids"]
         }
@@ -1008,7 +1025,6 @@ class ServerReceiver:
         # lease before the connect, and REST, which reads the same lease, matches it.
         proxied = {v for v in plan["wanted"] if plan["tokens"][v]["use_proxy"]}
         self._pool_proxied = proxied
-        proxies = get_proxy_pool()
         # The pool's keep_online is one global count; each ensure carries the total.
         keep = plan["keep_online"]
         for value in plan["wanted"]:
@@ -2099,6 +2115,11 @@ class ServerReceiver:
 
             elif typ == "reload_user_tokens":
                 # A mapping, its tokens or its token settings changed.
+                self._schedule_token_pool_reconcile()
+
+            elif typ == "reload_proxies":
+                # The proxy list was saved; the pool connects or stops on the new count.
+                get_proxy_pool().reload()
                 self._schedule_token_pool_reconcile()
 
             elif typ == "fetch_message":

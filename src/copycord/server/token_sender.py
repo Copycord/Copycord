@@ -1166,8 +1166,9 @@ class UserTokenSender:
                     return SEND_UNDELIVERABLE, None
                 except NoProxyAvailable:
                     # Token unavailable for this send, never dead: the caller moves on
-                    # to the next token, then the bot or webhook.
-                    warn_no_proxy(self._log, _token_log_id(token), ctx)
+                    # to the next token, then the bot or webhook. With no proxies at
+                    # all this is the one disabled notice, not a line per token.
+                    warn_no_proxy(self._log, _token_log_id(token), ctx, pool=get_proxy_pool())
                     return SEND_NO_TOKENS, None
                 except CurlRequestException as e:
                     rnet += 1

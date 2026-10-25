@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from copycord.common import token_proxy
 from copycord.server.token_sender import SEND_TRANSIENT
 from tests.test_token_sender_pool import FakePool as SenderFakePool
 from tests.test_token_sender_pool import _DB as SenderDB
@@ -123,6 +124,8 @@ def _settings(keep=5, presence="random", proxy=False, use=True, rotate=None):
 def make_rx(srv, monkeypatch):
     proxies = FakeProxies()
     monkeypatch.setattr(srv, "get_proxy_pool", lambda: proxies)
+    monkeypatch.setattr(token_proxy, "_tokens_disabled_noticed", False)
+    monkeypatch.setattr(srv, "logger", logging.getLogger("test.server_pool"))
 
     def build(mappings, online=()):
         db = FakeDB(mappings)
@@ -319,6 +322,83 @@ async def test_reconcile_without_proxies_leases_nothing(make_rx):
     await rx._reconcile_token_pool()
     assert rx.proxies.leases == {}
     assert rx._token_pool_proxy_for("X") is None
+
+
+def _notices(caplog):
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage() in (token_proxy.TOKENS_DISABLED_NOTICE, token_proxy.TOKENS_ENABLED_NOTICE)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_zero_proxies_closes_the_pool_and_notices_once_per_state_change(make_rx, caplog):
+    caplog.set_level(logging.INFO, logger="test.server_pool")
+    rx = make_rx([("m1", _settings(keep=2), [("1", "X", True), ("2", "Y", True)])])
+    await rx._reconcile_token_pool()
+    assert rx._pool_ids == {"1", "2"}
+    rx.token_pool.ensured.clear()
+
+    rx.proxies.enabled = False
+    for _ in range(3):
+        await rx._reconcile_token_pool()
+    assert rx.token_pool.ensured == []
+    assert sorted(rx.token_pool.closed) == ["1", "2"]
+    assert rx.token_pool.close_all_calls == 3
+    assert rx._pool_ids == set()
+    assert rx._pool_proxied == set()
+    assert _notices(caplog) == [token_proxy.TOKENS_DISABLED_NOTICE]
+    # no token ids or values in it
+    assert all(s not in token_proxy.TOKENS_DISABLED_NOTICE for s in ("X", "Y"))
+
+    # proxies come back: one info line, then the tokens connect
+    rx.proxies.enabled = True
+    await rx._reconcile_token_pool()
+    await rx._reconcile_token_pool()
+    assert [e[:2] for e in rx.token_pool.ensured][:2] == [("1", "X"), ("2", "Y")]
+    assert rx._pool_ids == {"1", "2"}
+    assert _notices(caplog) == [token_proxy.TOKENS_DISABLED_NOTICE, token_proxy.TOKENS_ENABLED_NOTICE]
+    enabled = [r for r in caplog.records if r.getMessage() == token_proxy.TOKENS_ENABLED_NOTICE]
+    assert enabled[0].levelno == logging.INFO
+
+    # and gone again: the notice once more
+    rx.proxies.enabled = False
+    await rx._reconcile_token_pool()
+    await rx._reconcile_token_pool()
+    assert _notices(caplog) == [
+        token_proxy.TOKENS_DISABLED_NOTICE,
+        token_proxy.TOKENS_ENABLED_NOTICE,
+        token_proxy.TOKENS_DISABLED_NOTICE,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_zero_proxies_without_kept_online_tokens_says_nothing(make_rx, caplog):
+    caplog.set_level(logging.INFO, logger="test.server_pool")
+    rx = make_rx(
+        [
+            ("m1", _settings(keep=0), [("1", "X", True)]),
+            ("m2", _settings(keep=3, use=False), [("2", "Y", True)]),
+        ]
+    )
+    rx.proxies.enabled = False
+    await rx._reconcile_token_pool()
+    assert rx.token_pool.ensured == []
+    assert rx.token_pool.close_all_calls == 1
+    assert _notices(caplog) == []
+
+
+@pytest.mark.asyncio
+async def test_proxy_reload_message_reloads_and_schedules_a_reconcile(make_rx):
+    rx = make_rx([("m1", _settings(keep=1), [("1", "X", True)])])
+    reloads, scheduled = [], []
+    rx.proxies.reload = lambda: reloads.append(1)
+    rx._resolve_guild_label = lambda typ, data: None
+    rx._schedule_token_pool_reconcile = lambda *a, **k: scheduled.append(1)
+    await rx._on_ws({"type": "reload_proxies", "data": {}})
+    assert reloads == [1]
+    assert scheduled == [1]
 
 
 @pytest.mark.asyncio
