@@ -142,6 +142,8 @@ class Config:
             "ANONYMIZE_USERS": False,
             "DISABLE_EVERYONE_MENTIONS": False,
             "DISABLE_ROLE_MENTIONS": False,
+            "DISABLE_USER_MENTIONS": False,
+            "STRIP_MENTIONS": False,
             "TAG_REPLY_MSG": False,
             "APPEND_TIMESTAMP": False,
             "APPEND_AUTHOR": False,

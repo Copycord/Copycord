@@ -268,6 +268,20 @@ class MessageUtils:
             out.append({"id": int(rid), "name": str(name)})
         return out
 
+    def _build_user_mentions_payload(
+        self, src_msg: Message, id_map: Optional[Dict[str, str]] = None
+    ) -> list[dict]:
+        """The display names humanize_user_mentions wrote as '@Name', so the server can strip them."""
+        names: Dict[str, str] = {}
+        for sid, nm in (id_map or {}).items():
+            if nm:
+                names[str(sid)] = nm[1:] if nm.startswith("@") else nm
+        for m in getattr(src_msg, "mentions", None) or []:
+            nm = (m.display_name if isinstance(m, Member) else m.name) or m.name
+            if nm:
+                names[str(m.id)] = str(nm)
+        return [{"id": int(sid), "name": nm} for sid, nm in names.items()]
+
     @staticmethod
     def author_role_ids(src_msg: Message) -> list[int]:
         """The host author's role ids (excluding @everyone), falling back to a member lookup for a bare User."""

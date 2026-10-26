@@ -941,6 +941,7 @@ class ClientListener:
         )
 
         role_mentions = self.msg._build_role_mentions_payload(src_msg)
+        user_mentions = self.msg._build_user_mentions_payload(src_msg, mention_map)
 
         data_block = {
             "guild_id": getattr(target_guild, "id", None),
@@ -994,6 +995,8 @@ class ClientListener:
 
         if role_mentions:
             data_block["role_mentions"] = role_mentions
+        if user_mentions:
+            data_block["user_mentions"] = user_mentions
 
         if is_thread:
             parent = getattr(target_chan, "parent", None)
@@ -1110,6 +1113,7 @@ class ClientListener:
         ]
 
         role_mentions = self.msg._build_role_mentions_payload(after)
+        user_mentions = self.msg._build_user_mentions_payload(after, mention_map)
 
         is_thread = after.channel.type in (
             ChannelType.public_thread,
@@ -1185,6 +1189,8 @@ class ClientListener:
 
         if role_mentions:
             payload["data"]["role_mentions"] = role_mentions
+        if user_mentions:
+            payload["data"]["user_mentions"] = user_mentions
 
         await self.ws.send(payload)
         logger.info(
@@ -1259,6 +1265,7 @@ class ClientListener:
         author_id = None
         avatar_url = None
         timestamp = None
+        mention_map = None
 
         if msg is None:
             try:
@@ -1307,8 +1314,10 @@ class ClientListener:
             timestamp = data.get("edited_timestamp") or data.get("timestamp")
 
         role_mentions = []
+        user_mentions = []
         if msg is not None:
             role_mentions = self.msg._build_role_mentions_payload(msg)
+            user_mentions = self.msg._build_user_mentions_payload(msg, mention_map)
 
         is_thread = getattr(channel, "type", None) in (
             ChannelType.public_thread,
@@ -1373,6 +1382,8 @@ class ClientListener:
 
         if role_mentions:
             out["data"]["role_mentions"] = role_mentions
+        if user_mentions:
+            out["data"]["user_mentions"] = user_mentions
 
         await self.ws.send(out)
 

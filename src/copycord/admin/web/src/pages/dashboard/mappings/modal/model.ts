@@ -48,6 +48,8 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
   ANONYMIZE_USERS: false,
   DISABLE_EVERYONE_MENTIONS: false,
   DISABLE_ROLE_MENTIONS: false,
+  DISABLE_USER_MENTIONS: false,
+  STRIP_MENTIONS: false,
   TAG_REPLY_MSG: false,
   APPEND_TIMESTAMP: false,
   APPEND_AUTHOR: false,
@@ -206,6 +208,8 @@ export const MSG_FEATURES: readonly MsgFeature[] = [
   { key: "ANONYMIZE_USERS", name: "Anonymize Users", desc: "Replace usernames and avatars with random names and images." },
   { key: "DISABLE_EVERYONE_MENTIONS", name: "Disable @everyone", desc: "Strip @everyone and @here mentions so they don't ping in the clone." },
   { key: "DISABLE_ROLE_MENTIONS", name: "Disable Role Mentions", desc: "Strip role mentions so they don't ping in the clone." },
+  { key: "DISABLE_USER_MENTIONS", name: "Disable User Mentions", desc: "Neutralize user mentions so they don't ping in the clone." },
+  { key: "STRIP_MENTIONS", name: "Strip Mentions", desc: "Remove all user, role, @everyone and @here mentions from the cloned message text." },
   { key: "APPEND_TIMESTAMP", name: "Append Timestamp", desc: "Shows when the original message was sent using Discord's native timestamp format." },
   { key: "APPEND_AUTHOR", name: "Append Author", desc: "Shows the original author's username below the cloned message." },
 ];
