@@ -571,6 +571,74 @@ class TestMappingUserTokensAPI:
         )
         assert resp.status_code == 400
 
+    def _add_identities(self, mid, authors):
+        for i, author in enumerate(authors):
+            db.upsert_token_identity(
+                mapping_id=mid,
+                author_id=author,
+                token_id=f"tok{i}",
+                cloned_guild_id=222,
+                applied_nick="Nick",
+                applied_role_ids=[5],
+                assigned_at=1,
+            )
+
+    def _release_calls(self, monkeypatch, result):
+        import copycord.admin.app as app_mod
+        ws = AsyncMock(return_value=result)
+        monkeypatch.setattr(app_mod, "_ws_cmd", ws)
+        return ws
+
+    @pytest.mark.asyncio
+    async def test_release_unknown_mapping_404(self, client):
+        resp = await client.post("/api/guild-mappings/nope/user-tokens/release")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_release_server_running_sends_message(self, client, monkeypatch):
+        mid = self._make_mapping()
+        other = self._make_mapping()
+        self._add_identities(mid, ["a1", "a2"])
+        self._add_identities(other, ["b1"])
+        ws = self._release_calls(monkeypatch, {"ok": True})
+
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/release")
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "released": 2, "reset_applied": True}
+        assert ws.await_count == 1
+        assert ws.await_args.args[1] == {
+            "type": "release_user_tokens",
+            "data": {"mapping_id": mid},
+        }
+        assert ws.await_args.kwargs["timeout"] > 1
+        # The server owns the DB clear here; the other mapping is untouched.
+        assert len(db.list_token_identities(mid)) == 2
+        assert len(db.list_token_identities(other)) == 1
+
+    @pytest.mark.asyncio
+    async def test_release_server_not_running_clears_db(self, client, monkeypatch):
+        mid = self._make_mapping()
+        other = self._make_mapping()
+        self._add_identities(mid, ["a1", "a2", "a3"])
+        self._add_identities(other, ["b1"])
+        self._release_calls(
+            monkeypatch, {"ok": False, "running": False, "error": "refused"}
+        )
+
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/release")
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "released": 3, "reset_applied": False}
+        assert db.list_token_identities(mid) == []
+        assert len(db.list_token_identities(other)) == 1
+
+    @pytest.mark.asyncio
+    async def test_release_nothing_assigned(self, client, monkeypatch):
+        mid = self._make_mapping()
+        ws = self._release_calls(monkeypatch, {"ok": True})
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/release")
+        assert resp.json()["released"] == 0
+        assert ws.await_count == 0
+
 # Version endpoint
 
 # Role logs: <home>/logs, and the old data dir location for one release

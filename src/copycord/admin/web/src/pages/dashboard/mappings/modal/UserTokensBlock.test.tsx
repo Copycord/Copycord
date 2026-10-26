@@ -24,24 +24,25 @@ const STICKY_KEYS = ["user_token_sticky_nickname", "user_token_sticky_avatar", "
 const stickyRows = () =>
   STICKY_KEYS.map((k) => document.querySelector(`#user-token-sticky-options [data-setting-key="${k}"]`));
 
-describe("UserTokensBlock proxy notice", () => {
-  it("shows the proxy notice right after the user token warning", () => {
+describe("UserTokensBlock notices", () => {
+  it("shows the exact user token warning", () => {
     renderBlock({});
     const warning = document.querySelector(".user-token-disclaimer")!;
-    const notice = warning.nextElementSibling as HTMLElement;
-    expect(notice).toHaveClass("user-token-proxy-notice");
-    expect(notice).toHaveTextContent("Proxies are recommended for token message cloning");
-    expect(notice).toHaveTextContent("Send through proxies is off by default");
-    expect(notice).toHaveTextContent(
-      "With it off, tokens connect and send from this server's own IP address, which Discord can link across accounts, and many accounts on one IP hit rate limits sooner.",
+    expect(warning.querySelector("strong")).toHaveTextContent("Warning:");
+    expect(warning.textContent!.replace(/\s+/g, " ").trim()).toBe(
+      "Warning: This feature uses user tokens. Discord may revoke your tokens or disable them. Only use accounts you are willing to lose.",
     );
-    expect(notice).toHaveTextContent("Turning it on needs proxies configured in the Proxy settings.");
-    expect(notice).not.toHaveTextContent(/on by default|required/i);
   });
 
-  it("points to the System page table in a card after the proxy notice, opening a new tab", () => {
+  it("has no proxies notice", () => {
     renderBlock({});
-    const card = document.querySelector(".user-token-proxy-notice")!.nextElementSibling as HTMLElement;
+    expect(document.querySelector(".user-token-proxy-notice")).toBeNull();
+    expect(screen.queryByText("Proxies:")).toBeNull();
+  });
+
+  it("points to the System page table in a card right after the warning, opening a new tab", () => {
+    renderBlock({});
+    const card = document.querySelector(".user-token-disclaimer")!.nextElementSibling as HTMLElement;
     expect(card).toHaveClass("user-token-system-notice");
     expect(card).toHaveTextContent("Token Message Cloning table");
     const link = within(card).getByRole("link", { name: "System page" });
@@ -210,6 +211,101 @@ describe("UserTokensBlock Verify tokens", () => {
   });
 });
 
+describe("UserTokensBlock Release all tokens", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function mockRelease(release: () => Response | Promise<Response>, tokens = TOKENS) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/release")) return release();
+      if (url.includes("/user-tokens")) return json({ ok: true, tokens });
+      return json({ ok: false });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const releaseCalls = (fetchMock: ReturnType<typeof mockRelease>) =>
+    fetchMock.mock.calls.filter(([u]) => String(u).includes("/release"));
+
+  async function openRelease() {
+    await screen.findByText("alpha");
+    fireEvent.click(screen.getByRole("button", { name: "Token options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Release all tokens" }));
+    return screen.findByRole("dialog", { name: "Release all tokens?" });
+  }
+
+  it("lists Release all tokens between Verify tokens and Delete all tokens", async () => {
+    mockRelease(() => json({ ok: true, released: 0, reset_applied: true }));
+    renderPool();
+    await screen.findByText("alpha");
+    fireEvent.click(screen.getByRole("button", { name: "Token options" }));
+    const items = screen.getAllByRole("menuitem").map((b) => b.textContent);
+    expect(items).toEqual(["Verify tokens", "Release all tokens", "Delete all tokens"]);
+    expect(screen.getByRole("menuitem", { name: "Release all tokens" })).toBeEnabled();
+  });
+
+  it("is not available when the mapping has no tokens", async () => {
+    mockRelease(() => json({ ok: true, released: 0 }), []);
+    renderPool();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByRole("button", { name: "Token options" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Release all tokens" })).toBeNull();
+  });
+
+  it("asks first and Cancel sends nothing", async () => {
+    const fetchMock = mockRelease(() => json({ ok: true, released: 2, reset_applied: true }));
+    renderPool();
+    const dialog = await openRelease();
+    expect(dialog).toHaveTextContent("Every token is released from the author it is assigned to");
+    expect(dialog).toHaveTextContent("nicknames and roles it applied in the clone server are reset");
+    expect(dialog).toHaveTextContent("Tokens stay in this mapping and keep sending");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(releaseCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it("posts to the release path and shows the count", async () => {
+    const fetchMock = mockRelease(() => json({ ok: true, released: 3, reset_applied: true }));
+    renderPool();
+    const dialog = await openRelease();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Release all" }));
+    expect(await screen.findByText("Released 3 tokens.")).toBeInTheDocument();
+    const calls = releaseCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0]![0])).toContain("/api/guild-mappings/m1/user-tokens/release");
+    expect((calls[0]![1] as RequestInit).method).toBe("POST");
+  });
+
+  it("says so when no tokens were assigned", async () => {
+    mockRelease(() => json({ ok: true, released: 0, reset_applied: true }));
+    renderPool();
+    const dialog = await openRelease();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Release all" }));
+    expect(await screen.findByText("No tokens were assigned.")).toBeInTheDocument();
+  });
+
+  it("explains that nicknames and roles were not reset when the server is not running", async () => {
+    mockRelease(() => json({ ok: true, released: 1, reset_applied: false }));
+    renderPool();
+    const dialog = await openRelease();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Release all" }));
+    expect(
+      await screen.findByText(
+        "Released 1 token. Nicknames and roles were not reset because the server is not running.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an error toast when the release fails", async () => {
+    mockRelease(() => json({ ok: false, error: "Mapping not found." }));
+    renderPool();
+    const dialog = await openRelease();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Release all" }));
+    expect(await screen.findByText("Mapping not found.")).toBeInTheDocument();
+  });
+});
+
 describe("UserTokensBlock warm pool", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -349,7 +445,7 @@ describe("UserTokensBlock warm pool", () => {
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/status"))).toBe(false);
   });
 
-  it("shows the Send through proxies switch after Attachments as links, with the direct IP warning under it", async () => {
+  it("shows the Send through proxies switch after Attachments as links, with no label under it", async () => {
     mockApi();
     renderPool({ USER_TOKEN_USE_PROXIES: true });
     await screen.findByText("alpha");
@@ -358,11 +454,11 @@ describe("UserTokensBlock warm pool", () => {
     expect(row).toHaveTextContent("Give each account its own proxy from your proxy list.");
     const links = document.querySelector('[data-setting-key="user_token_links_only"]')!;
     expect(links.nextElementSibling).toBe(row);
-    const warning = row.nextElementSibling as HTMLElement;
-    expect(warning).toHaveAttribute("id", "user-token-proxy-off-warning");
-    expect(warning).toHaveTextContent("this server's own IP address");
-    expect(warning).toHaveTextContent("Discord can link across accounts");
-    expect(warning.nextElementSibling).toHaveTextContent(/^Send delay/);
+    expect(document.getElementById("user-token-proxy-off-warning")).toBeNull();
+    expect(row.nextElementSibling).toHaveTextContent(/^Send delay/);
+    expect(document.getElementById("user-tokens-section")).not.toHaveTextContent(
+      "Turning this off sends token traffic",
+    );
   });
 
   it("the proxy switch is off when the mapping has no stored value", async () => {

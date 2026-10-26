@@ -5534,7 +5534,7 @@ async def api_release_mapping_tokens(mapping_id: str):
     if released:
         res = await _ws_cmd(
             SERVER_AGENT_URL,
-            {"type": "release_user_tokens", "mapping_id": str(mapping_id)},
+            {"type": "release_user_tokens", "data": {"mapping_id": str(mapping_id)}},
             timeout=RELEASE_TOKENS_TIMEOUT,
         )
         reset_applied = bool(isinstance(res, dict) and res.get("ok"))
