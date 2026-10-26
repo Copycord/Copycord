@@ -30,7 +30,7 @@ describe("UserTokensBlock proxy notice", () => {
     const warning = document.querySelector(".user-token-disclaimer")!;
     const notice = warning.nextElementSibling as HTMLElement;
     expect(notice).toHaveClass("user-token-proxy-notice");
-    expect(notice).toHaveTextContent("requires proxies");
+    expect(notice).toHaveTextContent("sends through proxies by default");
     expect(notice).toHaveTextContent("default webhook behavior");
     expect(notice).toHaveTextContent("Configure proxies");
   });
@@ -258,16 +258,36 @@ describe("UserTokensBlock warm pool", () => {
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/status"))).toBe(false);
   });
 
-  it("has no proxy switch: token cloning always sends through proxies", async () => {
+  it("shows the Send through proxies switch after Attachments as links, with the direct IP warning under it", async () => {
     mockApi();
     renderPool({ USER_TOKEN_USE_PROXIES: true });
     await screen.findByText("alpha");
-    expect(document.getElementById("map_USER_TOKEN_USE_PROXIES")).toBeNull();
-    expect(document.querySelector('[data-setting-key="user_token_use_proxies"]')).toBeNull();
-    // Only the notice under the warning may mention proxies.
-    expect(screen.queryAllByText(/prox(y|ies)/i).filter((el) => !el.closest(".user-token-proxy-notice"))).toEqual([]);
-    // Attachments as links is followed straight by the send delay row, no gap or label between.
+    const row = document.querySelector('[data-setting-key="user_token_use_proxies"]')!;
+    expect(row).toHaveTextContent("Send through proxies");
+    expect(row).toHaveTextContent("Give each account its own proxy from your proxy list.");
     const links = document.querySelector('[data-setting-key="user_token_links_only"]')!;
-    expect(links.nextElementSibling).toHaveTextContent(/^Send delay/);
+    expect(links.nextElementSibling).toBe(row);
+    const warning = row.nextElementSibling as HTMLElement;
+    expect(warning).toHaveAttribute("id", "user-token-proxy-off-warning");
+    expect(warning).toHaveTextContent("this server's own IP address");
+    expect(warning).toHaveTextContent("Discord can link across accounts");
+    expect(warning.nextElementSibling).toHaveTextContent(/^Send delay/);
+  });
+
+  it("the proxy switch is on when the mapping has no stored value", async () => {
+    mockApi();
+    renderPool({});
+    await screen.findByText("alpha");
+    expect(document.getElementById("map_USER_TOKEN_USE_PROXIES")).toBeChecked();
+  });
+
+  it("the proxy switch shows a stored off and posts the new value", async () => {
+    mockApi();
+    const setSetting = renderPool({ USER_TOKEN_USE_PROXIES: false });
+    await screen.findByText("alpha");
+    const toggle = document.getElementById("map_USER_TOKEN_USE_PROXIES")!;
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_USE_PROXIES", true);
   });
 });

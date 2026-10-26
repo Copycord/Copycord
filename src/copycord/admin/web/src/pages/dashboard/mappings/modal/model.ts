@@ -58,7 +58,7 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
   USER_TOKEN_MIN_DELAY: 0,
   USER_TOKEN_MAX_DELAY: 0,
   USER_TOKEN_LINKS_ONLY: false,
-  USER_TOKEN_USE_PROXIES: false,
+  USER_TOKEN_USE_PROXIES: true,
   USER_TOKEN_STICKY_NICKNAME: false,
   USER_TOKEN_STICKY_AVATAR: false,
   USER_TOKEN_STICKY_ROLES: false,
@@ -234,7 +234,9 @@ export function initialForm(mapping: DashboardMapping | null | undefined, mode: 
   const source = mode === "create" ? null : (mapping?.settings ?? null);
   const settings: MappingSettings = {};
   for (const [key, def] of Object.entries(DEFAULT_MAPPING_SETTINGS)) {
-    const raw = source && key in source ? source[key] : def;
+    // A stored null counts as missing for proxies, so it stays on by default.
+    const raw =
+      source && key in source && !(key === "USER_TOKEN_USE_PROXIES" && source[key] == null) ? source[key] : def;
     if (key === "USER_TOKEN_PRESENCE") settings[key] = normalizePresence(raw);
     else if (typeof def === "boolean") settings[key] = toBool(raw);
     else settings[key] = (raw as MappingSettingValue | null | undefined) ?? def;

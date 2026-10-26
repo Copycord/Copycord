@@ -559,8 +559,9 @@ export function UserTokensBlock({
           ban them at any time. Only use accounts you are willing to lose.
         </div>
         <div className="user-token-proxy-notice mb-3 rounded-input border border-warn/35 bg-warn-a10 px-3 py-2.5 text-xs leading-normal text-text">
-          <strong className="text-warn">Proxies:</strong> Token message cloning requires proxies. Without them the mapping falls
-          back to the default webhook behavior. Configure proxies in the Proxy section of the dashboard.
+          <strong className="text-warn">Proxies:</strong> Token message cloning sends through proxies by default. With Send
+          through proxies on and no proxies, the mapping falls back to the default webhook behavior. Configure proxies in
+          the Proxy section of the dashboard.
         </div>
         <div className="user-token-system-notice mb-3 rounded-input border border-info/35 bg-info-a12 px-3 py-2.5 text-xs leading-normal text-text">
           <strong className="text-info">Accounts:</strong> Each account's status, online time, last send and messages sent are
@@ -623,6 +624,22 @@ export function UserTokensBlock({
             "Post source attachment links instead of re-uploading the files.",
             "user_token_links_only",
           )}
+          <ToggleRow
+            id="map_USER_TOKEN_USE_PROXIES"
+            settingKey="user_token_use_proxies"
+            field={false}
+            name="Send through proxies"
+            desc="Give each account its own proxy from your proxy list. Uses the same proxy list on the dashboard."
+            checked={settings.USER_TOKEN_USE_PROXIES == null ? true : on("USER_TOKEN_USE_PROXIES")}
+            onChange={(v) => setSetting("USER_TOKEN_USE_PROXIES", v)}
+          />
+          <div
+            id="user-token-proxy-off-warning"
+            className="user-token-proxy-off-warning mb-1.5 px-1 text-xs leading-normal text-warn"
+          >
+            Turning this off sends token traffic from this server's own IP address, which Discord can link across
+            accounts.
+          </div>
 
           <div className={ROW}>
             <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
