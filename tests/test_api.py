@@ -1159,7 +1159,7 @@ class TestProxiesRequired:
 class TestParallelTokenChecks:
     """Verify and bulk add check tokens in parallel across proxies, one at a time per proxy."""
 
-    def _mapping(self):
+    def _mapping(self, settings=None):
         return db.upsert_guild_mapping(
             mapping_id=None,
             mapping_name="Parallel",
@@ -1168,7 +1168,19 @@ class TestParallelTokenChecks:
             original_guild_icon_url=None,
             cloned_guild_id=222,
             cloned_guild_name="",
+            settings=settings or {},
         )
+
+    def _no_proxy_lookups(self, monkeypatch):
+        """Make any proxy lookup fail the test, for the direct check path."""
+        import copycord.admin.app as app_mod
+
+        def _boom(*a, **k):
+            raise AssertionError("proxy lookup on the direct path")
+
+        monkeypatch.setattr(app_mod, "_user_token_proxies", _boom)
+        monkeypatch.setattr(app_mod, "_token_check_proxy", _boom)
+        monkeypatch.setattr(app_mod, "_selfbot_identity", AsyncMock(return_value=None))
 
     def _proxies(self, monkeypatch, proxy_of):
         """Pin each token to a proxy; proxy_of maps token -> proxy url."""
@@ -1290,6 +1302,102 @@ class TestParallelTokenChecks:
         assert resp.status_code == 400
         assert resp.json() == {"ok": False, "error": PROXIES_REQUIRED}
         assert state["calls"] == []
+
+    @pytest.mark.asyncio
+    async def test_verify_use_proxies_true_without_proxies_is_refused(self, client, monkeypatch):
+        self._proxies(monkeypatch, {})
+        state = self._tracker(monkeypatch)
+        mid = self._mapping({"USER_TOKEN_USE_PROXIES": False})
+        self._store(mid, ["tokaaaaaaaa"])
+
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/verify", json={"use_proxies": True}
+        )
+        assert resp.status_code == 400
+        assert resp.json() == {"ok": False, "error": PROXIES_REQUIRED}
+        assert state["calls"] == []
+
+    @pytest.mark.asyncio
+    async def test_verify_use_proxies_false_checks_direct(self, client, monkeypatch):
+        self._no_proxy_lookups(monkeypatch)
+        state = self._tracker(monkeypatch, delay=0)
+        mid = self._mapping()
+        self._store(mid, ["tokaaaaaaaa", "tokbbbbbbbb"])
+
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/verify", json={"use_proxies": False}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["working"] == 2
+        assert set(state["max_per_proxy"]) == {None}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("use_proxies", [True, False])
+    async def test_verify_without_a_body_follows_the_mapping(self, client, monkeypatch, use_proxies):
+        import copycord.admin.app as app_mod
+
+        if use_proxies:
+            self._proxies(monkeypatch, {"tokaaaaaaaa": "http://a.test:1"})
+        else:
+            self._no_proxy_lookups(monkeypatch)
+        state = self._tracker(monkeypatch, delay=0)
+        mid = self._mapping({"USER_TOKEN_USE_PROXIES": use_proxies})
+        self._store(mid, ["tokaaaaaaaa"])
+        assert app_mod._mapping_uses_proxies(mid) is use_proxies
+
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
+        assert resp.status_code == 200
+        assert resp.json()["working"] == 1
+        assert set(state["max_per_proxy"]) == {"http://a.test:1" if use_proxies else None}
+
+    @pytest.mark.asyncio
+    async def test_verify_direct_keeps_order_isolates_failures_and_caps_concurrency(self, client, monkeypatch):
+        import copycord.admin.app as app_mod
+
+        self._no_proxy_lookups(monkeypatch)
+        mid = self._mapping()
+        self._store(mid, [f"tok{i:08d}" for i in range(10)])
+        rows = db.list_mapping_tokens(mid)
+        stored_ids = [r["token_id"] for r in rows]
+        tokens = [r["token_value"] for r in rows]
+        state = self._tracker(
+            monkeypatch,
+            delay=lambda t: 0.05 - 0.004 * tokens.index(t),
+            fail={tokens[3]},
+            member=set(tokens) - {tokens[6]},
+        )
+
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/verify", json={"use_proxies": False}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [r["id"] for r in body["results"]] == stored_ids
+        assert [r["ok"] for r in body["results"]] == [i not in (3, 6) for i in range(10)]
+        assert (body["working"], body["broken"]) == (8, 2)
+        assert sorted(state["calls"]) == sorted(tokens)
+        assert state["max"] == app_mod.DIRECT_CHECK_CONCURRENCY == 3
+
+    @pytest.mark.asyncio
+    async def test_add_and_bulk_add_with_the_setting_off_need_no_proxies(self, client, monkeypatch):
+        self._no_proxy_lookups(monkeypatch)
+        state = self._tracker(monkeypatch, delay=0)
+        mid = self._mapping({"USER_TOKEN_USE_PROXIES": False})
+
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens", json={"token": "tokaaaaaaaa"}
+        )
+        assert resp.status_code == 200, resp.text
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/bulk",
+            json={"tokens": "tokbbbbbbbb\ntokcccccccc"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["added"] == 2
+        assert set(state["max_per_proxy"]) == {None}
+        assert {r["token_value"] for r in db.list_mapping_tokens(mid)} == {
+            "tokaaaaaaaa", "tokbbbbbbbb", "tokcccccccc"
+        }
 
     @pytest.mark.asyncio
     async def test_bulk_add_runs_in_parallel_and_keeps_input_order(self, client, monkeypatch):
