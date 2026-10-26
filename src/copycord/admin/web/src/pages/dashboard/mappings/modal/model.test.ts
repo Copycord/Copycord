@@ -83,12 +83,15 @@ describe("mapping modal model", () => {
     expect(buildPayload(f).settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
   });
 
-  it("send through proxies defaults on, a missing or null value loads on, and the payload carries it", () => {
-    expect(DEFAULT_MAPPING_SETTINGS.USER_TOKEN_USE_PROXIES).toBe(true);
-    expect(initialForm(null, "create").settings.USER_TOKEN_USE_PROXIES).toBe(true);
-    expect(initialForm(M, "edit").settings.USER_TOKEN_USE_PROXIES).toBe(true);
+  it("send through proxies defaults off, a missing or null value loads off, and the payload carries it", () => {
+    expect(DEFAULT_MAPPING_SETTINGS.USER_TOKEN_USE_PROXIES).toBe(false);
+    expect(initialForm(null, "create").settings.USER_TOKEN_USE_PROXIES).toBe(false);
+    expect(buildPayload(initialForm(null, "create")).settings.USER_TOKEN_USE_PROXIES).toBe(false);
+    expect(initialForm(M, "edit").settings.USER_TOKEN_USE_PROXIES).toBe(false);
     const nulled = { ...M, settings: { USER_TOKEN_USE_PROXIES: null } } as unknown as DashboardMapping;
-    expect(initialForm(nulled, "edit").settings.USER_TOKEN_USE_PROXIES).toBe(true);
+    expect(initialForm(nulled, "edit").settings.USER_TOKEN_USE_PROXIES).toBe(false);
+    const stored = initialForm({ ...M, settings: { USER_TOKEN_USE_PROXIES: true } }, "edit");
+    expect(stored.settings.USER_TOKEN_USE_PROXIES).toBe(true);
     const f = initialForm({ ...M, settings: { USER_TOKEN_USE_PROXIES: false } }, "edit");
     expect(f.settings.USER_TOKEN_USE_PROXIES).toBe(false);
     expect(buildPayload(f).settings.USER_TOKEN_USE_PROXIES).toBe(false);

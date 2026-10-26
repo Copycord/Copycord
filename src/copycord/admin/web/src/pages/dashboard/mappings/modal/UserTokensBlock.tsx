@@ -319,9 +319,8 @@ export function UserTokensBlock({
   const notify = useNotify();
   const confirm = useSafeConfirm();
   const on = (k: string) => toBool(settings[k]);
-  // Send through proxies is on unless the mapping stored it off.
-  const proxiesOn =
-    settings.USER_TOKEN_USE_PROXIES == null ? true : on("USER_TOKEN_USE_PROXIES");
+  // Send through proxies is off unless the mapping stored it on.
+  const proxiesOn = on("USER_TOKEN_USE_PROXIES");
 
   const [tokens, setTokens] = useState<UserToken[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -623,10 +622,10 @@ export function UserTokensBlock({
           ban them at any time. Only use accounts you are willing to lose.
         </div>
         <div className="user-token-proxy-notice mb-3 rounded-input border border-warn/35 bg-warn-a10 px-3 py-2.5 text-xs leading-normal text-text">
-          <strong className="text-warn">Proxies:</strong> Proxies are recommended for token message cloning, and Send
-          through proxies is on by default. With it on and no proxies, the mapping falls back to the default webhook
-          behavior. With it off, tokens connect from this server's own IP address. Configure proxies in the Proxy
-          section of the dashboard.
+          <strong className="text-warn">Proxies:</strong> Proxies are recommended for token message cloning. Send
+          through proxies is off by default. With it off, tokens connect and send from this server's own IP address,
+          which Discord can link across accounts, and many accounts on one IP hit rate limits sooner. Turning it on
+          needs proxies configured in the Proxy settings.
         </div>
         <div className="user-token-system-notice mb-3 rounded-input border border-info/35 bg-info-a12 px-3 py-2.5 text-xs leading-normal text-text">
           <strong className="text-info">Accounts:</strong> Each account's status, online time, last send and messages sent are
@@ -695,7 +694,7 @@ export function UserTokensBlock({
             field={false}
             name="Send through proxies"
             desc="Give each account its own proxy from your proxy list. Uses the same proxy list on the dashboard."
-            checked={settings.USER_TOKEN_USE_PROXIES == null ? true : on("USER_TOKEN_USE_PROXIES")}
+            checked={proxiesOn}
             onChange={(v) => setSetting("USER_TOKEN_USE_PROXIES", v)}
           />
           <div
