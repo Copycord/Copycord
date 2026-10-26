@@ -1868,6 +1868,9 @@ class BackfillEngine:
                     ],
                     "stickers": stickers_payload,
                     "embeds": embeds,
+                    "user_mentions": self.msg._build_user_mentions_payload(
+                        real_msg, mention_map
+                    ),
                     "timestamp": (
                         getattr(real_msg, "created_at", None)
                         or _dt_from_snowflake(real_msg.id)
