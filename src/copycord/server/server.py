@@ -1038,7 +1038,7 @@ class ServerReceiver:
             wanted = [v for v in wanted if not plan["tokens"][v]["use_proxy"]]
         else:
             notice_tokens_enabled(logger)
-        self._log_token_pool_plan(plan, wanted, mappings)
+        self._log_token_pool_plan(plan, wanted)
         wanted_ids = {
             tid for value in wanted for tid in plan["tokens"][value]["ids"]
         }
@@ -1076,7 +1076,7 @@ class ServerReceiver:
                 )
                 self._pool_ids.add(token_id)
 
-    def _log_token_pool_plan(self, plan: dict, wanted: list, mappings: list) -> None:
+    def _log_token_pool_plan(self, plan: dict, wanted: list) -> None:
         """One line at startup for the first wave, then one only when the wanted count changes."""
         count = len(wanted)
         last = self._pool_wanted_count
@@ -1091,9 +1091,6 @@ class ServerReceiver:
         proxied = sum(1 for v in wanted if plan["tokens"][v]["use_proxy"])
         in_mappings = {m for v in wanted for m in plan["tokens"][v]["mappings"]}
         extra = ""
-        paused = sum(1 for m in mappings if mapping_paused(m))
-        if paused:
-            extra += f", {paused} paused mapping(s) skipped"
         blocked = len(plan["wanted"]) - count
         if blocked:
             extra += f", {blocked} waiting for proxies"

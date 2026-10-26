@@ -818,7 +818,7 @@ async def test_startup_line_counts_tokens_mappings_and_routes_once(make_rx, capl
     rx.db.status["m3"] = "paused"
     await rx._reconcile_token_pool()
     assert _pool_lines(caplog) == [
-        "[token-pool] Bringing 3 token(s) online for 2 mapping(s): 2 through proxies, 1 direct, 1 paused mapping(s) skipped"
+        "[token-pool] Bringing 3 token(s) online for 2 mapping(s): 2 through proxies, 1 direct"
     ]
     caplog.clear()
     await rx._reconcile_token_pool()
