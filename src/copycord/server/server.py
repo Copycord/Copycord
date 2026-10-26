@@ -38,6 +38,7 @@ from asyncio import Queue
 from pathlib import Path
 from types import SimpleNamespace
 from dotenv import load_dotenv
+from copycord.common.bot_status import DEFAULT_STATUS, normalize_status, read_status
 from copycord.common.config import Config, CURRENT_VERSION
 from copycord.common.common_helpers import resolve_mapping_settings
 from copycord.common.control_protocol import TOKEN_POOL_CLOSE_CAP
@@ -273,7 +274,13 @@ class ServerReceiver:
 
     def __init__(self):
         self.config = Config(logger=logger)
-        self.bot = discord.Bot(intents=discord.Intents.all())
+        self.db = DBManager(self.config.DB_PATH)
+        self._bot_status = read_status(self.db, "SERVER_STATUS")
+        # Online stays off the IDENTIFY frame, as before the setting existed.
+        bot_kwargs = {}
+        if self._bot_status != DEFAULT_STATUS:
+            bot_kwargs["status"] = discord.Status(self._bot_status)
+        self.bot = discord.Bot(intents=discord.Intents.all(), **bot_kwargs)
         self.bot.server = self
         self.ws = WebsocketManager(
             send_url=self.config.CLIENT_WS_URL,
@@ -282,7 +289,6 @@ class ServerReceiver:
             logger=logger,
         )
         self.bot.ws_manager = self.ws
-        self.db = DBManager(self.config.DB_PATH)
         self._clone_guild_ids = set(self.db.get_all_clone_guild_ids())
         self.guild_resolver = GuildResolver(self.db, self.config)
         self.session: aiohttp.ClientSession = None
@@ -866,10 +872,30 @@ class ServerReceiver:
         t.add_done_callback(lambda tt: self._send_tasks.discard(tt))
         return t
 
+    async def apply_bot_status(self, value) -> dict:
+        """Set the bot's status; sent now when connected, otherwise at login."""
+        self._bot_status = normalize_status(value)
+        if not self.bot.is_ready():
+            return {"ok": True, "applied": False}
+        last = getattr(self, "_last_status", None)
+        try:
+            await self.bot.change_presence(
+                activity=discord.Game(name=last) if last else None,
+                status=discord.Status(self._bot_status),
+            )
+        except Exception as e:
+            logger.debug("[⚠️] Failed to apply bot status: %s", e)
+            return {"ok": True, "applied": False}
+        logger.info("[🟢] Bot status set to %s", self._bot_status)
+        return {"ok": True, "applied": True}
+
     async def update_status(self, message: str):
         """Update the bot's Discord status."""
         try:
-            await self.bot.change_presence(activity=discord.Game(name=message))
+            await self.bot.change_presence(
+                activity=discord.Game(name=message),
+                status=discord.Status(getattr(self, "_bot_status", DEFAULT_STATUS)),
+            )
             self._last_status = getattr(self, "_last_status", None)
             if self._last_status == message:
                 return
@@ -2219,6 +2245,9 @@ class ServerReceiver:
                     return {"ok": False, "error": "mapping_id is required"}
                 await self.token_identity.reset_mapping(mapping_id)
                 return {"ok": True}
+
+            elif typ == "bot_status":
+                return await self.apply_bot_status((data or {}).get("status"))
 
             elif typ == "reload_proxies":
                 # The proxy list was saved; the pool connects or stops on the new count.
