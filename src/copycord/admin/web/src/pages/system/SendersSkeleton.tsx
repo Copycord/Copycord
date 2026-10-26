@@ -107,19 +107,20 @@ export function SendersStatus({ counts }: { counts: ReadonlyArray<{ state: Sende
 }
 
 /** Title left; the status line, the account count and the Enabled or Disabled chip right, as the Messages header
- *  without its subtitle. One line at any width: from md up the title and the right side share it and the status
- *  line truncates, below md the right side takes the line under the title whole. */
+ *  without its subtitle. The same rows whatever loads or fails: from md up one line, the status line truncating,
+ *  below md the count and chip on the line under the title and the status line under them. Each piece keeps
+ *  its 20 px line box when empty. */
 export function SendersHeader({ status = null, count, chip = null }: { status?: ReactNode; count: ReactNode; chip?: ReactNode }) {
   return (
     <div className="mb-3 flex items-end justify-between gap-x-4 gap-y-1 max-md:flex-col max-md:items-stretch">
       <h2 id="system-senders-title" className="m-0 shrink-0 text-[22px] font-bold text-text">
         Token Message Cloning
       </h2>
-      <div className="flex min-w-0 items-center justify-end gap-2.5 max-md:justify-start">
-        <span id="system-senders-status" className={cx(COUNT, "min-w-0 truncate tabular-nums")}>
+      <div className="flex min-w-0 items-center justify-end gap-x-2.5 gap-y-1 max-md:flex-wrap max-md:justify-start">
+        <span id="system-senders-status" className={cx(COUNT, "h-5 min-w-0 truncate leading-5 tabular-nums max-md:order-last max-md:basis-full")}>
           {status}
         </span>
-        <span id="system-senders-count" className={cx(COUNT, "shrink-0 tabular-nums")} aria-live="polite">
+        <span id="system-senders-count" className={cx(COUNT, "h-5 shrink-0 leading-5 tabular-nums")} aria-live="polite">
           {count}
         </span>
         {chip}
