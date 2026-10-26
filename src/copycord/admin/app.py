@@ -1321,6 +1321,21 @@ def _user_avatar_url(user_id, avatar_hash) -> str | None:
     return _default_avatar_url(user_id)
 
 
+SENDER_AVATAR_SIZE = 64
+
+
+def _sized_avatar_url(url: str | None, size: int = SENDER_AVATAR_SIZE) -> str | None:
+    """A real CDN avatar URL with its size query set to ``size``; default and other URLs as given."""
+    if not url:
+        return url
+    parts = urlsplit(url)
+    if parts.netloc != "cdn.discordapp.com" or not parts.path.startswith("/avatars/"):
+        return url
+    query = [kv for kv in parts.query.split("&") if kv and kv.split("=", 1)[0] != "size"]
+    query.append(f"size={size}")
+    return parts._replace(query="&".join(query)).geturl()
+
+
 def _store_token_identity(token_value: str, ident: dict | None) -> None:
     """Save a /users/@me answer on every row of the token, for the System page senders table."""
     if not ident or not token_value:
@@ -3069,7 +3084,8 @@ def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
                 "id": str(group[0].get("token_id")),
                 "username": username,
                 "display_name": first("display_name") or username,
-                "avatar_url": first("avatar_url")
+                # A 24 px avatar: the stored 1024 px CDN URL is served at 64 px.
+                "avatar_url": _sized_avatar_url(first("avatar_url"))
                 or _default_avatar_url(first("user_id"))
                 or _token_default_avatar_url(str(group[0].get("token_id"))),
                 "state": state,

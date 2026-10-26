@@ -92,7 +92,7 @@ def test_identity_fallbacks():
     ]
     by_id = {i["id"]: i for i in app_module._merge_senders(rows, None)}
     assert by_id["s"]["display_name"] == "Stored Name"
-    assert by_id["s"]["avatar_url"] == "https://cdn.discordapp.com/avatars/1/h.png?size=1024"
+    assert by_id["s"]["avatar_url"] == "https://cdn.discordapp.com/avatars/1/h.png?size=64"
     assert by_id["u"]["display_name"] == "plain"
     assert by_id["u"]["avatar_url"] == "https://cdn.discordapp.com/embed/avatars/2.png"
     assert by_id["n"]["display_name"] is None
@@ -122,7 +122,31 @@ def test_real_avatar_replaces_the_id_default():
         [_row("n", "N", avatar_url="https://cdn.discordapp.com/avatars/1/h.png?size=1024", user_id="1")],
         None,
     )[0]
-    assert item["avatar_url"] == "https://cdn.discordapp.com/avatars/1/h.png?size=1024"
+    assert item["avatar_url"] == "https://cdn.discordapp.com/avatars/1/h.png?size=64"
+
+
+def test_sized_avatar_url_sets_size_64_on_real_avatars_only():
+    cdn = "https://cdn.discordapp.com"
+    sized = app_module._sized_avatar_url
+    assert sized(f"{cdn}/avatars/{UID}/abc.png?size=1024") == f"{cdn}/avatars/{UID}/abc.png?size=64"
+    assert sized(f"{cdn}/avatars/{UID}/a_abc.gif?size=1024") == f"{cdn}/avatars/{UID}/a_abc.gif?size=64"
+    assert sized(f"{cdn}/avatars/{UID}/abc.png") == f"{cdn}/avatars/{UID}/abc.png?size=64"
+    # Other query params are kept; only size changes.
+    assert sized(f"{cdn}/avatars/{UID}/abc.webp?animated=true&size=4096") == (
+        f"{cdn}/avatars/{UID}/abc.webp?animated=true&size=64"
+    )
+    assert sized(f"{cdn}/embed/avatars/3.png") == f"{cdn}/embed/avatars/3.png"
+    assert sized("https://example.com/avatars/1/abc.png?size=1024") == "https://example.com/avatars/1/abc.png?size=1024"
+    assert sized(None) is None
+    assert sized("") == ""
+
+
+def test_merged_sender_avatar_is_64_px_and_the_stored_url_untouched():
+    stored = "https://cdn.discordapp.com/avatars/1/a_h.gif?size=1024"
+    row = _row("n", "N", avatar_url=stored, user_id="1")
+    item = app_module._merge_senders([row], None)[0]
+    assert item["avatar_url"] == "https://cdn.discordapp.com/avatars/1/a_h.gif?size=64"
+    assert row["avatar_url"] == stored
 
 
 def test_sort_online_first_then_username():
