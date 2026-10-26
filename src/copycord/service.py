@@ -576,7 +576,21 @@ def port_free(host: str, port: int) -> bool:
             s.bind((host, port))
         except OSError:
             return False
-    return True
+    return not (sys.platform == "win32" and _wildcard_busy(port))
+
+
+def _wildcard_busy(port: int) -> bool:
+    """Whether another process listens on this port on every interface.
+
+    Windows lets 127.0.0.1:port bind beside a 0.0.0.0:port listener (a Docker
+    published port, say), so a bind on the dashboard host alone misses it.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("0.0.0.0", port))
+        except OSError:
+            return True
+    return False
 
 
 # How long stop and restart wait for the old Copycord to exit and free its ports.
