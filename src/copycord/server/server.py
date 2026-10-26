@@ -170,12 +170,18 @@ def _setting_on(value) -> bool:
     return value is True or value == 1
 
 
+def mapping_paused(mapping: dict) -> bool:
+    """True when a guild mapping row's ``status`` is ``paused``; a missing status is active."""
+    return str(mapping.get("status") or "active").strip().lower() == "paused"
+
+
 def plan_token_pool(mappings: list[dict], *, skip_values: set = frozenset()) -> dict:
     """Decide which sending tokens the warm pool keeps online.
 
     ``mappings`` holds one dict per mapping, in mapping order, with ``mapping_id``,
-    the resolved ``settings`` and its enabled ``tokens`` (``token_id``, ``token_value``).
-    Every working token of every mapping with ``USE_USER_TOKENS`` on is wanted online:
+    its ``status``, the resolved ``settings`` and its enabled ``tokens`` (``token_id``,
+    ``token_value``). A paused mapping wants no token online.
+    Every working token of every active mapping with ``USE_USER_TOKENS`` on is wanted online:
     a row marked ``enabled`` false or a value in ``skip_values`` (dead in the sender) is
     left out. A token value used by several mappings is one entry: its ids and mappings
     are the union, ``use_proxy`` (``USER_TOKEN_USE_PROXIES``, default on) is on if
@@ -188,6 +194,8 @@ def plan_token_pool(mappings: list[dict], *, skip_values: set = frozenset()) -> 
     tokens: dict[str, dict] = {}
     wanted: list[str] = []
     for m in mappings:
+        if mapping_paused(m):
+            continue
         settings = m.get("settings") or {}
         if not settings.get("USE_USER_TOKENS", False):
             continue
@@ -935,9 +943,14 @@ class ServerReceiver:
         return get_proxy_pool().current(token_value)
 
     def _load_token_pool_mappings(self) -> list[dict]:
-        """Every mapping with its resolved settings and enabled tokens, for plan_token_pool."""
+        """Every active mapping with its resolved settings and enabled tokens, for plan_token_pool.
+
+        A paused mapping keeps none of its tokens online, so its tokens are not loaded.
+        """
         out = []
         for row in self.db.list_guild_mappings() or []:
+            if mapping_paused(row):
+                continue
             mapping_id = row.get("mapping_id")
             orig = row.get("original_guild_id")
             clone = row.get("cloned_guild_id")
@@ -955,7 +968,14 @@ class ServerReceiver:
             except Exception:
                 logger.debug("[token-pool] Token load failed for %s", mapping_id, exc_info=True)
                 tokens = []
-            out.append({"mapping_id": str(mapping_id), "settings": settings, "tokens": tokens})
+            out.append(
+                {
+                    "mapping_id": str(mapping_id),
+                    "status": row.get("status") or "active",
+                    "settings": settings,
+                    "tokens": tokens,
+                }
+            )
         return out
 
     async def _reconcile_token_pool(self) -> None:

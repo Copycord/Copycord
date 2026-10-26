@@ -250,6 +250,32 @@ def test_endpoint_enabled_resolves_an_inherited_setting_through_the_defaults(tc,
     assert _enabled(tc, monkeypatch, [_mapping("m1", {"USE_USER_TOKENS": False})]) is False
 
 
+def test_endpoint_enabled_ignores_a_paused_mapping(tc, monkeypatch):
+    paused = dict(_mapping("m1", {"USE_USER_TOKENS": True}), status="paused")
+    assert _enabled(tc, monkeypatch, [paused]) is False
+    active = dict(_mapping("m2", {"USE_USER_TOKENS": True}), status="active")
+    assert _enabled(tc, monkeypatch, [paused, active]) is True
+
+
+def test_pausing_and_resuming_a_mapping_asks_for_a_pool_reconcile(tc, monkeypatch):
+    class StatusDB:
+        status = "active"
+
+        def get_mapping_by_id(self, mid):
+            return {"mapping_id": mid, "status": self.status}
+
+        def update_mapping_status(self, mid, status):
+            self.status = status
+
+    calls = []
+    monkeypatch.setattr(app_module, "db", StatusDB())
+    monkeypatch.setattr(app_module, "_notify_user_tokens_changed", lambda: calls.append(1))
+    assert tc.post("/api/guild-mappings/m1/toggle-status").json()["status"] == "paused"
+    assert len(calls) == 1
+    assert tc.post("/api/guild-mappings/m1/toggle-status").json()["status"] == "active"
+    assert len(calls) == 2
+
+
 def test_endpoint_needs_login(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "DATA_DIR", tmp_path)
     monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")

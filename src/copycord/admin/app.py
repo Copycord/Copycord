@@ -3092,8 +3092,10 @@ def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
 
 
 def _token_cloning_enabled(mappings: list[dict]) -> bool:
-    """True when any mapping has USE_USER_TOKENS on once its settings are laid over the defaults."""
+    """True when any active mapping has USE_USER_TOKENS on once its settings are laid over the defaults."""
     for m in mappings or []:
+        if str((m or {}).get("status") or "active").strip().lower() == "paused":
+            continue
         settings = (m or {}).get("settings")
         if not isinstance(settings, dict):
             settings = {}
@@ -3250,6 +3252,8 @@ async def api_toggle_mapping_status(mapping_id: str):
     new_status = "paused" if cur_status == "active" else "active"
 
     db.update_mapping_status(mapping_id, new_status)
+    # A paused mapping keeps none of its tokens online; resuming brings them back.
+    _notify_user_tokens_changed()
 
     return JSONResponse(
         {
