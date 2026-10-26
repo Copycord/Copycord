@@ -8,6 +8,8 @@
 # =============================================================================
 """How each bot appears on Discord: the SERVER_STATUS and CLIENT_STATUS keys."""
 
+import sqlite3
+
 STATUS_KEYS = ("SERVER_STATUS", "CLIENT_STATUS")
 STATUSES = ("online", "idle", "dnd", "invisible")
 DEFAULT_STATUS = "online"
@@ -23,5 +25,5 @@ def read_status(db, key: str) -> str:
     """The saved status for ``key``, online when unset or unreadable."""
     try:
         return normalize_status(db.get_config(key, DEFAULT_STATUS))
-    except Exception:
+    except (OSError, ValueError, RuntimeError, sqlite3.Error):
         return DEFAULT_STATUS

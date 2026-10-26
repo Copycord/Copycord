@@ -29,6 +29,9 @@ import {
   stopBots,
 } from "./model";
 import type { BotStatusPatch } from "./model";
+import { BotSettingsModal } from "./BotSettingsModal";
+import { MAPPING_ICON_BTN } from "./DashboardSkeleton";
+import { SettingsIcon } from "./mappings/icons";
 import type { PollResult } from "./useStatusPoll";
 import { useStatusPoll } from "./useStatusPoll";
 
@@ -86,6 +89,7 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
   const [loaded, setLoaded] = useState(false);
   const reveal = useReveal(loaded);
   const [busy, setBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [expanded, setExpanded] = useState<Record<BotRole, boolean>>({ server: false, client: false });
   // When each bot started, from its reported uptime, so the row counts up between reports.
   const [starts, setStarts] = useState<Record<BotRole, number | null>>({ server: null, client: null });
@@ -179,9 +183,20 @@ export function BotsPanel({ onViewLogs, onRunningChange, startBlocked = null, We
 
   return (
     <section className={BOTS_CARD}>
-      <header>
+      <header className="flex items-center justify-between gap-3">
         <h2 className={BOTS_TITLE}>Bots</h2>
+        <button
+          type="button"
+          id="bot-settings-btn"
+          aria-label="Bot settings"
+          title="Bot settings"
+          onClick={() => setSettingsOpen(true)}
+          className={cx(MAPPING_ICON_BTN, "size-8 min-h-8")}
+        >
+          <SettingsIcon />
+        </button>
       </header>
+      <BotSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <div className="w-full overflow-x-hidden">
         <table className={BOTS_TABLE}>
           <thead>
