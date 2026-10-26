@@ -186,6 +186,9 @@ def test_plan_unions_mappings_and_proxies_a_token_any_of_them_proxies(srv):
     assert x["use_proxy"] is True
     # only used by the mapping with proxies off: direct
     assert plan["tokens"]["Y"]["use_proxy"] is False
+    # The first mapping's presence wins; there is no per-token cap any more.
+    assert x["presence"] == "busy"
+    assert "keep_online" not in x
 
 
 def test_plan_proxies_by_default_when_the_setting_is_missing(srv):
@@ -193,9 +196,6 @@ def test_plan_proxies_by_default_when_the_setting_is_missing(srv):
     plan = srv.plan_token_pool([_m("m1", settings, ("1", "X")), _m("m2", {**settings, "USER_TOKEN_USE_PROXIES": None}, ("2", "Y"))])
     assert plan["tokens"]["X"]["use_proxy"] is True
     assert plan["tokens"]["Y"]["use_proxy"] is True
-    # The first mapping's presence wins; there is no per-token cap any more.
-    assert x["presence"] == "busy"
-    assert "keep_online" not in x
 
 
 def test_plan_rotate_is_on_if_any_mapping_sharing_the_token_has_it_on(srv):
