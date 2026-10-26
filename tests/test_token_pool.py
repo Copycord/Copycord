@@ -227,6 +227,36 @@ async def test_no_proxy_means_no_connect(fakes, sleeps):
         await pool.close_all()
 
 
+async def test_direct_token_connects_without_asking_for_a_proxy(fakes, sleeps):
+    """A token ensured with use_proxy=False (its mappings have proxies off) dials direct, with no proxy pool."""
+    asked = []
+
+    def proxy_for(token):
+        asked.append(token)
+        return None
+
+    pool = TokenSessionPool(
+        logger=logging.getLogger("test.token_pool"),
+        proxy_for=proxy_for,
+        client_factory=fakes.factory,
+    )
+    try:
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="online", use_proxy=False)
+        await until(lambda: pool.online_ids() == {"t1"})
+        assert asked == []
+        (client,) = fakes.clients
+        assert client.kwargs["proxy"] is None
+        assert client.kwargs["proxy_pool"] is None
+
+        # a mapping that wants proxies starts using it: reconnects proxied, never direct
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="online", use_proxy=True)
+        await until(lambda: len(asked) >= 1)
+        assert len(fakes.clients) == 1
+        assert pool.online_ids() == set()
+    finally:
+        await pool.close_all()
+
+
 async def test_shared_token_is_one_session(pool, fakes):
     try:
         await pool.ensure("a", "same-token", keep_online=5, presence="online")

@@ -1,4 +1,5 @@
-"""Proxies are mandatory for user tokens: no proxy lease, no request (no Discord)."""
+"""Proxies for user tokens: on by default, optional per mapping. A proxied token with
+no proxy lease makes no request (no Discord); a direct one never asks for a lease."""
 
 import types
 
@@ -79,6 +80,7 @@ def no_proxies(monkeypatch):
     monkeypatch.setattr(sh, "_CurlAsyncSession", FakeSession)
     monkeypatch.setattr(sh, "_TLS_SESSIONS", {})
     monkeypatch.setattr(sh, "_TLS_PRIMED", set())
+    monkeypatch.setattr(sh, "_TLS_DIRECT", set())
     monkeypatch.setattr(sh, "_TLS_SESSION_LOCKS", {})
     monkeypatch.setattr(sh, "_TLS_LAST_USED", {})
     monkeypatch.setattr(sh, "_TLS_SHARED", {})
@@ -98,16 +100,98 @@ def _sender(db, log):
     )
 
 
-def test_flag_is_always_on_whatever_is_stored():
-    assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": False}) is True
+def test_flag_honours_the_stored_setting_and_defaults_on():
+    assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": False}) is False
+    assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": "false"}) is False
+    assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": True}) is True
+    assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": None}) is True
+    assert token_proxy.token_use_proxy({"OTHER": 1}) is True
     assert token_proxy.token_use_proxy({}) is True
     assert token_proxy.token_use_proxy(None) is True
+
+
+def test_a_token_goes_direct_only_when_every_mapping_using_it_is_off(monkeypatch):
+    # empty until the server's first plan: every token is proxied
+    assert token_proxy.resolve_use_proxy("tok-a", False) is True
+    token_proxy.set_direct_tokens({"tok-a"})
+    assert token_proxy.resolve_use_proxy("tok-a", False) is False
+    assert token_proxy.resolve_use_proxy("tok-a", True) is True
+    # not in the plan's direct set (another mapping using it wants proxies)
+    assert token_proxy.resolve_use_proxy("tok-b", False) is True
+
+
+class _RecordingPool(ProxyPool):
+    """A real pool that records every lease and current() lookup."""
+
+    def __init__(self):
+        super().__init__()
+        self.asked = []
+
+    async def lease(self, token, *a, **k):
+        self.asked.append(("lease", token))
+        return await super().lease(token, *a, **k)
+
+    def current(self, token):
+        self.asked.append(("current", token))
+        return super().current(token)
+
+
+@pytest.fixture
+def recording_pool(no_proxies, monkeypatch):
+    pool = _RecordingPool()
+    pool.reload([])
+    monkeypatch.setattr(sh, "_get_proxy_pool", lambda: pool)
+    monkeypatch.setattr(token_sender, "get_proxy_pool", lambda: pool)
+    return pool
+
+
+@pytest.mark.asyncio
+async def test_direct_mapping_sends_with_no_lease_and_no_proxy(recording_pool):
+    token_proxy.set_direct_tokens({"tok-a"})
+    log = _Log()
+    s = _sender(_DB(["a"]), log)
+
+    status = await s.send(mapping_id="m", target_channel_id=1, content="hi", use_proxy=False)
+
+    assert status == token_sender.SEND_OK
+    assert recording_pool.asked == []
+    (sess,) = FakeSession.made
+    # primed and sent from the server's own address: no proxy on any request
+    assert sess.calls[0] == ("GET", "https://discord.com", None)
+    assert any(c[0] == "POST" and c[2] is None for c in sess.calls[1:])
+    # no proxies configured, but nothing needed one: no notice
+    assert token_proxy.TOKENS_DISABLED_NOTICE not in log.warnings
+
+
+@pytest.mark.asyncio
+async def test_token_shared_with_a_proxied_mapping_stays_proxied(recording_pool):
+    # tok-a is also used by a mapping that wants proxies, so it is not in the direct set
+    token_proxy.set_direct_tokens({"tok-other"})
+    log = _Log()
+    s = _sender(_DB(["a"]), log)
+
+    status = await s.send(mapping_id="m", target_channel_id=1, content="hi", use_proxy=False)
+
+    assert status == SEND_NO_TOKENS
+    assert FakeSession.made == []
+    assert log.warnings == [token_proxy.TOKENS_DISABLED_NOTICE]
+
+
+@pytest.mark.asyncio
+async def test_switching_a_token_to_direct_primes_again_without_the_proxy(no_proxies):
+    no_proxies.reload(["http://only.proxy.test:1"])
+    sess = await sh.get_tls_session("tok-a")
+    assert sess.calls == [("GET", "https://discord.com", "http://only.proxy.test:1")]
+    token_proxy.set_direct_tokens({"tok-a"})
+    again = await sh.get_tls_session("tok-a", use_proxy=False)
+    assert again is sess
+    assert sess.calls[-1] == ("GET", "https://discord.com", None)
 
 
 @pytest.mark.asyncio
 async def test_get_tls_session_without_proxies_makes_no_session(no_proxies):
     with pytest.raises(NoProxyAvailable):
-        # the old opt-out value is ignored
+        # use_proxy=False alone is not enough: the server's plan has not let the token go direct
         await sh.get_tls_session("tok-a", use_proxy=False)
     assert FakeSession.made == []
     assert sh._TLS_SESSIONS == {}

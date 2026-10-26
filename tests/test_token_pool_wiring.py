@@ -39,15 +39,18 @@ class FakePool:
         self.ensured = []
         # token_id -> the rotate flag of its last ensure
         self.rotate = {}
+        # token_id -> the use_proxy flag of its last ensure
+        self.use_proxy = {}
         self.closed = []
         self.close_all_calls = 0
         self.gate = None
 
-    async def ensure(self, token_id, token_value, *, keep_online, presence, rotate=False):
+    async def ensure(self, token_id, token_value, *, keep_online, presence, rotate=False, use_proxy=True):
         if self.gate is not None:
             await self.gate.wait()
         self.ensured.append((token_id, token_value, keep_online, presence))
         self.rotate[token_id] = rotate
+        self.use_proxy[token_id] = use_proxy
 
     async def close(self, token_id):
         self.closed.append(token_id)
@@ -108,7 +111,7 @@ class FakeProxies:
         return self.leases.get(token)
 
 
-def _settings(presence="random", proxy=False, use=True, rotate=None, legacy_keep=None):
+def _settings(presence="random", proxy=True, use=True, rotate=None, legacy_keep=None):
     settings = {
         "USE_USER_TOKENS": use,
         "USER_TOKEN_PRESENCE": presence,
@@ -169,7 +172,7 @@ def _m(mid, settings, *toks):
     }
 
 
-def test_plan_unions_mappings_and_always_proxies(srv):
+def test_plan_unions_mappings_and_proxies_a_token_any_of_them_proxies(srv):
     plan = srv.plan_token_pool(
         [
             _m("m1", _settings(presence="busy", proxy=False), ("1", "X"), ("2", "Y")),
@@ -179,8 +182,16 @@ def test_plan_unions_mappings_and_always_proxies(srv):
     x = plan["tokens"]["X"]
     assert x["ids"] == ["1", "3"]
     assert x["mappings"] == ["m1", "m2"]
+    # shared with a mapping that wants proxies: proxied
     assert x["use_proxy"] is True
-    # the stored USER_TOKEN_USE_PROXIES=False is ignored
+    # only used by the mapping with proxies off: direct
+    assert plan["tokens"]["Y"]["use_proxy"] is False
+
+
+def test_plan_proxies_by_default_when_the_setting_is_missing(srv):
+    settings = {"USE_USER_TOKENS": True}
+    plan = srv.plan_token_pool([_m("m1", settings, ("1", "X")), _m("m2", {**settings, "USER_TOKEN_USE_PROXIES": None}, ("2", "Y"))])
+    assert plan["tokens"]["X"]["use_proxy"] is True
     assert plan["tokens"]["Y"]["use_proxy"] is True
     # The first mapping's presence wins; there is no per-token cap any more.
     assert x["presence"] == "busy"
@@ -349,14 +360,49 @@ async def test_reconcile_shared_token_is_one_proxied_session(make_rx):
 
     # Both ids of the shared token go to the pool, which keys the session by value.
     assert [e[:3] for e in rx.token_pool.ensured] == [("1", "X", 2), ("2", "X", 2), ("3", "Y", 2)]
-    # Proxies are mandatory: every wanted token is proxied, whatever the stored flag says.
-    assert rx._pool_proxied == {"X", "Y"}
-    assert list(rx.proxies.leases) == ["X", "Y"]
+    # X is shared with m2, which wants proxies, so it stays proxied; Y is only m3's (off).
+    assert rx._pool_proxied == {"X"}
+    assert rx.token_pool.use_proxy == {"1": True, "2": True, "3": False}
+    assert list(rx.proxies.leases) == ["X"]
+    # Sends read the same rule: only Y may go direct.
+    assert token_proxy.resolve_use_proxy("X", False) is True
+    assert token_proxy.resolve_use_proxy("Y", False) is False
+    assert token_proxy.resolve_use_proxy("Y", True) is True
     # proxy_for hands the gateway the lease REST reads.
     assert rx._token_pool_proxy_for("X") == rx.proxies.current("X")
-    assert rx._token_pool_proxy_for("Y") == rx.proxies.current("Y")
     # A token with no lease gets None, which the pool takes as "do not connect".
     assert rx._token_pool_proxy_for("Z") is None
+
+
+@pytest.mark.asyncio
+async def test_zero_proxies_with_every_mapping_off_connects_direct_and_says_nothing(make_rx, caplog):
+    caplog.set_level(logging.INFO, logger="test.server_pool")
+    rx = make_rx([("m1", _settings(proxy=False), [("1", "X", True), ("2", "Y", True)])])
+    rx.proxies.enabled = False
+    await rx._reconcile_token_pool()
+    assert _notices(caplog) == []
+    assert [e[:2] for e in rx.token_pool.ensured] == [("1", "X"), ("2", "Y")]
+    assert rx.token_pool.use_proxy == {"1": False, "2": False}
+    assert rx.proxies.leases == {}
+    assert rx.token_pool.close_all_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_zero_proxies_keeps_proxied_tokens_offline_and_direct_ones_online(make_rx, caplog):
+    caplog.set_level(logging.INFO, logger="test.server_pool")
+    rx = make_rx(
+        [
+            ("m1", _settings(proxy=False), [("1", "X", True), ("2", "Y", True)]),
+            ("m2", _settings(proxy=True), [("3", "Y", True)]),
+        ]
+    )
+    rx.proxies.enabled = False
+    await rx._reconcile_token_pool()
+    # Y is shared with a mapping that wants proxies: offline, and the notice says why
+    assert _notices(caplog) == [token_proxy.TOKENS_DISABLED_NOTICE]
+    assert [e[:3] for e in rx.token_pool.ensured] == [("1", "X", 1)]
+    assert rx._pool_ids == {"1"}
+    assert rx.proxies.leases == {}
 
 
 @pytest.mark.asyncio
