@@ -371,3 +371,135 @@ def test_wait_healthy_gives_up_after_the_timeout(monkeypatch):
 
     assert update.wait_healthy(timeout=10, interval=2, sleep=sleep, clock=lambda: now[0]) is False
     assert len(sleeps) == 5
+
+
+# post-install check: the new environment must import, in its own process
+
+# Saved before the autouse conftest fixture swaps it for a stub.
+REAL_VERIFY = update.verify_environment
+BROKEN = ("pydantic_core", "ImportError: cannot import name 'ArgsKwargs' from "
+          "'pydantic_core._pydantic_core' (unknown location)")
+
+
+def test_required_imports_name_pydantic_core():
+    from copycord import required
+
+    assert cli.REQUIRED_IMPORTS is required.REQUIRED_IMPORTS
+    assert ("pydantic_core", "pydantic-core") in required.REQUIRED_IMPORTS
+    assert ("pydantic", "pydantic") in required.REQUIRED_IMPORTS
+
+
+def _fake_run(monkeypatch, rc=0, stdout="", exc=None):
+    import importlib
+
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append((list(cmd), kwargs))
+        if exc is not None:
+            raise exc
+        return subprocess.CompletedProcess(cmd, rc, stdout, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    # Nothing may be imported in the updater's own process.
+    monkeypatch.setattr(importlib, "import_module", lambda *a, **k: pytest.fail("imported in-process"))
+    return calls
+
+
+def test_verify_imports_with_the_environment_python_in_a_subprocess(monkeypatch):
+    calls = _fake_run(monkeypatch, stdout='{"ok": {"pydantic_core": "/x/__init__.py"}}\n')
+    assert REAL_VERIFY() is None
+    (cmd, kwargs), = calls
+    assert cmd[0] == str(update.env_python())
+    assert cmd[1:3] == ["-I", "-c"]
+    assert {"pydantic_core", "pydantic", "fastapi"} <= set(cmd[4:])
+    assert "__file__" in cmd[3]
+    assert not kwargs.get("shell") and kwargs["timeout"] == update.VERIFY_TIMEOUT
+
+
+def test_verify_names_the_failing_module(monkeypatch):
+    import json
+
+    out = json.dumps({"failed": BROKEN[0], "error": BROKEN[1]})
+    _fake_run(monkeypatch, rc=1, stdout=out + "\n")
+    assert REAL_VERIFY() == BROKEN
+
+
+def test_verify_timeout_is_a_failure(monkeypatch):
+    _fake_run(monkeypatch, exc=subprocess.TimeoutExpired(["python"], 60))
+    module, error = REAL_VERIFY()
+    assert module == "python" and "did not finish" in error
+
+
+def _verify_sequence(monkeypatch, results):
+    results = list(results)
+    seen = []
+
+    def verify(*a, **k):
+        seen.append(1)
+        return results.pop(0)
+
+    monkeypatch.setattr(update, "verify_environment", verify)
+    return seen
+
+
+def test_environment_ok_needs_no_retry(uv_tool, monkeypatch, capsys):
+    rec, restarts = uv_tool
+    _state(monkeypatch, True, True)
+    seen = _verify_sequence(monkeypatch, [None])
+    assert update.update() == 0
+    assert rec.calls == [["uv", "tool", "install", "--force", "--python", "3.12", WHEEL]]
+    assert seen == [1] and restarts == [1]
+    assert "environment OK" in capsys.readouterr().out
+
+
+def test_broken_environment_is_reinstalled_once_from_a_clean_cache(uv_tool, monkeypatch, capsys):
+    rec, restarts = uv_tool
+    _state(monkeypatch, True, True)
+    seen = _verify_sequence(monkeypatch, [BROKEN, None])
+    assert update.update() == 0
+    assert rec.calls == [
+        ["uv", "tool", "install", "--force", "--python", "3.12", WHEEL],
+        ["uv", "cache", "clean", "pydantic-core"],
+        ["uv", "tool", "install", "--reinstall", "--force", "--python", "3.12", WHEEL],
+    ]
+    assert seen == [1, 1] and restarts == [1]
+    assert "did not import: pydantic_core" in capsys.readouterr().err
+
+
+def test_other_broken_module_skips_the_cache_clean(uv_tool, monkeypatch):
+    rec, restarts = uv_tool
+    _state(monkeypatch, False, False)
+    _verify_sequence(monkeypatch, [("fastapi", "ModuleNotFoundError: No module named 'fastapi'"), None])
+    assert update.update() == 0
+    assert [c[:3] for c in rec.calls] == [["uv", "tool", "install"]] * 2
+
+
+def test_still_broken_fails_with_recovery_steps_and_no_restart(uv_tool, monkeypatch, capsys):
+    rec, restarts = uv_tool
+    _state(monkeypatch, True, True)
+    seen = _verify_sequence(monkeypatch, [BROKEN, BROKEN])
+    assert update.update() == 1
+    assert len([c for c in rec.calls if c[:3] == ["uv", "tool", "install"]]) == 2
+    assert seen == [1, 1] and restarts == []
+    err = capsys.readouterr().err
+    assert "cannot import pydantic_core" in err and "ArgsKwargs" in err
+    assert f"uv tool install --reinstall --force --python 3.12 {WHEEL}" in err
+    assert "copycord service stop" in err and "copycord doctor" in err
+
+
+def test_auto_update_onto_a_broken_environment_rolls_back(auto, monkeypatch):
+    cmds, restarts = auto
+    _verify_sequence(monkeypatch, [BROKEN, BROKEN, None])
+    assert update.update(yes=True, auto=True) == 1
+    assert len(cmds.installs(OLD_WHEEL)) == 1
+    # Only the version put back is restarted onto.
+    assert restarts == [1]
+    assert update.auto_update_stopped() is not None
+
+
+def test_doctor_fix_reports_a_broken_reinstall(monkeypatch):
+    monkeypatch.setattr(cli, "_can_reinstall", lambda checks: None)
+    monkeypatch.setattr(update, "update", lambda reinstall=False: 1)
+    with pytest.raises(cli.FixError):
+        cli.fix_reinstall([])

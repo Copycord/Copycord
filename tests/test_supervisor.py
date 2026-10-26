@@ -454,3 +454,37 @@ def test_roles_reach_the_dashboard_over_loopback_unless_it_listens_on_one_addres
         monkeypatch.setenv("DASHBOARD_HOST", listen)
     sup_mod._set_runtime_env()
     assert os.environ["ADMIN_HOST"] == agents
+
+
+def test_import_error_logs_the_doctor_hint_once_and_backs_off(caplog):
+    delays = []
+
+    async def fake_sleep(d):
+        delays.append(d)
+        await asyncio.sleep(0)
+
+    async def main():
+        state = {"n": 0}
+
+        async def broken():
+            state["n"] += 1
+            if state["n"] <= 3:
+                raise ImportError("cannot import name 'ArgsKwargs' from "
+                                  "'pydantic_core._pydantic_core' (unknown location)",
+                                  name="pydantic_core._pydantic_core")
+            await asyncio.Event().wait()
+
+        rs = RoleSupervisor("admin", broken, backoff=FAST, sleep=fake_sleep)
+        rs.start()
+        await _wait_until(lambda: state["n"] == 4)
+        await rs.stop()
+        return rs
+
+    with caplog.at_level(logging.INFO, logger="copycord.supervisor"):
+        rs = asyncio.run(main())
+    assert rs.crashes == 3
+    assert delays == [sup_mod.IMPORT_RETRY_DELAY] * 3
+    hints = [r for r in caplog.records if "copycord doctor --fix" in r.getMessage()]
+    assert len(hints) == 1
+    assert "pydantic_core._pydantic_core" in hints[0].getMessage()
+    assert hints[0].levelno == logging.ERROR
