@@ -175,7 +175,7 @@ copycord doctor --data-dir ~/copycord/data
 
 | Group | Checks |
 |-------|--------|
-| Install | The version, commit and update channel; Python is 3.12 to 3.14; the web UI files are installed; the required packages (`curl_cffi`, `py-cord`, `fastapi`, `uvicorn`) import, as one `dependencies OK` line that names only the missing ones |
+| Install | The version, commit and update channel; Python is 3.12 to 3.14; the web UI files are installed; the required packages (`curl_cffi`, `py-cord`, `pydantic_core`, `pydantic`, `fastapi`, `uvicorn`) import, as one `dependencies OK` line that names only the missing ones |
 | Settings | `<home>/.env` exists; a dashboard password is set (`no dashboard password` is only info, since `copycord run` makes one) and is not still the default `copycord`; a `FAIL` when the dashboard listens beyond this computer without a real password; a `FAIL` when the removed `ROLE` variable is still set |
 | Data | The Copycord home exists and is writable; the data files are in the `data` folder, not loose in the home; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the last backup in the backups folder is under 2 days old and did not fail its check |
 | Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running, and on Linux whether the user service starts at boot |
@@ -483,6 +483,10 @@ The full install output is saved to `logs/update.log` in the [Copycord home](#da
 When the install is already the newest on the saved channel (the same release version on `stable` or `beta`, the same commit as the branch head on `dev`), `copycord update` says it is up to date and changes nothing. If GitHub cannot be reached for that check, it warns and installs anyway. A channel switch, `--tag`, `--force` and `copycord doctor --fix` always install.
 
 On Windows, `copycord update` stops a running service and moves the program files in use into `.copycord-old` in the Copycord home before it installs; the next update deletes that folder. If Copycord is running in another window, for example with `copycord run`, stop it first; the update changes nothing until you do.
+
+After installing, `copycord update` checks that the new install works by loading its required packages in a fresh process. If one fails, it reinstalls once from a clean cache and checks again. If that also fails, it stops without restarting the service, names the package that is broken and prints the steps to repair it by hand.
+
+If a role cannot start because a package fails to load, the log says the install is broken and to run `copycord doctor --fix`, and Copycord waits 5 minutes between restart attempts instead of retrying every few seconds.
 
 `status` also shows when Copycord last checked for an update and whether auto-update is on.
 
