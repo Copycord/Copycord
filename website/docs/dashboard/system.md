@@ -5,7 +5,7 @@ title: System
 
 # System
 
-The **System** page holds the **Database** card, where you make, download, restore and delete database backups. This page also explains where Copycord writes its logs.
+The **System** page holds the **Database** card, where you make, download, restore and delete database backups, and the **Token Message Cloning** table of sending accounts. This page also explains where Copycord writes its logs.
 
 ## Database card
 
@@ -19,6 +19,12 @@ The card is closed by default. To open it, click its header.
 | Backup list | Shows each archive's **Name**, **Time** and **Size**, with **Download**, **Restore** and **Delete** |
 
 **Restore** and **Delete** ask you to confirm. For the steps, the daily schedule and restoring from the command line, see [Backups](/docs/dashboard/backups).
+
+## Token Message Cloning
+
+This table lists the user accounts that send cloned messages (see [Token message cloning](/docs/dashboard/guild-mappings#token-message-cloning)): each account's avatar and name, username, status, how long it has been online, its last send and how many messages it sent. An avatar shows a shimmer while it loads, then the account's picture, or Discord's default avatar when there is none.
+
+The mapping dropdown shows **All mappings** or the accounts of one mapping; paused mappings are marked **(paused)**. The search box filters the list further. The title row shows how many of the listed accounts are online, connecting, offline, disabled and revoked. The table, dropdown and counts refresh by themselves every 5 seconds.
 
 ## Version information
 
