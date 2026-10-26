@@ -90,6 +90,7 @@ from copycord.server.helpers import (
     _anonymize_user,
     host_message_needs_webhook,
 )
+from copycord.server.mention_strip import strip_embed_mentions, strip_mentions
 from copycord.server.permission_sync import ChannelPermissionSync
 from copycord.server.guild_resolver import GuildResolver
 from copycord.server import logctx
@@ -9312,6 +9313,35 @@ class ServerReceiver:
                                 "@everyone", "@\u200beveryone"
                             ).replace("@here", "@\u200bhere")
 
+            # last of the mention passes, after role remap and the footer append
+            if mapping_settings.get("STRIP_MENTIONS", False):
+                user_names = [
+                    str(u.get("name") or "")
+                    for u in (msg.get("user_mentions") or [])
+                    if isinstance(u, dict)
+                ]
+                role_names = [
+                    str(r.get("name") or "")
+                    for r in role_mentions_meta
+                    if isinstance(r, dict)
+                ]
+                for cid in cloned_id_to_name or {}:
+                    live = (live_role_names or {}).get(cid)
+                    if live:
+                        role_names.append(live)
+
+                text = strip_mentions(
+                    text, user_names=user_names, role_names=role_names
+                )
+                embeds = [
+                    Embed.from_dict(
+                        strip_embed_mentions(
+                            e.to_dict(), user_names=user_names, role_names=role_names
+                        )
+                    )
+                    for e in embeds
+                ]
+
             try:
                 if orig_gid and clone_gid:
                     text, embeds = self._apply_word_rewrites(
@@ -10314,6 +10344,20 @@ class ServerReceiver:
                     )
 
                     if is_backfill and bf_targets and clone_cid not in bf_targets:
+                        continue
+
+                    # Strip Mentions can empty a message that held only mentions
+                    if (
+                        not payload_for_mapping.get("content")
+                        and not payload_for_mapping.get("embeds")
+                        and not (msg.get("stickers") or [])
+                    ):
+                        logger.info(
+                            "[⚠️]%s Skipping message in #%s: empty after mapping options (clone ch=%s)",
+                            tag,
+                            msg.get("channel_name"),
+                            clone_cid,
+                        )
                         continue
 
                     stickers = msg.get("stickers") or []
