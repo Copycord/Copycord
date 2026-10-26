@@ -328,7 +328,7 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "USER_TOKEN_TYPING": False,
     "USER_TOKEN_LINKS_ONLY": False,
     # off: this mapping's tokens talk to Discord from the server's own address
-    "USER_TOKEN_USE_PROXIES": True,
+    "USER_TOKEN_USE_PROXIES": False,
     "USER_TOKEN_STICKY_NICKNAME": False,
     "USER_TOKEN_STICKY_AVATAR": False,
     "USER_TOKEN_STICKY_ROLES": False,
@@ -1234,7 +1234,7 @@ def _proxies_required_response() -> JSONResponse:
 
 
 def _mapping_uses_proxies(mapping_id: str) -> bool:
-    """Whether the mapping's tokens go through proxies (``USER_TOKEN_USE_PROXIES``, default on)."""
+    """Whether the mapping's tokens go through proxies (``USER_TOKEN_USE_PROXIES``, default off)."""
     try:
         row = db.get_mapping_by_id(mapping_id) or {}
     except Exception:

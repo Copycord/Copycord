@@ -184,7 +184,7 @@ def plan_token_pool(mappings: list[dict], *, skip_values: set = frozenset()) -> 
     Every working token of every active mapping with ``USE_USER_TOKENS`` on is wanted online:
     a row marked ``enabled`` false or a value in ``skip_values`` (dead in the sender) is
     left out. A token value used by several mappings is one entry: its ids and mappings
-    are the union, ``use_proxy`` (``USER_TOKEN_USE_PROXIES``, default on) is on if
+    are the union, ``use_proxy`` (``USER_TOKEN_USE_PROXIES``, default off) is on if
     any of them has it on,
     ``presence`` is the first mapping's and ``rotate`` (``USER_TOKEN_PRESENCE_ROTATE``)
     is on if any of them has it on. ``keep_online`` is the number of distinct wanted

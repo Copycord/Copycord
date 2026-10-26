@@ -224,6 +224,11 @@ class TestGuildMappingsAPI:
         eff = resolve_mapping_settings(db, cfg, original_guild_id=555, cloned_guild_id=666)
         assert eff["CLONE_EMOJI"] is True
 
+    def test_send_through_proxies_defaults_off(self):
+        import copycord.admin.app as app_mod
+
+        assert app_mod.DEFAULTS["USER_TOKEN_USE_PROXIES"] is False
+
     @pytest.mark.asyncio
     async def test_retired_keep_online_loads_and_saves(self, client):
         """A mapping stored with the removed USER_TOKEN_KEEP_ONLINE still lists, resolves and saves."""

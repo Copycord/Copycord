@@ -194,11 +194,30 @@ def test_plan_unions_mappings_and_proxies_a_token_any_of_them_proxies(srv):
     assert "keep_online" not in x
 
 
-def test_plan_proxies_by_default_when_the_setting_is_missing(srv):
+def test_plan_goes_direct_by_default_when_the_setting_is_missing(srv):
     settings = {"USE_USER_TOKENS": True}
     plan = srv.plan_token_pool([_m("m1", settings, ("1", "X")), _m("m2", {**settings, "USER_TOKEN_USE_PROXIES": None}, ("2", "Y"))])
+    assert plan["tokens"]["X"]["use_proxy"] is False
+    assert plan["tokens"]["Y"]["use_proxy"] is False
+
+
+def test_plan_proxies_a_mapping_that_stores_the_setting_on(srv):
+    settings = {"USE_USER_TOKENS": True}
+    plan = srv.plan_token_pool(
+        [
+            _m("m1", {**settings, "USER_TOKEN_USE_PROXIES": True}, ("1", "X")),
+            _m("m2", settings, ("2", "Y"), ("3", "X")),
+        ]
+    )
     assert plan["tokens"]["X"]["use_proxy"] is True
-    assert plan["tokens"]["Y"]["use_proxy"] is True
+    assert plan["tokens"]["Y"]["use_proxy"] is False
+
+
+def test_the_mapping_defaults_have_send_through_proxies_off():
+    from copycord.common.config import Config
+
+    assert Config.default_mapping_settings(None)["USER_TOKEN_USE_PROXIES"] is False
+    assert token_proxy.USE_PROXIES_DEFAULT is False
 
 
 def test_plan_rotate_is_on_if_any_mapping_sharing_the_token_has_it_on(srv):

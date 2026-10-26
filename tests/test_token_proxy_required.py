@@ -100,14 +100,15 @@ def _sender(db, log):
     )
 
 
-def test_flag_honours_the_stored_setting_and_defaults_on():
+def test_flag_honours_the_stored_setting_and_defaults_off():
     assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": False}) is False
     assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": "false"}) is False
     assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": True}) is True
-    assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": None}) is True
-    assert token_proxy.token_use_proxy({"OTHER": 1}) is True
-    assert token_proxy.token_use_proxy({}) is True
-    assert token_proxy.token_use_proxy(None) is True
+    assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": "true"}) is True
+    assert token_proxy.token_use_proxy({"USER_TOKEN_USE_PROXIES": None}) is False
+    assert token_proxy.token_use_proxy({"OTHER": 1}) is False
+    assert token_proxy.token_use_proxy({}) is False
+    assert token_proxy.token_use_proxy(None) is False
 
 
 def test_a_token_goes_direct_only_when_every_mapping_using_it_is_off(monkeypatch):
