@@ -2,8 +2,13 @@
 
 import logging
 
+import pytest
+
 from copycord.common import token_proxy
 from copycord.server.token_pool import TokenSessionPool, _Session
+
+
+pytestmark = pytest.mark.asyncio
 
 
 class _BoomClient:
