@@ -33,6 +33,11 @@ FORMAT = "%(asctime)s | %(levelname)-5s | %(message)s"
 CONSOLE_FORMAT = "%(asctime)s | %(levelname)-5s | %(role_tag)s %(message)s"
 DATEFMT = "%Y-%m-%d %H:%M:%S"
 
+# Below DEBUG: per-frame and per-item lines (heartbeat acks, science posts,
+# repair skips) that would bury everything else at LOG_LEVEL=DEBUG. Nothing
+# sets a level this low, so they stay hidden unless a logger is set to it.
+TRACE = 5
+
 # Marks console handlers so server.py and client.py do not add a second one.
 CONSOLE_MARK = "_copycord_console"
 

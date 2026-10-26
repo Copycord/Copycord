@@ -18,6 +18,7 @@ import json
 import logging
 import random
 import aiohttp
+from copycord.logging_setup import TRACE
 from copycord.server.rate_limiter import ActionType
 
 logger = logging.getLogger("server")
@@ -548,7 +549,8 @@ class BackfillWebhookPool:
                         ch = await self.bot.fetch_channel(int(clone_id))
                     except Exception as e:
                         stats["skipped_missing_channel"] += 1
-                        logger.debug(
+                        logger.log(
+                            TRACE,
                             "[cleanup] Clone channel #%s not found/inaccessible (%s); skipping",
                             clone_id,
                             e,

@@ -30,6 +30,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from copycord.common import traffic_capture
 from copycord.common.exit_timezone import note_token_proxy
 from copycord.common.token_proxy import lease_with_timezone
+from copycord.logging_setup import TRACE
 
 from . import fingerprint, qos
 from .enums import API_VERSION, FATAL_CLOSE_CODES, Capabilities, CloseCode, GatewayOp
@@ -950,7 +951,7 @@ class GatewayClient:
             if self._last_heartbeat:
                 self.latency = now - self._last_heartbeat
             self._last_ack = now
-            log.debug("heartbeat ack, latency %.1fms", self.latency * 1000)
+            log.log(TRACE, "heartbeat ack, latency %.1fms", self.latency * 1000)
         elif op == GatewayOp.DISPATCH:
             await self._handle_dispatch(t, d)
         elif op == GatewayOp.INVALID_SESSION:
@@ -973,7 +974,7 @@ class GatewayClient:
 
     async def _handle_hello(self, d: Dict[str, Any]) -> None:
         self.heartbeat_interval = float(d.get("heartbeat_interval", 41250)) / 1000.0
-        log.debug("hello, heartbeat interval %.2fs", self.heartbeat_interval)
+        log.log(TRACE, "hello, heartbeat interval %.2fs", self.heartbeat_interval)
 
         await self._cancel_task("_heartbeat_task")
 
@@ -1108,7 +1109,7 @@ class GatewayClient:
         # Only session events: message, typing and member traffic would bury the
         # sent-frame lines DEBUG exists for.
         if event in SESSION_DISPATCHES:
-            log.debug("DISPATCH %s", event)
+            log.log(TRACE, "DISPATCH %s", event)
         data_dict = data if isinstance(data, dict) else {}
 
         if event in ("READY", "RESUMED"):
