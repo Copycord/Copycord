@@ -25,6 +25,8 @@ import random
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from copycord.common.login_limiter import DIRECT as DIRECT_LOGIN_KEY
+from copycord.common.login_limiter import get_limiter as get_login_limiter
 from copycord.common.proxy_pool import get_pool as get_proxy_pool
 from copycord.common.token_proxy import (
     NoProxyAvailable,
@@ -32,7 +34,7 @@ from copycord.common.token_proxy import (
     proxies_configured,
 )
 from copycord.selfclient import Client
-from copycord.selfclient.errors import ConnectionClosed, HTTPException, LoginFailure
+from copycord.selfclient.errors import ConnectionClosed, HTTPException, LoginFailure, RateLimited
 from copycord.selfclient.gateway import GatewayClient
 
 # Patched by tests; every stagger and backoff wait goes through it.
@@ -68,6 +70,10 @@ STAGGER_MIN = 2.0
 STAGGER_MAX = 6.0
 # A connect not READY by then frees its slot so one stuck token holds no one up.
 READY_TIMEOUT = 60.0
+# A login still rate limited after this many tries (each one already spent the
+# REST layer's own 429 retries, about 20 s) ends the session with the normal
+# backoff, so a key that never recovers does not loop forever.
+LOGIN_RATE_LIMIT_TRIES = 6
 
 BACKOFF_BASE = 5.0
 BACKOFF_CAP = 300.0
@@ -267,6 +273,8 @@ class TokenSessionPool:
         self._random_status: Dict[str, str] = {}
         self._last_seen: Dict[str, float] = {}
         self._gate = asyncio.Semaphore(CONNECT_CONCURRENCY)
+        # Paces logins per exit IP; shared with anything else that logs in.
+        self._login_limiter = get_login_limiter()
         self._lock = asyncio.Lock()
         self._rng = random.Random()
         # Patched by tests; the reshuffle schedule runs on it.
@@ -653,37 +661,45 @@ class TokenSessionPool:
         )
 
     async def _connect_once(self, sess: _Session) -> None:
-        """Start one connect under a gate slot and wait for READY; a lag seen meanwhile holds the slot for a gap."""
+        """Log in paced by the exit IP's limiter, then connect under a gate slot and wait for READY.
+
+        The login, and any wait for its limiter slot, happens before the gate,
+        so a session queued behind a slow IP holds no slot from other IPs and
+        READY_TIMEOUT counts only the gateway connect.
+        """
+        sess.set_state(STATE_CONNECTING)
+        sess.dropped = False
+        try:
+            direct = sess.key in self._direct
+            proxy = None if direct else self._proxy_for(sess.token_value)
+            if not proxy and not direct:
+                # A proxied token never goes direct: no lease, no connect. The
+                # session stays offline and retries with the normal backoff.
+                raise NoProxyAvailable("no proxy leased for this token")
+            client = self._factory(
+                proxy=proxy,
+                proxy_pool=None if direct else self._proxy_pool,
+                max_messages=0,
+                status=sess.status,
+                refresh_build=False,
+                # A sending token is a tab in use: focused after READY.
+                gateway_factory=_FOREGROUND_GATEWAY,
+            )
+        except Exception as exc:
+            self.logger.debug("[token-pool] connect setup failed for %s", sess.key, exc_info=True)
+            sess.runner = asyncio.ensure_future(_raise(exc))
+            return
+        self._watch(sess, client)
+        sess.client = client
+        # A LoginFailure or a login that stays rate limited raises to _run, which
+        # tears the client down and marks the token dead or backs off.
+        await self._login(sess, client, direct, proxy)
         async with self._gate:
-            sess.set_state(STATE_CONNECTING)
-            sess.dropped = False
             self._connecting += 1
             self._lag_warned = False
             cancelled = False
             try:
-                try:
-                    direct = sess.key in self._direct
-                    proxy = None if direct else self._proxy_for(sess.token_value)
-                    if not proxy and not direct:
-                        # A proxied token never goes direct: no lease, no connect. The
-                        # session stays offline and retries with the normal backoff.
-                        raise NoProxyAvailable("no proxy leased for this token")
-                    client = self._factory(
-                        proxy=proxy,
-                        proxy_pool=None if direct else self._proxy_pool,
-                        max_messages=0,
-                        status=sess.status,
-                        refresh_build=False,
-                        # A sending token is a tab in use: focused after READY.
-                        gateway_factory=_FOREGROUND_GATEWAY,
-                    )
-                except Exception as exc:
-                    self.logger.debug("[token-pool] connect setup failed for %s", sess.key, exc_info=True)
-                    sess.runner = asyncio.ensure_future(_raise(exc))
-                    return
-                self._watch(sess, client)
-                sess.client = client
-                sess.runner = asyncio.ensure_future(self._drive(client, sess.token_value))
+                sess.runner = asyncio.ensure_future(self._drive(client))
                 ready = asyncio.ensure_future(client.wait_until_ready())
                 try:
                     await asyncio.wait(
@@ -711,8 +727,40 @@ class TokenSessionPool:
                     await _sleep(self._next_gap())
 
     @staticmethod
-    async def _drive(client: Any, token_value: str) -> None:
-        await client.login(token_value)
+    def _login_key(client: Any, direct: bool, proxy: Optional[str]) -> str:
+        """The exit IP a login goes out on: ``direct``, or the proxy the client's REST uses now."""
+        if direct:
+            return DIRECT_LOGIN_KEY
+        http = getattr(client, "http", None)
+        # REST may have rotated the lease since the client was built.
+        return getattr(http, "proxy", None) or getattr(client, "proxy", None) or proxy or DIRECT_LOGIN_KEY
+
+    async def _login(self, sess: _Session, client: Any, direct: bool, proxy: Optional[str]) -> None:
+        """Log in through the exit IP's limiter; a 429 slows that IP and retries instead of ending the session."""
+        limiter = self._login_limiter
+        tries = 0
+        while True:
+            key = self._login_key(client, direct, proxy)
+            await limiter.acquire(key)
+            try:
+                await client.login(sess.token_value)
+            except RateLimited as exc:
+                limiter.on_rate_limited(key, exc.retry_after or None)
+                tries += 1
+                if tries >= LOGIN_RATE_LIMIT_TRIES:
+                    raise
+                self._log.debug(
+                    "[token-pool] Session %s login rate limited (try %d/%d); waiting for its IP",
+                    sess.key,
+                    tries,
+                    LOGIN_RATE_LIMIT_TRIES,
+                )
+                continue
+            limiter.on_success(key)
+            return
+
+    @staticmethod
+    async def _drive(client: Any) -> None:
         await client.connect(reconnect=True)
 
     def _watch(self, sess: _Session, client: Any) -> None:
