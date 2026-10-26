@@ -16,7 +16,10 @@ goes out for it. With the setting off, that mapping's tokens talk to Discord
 """
 from __future__ import annotations
 
+import logging
 import time
+
+_log = logging.getLogger("common.token_proxy")
 
 # The default when a mapping has no stored value.
 USE_PROXY = True
@@ -111,6 +114,7 @@ def proxies_configured(pool=None) -> bool:
             pool = get_pool()
         return bool(pool.enabled)
     except Exception:
+        _log.debug("could not read the proxy pool state", exc_info=True)
         return False
 
 
