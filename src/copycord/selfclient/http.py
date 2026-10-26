@@ -56,6 +56,9 @@ REQUEST_TIMEOUT = 30
 
 MAX_RETRIES = 5
 FALLBACK_RETRY_AFTER = 1.0
+# A 429 with no retry_after (or 0) still waits, so retries do not fire back to back.
+EMPTY_RETRY_FLOOR = 1.0
+EMPTY_RETRY_CAP = 8.0
 
 # Pause between pages, on top of the bucket pacing.
 PAGE_DELAY = 0.2
@@ -182,18 +185,24 @@ def redact_request_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _retry_after(resp: Any) -> float:
-    """Seconds Discord asked us to wait, from the 429 body."""
+def _retry_after(resp: Any, default: Optional[float] = FALLBACK_RETRY_AFTER) -> Optional[float]:
+    """Seconds Discord asked us to wait, from the 429 body; ``default`` when it gave none."""
     body = _decode(resp)
     if isinstance(body, dict):
         try:
-            return float(body.get("retry_after", FALLBACK_RETRY_AFTER))
+            return float(body.get("retry_after", default))
         except (TypeError, ValueError):
             pass
     try:
-        return float(_header(resp, "Retry-After") or FALLBACK_RETRY_AFTER)
+        return float(_header(resp, "Retry-After") or default)
     except (TypeError, ValueError):
-        return FALLBACK_RETRY_AFTER
+        return default
+
+
+def _empty_retry_wait(attempt: int) -> float:
+    """The wait after a 429 that gave no wait (or 0): EMPTY_RETRY_FLOOR doubling per attempt, jittered, capped."""
+    base = EMPTY_RETRY_FLOOR * (2 ** (max(1, attempt) - 1))
+    return min(EMPTY_RETRY_CAP, base * random.uniform(1.0, 1.25))
 
 
 # client
@@ -436,7 +445,8 @@ class HTTPClient:
             self._record_bucket(route, resp)
 
             if status == 429:
-                last_retry_after = _retry_after(resp)
+                given = _retry_after(resp, None)
+                last_retry_after = given if given and given > 0 else _empty_retry_wait(attempt)
                 last_body = _decode(resp)
                 scope = _header(resp, "X-RateLimit-Scope") or "?"
                 is_global = bool(isinstance(last_body, dict) and last_body.get("global")) or (

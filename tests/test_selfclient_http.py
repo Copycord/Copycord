@@ -119,6 +119,30 @@ class TestRateLimited:
         assert clock.sleeps == [1.0, 1.0]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", [{"retry_after": 0}, {"retry_after": 0.0, "global": False}, {}])
+    async def test_429_without_a_wait_backs_off_from_one_second(self, body):
+        client, session, clock = _client(
+            [FakeResponse(429, body) for _ in range(5)] + [FakeResponse(200, {"ok": True})],
+            max_retries=6,
+        )
+        assert await client.get("/users/@me") == {"ok": True}
+        assert len(session.calls) == 6
+        assert len(clock.sleeps) == 5
+        for attempt, wait in enumerate(clock.sleeps, start=1):
+            base = min(8.0, 2.0 ** (attempt - 1))
+            assert base - 1e-6 <= wait <= min(8.0, base * 1.25) + 1e-6, (attempt, wait)
+        # 1, 2, 4, then capped at 8.
+        assert clock.sleeps[-2:] == pytest.approx([8.0, 8.0])
+
+    @pytest.mark.asyncio
+    async def test_429_with_a_real_wait_is_used_as_given(self):
+        client, session, clock = _client(
+            [FakeResponse(429, {"retry_after": 0.4}), FakeResponse(429, {"retry_after": 12.0}), FakeResponse(200, {})]
+        )
+        await client.get("/users/@me")
+        assert clock.sleeps == pytest.approx([0.4, 12.0])
+
+    @pytest.mark.asyncio
     async def test_global_429_holds_every_route(self):
         client, session, clock = _client(
             [FakeResponse(429, {"retry_after": 3.0, "global": True}), FakeResponse(200, {})],
