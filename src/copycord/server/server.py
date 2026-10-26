@@ -431,6 +431,10 @@ class ServerReceiver:
             try:
                 await orig_on_connect()
             except Forbidden as e:
+                if getattr(e, "code", None) == 50001:
+                    # commands.py on_ready runs the same sync and logs the hint once
+                    logger.debug("Slash command sync on connect: %s", e)
+                    return
                 logger.warning(
                     "[⚠️] Can't sync slash commands, make sure the bot is in the server: %s",
                     e,
