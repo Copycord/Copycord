@@ -222,8 +222,10 @@ class TokenSessionPool:
 
     ``proxy_for`` is called with the token value before every connect attempt
     and returns the proxy URL to use. None means the token has no proxy, so it
-    does not connect: proxies are mandatory, never a direct connection. A None
-    or a raise counts as a failed attempt and is retried with backoff.
+    does not connect: a proxied token never falls back to a direct connection.
+    A None or a raise counts as a failed attempt and is retried with backoff.
+    A token ensured with ``use_proxy=False`` (every mapping using it has proxies
+    off) skips ``proxy_for`` and connects directly, with no proxy pool.
     """
 
     def __init__(
@@ -247,6 +249,8 @@ class TokenSessionPool:
         self._presence_by_key: Dict[str, str] = {}
         # key -> whether its ``random`` status rotates on the reshuffle clock.
         self._rotate_by_key: Dict[str, bool] = {}
+        # Keys that connect directly: every mapping using the token has proxies off.
+        self._direct: set = set()
         self._sessions: Dict[str, _Session] = {}
         self._dead: set = set()
         # The ``random`` pick per token, kept for the life of the process.
@@ -280,6 +284,7 @@ class TokenSessionPool:
         keep_online: int,
         presence: str,
         rotate: bool = False,
+        use_proxy: bool = True,
     ) -> None:
         """Register ``token_id`` and reconcile so at most ``keep_online`` sessions are live.
 
@@ -291,6 +296,8 @@ class TokenSessionPool:
         closes the pool with ``close_all`` when it wants none.
         ``rotate`` lets a ``random`` token change status on the reshuffle clock;
         without it the one random pick is kept. Fixed statuses never rotate.
+        ``use_proxy=False`` connects the token directly; a live session whose
+        mode changed is closed and reconnects in the new mode.
         """
         token_id = str(token_id)
         token_value = (token_value or "").strip()
@@ -304,6 +311,13 @@ class TokenSessionPool:
                 self._last_seen[key] = time.monotonic()
                 if old is not None and old != key:
                     self._forget_if_unused(old)
+                if (key in self._direct) == bool(use_proxy):
+                    if use_proxy:
+                        self._direct.discard(key)
+                    else:
+                        self._direct.add(key)
+                    if key in self._sessions:
+                        await self._stop(key)
                 await self._apply_presence(key, presence, rotate)
             await self._reconcile()
             if self._keep_online > 0:
@@ -444,6 +458,7 @@ class TokenSessionPool:
         self._tokens.pop(key, None)
         self._presence_by_key.pop(key, None)
         self._rotate_by_key.pop(key, None)
+        self._direct.discard(key)
         self._last_seen.pop(key, None)
 
     async def _reconcile(self) -> None:
@@ -588,14 +603,15 @@ class TokenSessionPool:
             cancelled = False
             try:
                 try:
-                    proxy = self._proxy_for(sess.token_value)
-                    if not proxy:
-                        # Proxies are mandatory: no lease, no connect. The session
-                        # stays offline and retries with the normal backoff.
+                    direct = sess.key in self._direct
+                    proxy = None if direct else self._proxy_for(sess.token_value)
+                    if not proxy and not direct:
+                        # A proxied token never goes direct: no lease, no connect. The
+                        # session stays offline and retries with the normal backoff.
                         raise NoProxyAvailable("no proxy leased for this token")
                     client = self._factory(
                         proxy=proxy,
-                        proxy_pool=self._proxy_pool,
+                        proxy_pool=None if direct else self._proxy_pool,
                         max_messages=0,
                         status=sess.status,
                         refresh_build=False,

@@ -30,7 +30,12 @@ from copycord.common.exit_timezone import (
 )
 from copycord.common.http_session import shared_session
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
-from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable, lease_with_timezone
+from copycord.common.token_proxy import (
+    USE_PROXY,
+    NoProxyAvailable,
+    lease_with_timezone,
+    resolve_use_proxy,
+)
 
 try:
     from curl_cffi.requests import AsyncSession as _CurlAsyncSession
@@ -396,6 +401,8 @@ def context_properties(location: str = "chat_input") -> str:
 
 _TLS_SESSIONS: dict = {}
 _TLS_PRIMED: set[str] = set()
+# Tokens whose session was primed direct (their mapping has proxies off).
+_TLS_DIRECT: set[str] = set()
 _TLS_SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 _TLS_LAST_USED: dict[str, float] = {}
 # Tokens whose curl_cffi session has another owner (the selfclient's REST
@@ -445,18 +452,25 @@ async def require_token_proxy(token: str) -> str:
 async def get_tls_session(token: str, *, use_proxy: bool = USE_PROXY):
     """Return a curl_cffi ``AsyncSession`` dedicated to this token.
 
-    Proxies are mandatory for user tokens: ``use_proxy`` is ignored, and with no
-    proxy lease this raises NoProxyAvailable before any session is made or primed.
+    Proxies are on by default and optional per mapping. With ``use_proxy`` on and
+    no proxy lease this raises NoProxyAvailable before any session is made or
+    primed, so nothing goes out from the server's own address. With it off the
+    proxy pool is never asked for a lease and the session talks to Discord directly.
     """
+    use_proxy = resolve_use_proxy(token, use_proxy)
     shared = _shared_tls_session(token)
     if shared is not None:
-        await require_token_proxy(token)
+        if use_proxy:
+            await require_token_proxy(token)
         return shared
     if _CurlAsyncSession is None:
         raise RuntimeError("curl_cffi is not installed")
 
     async with _tls_session_lock(token):
-        proxy = await require_token_proxy(token)
+        proxy = await require_token_proxy(token) if use_proxy else None
+        if (token in _TLS_DIRECT) != (proxy is None):
+            # Switched between direct and proxied: prime again from the new exit.
+            _TLS_PRIMED.discard(token)
         sess = _TLS_SESSIONS.get(token)
         is_new = sess is None
         if sess is None:
@@ -475,8 +489,15 @@ async def get_tls_session(token: str, *, use_proxy: bool = USE_PROXY):
 
         if token not in _TLS_PRIMED:
             await _note_token_proxy(token, proxy)
-            await _prime_tls_session(sess, token, proxy=proxy)
+            if use_proxy:
+                await _prime_tls_session(sess, token, proxy=proxy)
+            else:
+                await _prime_tls_session(sess, token, direct=True)
             _TLS_PRIMED.add(token)
+            if proxy is None:
+                _TLS_DIRECT.add(token)
+            else:
+                _TLS_DIRECT.discard(token)
 
         _TLS_LAST_USED[token] = time.monotonic()
 
@@ -502,10 +523,16 @@ def _mask_proxy_for_log(proxy: str) -> str:
     return proxy
 
 
-async def _prime_tls_session(sess, token: str, proxy: str | None = None) -> None:
-    """Warm the session's cookie jar through the token's leased proxy, so cookies match the source IP."""
-    if not proxy:
-        # never prime a user token's session from the server's own address
+async def _prime_tls_session(
+    sess, token: str, proxy: str | None = None, *, direct: bool = False
+) -> None:
+    """Warm the session's cookie jar from the exit the token sends from, so cookies match the source IP.
+
+    That is the token's leased proxy, or the server's own address only when
+    ``direct`` (its mapping has proxies turned off).
+    """
+    if not proxy and not direct:
+        # never prime a proxied token's session from the server's own address
         raise NoProxyAvailable("cookie priming needs the token's proxy")
     try:
         await sess.get("https://discord.com", timeout=12, proxy=proxy)
@@ -518,6 +545,7 @@ async def close_tls_session(token: str, reason: str = "unspecified") -> None:
     async with _tls_session_lock(token):
         sess = _TLS_SESSIONS.pop(token, None)
         _TLS_PRIMED.discard(token)
+        _TLS_DIRECT.discard(token)
         _TLS_LAST_USED.pop(token, None)
         _forget_exit_timezone(token)
         if sess is not None:

@@ -74,7 +74,7 @@ from copycord.common.db import DBManager, backups_dir
 from copycord.common.paths import data_dir, out_candidates, out_dir
 from copycord.common.http_session import close_shared_session, shared_session
 from copycord.common.proxy_pool import ProxyPool, _normalise_proxy_url
-from copycord.common.token_proxy import PROXIES_REQUIRED_ERROR
+from copycord.common.token_proxy import PROXIES_REQUIRED_ERROR, token_use_proxy
 from copycord.common.timezone import configured_tz_name
 from copycord.common import inprocess
 from copycord.common import install_identity
@@ -327,7 +327,7 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "USER_TOKEN_FALLBACK_WEBHOOK": True,
     "USER_TOKEN_TYPING": False,
     "USER_TOKEN_LINKS_ONLY": False,
-    # ignored: proxies are mandatory for user tokens
+    # off: this mapping's tokens talk to Discord from the server's own address
     "USER_TOKEN_USE_PROXIES": True,
     "USER_TOKEN_STICKY_NICKNAME": False,
     "USER_TOKEN_STICKY_AVATAR": False,
@@ -1231,6 +1231,15 @@ def _token_check_proxy(token: str) -> str | None:
 
 def _proxies_required_response() -> JSONResponse:
     return JSONResponse({"ok": False, "error": PROXIES_REQUIRED_ERROR}, status_code=400)
+
+
+def _mapping_uses_proxies(mapping_id: str) -> bool:
+    """Whether the mapping's tokens go through proxies (``USER_TOKEN_USE_PROXIES``, default on)."""
+    try:
+        row = db.get_mapping_by_id(mapping_id) or {}
+    except Exception:
+        row = {}
+    return token_use_proxy(row.get("settings") or {})
 
 
 # Most admin-side token checks in flight at once, across all proxies.
@@ -4952,10 +4961,14 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
     old_host_id = int(existing["original_guild_id"] or 0) if existing else 0
     old_clone_id = int(existing["cloned_guild_id"] or 0) if existing else 0
 
-    # Proxies are mandatory for user tokens. Refuse only the save that turns them on
-    # with tokens attached; any other save of a mapping using tokens gets a warning.
+    # Tokens of a mapping that uses proxies need proxies configured. Refuse only the
+    # save that turns tokens on with tokens attached; any other such save gets a warning.
     proxy_warning = None
-    if bool(settings.get("USE_USER_TOKENS", False)) and not _user_token_proxies():
+    if (
+        bool(settings.get("USE_USER_TOKENS", False))
+        and token_use_proxy(settings)
+        and not _user_token_proxies()
+    ):
         try:
             has_tokens = bool(db.get_enabled_mapping_tokens(mapping_id))
         except Exception:
@@ -5348,7 +5361,7 @@ async def api_update_mapping_token(
 
     if "enabled" in payload:
         turning_on = bool(payload.get("enabled")) and not bool(row.get("enabled"))
-        if turning_on and not _user_token_proxies():
+        if turning_on and _mapping_uses_proxies(mapping_id) and not _user_token_proxies():
             return _proxies_required_response()
         db.set_mapping_token_enabled(token_id, bool(payload.get("enabled")))
         _notify_user_tokens_changed()

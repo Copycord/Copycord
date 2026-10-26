@@ -6,18 +6,19 @@
 #  version 3.0. A copy of the license is available at:
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
-"""Proxies are mandatory for user tokens.
+"""Proxies for user tokens: on by default, optional per mapping.
 
-A user token never talks to Discord (REST or gateway) from the server's own
-address. With no proxy lease for a token, no request goes out for it.
-``USER_TOKEN_USE_PROXIES`` stays readable in stored settings so old databases
-load, but its value is ignored.
+``USER_TOKEN_USE_PROXIES`` (default on) decides it per mapping. A token used by
+several mappings goes through a proxy if any of them has it on. A proxied token
+never falls back to the server's own address: with no proxy lease, no request
+goes out for it. With the setting off, that mapping's tokens talk to Discord
+(REST and gateway) directly and never ask the proxy pool for a lease.
 """
 from __future__ import annotations
 
 import time
 
-# Always on; kept as a name so every call site reads the same rule.
+# The default when a mapping has no stored value.
 USE_PROXY = True
 
 PROXIES_REQUIRED_ERROR = "Proxies are required for user tokens. Add proxies first."
@@ -64,8 +65,39 @@ async def lease_with_timezone(pool, token: str, *, time_cap: float = ROTATE_TIME
 
 
 def token_use_proxy(settings=None) -> bool:
-    """Whether token requests go through a proxy: always, whatever the stored setting says."""
-    return USE_PROXY
+    """Whether a mapping's token requests go through a proxy.
+
+    ``USER_TOKEN_USE_PROXIES`` from ``settings``; missing or None means on.
+    """
+    if not settings:
+        return USE_PROXY
+    value = settings.get("USER_TOKEN_USE_PROXIES", USE_PROXY)
+    if value is None:
+        return USE_PROXY
+    if isinstance(value, str):
+        return value.strip().lower() not in ("0", "false", "no", "off", "")
+    return bool(value)
+
+
+# Token values every mapping using them has proxies off, from the server's last
+# plan. Empty until the first plan, so until then every token is proxied.
+_direct_tokens: frozenset = frozenset()
+
+
+def set_direct_tokens(values) -> None:
+    """Publish the token values allowed to go direct (no mapping using them wants proxies)."""
+    global _direct_tokens
+    _direct_tokens = frozenset(v for v in (values or ()) if v)
+
+
+def resolve_use_proxy(token: str, use_proxy: bool = USE_PROXY) -> bool:
+    """Whether this request for ``token`` goes through a proxy.
+
+    A token goes direct only when the caller's mapping has proxies off and so
+    does every other mapping using the token: if any of them wants proxies, the
+    token uses one.
+    """
+    return bool(use_proxy) or token not in _direct_tokens
 
 
 def proxies_configured(pool=None) -> bool:
@@ -81,8 +113,8 @@ def proxies_configured(pool=None) -> bool:
 
 
 TOKENS_DISABLED_NOTICE = (
-    "Token message cloning is disabled: no proxies are configured. "
-    "Add proxies in the Proxy settings to enable it."
+    "Token message cloning is disabled for mappings that use proxies: no proxies are "
+    "configured. Add proxies in the Proxy settings to enable it."
 )
 TOKENS_ENABLED_NOTICE = "Proxies found: token message cloning is enabled."
 # Set once the disabled notice is logged; cleared when proxies come back.

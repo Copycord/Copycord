@@ -31,6 +31,7 @@ from copycord.common import selfbot_headers as sh
 from copycord.common import traffic_capture
 from copycord.common.env import is_dev
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
+from copycord.common.token_proxy import resolve_use_proxy
 
 logger = logging.getLogger("common.wire_probe")
 
@@ -152,9 +153,11 @@ def _placeholder(token: str) -> str:
 
 
 async def _probe(token: str, placeholder: str) -> tuple[dict, Optional[str]]:
-    session = await sh.get_tls_session(token, use_proxy=True)
+    # Probe from the exit real sends use: direct only when no mapping using the token wants proxies.
+    use_proxy = resolve_use_proxy(token, False)
+    session = await sh.get_tls_session(token, use_proxy=use_proxy)
     # Read after the session: opening it is what takes the lease.
-    proxy = _get_proxy_pool().current(token)
+    proxy = _get_proxy_pool().current(token) if use_proxy else None
 
     # Build the headers exactly as a real send does, or the probe reports
     # differences that only exist in the probe.
