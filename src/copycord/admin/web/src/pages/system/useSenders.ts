@@ -15,7 +15,7 @@ export interface SendersState {
   items: Sender[] | undefined;
   /** Token message cloning is on for a mapping; undefined until the first answer. */
   enabled: boolean | undefined;
-  /** Each mapping with its token counts; undefined until the first answer. */
+  /** The mappings the table filters by; undefined until the first answer. */
   mappings: SenderMapping[] | undefined;
   /** The last poll failed. */
   error: boolean;

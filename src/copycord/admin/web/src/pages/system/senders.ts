@@ -1,7 +1,8 @@
-// Pure logic of the sending accounts table: the status of a row, the client side search and column
-// sort over the rows already loaded, and the Discord default avatar colour of an account.
+// Pure logic of the sending accounts table: the status of a row, the mapping filter, the status
+// counts, the client side search and column sort over the rows already loaded, and the Discord
+// default avatar colour of an account.
 
-import type { Sender } from "../../types/system";
+import type { Sender, SenderMapping, SenderState } from "../../types/system";
 
 export type SenderStatus = "online" | "idle" | "busy" | "connecting" | "offline" | "revoked" | "disabled";
 
@@ -26,6 +27,37 @@ export function senderStatus(s: Pick<Sender, "state" | "presence">): SenderStatu
 /** The name the Account column shows: display name, then username, then id. */
 export function senderName(s: Pick<Sender, "id" | "username" | "display_name">): string {
   return s.display_name || s.username || s.id;
+}
+
+/** The mapping dropdown's value for every account. */
+export const ALL_MAPPINGS = "";
+
+/** The dropdown's options: All mappings, then each mapping as the API orders them, a paused one marked. */
+export function mappingOptions(mappings: readonly SenderMapping[] | undefined): Array<{ value: string; label: string }> {
+  return [
+    { value: ALL_MAPPINGS, label: "All mappings" },
+    ...(mappings ?? []).map((m) => ({ value: m.id, label: m.status === "paused" ? `${m.name} (paused)` : m.name })),
+  ];
+}
+
+/** The chosen mapping while the API still lists it, else All mappings. */
+export function liveMapping(mappings: readonly SenderMapping[] | undefined, id: string): string {
+  return id !== ALL_MAPPINGS && mappings?.some((m) => m.id === id) ? id : ALL_MAPPINGS;
+}
+
+/** The accounts of one mapping (a shared token is in each of its mappings); All mappings keeps every one. */
+export function senderInMapping(s: Pick<Sender, "mapping_ids">, id: string): boolean {
+  return id === ALL_MAPPINGS || (s.mapping_ids ?? []).includes(id);
+}
+
+/** The status line's order; an online account counts as online whatever its presence. */
+export const STATE_ORDER: readonly SenderState[] = ["online", "connecting", "offline", "disabled", "revoked"];
+
+/** How many accounts are in each state, the ones that have none left out, in STATE_ORDER. */
+export function stateCounts(items: readonly Pick<Sender, "state">[]): Array<{ state: SenderState; n: number }> {
+  const n = new Map<SenderState, number>();
+  for (const s of items) n.set(s.state, (n.get(s.state) ?? 0) + 1);
+  return STATE_ORDER.flatMap((state) => (n.get(state) ? [{ state, n: n.get(state)! }] : []));
 }
 
 /** Rows whose name, username or status label holds the query, case-insensitive. A blank query keeps all. */

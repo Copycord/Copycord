@@ -1,8 +1,8 @@
 // The sending accounts under the Database card: one row per account that posts cloned messages,
 // live from /api/system/senders. Avatar and name, username, status dot, how long it has been online
 // (ticking), the last send and how many messages it sent. Revoked and disabled rows are dimmed.
-// A search and a column sort over the loaded rows live in state, so each 5 s poll swaps the rows
-// underneath without losing them.
+// A mapping dropdown, a search and a column sort over the loaded rows live in state, so each 5 s poll
+// swaps the rows underneath without losing them. The status line over the table counts the rows shown.
 
 import { useEffect, useMemo, useState } from "react";
 import { cx, useReveal } from "../../components/ui";
@@ -12,14 +12,19 @@ import { formatUptime } from "../dashboard/model";
 import { MUTED } from "../messages/MessagesSkeleton";
 import { absoluteTime, relativeTime } from "../messages/model";
 import {
+  ALL_MAPPINGS,
   DEFAULT_AVATAR_COLORS,
   STATUS_LABEL,
   defaultAvatarIndex,
   filterSenders,
+  liveMapping,
+  mappingOptions,
   nextSort,
+  senderInMapping,
   senderName,
   senderStatus,
   sortSenders,
+  stateCounts,
 } from "./senders";
 import type { SenderSort, SenderStatus } from "./senders";
 import {
@@ -41,11 +46,11 @@ import {
   SendersHead,
   SendersHeader,
   SendersLoadingRows,
+  SendersStatus,
+  SendersStatusBar,
   SendersToolbar,
 } from "./SendersSkeleton";
-import { MappingsSection } from "./MappingsSection";
 import { useSenders } from "./useSenders";
-import type { SendersState } from "./useSenders";
 
 const DASH = "-";
 
@@ -163,32 +168,28 @@ function SenderRow({ s, now }: { s: Sender; now: number }) {
 
 const accounts = (n: number) => `${n.toLocaleString()} ${n === 1 ? "account" : "accounts"}`;
 
-/** The mappings and the sending accounts off one senders poll. */
-export function SystemSenders() {
-  const state = useSenders();
-  return (
-    <>
-      <MappingsSection mappings={state.mappings} error={state.error} />
-      <SendersTableView {...state} />
-    </>
-  );
-}
-
 export function SendersTable() {
-  return <SendersTableView {...useSenders()} />;
-}
-
-function SendersTableView({ items, enabled, error, busy }: SendersState) {
+  const { items, enabled, mappings, error, busy } = useSenders();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SenderSort | null>(null);
+  const [picked, setPicked] = useState(ALL_MAPPINGS);
+  // A mapping gone from a later poll reads as All mappings on that same render, then the choice is dropped.
+  const mapping = liveMapping(mappings, picked);
+  useEffect(() => {
+    if (mappings !== undefined && mapping !== picked) setPicked(mapping);
+  }, [mappings, mapping, picked]);
   const reveal = useReveal(items !== undefined || error);
   useLastCount(SENDERS_COUNT_KEY, items?.length);
   const now = Date.now();
   const searching = query.trim() !== "";
-  const rows = useMemo(() => (items ? sortSenders(filterSenders(items, query), sort) : undefined), [items, query, sort]);
+  const scoped = useMemo(() => items?.filter((s) => senderInMapping(s, mapping)), [items, mapping]);
+  const rows = useMemo(() => (scoped ? sortSenders(filterSenders(scoped, query), sort) : undefined), [scoped, query, sort]);
+  const options = useMemo(() => mappingOptions(mappings), [mappings]);
 
   const count =
-    items === undefined ? (error ? null : <SendersCountBar />) : searching ? `${rows!.length.toLocaleString()} of ${accounts(items.length)}` : accounts(items.length);
+    scoped === undefined ? (error ? null : <SendersCountBar />) : searching ? `${rows!.length.toLocaleString()} of ${accounts(scoped.length)}` : accounts(scoped.length);
+  // The same rows as the table: the mapping and the search both apply.
+  const status = rows === undefined ? (error ? null : <SendersStatusBar />) : <SendersStatus counts={stateCounts(rows)} />;
   // The chip's box is held until the first answer; a first poll that fails shows no chip.
   const chip =
     enabled !== undefined ? <SendersChip on={enabled} /> : items === undefined && !error ? <SendersChipBox /> : null;
@@ -205,9 +206,16 @@ function SendersTableView({ items, enabled, error, busy }: SendersState) {
 
   return (
     <section aria-labelledby="system-senders-title" className={SENDERS_SECTION}>
-      <SendersHeader count={count} chip={chip} />
+      <SendersHeader status={status} count={count} chip={chip} />
       <div>
-        <SendersToolbar query={query} onQuery={setQuery} />
+        <SendersToolbar
+          query={query}
+          onQuery={setQuery}
+          mapping={mapping}
+          mappingOptions={options}
+          onMapping={setPicked}
+          mappingsPending={mappings === undefined && !error}
+        />
       </div>
       <div id="system-senders" className={SENDERS_WRAP} aria-busy={busy && items !== undefined ? true : undefined}>
         <table aria-label="Sending accounts" className={SENDERS_TABLE} style={SENDERS_TABLE_STYLE}>

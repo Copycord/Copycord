@@ -6,8 +6,11 @@ import type { CSSProperties, ReactNode } from "react";
 import { Skeleton, cx } from "../../components/ui";
 import { readLastCount } from "../../components/ui/lastCount";
 import { COUNT, HEAD_ROW, SORT_BTN, TH } from "../logs/LogsSkeleton";
+import type { SenderState } from "../../types/system";
+import { ToolbarSelect } from "../channels/ToolbarSelect";
+import type { ToolbarOption } from "../channels/ToolbarSelect";
 import { MessagesIcon } from "../messages/icons";
-import { CELL_TEXT, ROW, SEARCH_INPUT, TABLE, TD, TOOLBAR } from "../messages/MessagesSkeleton";
+import { CELL_TEXT, ROW, SEARCH_INPUT, TABLE, TD, TOOLBAR, TOOLBAR_ROW } from "../messages/MessagesSkeleton";
 import type { SenderSort, SenderSortKey } from "./senders";
 
 export type SenderColumn = SenderSortKey;
@@ -86,15 +89,37 @@ export function SendersChipBox() {
   );
 }
 
-/** Title left; the account count and the Enabled or Disabled chip right, as the Messages header without its subtitle. */
-export function SendersHeader({ count, chip = null }: { count: ReactNode; chip?: ReactNode }) {
+/** The status line until the first answer: a bar in its line box. */
+export function SendersStatusBar() {
+  return <Skeleton.Text className={COUNT} width={150} />;
+}
+
+/** How the listed accounts stand: a green dot and the online count, then the other states muted, zeros left out. */
+export function SendersStatus({ counts }: { counts: ReadonlyArray<{ state: SenderState; n: number }> }) {
+  return counts.map(({ state, n }, i) => (
+    <span key={state} data-count={state} className={cx("inline-flex items-center gap-1.5", i > 0 && "ml-3")}>
+      {state === "online" ? <span aria-hidden="true" className="inline-block size-2 flex-none rounded-full bg-good" /> : null}
+      <span className={state === "online" ? "text-text" : undefined}>
+        {n.toLocaleString()} {state}
+      </span>
+    </span>
+  ));
+}
+
+/** Title left; the status line, the account count and the Enabled or Disabled chip right, as the Messages header
+ *  without its subtitle. One line at any width: from md up the title and the right side share it and the status
+ *  line truncates, below md the right side takes the line under the title whole. */
+export function SendersHeader({ status = null, count, chip = null }: { status?: ReactNode; count: ReactNode; chip?: ReactNode }) {
   return (
-    <div className="mb-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
-      <h2 id="system-senders-title" className="m-0 text-[22px] font-bold text-text">
+    <div className="mb-3 flex items-end justify-between gap-x-4 gap-y-1 max-md:flex-col max-md:items-stretch">
+      <h2 id="system-senders-title" className="m-0 shrink-0 text-[22px] font-bold text-text">
         Token Message Cloning
       </h2>
-      <div className="flex items-center gap-2.5">
-        <span id="system-senders-count" className={COUNT} aria-live="polite">
+      <div className="flex min-w-0 items-center justify-end gap-2.5 max-md:justify-start">
+        <span id="system-senders-status" className={cx(COUNT, "min-w-0 truncate tabular-nums")}>
+          {status}
+        </span>
+        <span id="system-senders-count" className={cx(COUNT, "shrink-0 tabular-nums")} aria-live="polite">
           {count}
         </span>
         {chip}
@@ -103,27 +128,58 @@ export function SendersHeader({ count, chip = null }: { count: ReactNode; chip?:
   );
 }
 
-/** The toolbar card with the one search input; Escape clears it. */
-export function SendersToolbar({ query, onQuery }: { query: string; onQuery: (q: string) => void }) {
+export interface SendersToolbarProps {
+  query: string;
+  onQuery: (q: string) => void;
+  mapping?: string;
+  mappingOptions?: readonly ToolbarOption[];
+  onMapping?: (id: string) => void;
+  /** The mappings are still loading: a bar stands where All mappings goes. */
+  mappingsPending?: boolean;
+}
+
+const NO_MAPPINGS: readonly ToolbarOption[] = [{ value: "", label: "All mappings" }];
+
+/** The toolbar card: the search input (Escape clears it) and the mapping dropdown, as on the Messages page. */
+export function SendersToolbar({
+  query,
+  onQuery,
+  mapping = "",
+  mappingOptions = NO_MAPPINGS,
+  onMapping = () => {},
+  mappingsPending,
+}: SendersToolbarProps) {
   return (
     <div className={TOOLBAR}>
-      <div className="relative flex w-full items-center">
-        <MessagesIcon name="search" size={15} className="pointer-events-none absolute left-2.5 text-muted" />
-        <input
-          type="search"
-          id="system-senders-search"
-          className={SEARCH_INPUT}
-          placeholder="Search accounts"
-          aria-label="Search accounts"
-          autoComplete="off"
-          value={query}
-          onChange={(e) => onQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape" && query) {
-              e.preventDefault();
-              onQuery("");
-            }
-          }}
+      <div className={TOOLBAR_ROW}>
+        <div className="relative flex min-w-[240px] flex-1 items-center max-md:col-span-2 max-md:min-w-0">
+          <MessagesIcon name="search" size={15} className="pointer-events-none absolute left-2.5 text-muted" />
+          <input
+            type="search"
+            id="system-senders-search"
+            className={SEARCH_INPUT}
+            placeholder="Search accounts"
+            aria-label="Search accounts"
+            autoComplete="off"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query) {
+                e.preventDefault();
+                onQuery("");
+              }
+            }}
+          />
+        </div>
+        <ToolbarSelect
+          id="system-senders-mapping"
+          label="Filter by mapping"
+          value={mapping}
+          options={mappingOptions}
+          pending={mappingsPending}
+          pendingLabel="All mappings"
+          className="max-md:col-span-2"
+          onChange={onMapping}
         />
       </div>
     </div>
@@ -206,9 +262,9 @@ export function SendersLoadingRows({ rows = readLastCount(SENDERS_COUNT_KEY, 3, 
 export function SendersTableSkeleton() {
   return (
     <section aria-labelledby="system-senders-title" className={SENDERS_SECTION}>
-      <SendersHeader count={<SendersCountBar />} chip={<SendersChipBox />} />
+      <SendersHeader status={<SendersStatusBar />} count={<SendersCountBar />} chip={<SendersChipBox />} />
       <div inert>
-        <SendersToolbar query="" onQuery={() => {}} />
+        <SendersToolbar query="" onQuery={() => {}} mappingsPending />
       </div>
       <div inert className={SENDERS_WRAP}>
         <table aria-label="Sending accounts" className={SENDERS_TABLE} style={SENDERS_TABLE_STYLE}>

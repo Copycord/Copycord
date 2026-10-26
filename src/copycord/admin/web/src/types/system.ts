@@ -54,23 +54,16 @@ export interface Sender {
   /** Unix seconds of the last send. */
   last_used: number | null;
   use_count: number;
+  /** The mappings the account sends for, sorted; a shared token lists each. */
+  mapping_ids: string[];
 }
 
-/** One mapping and how its sending accounts stand. A token shared by several mappings counts under each. */
+/** A mapping the sending accounts table filters by. */
 export interface SenderMapping {
   id: string;
   /** The mapping name, else a guild name, else a short id. */
   name: string;
   status: "active" | "paused";
-  /** Token message cloning is on for this mapping. */
-  tokens_enabled: boolean;
-  total: number;
-  online: number;
-  connecting: number;
-  /** A paused mapping counts every running token here. */
-  offline: number;
-  disabled: number;
-  revoked: number;
 }
 
 /** GET /api/system/senders */

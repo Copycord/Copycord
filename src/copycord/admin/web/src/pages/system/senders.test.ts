@@ -3,7 +3,7 @@ import type { Sender } from "../../types/system";
 import { STATUS_LABEL, STATUS_ORDER, filterSenders, senderStatus, sortSenders } from "./senders";
 
 function sender(id: string, state: Sender["state"], presence: Sender["presence"] = null): Sender {
-  return { id, username: `relay.${id}`, display_name: null, avatar_url: null, state, presence, since: null, last_used: null, use_count: 0 };
+  return { id, username: `relay.${id}`, display_name: null, avatar_url: null, state, presence, since: null, last_used: null, use_count: 0, mapping_ids: [] };
 }
 
 describe("senderStatus", () => {

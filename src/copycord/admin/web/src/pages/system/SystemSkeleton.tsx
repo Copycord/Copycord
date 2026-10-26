@@ -1,14 +1,13 @@
 // The System page while its chunk downloads: the same collapsed Database card the page shows, with its
 // real title and the collapse button as inert chrome, a bar where the last backup time goes, and the
 // panel's buttons, archive table head and loading rows (hidden while collapsed, as on the page), then
-// the mappings section with loading cards, then the sending accounts section with its real header, toolbar, head and loading rows. Kept
+// the sending accounts section with its real header, toolbar, head and loading rows. Kept
 // out of System.tsx so the app shell can show it without pulling the page chunk in; the page takes its
 // shared classes, the table head and the loading rows from here.
 
 import { Card, Skeleton, cx } from "../../components/ui";
 import { readLastCount } from "../../components/ui/lastCount";
 import { CHEV, CHEV_BUTTON, GhostButton, LinkButton } from "./buttons";
-import { MappingsSectionSkeleton } from "./MappingsSkeleton";
 import { SendersTableSkeleton } from "./SendersSkeleton";
 
 export const DB_CARD = "mt-[18px] max-w-full";
@@ -137,7 +136,6 @@ export function SystemSkeleton() {
           </div>
         </div>
       </Card>
-      <MappingsSectionSkeleton />
       <SendersTableSkeleton />
     </div>
   );
