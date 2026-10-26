@@ -50,6 +50,9 @@ TOKEN_POOL_CLOSE_CAP = 30.0
 ROLE_STOP_MARGIN = 15.0
 # How long a stop waits for the server role before it says it is over budget.
 SERVER_STOP_BUDGET = TOKEN_POOL_CLOSE_CAP + ROLE_STOP_MARGIN
+# How much longer than its stop budget a threaded role waits for its thread
+# before it abandons it (a hung close) so the role can be started again.
+ROLE_ABANDON_GRACE = 2 * ROLE_STOP_MARGIN
 # The status a role reports from a stop request until its task has really ended.
 STOPPING = "stopping"
 

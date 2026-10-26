@@ -500,9 +500,9 @@ def test_threaded_role_over_its_budget_is_waited_for_not_abandoned(monkeypatch, 
     async def main():
         rs = RoleSupervisor(
             "server",
-            ThreadedRole("server", _SlowShutdownRole, stop_timeout=0.1),
+            ThreadedRole("server", _SlowShutdownRole, stop_timeout=0.1, abandon_grace=5.0),
             backoff=FAST,
-            stop_timeout=5.0,
+            stop_timeout=10.0,
         )
         rs.start()
         await _wait_until(lambda: _BlockingRole.instances and _BlockingRole.instances[0].thread)
@@ -518,17 +518,105 @@ def test_threaded_role_over_its_budget_is_waited_for_not_abandoned(monkeypatch, 
         assert (await stop)["status"] == "stopped"
         assert inst.finished
         assert "still shutting down after its" in caplog.text
+        # Ended during the grace: not abandoned, and no wait for the rest of the grace.
+        assert "abandoning it" not in caplog.text
+        assert len(states) < 100
+
+    asyncio.run(main())
+
+
+def test_threaded_role_within_its_budget_logs_nothing(monkeypatch, caplog):
+    monkeypatch.setattr(logging.getLogger("copycord"), "propagate", True)
+    _BlockingRole.instances.clear()
+
+    async def main():
+        rs = RoleSupervisor(
+            "server",
+            ThreadedRole("server", _BlockingRole, stop_timeout=5.0, abandon_grace=5.0),
+            backoff=FAST,
+            stop_timeout=15.0,
+        )
+        rs.start()
+        await _wait_until(lambda: _BlockingRole.instances and _BlockingRole.instances[0].thread)
+        with caplog.at_level("WARNING", logger="copycord.supervisor"):
+            assert (await rs.stop())["status"] == "stopped"
+        assert "still shutting down" not in caplog.text
+        assert "abandoning it" not in caplog.text
+
+    asyncio.run(main())
+
+
+class _HungShutdownRole(_BlockingRole):
+    """_shutdown never lets run() return, like a session close that hangs."""
+
+    async def _shutdown(self):
+        self.shutdown_called = True
+        self.loop = asyncio.get_running_loop()
+
+
+def test_threaded_role_that_never_exits_is_abandoned_after_budget_and_grace(
+    monkeypatch, caplog
+):
+    monkeypatch.setattr(logging.getLogger("copycord"), "propagate", True)
+    _BlockingRole.instances.clear()
+
+    def build():
+        return _HungShutdownRole() if not _BlockingRole.instances else _BlockingRole()
+
+    async def main():
+        rs = RoleSupervisor(
+            "server",
+            ThreadedRole("server", build, stop_timeout=0.1, abandon_grace=0.3),
+            backoff=FAST,
+            stop_timeout=5.0,
+        )
+        rs.start()
+        await _wait_until(lambda: _BlockingRole.instances and _BlockingRole.instances[0].thread)
+        hung = _BlockingRole.instances[0]
+        try:
+            stop = asyncio.ensure_future(rs.stop())
+            await asyncio.sleep(0)
+            states = []
+            with caplog.at_level("WARNING", logger="copycord.supervisor"):
+                while not stop.done():
+                    states.append(rs.status().get("status"))
+                    await asyncio.sleep(0.02)
+                r = await stop
+            # Stopping for the whole budget and grace, then a startable state.
+            assert len(states) > 5 and all(st == "stopping" for st in states)
+            assert r["status"] == "stopped"
+            assert hung.shutdown_called and hung.thread.is_alive()
+            assert not rs.is_running() and not rs.is_stopping()
+            assert "status" not in rs.status()
+            assert caplog.text.count("abandoning it, state reset so it can be started again") == 1
+            assert (await rs.handle({"cmd": "start"}))["status"] == "started"
+            await _wait_until(
+                lambda: len(_BlockingRole.instances) == 2 and _BlockingRole.instances[1].thread
+            )
+            assert rs.is_running()
+            assert (await rs.stop())["status"] == "stopped"
+            assert caplog.text.count("abandoning it") == 1
+        finally:
+            hung.loop.call_soon_threadsafe(hung._stop.set)
+        await _wait_until(lambda: not hung.thread.is_alive())
 
     asyncio.run(main())
 
 
 def test_server_stop_budget_is_built_from_the_pool_close_cap():
-    from copycord.common.control_protocol import SERVER_STOP_BUDGET, TOKEN_POOL_CLOSE_CAP
+    from copycord.common.control_protocol import (
+        ROLE_ABANDON_GRACE,
+        SERVER_STOP_BUDGET,
+        TOKEN_POOL_CLOSE_CAP,
+    )
 
     assert SERVER_STOP_BUDGET > TOKEN_POOL_CLOSE_CAP
-    assert sup_mod.server_factory().stop_timeout == SERVER_STOP_BUDGET
+    role = sup_mod.server_factory()
+    assert role.stop_timeout == SERVER_STOP_BUDGET
+    assert role.abandon_grace == ROLE_ABANDON_GRACE > 0
     sup = build_supervisor(_fakes(), control_ports={"server": 0, "client": 0}, backoff=FAST)
-    assert sup.roles["server"].stop_timeout > SERVER_STOP_BUDGET
+    # The supervisor outwaits the role's budget plus its grace, so the role's own lines come first.
+    assert sup.roles["server"].stop_timeout > SERVER_STOP_BUDGET + ROLE_ABANDON_GRACE
 
 
 # Busy ports at startup

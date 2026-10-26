@@ -32,6 +32,7 @@ from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 from copycord.common.config import CURRENT_VERSION
 from copycord.common.control_protocol import (
     ALLOWED_ENV,
+    ROLE_ABANDON_GRACE,
     SERVER_STOP_BUDGET,
     STOPPING,
     serve_json,
@@ -437,10 +438,17 @@ class ThreadedRole:
     Cancelling the task runs the role's _shutdown() and joins the thread.
     """
 
-    def __init__(self, name: str, build: Callable[[], object], stop_timeout: float = 15.0):
+    def __init__(
+        self,
+        name: str,
+        build: Callable[[], object],
+        stop_timeout: float = 15.0,
+        abandon_grace: float = ROLE_ABANDON_GRACE,
+    ):
         self.name = name
         self.build = build
         self.stop_timeout = stop_timeout
+        self.abandon_grace = abandon_grace
 
     async def __call__(self) -> None:
         outer = asyncio.get_running_loop()
@@ -499,14 +507,21 @@ class ThreadedRole:
                 await asyncio.wait_for(asyncio.shield(done), self.stop_timeout)
             except asyncio.TimeoutError:
                 # Ending the task now would report stopped while the thread still
-                # closes sessions; keep waiting (a second cancel at exit ends it).
+                # closes sessions; keep waiting, up to the grace (a second cancel at exit ends it).
                 logger.warning(
                     "[%s] still shutting down after its %.0fs stop budget; waiting for it to exit",
                     self.name,
                     self.stop_timeout,
                 )
                 try:
-                    await asyncio.shield(done)
+                    await asyncio.wait_for(asyncio.shield(done), self.abandon_grace)
+                except asyncio.TimeoutError:
+                    # A hung close: give up on the (daemon) thread so the role can start again.
+                    logger.error(
+                        "[%s] thread still running after %.0fs; abandoning it, state reset so it can be started again",
+                        self.name,
+                        self.stop_timeout + self.abandon_grace,
+                    )
                 except Exception:
                     logger.debug("[%s] role exited with an error while stopping", self.name, exc_info=True)
             except Exception:
@@ -660,8 +675,10 @@ def build_supervisor(
             factories[name],
             backoff=backoff,
             restart_on_exit=is_admin,
-            # A little past the server's own budget, so its over-budget line comes first.
-            stop_timeout=SERVER_STOP_BUDGET + STOP_GRACE if name == "server" else 20.0,
+            # A little past the server's own budget and grace, so its own lines come first.
+            stop_timeout=(
+                SERVER_STOP_BUDGET + ROLE_ABANDON_GRACE + STOP_GRACE if name == "server" else 20.0
+            ),
             # Real server/client read their config from os.environ.
             before_start=_apply_db_config if real and not is_admin else None,
         )
