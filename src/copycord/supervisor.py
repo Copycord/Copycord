@@ -92,7 +92,21 @@ def port_free(host: str, port: int) -> bool:
             if port_in_use(e):
                 return False
             raise
-    return True
+    return not (sys.platform == "win32" and _wildcard_busy(port))
+
+
+def _wildcard_busy(port: int) -> bool:
+    """Whether another process listens on this port on every interface.
+
+    Windows lets 127.0.0.1:port bind beside a 0.0.0.0:port listener (a Docker
+    published port, say), so a bind on the dashboard host alone misses it.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("0.0.0.0", port))
+        except OSError as e:
+            return port_in_use(e)
+    return False
 
 
 async def wait_for_port(host: str, port: int, timeout: float = PORT_WAIT) -> None:

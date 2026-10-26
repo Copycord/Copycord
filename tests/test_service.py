@@ -1,12 +1,14 @@
 """Tests for `copycord service`: unit, plist and task XML and the commands per OS."""
 import plistlib
 import subprocess
+import sys
 from pathlib import Path, PurePosixPath
 
 import pytest
 
 from copycord import __main__ as cli
 from copycord import service
+from copycord import supervisor
 
 
 class FakeRun:
@@ -645,6 +647,18 @@ def test_port_free_sees_a_listening_socket():
         s.bind(("127.0.0.1", 0))
         s.listen()
         assert not service.port_free("127.0.0.1", s.getsockname()[1])
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows lets a loopback bind share a wildcard port")
+def test_port_free_sees_a_wildcard_listener_on_windows():
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("0.0.0.0", 0))
+        s.listen()
+        port = s.getsockname()[1]
+        assert not service.port_free("127.0.0.1", port)
+        assert not supervisor.port_free("127.0.0.1", port)
 
 
 # CLI
