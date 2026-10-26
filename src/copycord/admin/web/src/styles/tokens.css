@@ -136,6 +136,9 @@
   --color-run-text: #3ecf8e;
   --color-stop-bg: #311b27;
   --color-stop-text: #f7a1b2;
+  /* Stopping: the warning tint laid the same way, from a Stop click until the role has exited. */
+  --color-stopping-bg: #32271a;
+  --color-stopping-text: #f5a524;
   --color-ok: #3ecf8e;
   --color-warn: #f5a524;
   --color-fail: #f0506e;

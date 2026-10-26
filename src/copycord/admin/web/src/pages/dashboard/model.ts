@@ -2,16 +2,25 @@
 
 import { api } from "../../lib/api";
 import type { BusMessage, LogStream } from "../../types/api";
-import type { BotRole, BotStatus, BotStatuses, LogStreamPayload, StatusResponse } from "../../types/dashboard";
+import type { BotRole, BotState, BotStatus, BotStatuses, LogStreamPayload, StatusResponse } from "../../types/dashboard";
 
 export const STATUS_URL = "/api/status";
 export const VERSION_URL = "/version";
 export const MAX_LOG_LINES = 10000;
 
 export const EMPTY_STATUSES: BotStatuses = {
-  server: { running: false },
-  client: { running: false },
+  server: { running: false, state: "stopped" },
+  client: { running: false, state: "stopped" },
 };
+
+const STATES: readonly BotState[] = ["running", "stopping", "stopped"];
+
+/** A role's state: the one /api/status names, else running or stopped from the running flag. */
+export function stateOf(raw: Partial<BotStatus> | undefined): BotState {
+  const st = raw?.state;
+  if (st && STATES.includes(st)) return st;
+  return raw?.running ? "running" : "stopped";
+}
 
 // /start and /stop answer {"ok": true} to a JSON request (a 303 to "/" only
 // for a plain form post). The CSRF header comes from lib/api.ts.
@@ -21,9 +30,11 @@ export const clearLogs = (which: LogStream) => api.post<unknown>(`/logs/clear/${
 
 export function toBotStatus(raw: Partial<BotStatus> | undefined): BotStatus {
   const r = raw ?? {};
+  const state = stateOf(r);
   return {
-    running: !!r.running,
-    uptime_sec: r.uptime_sec ?? null,
+    running: state !== "stopped",
+    state,
+    uptime_sec: state === "running" ? (r.uptime_sec ?? null) : null,
     status: typeof r.status === "string" ? r.status : "",
   };
 }
@@ -46,13 +57,17 @@ function patchFrom(raw: Record<string, unknown>, noteKey = "status"): BotStatusP
 /**
  * A role's status after an update: fields the update leaves out keep their last value, so a push with
  * only the status note (the bots' AdminBus.status() never sends uptime_sec) does not blank the uptime
- * or flip running. A stopped role has no uptime, and a note does not outlive a change of running.
+ * or flip running. Only a running role has an uptime, and a note does not outlive a change of state.
+ * A stopping role changes only on an update that names its state (an /api/status answer): the
+ * bots' own "Stopped" push comes at the start of their shutdown, long before they have exited.
  */
 export function mergeStatus(prev: BotStatus, patch: BotStatusPatch): BotStatus {
-  const running = patch.running ?? prev.running;
-  const flipped = running !== prev.running;
-  const uptime_sec = running ? (patch.uptime_sec ?? (flipped ? null : (prev.uptime_sec ?? null))) : null;
-  return { running, uptime_sec, status: patch.status ?? (flipped ? "" : (prev.status ?? "")) };
+  const was = stateOf(prev);
+  if (was === "stopping" && !patch.state) return prev;
+  const state: BotState = patch.state ?? (patch.running == null ? was : patch.running ? "running" : "stopped");
+  const flipped = state !== was;
+  const uptime_sec = state === "running" ? (patch.uptime_sec ?? (flipped ? null : (prev.uptime_sec ?? null))) : null;
+  return { running: state !== "stopped", state, uptime_sec, status: patch.status ?? (flipped ? "" : (prev.status ?? "")) };
 }
 
 /** A status push on /ws/ui, or null for any other message. */
@@ -100,10 +115,10 @@ export function formatUptime(sec: number | null | undefined): string {
 }
 
 /** The Status column text: the bot's note as sent; the bare "ready" and "active" notes read capitalized, and a bare
- * "stopped" note is blank since the State chip already says so. */
+ * "stopped" or "stopping" note is blank since the State chip already says so. */
 export function displayStatus(status: string | undefined): string {
   const raw = (status ?? "").trim();
-  if (/^stopped$/i.test(raw)) return "";
+  if (/^stopp(ed|ing)$/i.test(raw)) return "";
   return /^(active|ready)$/i.test(raw) ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : raw;
 }
 

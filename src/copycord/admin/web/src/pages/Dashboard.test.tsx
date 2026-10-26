@@ -353,15 +353,26 @@ describe("dashboard model", () => {
   });
 
   it("merges a partial status into the last one", () => {
-    const up = { running: true, uptime_sec: 65, status: "Starting" };
+    const up = { running: true, state: "running" as const, uptime_sec: 65, status: "Starting" };
     // A note only push keeps running and the uptime.
-    expect(mergeStatus(up, { running: true, status: "Logged in as cc" })).toEqual({ running: true, uptime_sec: 65, status: "Logged in as cc" });
+    expect(mergeStatus(up, { running: true, status: "Logged in as cc" })).toEqual({ ...up, status: "Logged in as cc" });
     expect(mergeStatus(up, {})).toEqual(up);
     expect(mergeStatus(up, { uptime_sec: 70 })).toEqual({ ...up, uptime_sec: 70 });
     // A stop drops the uptime and the old note.
-    expect(mergeStatus(up, { running: false })).toEqual({ running: false, uptime_sec: null, status: "" });
+    expect(mergeStatus(up, { running: false })).toEqual({ running: false, state: "stopped", uptime_sec: null, status: "" });
     // A start without an uptime has none yet, not the one from before the stop.
-    expect(mergeStatus({ running: false, uptime_sec: 30, status: "" }, { running: true })).toEqual({ running: true, uptime_sec: null, status: "" });
+    expect(mergeStatus({ running: false, uptime_sec: 30, status: "" }, { running: true })).toEqual({ running: true, state: "running", uptime_sec: null, status: "" });
+  });
+
+  it("keeps a stopping role stopping until an update names its state", () => {
+    const stopping = mergeStatus({ running: true, state: "running", uptime_sec: 65, status: "Logged in" }, { state: "stopping" });
+    // Still up, no uptime, no stale note.
+    expect(stopping).toEqual({ running: true, state: "stopping", uptime_sec: null, status: "" });
+    // The bots' own "Stopped" push at the start of their shutdown changes nothing.
+    expect(mergeStatus(stopping, { running: false, status: "Stopped" })).toBe(stopping);
+    expect(mergeStatus(stopping, { running: true, uptime_sec: 70 })).toBe(stopping);
+    // /api/status saying stopped ends it.
+    expect(mergeStatus(stopping, { running: false, state: "stopped" })).toEqual({ running: false, state: "stopped", uptime_sec: null, status: "" });
   });
 });
 

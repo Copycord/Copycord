@@ -43,12 +43,19 @@ export const BOTS_CELL = "border-b border-b-border px-3 py-2 align-middle text-[
 
 // Bots state badge: fill and text only,
 // the 1px border stays transparent so the chip keeps its box.
+// The badge is a one cell grid with an invisible "stopping" (the longest label) under the
+// label, so running, stopping, stopped and the skeleton all have the same box.
 export const BOTS_STATE =
-  "inline-block rounded-[12px] border border-transparent px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
+  "inline-grid justify-items-center rounded-[12px] border border-transparent px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold after:invisible after:col-start-1 after:row-start-1 after:content-['stopping']";
+export const BOTS_STATE_LABEL = "col-start-1 row-start-1";
 
 /** The Bots state badge until the first status lands: the badge box with a bar over it. */
 export function BotStatePending() {
-  return <Skeleton.Box className={BOTS_STATE}>stopped</Skeleton.Box>;
+  return (
+    <Skeleton.Box className={BOTS_STATE}>
+      <span className={BOTS_STATE_LABEL}>stopping</span>
+    </Skeleton.Box>
+  );
 }
 
 /** The label.toggle switch until its value lands: a bar the size of the 38x22 track. */
