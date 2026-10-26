@@ -81,7 +81,7 @@ Deleting a mapping removes the link between the two servers. The channels, roles
 Copycord posts cloned messages through channel webhooks. With token message cloning, a mapping posts them from real user accounts instead, so messages come from ordinary members.
 
 :::warning
-Sending messages from user accounts (self-bots) is against Discord's Terms of Service and can get those accounts banned.
+This feature uses user tokens. Discord may revoke your tokens or disable them. Only use accounts you are willing to lose.
 :::
 
 To send a mapping's messages from user accounts:
