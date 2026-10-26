@@ -70,7 +70,7 @@ from copycord.server.token_sender import (
     SEND_RATE_LIMITED,
     SEND_TRANSIENT,
 )
-from copycord.server.token_identity import TokenIdentityManager
+from copycord.server.token_identity import TokenIdentityManager, exhausted_action
 from copycord.server.token_pool import TokenSessionPool
 from copycord.server.emojis import EmojiManager
 from copycord.server.stickers import StickerManager
@@ -8254,10 +8254,8 @@ class ServerReceiver:
 
     @staticmethod
     def _identity_exhausted_action(settings: dict) -> str:
-        """Webhook-or-skip when a token can't deliver, from the shared toggle."""
-        return (
-            "webhook" if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True) else "skip"
-        )
+        """Webhook-or-skip when a token can't deliver, from the no-free-account policy."""
+        return exhausted_action(settings)
 
     async def _prepare_token_identity(
         self, *, mapping_id, cloned_guild_id, settings: dict, msg: dict, exclude=None
@@ -8265,7 +8263,7 @@ class ServerReceiver:
         """Run sticky-author identity prep. Returns (forced_token_id, action).
 
         (token_id, None) posts from that account. (None, 'webhook') or (None, 'skip') means
-        identity is active but out of free tokens, per USER_TOKEN_FALLBACK_WEBHOOK.
+        identity is active but out of free tokens, per USER_TOKEN_NO_FREE_ACCOUNT.
         (None, None) means identity mirroring is off. exclude holds token ids already tried
         for this message. Never raises; the message must still send.
         """
@@ -8540,7 +8538,8 @@ class ServerReceiver:
                 )
             elif identity_active:
                 logger.info(
-                    "[user-send] No token could deliver this identity's message and 'skip' is set; dropping from %s (clone ch=%s)",
+                    "[user-send] No token could deliver this identity's message and 'skip' is set "
+                    "(When no account is free: drop); dropping from %s (clone ch=%s)",
                     msg.get("author"),
                     target_channel_id,
                 )

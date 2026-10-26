@@ -153,6 +153,9 @@ class Config:
             "USER_TOKEN_PRESENCE": "random",
             "USER_TOKEN_PRESENCE_ROTATE": False,
             "USER_TOKEN_FALLBACK_WEBHOOK": True,
+            # USER_TOKEN_NO_FREE_ACCOUNT (webhook | drop | reuse) has no default here on
+            # purpose: when unset, the older fallback toggle above decides.
+            "USER_TOKEN_REUSE_IDLE_MINUTES": 30,
             "USER_TOKEN_TYPING": False,
             "USER_TOKEN_MIN_DELAY": 0,
             "USER_TOKEN_MAX_DELAY": 0,

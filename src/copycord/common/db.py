@@ -5468,7 +5468,7 @@ class DBManager:
         with self.lock:
             cur = self.conn.execute(
                 """
-                SELECT token_id, token_value, username, user_id
+                SELECT token_id, token_value, username, user_id, last_used
                 FROM mapping_user_tokens
                 WHERE mapping_id = ? AND enabled = 1
                 ORDER BY added_at ASC, token_id ASC
