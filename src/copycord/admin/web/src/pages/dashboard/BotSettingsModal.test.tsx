@@ -47,7 +47,8 @@ describe("BotSettingsModal", () => {
     stub();
     const dialog = await openModal();
     expect(within(dialog).getByText("Bot settings")).toBeTruthy();
-    expect(within(dialog).getByText("How each bot appears on Discord")).toBeTruthy();
+    expect(within(dialog).queryByText("How each bot appears on Discord")).toBeNull();
+    expect(within(dialog).queryByText(/Applies right away/)).toBeNull();
     const server = within(dialog).getByRole("region", { name: "Server bot" });
     const client = within(dialog).getByRole("region", { name: "Client bot" });
     await waitFor(() => expect(within(server).getByRole("combobox", { name: "Status" }).textContent).toContain("Online"));

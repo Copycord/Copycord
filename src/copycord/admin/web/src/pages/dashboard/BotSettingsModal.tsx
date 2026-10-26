@@ -80,7 +80,6 @@ export function BotSettingsModal({ open, onClose }: BotSettingsModalProps) {
       onClose={onClose}
       id="bot-settings-modal"
       title="Bot settings"
-      subtitle="How each bot appears on Discord"
       footer={
         <>
           <Button id="bot-settings-cancel" variant="ghost" onClick={onClose}>
@@ -122,7 +121,6 @@ export function BotSettingsModal({ open, onClose }: BotSettingsModalProps) {
             </div>
           </section>
         ))}
-        <p className="m-0 text-xs text-muted">Applies right away to a running bot, at the next start otherwise.</p>
       </div>
     </Modal>
   );
