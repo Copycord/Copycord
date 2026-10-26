@@ -402,6 +402,7 @@ def test_stop_reports_stopping_until_the_role_has_exited():
         await _wait_until(lambda: role.started == 1)
         task = rs._task
         stop = asyncio.ensure_future(rs.handle({"cmd": "stop"}))
+        await asyncio.sleep(0)
         seen = []
         while not stop.done():
             seen.append((role.exited, _quiet_status(rs.status())))
@@ -466,8 +467,11 @@ def test_stop_past_its_timeout_keeps_reporting_stopping_until_the_task_ends(
         assert role.exited
         st = rs.status()
         assert st["running"] is False and "status" not in st
-        assert rs._task is None
+        # A start before the done callback ran is not left stopping.
         assert (await rs.handle({"cmd": "start"}))["status"] == "started"
+        assert not rs.is_stopping() and rs.status()["running"] is True
+        await asyncio.sleep(0)
+        assert not rs.is_stopping()
         await _wait_until(lambda: role.started == 2)
         rs.stop_timeout = 5.0
         await rs.stop()
@@ -504,6 +508,7 @@ def test_threaded_role_over_its_budget_is_waited_for_not_abandoned(monkeypatch, 
         await _wait_until(lambda: _BlockingRole.instances and _BlockingRole.instances[0].thread)
         inst = _BlockingRole.instances[0]
         stop = asyncio.ensure_future(rs.stop())
+        await asyncio.sleep(0)
         states = []
         with caplog.at_level("WARNING", logger="copycord.supervisor"):
             while not stop.done():

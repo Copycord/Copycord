@@ -181,7 +181,7 @@ describe("BotsPanel stop", () => {
   /** Answers /api/status from `replies` in order, the last one for good. */
   function scripted(first: StatusResponse) {
     const replies: Array<StatusResponse | Error> = [first];
-    const calls = stubServer(() => (replies.length > 1 ? replies.shift()! : replies[0]));
+    const calls = stubServer(() => (replies.length > 1 ? replies.shift()! : replies[0]!));
     return { calls, then: (...next: Array<StatusResponse | Error>) => replies.splice(0, replies.length, ...next) };
   }
 

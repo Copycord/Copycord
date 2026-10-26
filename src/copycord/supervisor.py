@@ -225,6 +225,8 @@ class RoleSupervisor:
         self._task = asyncio.get_running_loop().create_task(
             self._supervise(), name=f"copycord-{self.name}"
         )
+        # The last task may have ended before its done callback ran.
+        self._stopping = False
         self._started_wall = time.time()
         self._started_mono = time.monotonic()
         logger.info("%s role started", self.name)
