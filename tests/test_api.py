@@ -1209,7 +1209,11 @@ class TestParallelTokenChecks:
 
     @pytest.mark.asyncio
     async def test_verify_keeps_stored_order(self, client, monkeypatch):
-        tokens = [f"tok{i:08d}" for i in range(6)]
+        mid = self._mapping()
+        self._store(mid, [f"tok{i:08d}" for i in range(6)])
+        rows = db.list_mapping_tokens(mid)
+        stored_ids = [r["token_id"] for r in rows]
+        tokens = [r["token_value"] for r in rows]
         self._proxies(monkeypatch, {t: f"http://p{i % 3}.test:1" for i, t in enumerate(tokens)})
         # Later tokens finish first, and only even ones are members.
         self._tracker(
@@ -1217,9 +1221,6 @@ class TestParallelTokenChecks:
             delay=lambda t: 0.06 - 0.01 * tokens.index(t),
             member={t for i, t in enumerate(tokens) if i % 2 == 0},
         )
-        mid = self._mapping()
-        self._store(mid, tokens)
-        stored_ids = [r["token_id"] for r in db.list_mapping_tokens(mid)]
 
         resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
         assert resp.status_code == 200
@@ -1263,11 +1264,11 @@ class TestParallelTokenChecks:
 
     @pytest.mark.asyncio
     async def test_verify_one_failure_does_not_abort_the_rest(self, client, monkeypatch):
-        tokens = [f"tok{i:08d}" for i in range(4)]
+        mid = self._mapping()
+        self._store(mid, [f"tok{i:08d}" for i in range(4)])
+        tokens = [r["token_value"] for r in db.list_mapping_tokens(mid)]
         self._proxies(monkeypatch, {t: "http://a.test:1" for t in tokens})
         state = self._tracker(monkeypatch, delay=0, fail={tokens[1]})
-        mid = self._mapping()
-        self._store(mid, tokens)
 
         resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
         assert resp.status_code == 200
