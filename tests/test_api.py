@@ -224,6 +224,11 @@ class TestGuildMappingsAPI:
         eff = resolve_mapping_settings(db, cfg, original_guild_id=555, cloned_guild_id=666)
         assert eff["CLONE_EMOJI"] is True
 
+    def test_send_through_proxies_defaults_off(self):
+        import copycord.admin.app as app_mod
+
+        assert app_mod.DEFAULTS["USER_TOKEN_USE_PROXIES"] is False
+
     @pytest.mark.asyncio
     async def test_retired_keep_online_loads_and_saves(self, client):
         """A mapping stored with the removed USER_TOKEN_KEEP_ONLINE still lists, resolves and saves."""
@@ -339,7 +344,7 @@ class TestGuildMappingsAPI:
 
 class TestMappingUserTokensAPI:
 
-    def _make_mapping(self):
+    def _make_mapping(self, settings=None):
         return db.upsert_guild_mapping(
             mapping_id=None,
             mapping_name="UT API",
@@ -348,6 +353,7 @@ class TestMappingUserTokensAPI:
             original_guild_icon_url=None,
             cloned_guild_id=222,
             cloned_guild_name="",
+            settings=settings,
         )
 
     @pytest.mark.asyncio
@@ -467,7 +473,7 @@ class TestMappingUserTokensAPI:
         monkeypatch.setattr(
             app_mod, "_selfbot_identity", AsyncMock(return_value=None)
         )
-        mid = self._make_mapping()
+        mid = self._make_mapping({"USER_TOKEN_USE_PROXIES": True})
         resp = await client.post(
             f"/api/guild-mappings/{mid}/user-tokens/bulk",
             json={"tokens": "goodtoken1\nbadtoken2"},
@@ -496,7 +502,7 @@ class TestMappingUserTokensAPI:
     @pytest.mark.asyncio
     async def test_verify_reports_working_and_broken(self, client, monkeypatch):
         import copycord.admin.app as app_mod
-        mid = self._make_mapping()
+        mid = self._make_mapping({"USER_TOKEN_USE_PROXIES": True})
         await self._add_tokens(
             client, monkeypatch, mid, ["goodtoken1", "badtoken22"]
         )
@@ -1006,6 +1012,7 @@ PROXIES_REQUIRED = (
 class TestProxiesRequired:
 
     def _mapping(self, settings=None):
+        # Send through proxies on unless the test says otherwise (the default is off).
         return db.upsert_guild_mapping(
             mapping_id=None,
             mapping_name="Proxy rule",
@@ -1014,7 +1021,7 @@ class TestProxiesRequired:
             original_guild_icon_url=None,
             cloned_guild_id=222,
             cloned_guild_name="",
-            settings=settings or {},
+            settings={"USER_TOKEN_USE_PROXIES": True, **(settings or {})},
         )
 
     def _discord(self, monkeypatch, *, proxies=()):
@@ -1102,9 +1109,28 @@ class TestProxiesRequired:
                 "mapping_name": "Proxy rule",
                 "original_guild_id": "111",
                 "cloned_guild_id": "222",
-                "settings": settings,
+                "settings": {"USER_TOKEN_USE_PROXIES": True, **settings},
             },
         )
+
+    @pytest.mark.asyncio
+    async def test_unset_mapping_adds_a_token_directly_without_proxies(self, client, monkeypatch):
+        mocks = self._discord(monkeypatch)
+        mid = db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name="Direct",
+            original_guild_id=111,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=222,
+            cloned_guild_name="",
+            settings={},
+        )
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens", json={"token": "tokaaaaaaaa"}
+        )
+        assert resp.status_code == 200
+        assert mocks["_selfbot_in_guild"].await_args.kwargs["proxy"] is None
 
     @pytest.mark.asyncio
     async def test_turning_user_tokens_on_without_proxies_is_refused(self, client, monkeypatch):
@@ -1168,7 +1194,8 @@ class TestParallelTokenChecks:
             original_guild_icon_url=None,
             cloned_guild_id=222,
             cloned_guild_name="",
-            settings=settings or {},
+            # Send through proxies on unless the test says otherwise (the default is off).
+            settings={"USER_TOKEN_USE_PROXIES": True, **(settings or {})},
         )
 
     def _no_proxy_lookups(self, monkeypatch):

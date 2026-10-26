@@ -6,9 +6,9 @@
 #  version 3.0. A copy of the license is available at:
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
-"""Proxies for user tokens: on by default, optional per mapping.
+"""Proxies for user tokens: recommended, off by default, chosen per mapping.
 
-``USER_TOKEN_USE_PROXIES`` (default on) decides it per mapping. A token used by
+``USER_TOKEN_USE_PROXIES`` (default off) decides it per mapping. A token used by
 several mappings goes through a proxy if any of them has it on. A proxied token
 never falls back to the server's own address: with no proxy lease, no request
 goes out for it. With the setting off, that mapping's tokens talk to Discord
@@ -21,8 +21,10 @@ import time
 
 _logger = logging.getLogger("common.token_proxy")
 
-# The default when a mapping has no stored value.
+# The default use_proxy for internal callers that are not told otherwise.
 USE_PROXY = True
+# The default when a mapping has no stored USER_TOKEN_USE_PROXIES value.
+USE_PROXIES_DEFAULT = False
 
 PROXIES_REQUIRED_ERROR = (
     "No proxies are configured. Add proxies, or turn off Send through proxies for this mapping."
@@ -72,13 +74,13 @@ async def lease_with_timezone(pool, token: str, *, time_cap: float = ROTATE_TIME
 def token_use_proxy(settings=None) -> bool:
     """Whether a mapping's token requests go through a proxy.
 
-    ``USER_TOKEN_USE_PROXIES`` from ``settings``; missing or None means on.
+    ``USER_TOKEN_USE_PROXIES`` from ``settings``; missing or None means off.
     """
     if not settings:
-        return USE_PROXY
-    value = settings.get("USER_TOKEN_USE_PROXIES", USE_PROXY)
+        return USE_PROXIES_DEFAULT
+    value = settings.get("USER_TOKEN_USE_PROXIES", USE_PROXIES_DEFAULT)
     if value is None:
-        return USE_PROXY
+        return USE_PROXIES_DEFAULT
     if isinstance(value, str):
         return value.strip().lower() not in ("0", "false", "no", "off", "")
     return bool(value)

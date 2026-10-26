@@ -71,6 +71,8 @@ class FakeDB:
     def __init__(self, mappings):
         self.mappings = mappings
         self.loads = 0
+        # mapping_id -> status; missing is active
+        self.status = {}
 
     def list_guild_mappings(self):
         self.loads += 1
@@ -79,6 +81,7 @@ class FakeDB:
                 "mapping_id": mid,
                 "original_guild_id": str(100 + i),
                 "cloned_guild_id": str(200 + i),
+                "status": self.status.get(mid, "active"),
                 "settings": settings,
             }
             for i, (mid, settings, _toks) in enumerate(self.mappings)
@@ -191,11 +194,30 @@ def test_plan_unions_mappings_and_proxies_a_token_any_of_them_proxies(srv):
     assert "keep_online" not in x
 
 
-def test_plan_proxies_by_default_when_the_setting_is_missing(srv):
+def test_plan_goes_direct_by_default_when_the_setting_is_missing(srv):
     settings = {"USE_USER_TOKENS": True}
     plan = srv.plan_token_pool([_m("m1", settings, ("1", "X")), _m("m2", {**settings, "USER_TOKEN_USE_PROXIES": None}, ("2", "Y"))])
+    assert plan["tokens"]["X"]["use_proxy"] is False
+    assert plan["tokens"]["Y"]["use_proxy"] is False
+
+
+def test_plan_proxies_a_mapping_that_stores_the_setting_on(srv):
+    settings = {"USE_USER_TOKENS": True}
+    plan = srv.plan_token_pool(
+        [
+            _m("m1", {**settings, "USER_TOKEN_USE_PROXIES": True}, ("1", "X")),
+            _m("m2", settings, ("2", "Y"), ("3", "X")),
+        ]
+    )
     assert plan["tokens"]["X"]["use_proxy"] is True
-    assert plan["tokens"]["Y"]["use_proxy"] is True
+    assert plan["tokens"]["Y"]["use_proxy"] is False
+
+
+def test_the_mapping_defaults_have_send_through_proxies_off():
+    from copycord.common.config import Config
+
+    assert Config.default_mapping_settings(None)["USER_TOKEN_USE_PROXIES"] is False
+    assert token_proxy.USE_PROXIES_DEFAULT is False
 
 
 def test_plan_rotate_is_on_if_any_mapping_sharing_the_token_has_it_on(srv):
@@ -533,6 +555,53 @@ async def test_user_tokens_off_everywhere_closes_all(make_rx):
     assert sorted(rx.token_pool.closed) == ["1", "2"]
     assert rx.token_pool.close_all_calls == 1
     assert rx.token_pool.ensured == []
+    assert rx._pool_ids == set()
+
+
+def test_plan_skips_a_paused_mapping(srv):
+    paused = dict(_m("m1", _settings(), ("1", "X"), ("2", "S")), status="paused")
+    active = dict(_m("m2", _settings(), ("3", "S")), status="active")
+    plan = srv.plan_token_pool([paused, active])
+    assert plan["wanted"] == ["S"]
+    assert plan["tokens"]["S"]["ids"] == ["3"]
+    assert plan["tokens"]["S"]["mappings"] == ["m2"]
+    assert srv.plan_token_pool([paused])["keep_online"] == 0
+
+
+@pytest.mark.asyncio
+async def test_pausing_closes_tokens_and_resuming_brings_them_back(make_rx):
+    rx = make_rx(
+        [
+            ("m1", _settings(), [("1", "X", True), ("2", "S", True)]),
+            ("m2", _settings(), [("3", "S", True)]),
+        ]
+    )
+    await rx._reconcile_token_pool()
+    assert rx._pool_ids == {"1", "2", "3"}
+
+    rx.db.status["m1"] = "paused"
+    rx.token_pool.ensured.clear()
+    await rx._reconcile_token_pool()
+    # The token shared with the active mapping stays online for it.
+    assert sorted(rx.token_pool.closed) == ["1", "2"]
+    assert rx.token_pool.ensured == [("3", "S", 1, "random")]
+    assert rx._pool_ids == {"3"}
+
+    rx.db.status["m1"] = "active"
+    rx.token_pool.ensured.clear()
+    await rx._reconcile_token_pool()
+    assert rx._pool_ids == {"1", "2", "3"}
+    assert {e[0] for e in rx.token_pool.ensured} == {"1", "2", "3"}
+
+
+@pytest.mark.asyncio
+async def test_every_mapping_paused_closes_all(make_rx):
+    rx = make_rx([("m1", _settings(), [("1", "X", True)])])
+    await rx._reconcile_token_pool()
+    rx.db.status["m1"] = "paused"
+    await rx._reconcile_token_pool()
+    assert rx.token_pool.closed == ["1"]
+    assert rx.token_pool.close_all_calls == 1
     assert rx._pool_ids == set()
 
 

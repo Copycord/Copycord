@@ -28,6 +28,9 @@ class FakeClient:
         self._fail = None
         self._listeners = {}
         self.user = None
+        # Seconds close() takes; None makes it hang until cancelled.
+        self.close_delay = 0
+        self.rest_closed = False
 
     async def login(self, token):
         self.token = token
@@ -48,9 +51,17 @@ class FakeClient:
             raise self._fail
 
     async def close(self):
+        if self.close_delay is None:
+            await asyncio.Event().wait()
+        elif self.close_delay:
+            await asyncio.sleep(self.close_delay)
         self._closed = True
         self._ready.clear()
         self._ended.set()
+        self.rest_closed = True
+
+    async def close_rest(self):
+        self.rest_closed = True
 
     def is_ready(self):
         return self._ready.is_set()
@@ -1039,3 +1050,90 @@ async def test_pool_reads_focus_by_token_key():
     assert pool.sendable_ids() == set()
     assert pool.online_ids() == {"7"}
     assert pool.heartbeat_session_id("tok-focus") is None
+
+
+def _pool_tasks(pool):
+    return [t for s in pool._sessions.values() for t in (s.task, s.runner) if t is not None]
+
+
+async def _online(pool, fakes, n):
+    pairs = [(f"t{i}", f"tok-{i}") for i in range(n)]
+    await ensure_all(pool, pairs, keep_online=n)
+    await until(lambda: len(pool.online_ids()) == n, rounds=20000)
+    return pairs
+
+
+async def test_close_all_closes_sessions_concurrently(pool, fakes, caplog):
+    await _online(pool, fakes, 100)
+    tasks = _pool_tasks(pool)
+    for c in fakes.clients:
+        c.close_delay = 0.5
+    caplog.set_level(logging.INFO, logger="test.token_pool")
+    started = time.monotonic()
+    await pool.close_all()
+    elapsed = time.monotonic() - started
+    assert elapsed < 3.0, elapsed
+    assert all(c.is_closed() for c in fakes.clients)
+    assert all(t.done() for t in tasks)
+    assert pool.online_ids() == set()
+    assert "Closed 100 session(s) cleanly, 0 cut off" in caplog.text
+
+
+async def test_close_all_cuts_off_a_hung_close(pool, fakes, caplog, monkeypatch):
+    monkeypatch.setattr(token_pool, "CLOSE_TIMEOUT", 0.5)
+    await _online(pool, fakes, 5)
+    tasks = _pool_tasks(pool)
+    hung = fakes.for_token("tok-0")[0]
+    hung.close_delay = None
+    for c in fakes.clients[1:]:
+        c.close_delay = 0.2
+    caplog.set_level(logging.INFO, logger="test.token_pool")
+    started = time.monotonic()
+    await pool.close_all()
+    elapsed = time.monotonic() - started
+    assert 0.4 < elapsed < 1.5, elapsed
+    assert all(c.is_closed() for c in fakes.clients[1:])
+    # The cut-off session still closes its REST side.
+    assert hung.rest_closed
+    await settle()
+    assert all(t.done() for t in tasks)
+    assert "Closed 4 session(s) cleanly, 1 cut off" in caplog.text
+
+
+async def test_close_all_then_ensure_starts_again(pool, fakes):
+    try:
+        await _online(pool, fakes, 3)
+        await pool.close_all()
+        assert pool.online_ids() == set()
+        await pool.ensure("t1", "tok-1", keep_online=3, presence="online")
+        await until(lambda: pool.online_ids() == {"t0", "t1", "t2"})
+    finally:
+        await pool.close_all()
+
+
+async def test_close_all_cancelled_leaks_no_tasks(pool, fakes):
+    await _online(pool, fakes, 10)
+    tasks = _pool_tasks(pool)
+    for c in fakes.clients:
+        c.close_delay = None
+    closer = asyncio.ensure_future(pool.close_all())
+    await asyncio.sleep(0.05)
+    closer.cancel()
+    await asyncio.gather(closer, return_exceptions=True)
+    await settle()
+    assert all(t.done() for t in tasks)
+    assert not pool._lock.locked()
+
+
+async def test_close_all_survives_a_close_error(pool, fakes):
+    await _online(pool, fakes, 3)
+    tasks = _pool_tasks(pool)
+
+    async def broken():
+        raise RuntimeError("socket gone")
+
+    fakes.clients[0].close = broken
+    await pool.close_all()
+    await settle()
+    assert all(t.done() for t in tasks)
+    assert all(c.is_closed() for c in fakes.clients[1:])

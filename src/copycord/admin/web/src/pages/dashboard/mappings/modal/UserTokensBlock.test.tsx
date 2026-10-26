@@ -31,11 +31,12 @@ describe("UserTokensBlock proxy notice", () => {
     const notice = warning.nextElementSibling as HTMLElement;
     expect(notice).toHaveClass("user-token-proxy-notice");
     expect(notice).toHaveTextContent("Proxies are recommended for token message cloning");
-    expect(notice).toHaveTextContent("Send through proxies is on by default");
-    expect(notice).toHaveTextContent("default webhook behavior");
-    expect(notice).toHaveTextContent("With it off, tokens connect from this server's own IP address");
-    expect(notice).toHaveTextContent("Configure proxies");
-    expect(notice).not.toHaveTextContent(/required/i);
+    expect(notice).toHaveTextContent("Send through proxies is off by default");
+    expect(notice).toHaveTextContent(
+      "With it off, tokens connect and send from this server's own IP address, which Discord can link across accounts, and many accounts on one IP hit rate limits sooner.",
+    );
+    expect(notice).toHaveTextContent("Turning it on needs proxies configured in the Proxy settings.");
+    expect(notice).not.toHaveTextContent(/on by default|required/i);
   });
 
   it("points to the System page table in a card after the proxy notice, opening a new tab", () => {
@@ -150,9 +151,9 @@ describe("UserTokensBlock Verify tokens", () => {
 
   const radio = (dialog: HTMLElement, name: RegExp) => within(dialog).getByRole("radio", { name });
 
-  it("asks first, preselecting Use proxies when the setting is on or unset", async () => {
+  it("asks first, preselecting Use proxies when the setting is on", async () => {
     const fetchMock = mockVerify();
-    renderPool();
+    renderPool({ USER_TOKEN_USE_PROXIES: true });
     const dialog = await openVerify();
     expect(radio(dialog, /^Use proxies/)).toBeChecked();
     expect(radio(dialog, /^Use proxies/)).toHaveAccessibleName(/Recommended/);
@@ -169,6 +170,16 @@ describe("UserTokensBlock Verify tokens", () => {
     const dialog = await openVerify();
     expect(radio(dialog, /^Don't use proxies/)).toBeChecked();
     expect(radio(dialog, /^Use proxies/)).not.toBeChecked();
+  });
+
+  it("preselects Don't use proxies when the mapping has no stored setting, still recommending proxies", async () => {
+    mockVerify();
+    renderPool({});
+    const dialog = await openVerify();
+    expect(radio(dialog, /^Don't use proxies/)).toBeChecked();
+    expect(radio(dialog, /^Use proxies/)).not.toBeChecked();
+    expect(radio(dialog, /^Use proxies/)).toHaveAccessibleName(/Recommended/);
+    expect(dialog).toHaveTextContent("this server's own IP address, which Discord can link across accounts");
   });
 
   it("Cancel sends nothing", async () => {
@@ -354,9 +365,16 @@ describe("UserTokensBlock warm pool", () => {
     expect(warning.nextElementSibling).toHaveTextContent(/^Send delay/);
   });
 
-  it("the proxy switch is on when the mapping has no stored value", async () => {
+  it("the proxy switch is off when the mapping has no stored value", async () => {
     mockApi();
     renderPool({});
+    await screen.findByText("alpha");
+    expect(document.getElementById("map_USER_TOKEN_USE_PROXIES")).not.toBeChecked();
+  });
+
+  it("the proxy switch is on when the mapping stored it on", async () => {
+    mockApi();
+    renderPool({ USER_TOKEN_USE_PROXIES: true });
     await screen.findByText("alpha");
     expect(document.getElementById("map_USER_TOKEN_USE_PROXIES")).toBeChecked();
   });

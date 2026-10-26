@@ -161,7 +161,7 @@ class Config:
             "USER_TOKEN_STICKY_AVATAR": False,
             "USER_TOKEN_STICKY_ROLES": False,
             # off: this mapping's tokens talk to Discord from the server's own address
-            "USER_TOKEN_USE_PROXIES": True,
+            "USER_TOKEN_USE_PROXIES": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

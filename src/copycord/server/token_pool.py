@@ -82,6 +82,11 @@ LAG_GAP_FACTOR = 2.0
 # A pool session sends only once its gateway tab is focused, or this long after
 # READY if the focus never came (it is due 0.5 to 3 s after READY).
 FOREGROUND_GRACE = 5.0
+# close_all stops this many sessions at once; a session whose gateway close
+# takes longer than CLOSE_TIMEOUT seconds is cut off so one stuck socket
+# cannot hold the stop.
+CLOSE_CONCURRENCY = 50
+CLOSE_TIMEOUT = 3.0
 
 # Every pool session's gateway focuses its tab after READY; other selfclient
 # users keep the unfocused default.
@@ -421,17 +426,39 @@ class TokenSessionPool:
         if shuffler is not None:
             shuffler.cancel()
             await asyncio.gather(shuffler, return_exceptions=True)
-        async with self._lock:
-            self._keep_online = 0
-            for key in list(self._sessions):
-                await self._stop(key)
-            self._shuffle_due.clear()
-        for attr in ("_lag_task", "_shuffle_task"):
-            task = getattr(self, attr)
-            setattr(self, attr, None)
-            if task is not None:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+        try:
+            async with self._lock:
+                # The lock stays held so ensure() cannot start sessions meanwhile;
+                # the closes themselves run concurrently.
+                self._keep_online = 0
+                sessions = list(self._sessions.values())
+                self._sessions.clear()
+                self._shuffle_due.clear()
+                clean = 0
+                gate = asyncio.Semaphore(CLOSE_CONCURRENCY)
+
+                async def close_one(sess: _Session) -> None:
+                    nonlocal clean
+                    async with gate:
+                        if await self._close_session(sess):
+                            clean += 1
+
+                try:
+                    await asyncio.gather(*(close_one(s) for s in sessions), return_exceptions=True)
+                finally:
+                    if sessions:
+                        self._log.info(
+                            "[token-pool] Closed %d session(s) cleanly, %d cut off",
+                            clean,
+                            len(sessions) - clean,
+                        )
+        finally:
+            for attr in ("_lag_task", "_shuffle_task"):
+                task = getattr(self, attr)
+                setattr(self, attr, None)
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
 
     async def reap_idle(self, idle_ttl: float = 3600) -> int:
         """Drop tokens not ensured or acquired for ``idle_ttl`` seconds and close their sessions.
@@ -535,6 +562,31 @@ class TokenSessionPool:
         await self._teardown(sess)
         sess.set_state(STATE_OFFLINE)
         self._log.debug("[token-pool] Session %s closed", key)
+
+    async def _halt(self, sess: _Session) -> None:
+        task = sess.task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await self._teardown(sess)
+
+    async def _close_session(self, sess: _Session) -> bool:
+        """Stop one session for close_all; False when its close was cut off at CLOSE_TIMEOUT."""
+        client = sess.client
+        clean = True
+        try:
+            await asyncio.wait_for(self._halt(sess), CLOSE_TIMEOUT)
+        except asyncio.TimeoutError:
+            clean = False
+            self._log.debug("[token-pool] Session %s close cut off after %.1fs", sess.key, CLOSE_TIMEOUT)
+            close_rest = getattr(client, "close_rest", None)
+            if close_rest is not None:
+                try:
+                    await asyncio.wait_for(close_rest(), CLOSE_TIMEOUT)
+                except Exception as exc:
+                    self.logger.debug("[token-pool] REST close failed for %s: %r", sess.key, exc, exc_info=True)
+        sess.set_state(STATE_OFFLINE)
+        return clean
 
     # one session
 
@@ -691,13 +743,16 @@ class TokenSessionPool:
         client, runner = sess.client, sess.runner
         sess.client = None
         sess.runner = None
-        if client is not None:
-            try:
-                await client.close()
-            except Exception as exc:
-                self.logger.debug("[token-pool] close failed for %s: %r", sess.key, exc, exc_info=True)
-        if runner is not None and not runner.done():
-            runner.cancel()
+        try:
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception as exc:
+                    self.logger.debug("[token-pool] close failed for %s: %r", sess.key, exc, exc_info=True)
+        finally:
+            # A close cut off by close_all still stops the runner.
+            if runner is not None and not runner.done():
+                runner.cancel()
         if runner is not None:
             await asyncio.gather(runner, return_exceptions=True)
 
