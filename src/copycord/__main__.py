@@ -47,13 +47,7 @@ from copycord.common.ports import dashboard_host, insecure_dashboard
 
 # The default listen address; DASHBOARD_HOST changes it.
 ADMIN_BIND_HOST = DEFAULT_DASHBOARD_HOST
-# Module name -> distribution that must provide it.
-REQUIRED_IMPORTS = (
-    ("curl_cffi", "curl_cffi"),
-    ("discord", "py-cord"),
-    ("fastapi", "fastapi"),
-    ("uvicorn", "uvicorn"),
-)
+from copycord.required import REQUIRED_IMPORTS
 
 SECRET_MARKERS = ("TOKEN", "PASSWORD", "SECRET")
 MASK = "********"

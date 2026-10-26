@@ -935,7 +935,13 @@ def update(
         else:
             what = target.ref
         text = f"Installing Copycord {what}" + (" and building the admin UI" if git else "")
-        result, log = _install(cmd, hint, cmd_env, windows, launchers, restart, text + "...")
+        result, log, broken = _install_verified(cmd, hint, cmd_env, windows, launchers,
+                                                restart, text + "...")
+        if broken:
+            # Never restart the service onto an environment that does not import.
+            if auto:
+                rollback(broken, spec, restart)
+            return 1
         if result.returncode != 0:
             sys.stdout.flush()
             lines = (log.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -956,9 +962,10 @@ def update(
             return result.returncode
         version, commit = installed_version()
         if version:
-            ui.ok(f"Copycord updated to {version}" + (f" ({commit[:7]})" if commit else ""))
+            ui.ok(f"Copycord updated to {version}" + (f" ({commit[:7]})" if commit else ""),
+                  "environment OK")
         else:
-            ui.ok("Copycord updated", spec)
+            ui.ok("Copycord updated", f"{spec}, environment OK")
 
         if auto:
             problem = verify_install(doctor_was_ok)
@@ -1043,11 +1050,122 @@ _VERSION_CODE = (
 )
 
 
+def env_python() -> Path:
+    """The interpreter of the tool environment, which the install replaces in place."""
+    return Path(sys.prefix) / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+
+
+# Imports each module named in argv; prints {"ok": {module: __file__}} or {"failed", "error"}.
+_VERIFY_CODE = (
+    "import importlib, json, sys\n"
+    "files = {}\n"
+    "for name in sys.argv[1:]:\n"
+    "    try:\n"
+    "        files[name] = getattr(importlib.import_module(name), '__file__', None) or ''\n"
+    "    except BaseException as e:\n"
+    "        print(json.dumps({'failed': name, 'error': type(e).__name__ + ': ' + str(e)}))\n"
+    "        sys.exit(1)\n"
+    "print(json.dumps({'ok': files}))\n"
+)
+VERIFY_TIMEOUT = 60
+
+
+def verify_environment(python: Optional[Path] = None,
+                       timeout: float = VERIFY_TIMEOUT) -> Optional[Tuple[str, str]]:
+    """Import the required modules with the new environment's own Python, in a
+    fresh process (this one holds the old modules); (module, error) or None."""
+    import subprocess
+
+    from copycord.required import REQUIRED_IMPORTS
+
+    modules = [m for m, _ in REQUIRED_IMPORTS] + ["copycord"]
+    exe = python or env_python()
+    try:
+        res = subprocess.run([str(exe), "-I", "-c", _VERIFY_CODE, *modules],
+                             capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "python", f"{exe} did not finish importing in {timeout:.0f}s"
+    except OSError as e:
+        return "python", f"{exe} could not run: {e}"
+    lines = (res.stdout or "").strip().splitlines()
+    try:
+        data = json.loads(lines[-1])
+    except (ValueError, IndexError):
+        data = None
+    if not isinstance(data, dict):
+        err = (res.stderr or "").strip().splitlines()
+        return "python", (err[-1] if err else f"{exe} exited {res.returncode}")
+    if res.returncode == 0 and "ok" in data:
+        return None
+    return str(data.get("failed") or "python"), str(data.get("error") or f"exit {res.returncode}")
+
+
+def _recovery_lines(module: str, error: str, hint: str, windows: bool) -> list:
+    from copycord.common.paths import home_dir
+
+    lines = [f"The installed environment cannot import {module}:", f"  {error}"]
+    old = home_dir() / winupdate.ASIDE
+    if windows and old.is_dir():
+        lines.append(f"The previous version's program files are in {old}.")
+    lines.append("To repair it by hand:")
+    if windows:
+        lines.append("  1. stop the Copycord scheduled task (copycord service stop) "
+                     "and end every copycord.exe / copycordw.exe process")
+    else:
+        lines.append("  1. stop Copycord (copycord service stop, and any copycord run)")
+    lines.append(f"  2. {hint}")
+    lines.append("  3. copycord doctor")
+    return lines
+
+
+def _install_verified(cmd, hint, env, windows, launchers, restart, text):
+    """_install, then verify_environment; on failure one forced clean reinstall.
+
+    (result, log, problem): problem is None when the environment imports, else
+    the message already printed, and the caller must not restart onto it.
+    """
+    result, log = _install(cmd, hint, env, windows, launchers, restart, text)
+    if result.returncode != 0:
+        return result, log, None
+    bad = verify_environment()
+    if bad is None:
+        return result, log, None
+    module, error = bad
+    ui.warn(f"the install did not import: {module}", error)
+    retry = list(cmd)
+    if retry[0] == "uv" and "--reinstall" not in retry:
+        retry.insert(3, "--reinstall")
+    retry_hint = " ".join(_quote(a) for a in retry)
+    if module == "pydantic_core" and retry[0] == "uv":
+        service.run_cmd(["uv", "cache", "clean", "pydantic-core"], capture=True)
+    other = winupdate.running()[1] if windows else None
+    if other is not None:
+        problem = f"Copycord is running in another window (process {other})"
+        ui.box(_recovery_lines(module, error, retry_hint, windows) + [problem],
+               title="Copycord install is broken", status="fail", stream=sys.stderr)
+        return result, log, problem
+    # The service is already stopped and the first install moved the old files
+    # aside; nothing has the new environment's files open now.
+    result, log = _install(retry, retry_hint, env, False, [], False,
+                           "Reinstalling Copycord from a clean cache...")
+    if result.returncode == 0:
+        bad = verify_environment()
+    else:
+        bad = module, f"{error} (the clean reinstall exited {result.returncode}, see {log})"
+    if bad is None:
+        ui.ok("reinstalled Copycord", "environment OK")
+        return result, log, None
+    module, error = bad
+    ui.box(_recovery_lines(module, error, retry_hint, windows),
+           title="Copycord install is broken", status="fail", stream=sys.stderr)
+    return result, log, f"the installed environment cannot import {module}: {error}"
+
+
 def installed_version() -> Tuple[Optional[str], Optional[str]]:
     """(version, commit) of the freshly installed Copycord, read by its own Python."""
     import subprocess
 
-    exe = Path(sys.prefix) / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    exe = env_python()
     try:
         res = subprocess.run([str(exe), "-I", "-c", _VERSION_CODE],
                              capture_output=True, text=True, timeout=60)
@@ -1311,7 +1429,11 @@ def rollback(reason: str, new: str, restart: bool) -> bool:
             return _rollback_failed(f"{what}. Putting {old} back needs Node.js/npm: {e}")
     windows = sys.platform == "win32" and kind in (UV_TOOL, PIPX)
     launchers = winupdate.running()[0] if windows else []
-    result, log = _install(cmd, hint, env, windows, launchers, restart, f"Putting back Copycord {old}...")
+    result, log, broken = _install_verified(cmd, hint, env, windows, launchers, restart,
+                                            f"Putting back Copycord {old}...")
+    if broken:
+        return _rollback_failed(f"{what}, and {old} did not import after putting it back "
+                                f"({broken}). Put it back with: {hint}")
     if result.returncode != 0:
         return _rollback_failed(f"{what}, and putting {old} back failed too "
                                 f"(exit {result.returncode}, see {log}). Put it back with: {hint}")

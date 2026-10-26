@@ -34,6 +34,15 @@ def _update_tests_never_touch_the_network(request, monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", blocked)
 
 
+@pytest.fixture(autouse=True)
+def _installed_environment_imports(monkeypatch):
+    """The post-install import check never starts a real interpreter; the tests
+    of it call the function saved before this patch (test_update_verify)."""
+    from copycord import update
+
+    monkeypatch.setattr(update, "verify_environment", lambda *a, **k: None)
+
+
 def pytest_sessionfinish(session, exitstatus):
     import shutil
 

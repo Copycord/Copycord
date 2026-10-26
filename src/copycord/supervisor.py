@@ -98,6 +98,10 @@ async def wait_for_port(host: str, port: int, timeout: float = PORT_WAIT) -> Non
             warned = True
         await asyncio.sleep(PORT_RETRY)
 
+# Seconds between restarts of a role that failed to import a module.
+IMPORT_RETRY_DELAY = 300.0
+
+
 @dataclass
 class Backoff:
     """Capped exponential backoff between restarts of a crashed role."""
@@ -136,6 +140,7 @@ class RoleSupervisor:
         self.stop_timeout = stop_timeout
         self._sleep = sleep
         self._before_start = before_start
+        self._import_failed = False
 
         self._task: Optional[asyncio.Task] = None
         self._started_wall: Optional[float] = None
@@ -161,12 +166,25 @@ class RoleSupervisor:
                 await self.factory()
             except asyncio.CancelledError:
                 raise
+            except ImportError as e:
+                # A broken install fails the same way on every restart: say so
+                # once and retry slowly instead of every few seconds.
+                self.crashes += 1
+                if not self._import_failed:
+                    logger.error(
+                        "[%s] role cannot start: cannot import %s (%s); the Copycord "
+                        "install is broken, run copycord doctor --fix",
+                        self.name, e.name or "a module", e,
+                    )
+                self._import_failed = True
             except (Exception, SystemExit) as e:
                 self.crashes += 1
+                self._import_failed = False
                 logger.error(
                     "[%s] role crashed: %r", self.name, e, exc_info=True
                 )
             else:
+                self._import_failed = False
                 if not self.restart_on_exit:
                     logger.info("%s role exited", self.name)
                     return
@@ -175,6 +193,8 @@ class RoleSupervisor:
             if time.monotonic() - began >= self.backoff.reset_after:
                 delays = self.backoff.delays()
             delay = next(delays)
+            if self._import_failed:
+                delay = max(delay, IMPORT_RETRY_DELAY)
             self.restart_delays.append(delay)
             logger.info("%s role restarting in %.1fs", self.name, delay)
             await self._sleep(delay)
