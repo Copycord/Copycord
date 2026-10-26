@@ -93,7 +93,7 @@ To send a mapping's messages from user accounts:
 
 Each cloned message is then sent by one of the enabled tokens. If an account cannot deliver a message, Copycord tries another enabled token, then falls back to the webhook when **Fall back to webhook** is on.
 
-Tokens are shown masked. You can enable, disable or remove each one. The **Token options** menu has **Verify tokens**, which checks every token and offers to delete the ones that fail, and **Delete all tokens**.
+Tokens are shown masked. You can enable, disable or remove each one. The **Token options** menu has **Verify tokens**, which checks every token and offers to delete the ones that fail, **Release all tokens**, which frees every account from the author it is assigned to and resets the nicknames and roles it applied (the tokens stay and keep sending), and **Delete all tokens**.
 
 ### Options
 

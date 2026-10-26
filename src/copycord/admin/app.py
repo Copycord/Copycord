@@ -5513,6 +5513,42 @@ async def api_bulk_delete_mapping_tokens(mapping_id: str, payload: dict = Body(.
     return JSONResponse({"ok": True, "deleted": deleted})
 
 
+# Resetting nicknames and roles across a large mapping can take a while.
+RELEASE_TOKENS_TIMEOUT = 30.0
+
+
+@app.post(
+    "/api/guild-mappings/{mapping_id}/user-tokens/release",
+    response_class=JSONResponse,
+)
+async def api_release_mapping_tokens(mapping_id: str):
+    """Free every saved sticky identity of a mapping; tokens stay attached."""
+    m = db.get_mapping_by_id(mapping_id)
+    if not m:
+        return JSONResponse(
+            {"ok": False, "error": "Mapping not found."}, status_code=404
+        )
+
+    released = len(db.list_token_identities(mapping_id) or [])
+    reset_applied = False
+    if released:
+        res = await _ws_cmd(
+            SERVER_AGENT_URL,
+            {"type": "release_user_tokens", "data": {"mapping_id": str(mapping_id)}},
+            timeout=RELEASE_TOKENS_TIMEOUT,
+        )
+        reset_applied = bool(isinstance(res, dict) and res.get("ok"))
+        if not reset_applied:
+            # Server stopped or unreachable: free the identities without the guild reset.
+            db.clear_token_identities(mapping_id)
+    else:
+        reset_applied = True
+
+    return JSONResponse(
+        {"ok": True, "released": released, "reset_applied": reset_applied}
+    )
+
+
 @app.patch(
     "/api/guild-mappings/{mapping_id}/user-tokens/{token_id}",
     response_class=JSONResponse,

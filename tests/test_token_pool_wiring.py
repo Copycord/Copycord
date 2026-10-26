@@ -514,6 +514,28 @@ async def test_proxy_reload_message_reloads_and_schedules_a_reconcile(make_rx):
 
 
 @pytest.mark.asyncio
+async def test_release_message_resets_the_mapping_identities(make_rx):
+    from unittest.mock import AsyncMock
+
+    rx = make_rx([("m1", _settings(), [("1", "X", True)])])
+    rx._resolve_guild_label = lambda typ, data: None
+    scheduled = []
+    rx._schedule_token_pool_reconcile = lambda *a, **k: scheduled.append(1)
+    rx.token_identity = type("TI", (), {})()
+    rx.token_identity.reset_mapping = AsyncMock()
+    res = await rx._on_ws(
+        {"type": "release_user_tokens", "data": {"mapping_id": "m1"}}
+    )
+    assert res == {"ok": True}
+    rx.token_identity.reset_mapping.assert_awaited_once_with("m1")
+    assert scheduled == []
+
+    res = await rx._on_ws({"type": "release_user_tokens", "data": {}})
+    assert res["ok"] is False
+    assert rx.token_identity.reset_mapping.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_stored_keep_online_zero_keeps_tokens_online(make_rx):
     rx = make_rx(
         [

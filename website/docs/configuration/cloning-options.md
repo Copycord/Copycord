@@ -88,8 +88,8 @@ These options are in the **Optional Message Features** window of the mapping.
 
 By default the bot posts cloned messages through webhooks. The **Token Message Cloning** section of a mapping sends them from Discord user accounts instead. The accounts must be members of the clone server.
 
-:::danger Accounts can be banned
-This uses user tokens. Discord may rate limit these accounts or ban them permanently at any time. Only use accounts you are willing to lose.
+:::danger Tokens can be revoked
+This uses user tokens. Discord may revoke your tokens or disable them. Only use accounts you are willing to lose.
 :::
 
 | Option | Default | Description |
@@ -105,7 +105,9 @@ This uses user tokens. Discord may rate limit these accounts or ban them permane
 | Send through proxies | Off | Give each account its own proxy from the [proxy list](/docs/configuration/advanced#proxy-support) |
 | Send delay | 0 to 0 s | A random pause before each message, between the minimum and maximum, in seconds |
 
-To add accounts, click **Add user token**; for a new mapping, save it and open it again first. You can add one token or several at once; each is checked when you add it. The token menu has **Verify tokens** and **Delete all tokens**.
+To add accounts, click **Add user token**; for a new mapping, save it and open it again first. You can add one token or several at once; each is checked when you add it. The token menu has **Verify tokens**, **Release all tokens** and **Delete all tokens**.
+
+**Release all tokens** frees every saved account identity of the mapping. The tokens stay in the mapping and keep sending, and the nicknames and roles they applied in the clone server are reset. Authors get tokens assigned again as they post.
 
 ## Recommended settings
 

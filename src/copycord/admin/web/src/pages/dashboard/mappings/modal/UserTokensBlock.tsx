@@ -332,6 +332,7 @@ export function UserTokensBlock({
   const [menuOpen, setMenuOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [releasing, setReleasing] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(mappingId);
   idRef.current = mappingId;
@@ -586,6 +587,54 @@ export function UserTokensBlock({
       notify(`Deleted ${deleted} token${deleted === 1 ? "" : "s"}.`, "success");
   };
 
+  const releaseAll = async () => {
+    setMenuOpen(false);
+    if (!mappingId) return;
+    const ok = await confirm({
+      title: "Release all tokens?",
+      body: (
+        <>
+          Every token is released from the author it is assigned to, and the
+          nicknames and roles it applied in the clone server are reset. Tokens
+          stay in this mapping and keep sending. Authors get tokens assigned
+          again as they post.
+        </>
+      ),
+      confirmLabel: "Release all",
+      confirmVariant: "primary",
+    });
+    if (!ok) return;
+    setReleasing(true);
+    try {
+      const j = await api.post<{
+        ok: boolean;
+        released?: number;
+        reset_applied?: boolean;
+        error?: string;
+      }>(tokensPath(mappingId, "/release"), {});
+      if (!j.ok) {
+        notify(j.error || "Failed to release tokens.", "error");
+        return;
+      }
+      const released = j.released ?? 0;
+      if (!released) {
+        notify("No tokens were assigned.", "success");
+        return;
+      }
+      const msg = `Released ${released} token${released === 1 ? "" : "s"}.`;
+      if (j.reset_applied === false)
+        notify(
+          `${msg} Nicknames and roles were not reset because the server is not running.`,
+          "info",
+        );
+      else notify(msg, "success");
+    } catch (e) {
+      notify(errorText(e, "Failed to release tokens"), "error");
+    } finally {
+      setReleasing(false);
+    }
+  };
+
   const switchRow = (
     key: string,
     name: string,
@@ -618,14 +667,8 @@ export function UserTokensBlock({
       <div className="mapping-section-body pt-1">
         <div className="user-token-disclaimer mb-3 rounded-input border border-danger-a35 bg-danger-a8 px-3 py-2.5 text-xs leading-normal text-text">
           <strong className="text-danger-pale">Warning:</strong> This feature
-          uses user tokens. Discord may rate limit your accounts or permanently
-          ban them at any time. Only use accounts you are willing to lose.
-        </div>
-        <div className="user-token-proxy-notice mb-3 rounded-input border border-warn/35 bg-warn-a10 px-3 py-2.5 text-xs leading-normal text-text">
-          <strong className="text-warn">Proxies:</strong> Proxies are recommended for token message cloning. Send
-          through proxies is off by default. With it off, tokens connect and send from this server's own IP address,
-          which Discord can link across accounts, and many accounts on one IP hit rate limits sooner. Turning it on
-          needs proxies configured in the Proxy settings.
+          uses user tokens. Discord may revoke your tokens or disable them.
+          Only use accounts you are willing to lose.
         </div>
         <div className="user-token-system-notice mb-3 rounded-input border border-info/35 bg-info-a12 px-3 py-2.5 text-xs leading-normal text-text">
           <strong className="text-info">Accounts:</strong> Each account's status, online time, last send and messages sent are
@@ -697,13 +740,6 @@ export function UserTokensBlock({
             checked={proxiesOn}
             onChange={(v) => setSetting("USER_TOKEN_USE_PROXIES", v)}
           />
-          <div
-            id="user-token-proxy-off-warning"
-            className="user-token-proxy-off-warning mb-1.5 px-1 text-xs leading-normal text-warn"
-          >
-            Turning this off sends token traffic from this server's own IP address, which Discord can link across
-            accounts.
-          </div>
 
           <div className={ROW}>
             <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
@@ -923,6 +959,35 @@ export function UserTokensBlock({
                               <polyline points="22 4 12 14.01 9 11.01" />
                             </svg>
                             <span>Verify tokens</span>
+                          </button>
+                          <button
+                            type="button"
+                            id="user-token-release-all"
+                            role="menuitem"
+                            className={cx(
+                              MENU_ITEM,
+                              "disabled:cursor-not-allowed disabled:opacity-50",
+                            )}
+                            disabled={!hasTokens || verifying || releasing}
+                            onClick={() => void releaseAll()}
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="15"
+                              height="15"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                              className="flex-none opacity-85"
+                            >
+                              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                              <path d="M3 3v5h5" />
+                            </svg>
+                            <span>Release all tokens</span>
                           </button>
                           <button
                             type="button"
