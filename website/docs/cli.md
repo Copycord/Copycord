@@ -39,7 +39,7 @@ copycord --verbose <command>
 
 Every status line starts with one symbol: `✓` success, `!` warning, `✗` failure, `•` info and `?` question. Where the terminal cannot print them, they are replaced with `+ ! x -`.
 
-Colors are off when the output is not a terminal (a pipe, a file or a service log), when `NO_COLOR` is set, when `TERM=dumb` or with `--no-color` before or after the command. `FORCE_COLOR=1` turns them on. In terminals that support it, web addresses and the folders Copycord prints can be clicked; links are off without colors, inside tmux or screen, over SSH, inside Docker and with `--json`.
+Colors are off when the output is not a terminal (a pipe, a file or a service log), when `NO_COLOR` is set, when `TERM=dumb` or with `--no-color` before or after the command. `FORCE_COLOR=1` turns them on. On a Windows console that cannot show colors, such as the classic Command Prompt, Copycord prints plain text instead of raw escape codes. In terminals that support it, web addresses and the folders Copycord prints can be clicked; links are off without colors, inside tmux or screen, over SSH, inside Docker and with `--json`.
 
 ### JSON output {#json}
 
@@ -430,7 +430,7 @@ It lists:
 
 Removes the Copycord program and its background service. It asks whether to keep or delete your data in the [Copycord home](#data-dir). Pressing **Enter** keeps it; **Esc** or **Ctrl+C** cancels.
 
-Where arrow keys do not work (for example Git Bash without a console), Copycord asks you to type a number or `y`/`n` instead. `COPYCORD_PLAIN_PROMPTS=1` forces this.
+Where arrow keys do not work (for example Git Bash without a console, or a Windows console that cannot show colors), Copycord asks you to type a number or `y`/`n` instead. `COPYCORD_PLAIN_PROMPTS=1` forces this.
 
 ```bash
 copycord uninstall --dry-run          # show what would be removed, change nothing
