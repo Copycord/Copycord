@@ -64,8 +64,26 @@ const FIELD_LIST_MAX = 260;
 const FIELD_LIST_FLIP = 160;
 const FIELD_LIST_GAP = 4;
 const VIEWPORT_MARGIN = 8;
+/** Widest the toolbar list grows to fit its longest label; past it a label ends in an ellipsis. */
+const TOOLBAR_LIST_MAX = 320;
 
 const isPlaceholder = (o: ToolbarOption) => Boolean(o.disabled) && o.value === "";
+
+/**
+ * Side and width cap of the toolbar list, which sits in the wrapper at least as wide as the toggle.
+ * It grows rightwards from the toggle's left edge when the widest list fits there, else leftwards
+ * from its right edge when it fits there, else towards the side with more room, capped to it.
+ */
+export function placeToolbarList(toggle: HTMLElement): CSSProperties {
+  const r = toggle.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const cap = Math.min(TOOLBAR_LIST_MAX, vw - 2 * VIEWPORT_MARGIN);
+  const roomRight = vw - VIEWPORT_MARGIN - r.left;
+  const roomLeft = r.right - VIEWPORT_MARGIN;
+  const rightwards = roomRight >= cap || (roomLeft < cap && roomRight >= roomLeft);
+  const maxWidth = Math.max(r.width, Math.min(cap, rightwards ? roomRight : roomLeft));
+  return rightwards ? { left: 0, right: "auto", maxWidth } : { left: "auto", right: 0, maxWidth };
+}
 
 /** Fixed box for the field list: the toggle's left and width, under it or flipped above it. */
 function placeList(toggle: HTMLElement): CSSProperties {
@@ -135,12 +153,21 @@ export function ToolbarSelect({
 
   // The floating field list is placed from the toggle before paint; a scroll anywhere but in the
   // list itself, or a resize, would leave it hanging away from the toggle, so it closes.
+  // The toolbar list hangs in the wrapper and scrolls with it; its side is picked before paint
+  // and again on a resize.
   useLayoutEffect(() => {
-    if (!open || !field || !toggle.current) {
+    const el = toggle.current;
+    if (!open || !el) {
       setPlace(null);
       return;
     }
-    setPlace(placeList(toggle.current));
+    if (!field) {
+      const onResize = () => setPlace(placeToolbarList(el));
+      onResize();
+      window.addEventListener("resize", onResize);
+      return () => window.removeEventListener("resize", onResize);
+    }
+    setPlace(placeList(el));
     const onScroll = (e: Event) => {
       if (e.target instanceof Node && list.current?.contains(e.target)) return;
       setOpen(false);
@@ -239,11 +266,11 @@ export function ToolbarSelect({
       role="listbox"
       aria-label={label}
       aria-labelledby={label ? undefined : id}
-      style={field ? (place ?? undefined) : undefined}
+      style={place ?? undefined}
       className={cx(
         field
           ? "z-[70] block overflow-x-hidden overflow-y-auto overscroll-contain"
-          : "absolute inset-x-0 top-[calc(100%+4px)] z-[55] block max-h-[180px] overflow-x-hidden overflow-y-auto",
+          : "absolute top-[calc(100%+4px)] left-0 z-[55] block max-h-[180px] w-max max-w-[min(20rem,calc(100vw-16px))] min-w-full overflow-x-hidden overflow-y-auto",
         "rounded-control border border-border bg-surface-deep p-1 shadow-popover",
       )}
     >
@@ -265,8 +292,10 @@ export function ToolbarSelect({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => choose(i)}
             onMouseEnter={() => !o.disabled && setFocus(i)}
+            title={field ? undefined : o.label}
             className={cx(
-              "block rounded-lg px-2.5 py-2 text-[13px] leading-[1.3] break-words select-none [overflow-wrap:anywhere]",
+              "block rounded-lg px-2.5 py-2 text-[13px] leading-[1.3] select-none",
+              field ? "break-words [overflow-wrap:anywhere]" : "truncate",
               "transition-colors duration-150",
               o.disabled
                 ? "cursor-default text-muted opacity-70"

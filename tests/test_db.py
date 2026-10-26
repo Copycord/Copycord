@@ -479,10 +479,11 @@ class TestMappingUserTokens:
         rows = db.list_all_user_tokens()
         assert len(rows) == 3
         assert set(rows[0]) == {
-            "token_id", "token_value", "username", "display_name", "avatar_url",
+            "token_id", "mapping_id", "token_value", "username", "display_name", "avatar_url",
             "user_id", "enabled", "last_used", "use_count",
         }
         assert rows[0]["display_name"] is None and rows[0]["avatar_url"] is None
+        assert sorted(r["mapping_id"] for r in rows) == ["ut-map", "ut-map2", "ut-map2"]
 
     def test_update_token_identity_by_id_updates_every_row_of_the_value(self, db):
         self._mapping(db)

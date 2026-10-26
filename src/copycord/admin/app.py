@@ -1321,6 +1321,21 @@ def _user_avatar_url(user_id, avatar_hash) -> str | None:
     return _default_avatar_url(user_id)
 
 
+SENDER_AVATAR_SIZE = 64
+
+
+def _sized_avatar_url(url: str | None, size: int = SENDER_AVATAR_SIZE) -> str | None:
+    """A real CDN avatar URL with its size query set to ``size``; default and other URLs as given."""
+    if not url:
+        return url
+    parts = urlsplit(url)
+    if parts.netloc != "cdn.discordapp.com" or not parts.path.startswith("/avatars/"):
+        return url
+    query = [kv for kv in parts.query.split("&") if kv and kv.split("=", 1)[0] != "size"]
+    query.append(f"size={size}")
+    return parts._replace(query="&".join(query)).geturl()
+
+
 def _store_token_identity(token_value: str, ident: dict | None) -> None:
     """Save a /users/@me answer on every row of the token, for the System page senders table."""
     if not ident or not token_value:
@@ -3069,7 +3084,8 @@ def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
                 "id": str(group[0].get("token_id")),
                 "username": username,
                 "display_name": first("display_name") or username,
-                "avatar_url": first("avatar_url")
+                # A 24 px avatar: the stored 1024 px CDN URL is served at 64 px.
+                "avatar_url": _sized_avatar_url(first("avatar_url"))
                 or _default_avatar_url(first("user_id"))
                 or _token_default_avatar_url(str(group[0].get("token_id"))),
                 "state": state,
@@ -3077,6 +3093,9 @@ def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
                 "since": int(since) if isinstance(since, (int, float)) else None,
                 "last_used": max(last_used) if last_used else None,
                 "use_count": sum(int(r.get("use_count") or 0) for r in group),
+                "mapping_ids": sorted(
+                    {str(r["mapping_id"]) for r in group if r.get("mapping_id")}
+                ),
             }
         )
 
@@ -3089,6 +3108,30 @@ def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
         )
     )
     return items
+
+
+def _mapping_name(m: dict) -> str:
+    mid = str(m.get("mapping_id") or "")
+    for field in ("mapping_name", "original_guild_name", "cloned_guild_name"):
+        name = str(m.get(field) or "").strip()
+        if name:
+            return name
+    return f"Mapping {mid[:8]}" if mid else "Mapping"
+
+
+def _senders_mappings(mappings: list[dict]) -> list[dict]:
+    """The mappings the senders table filters by: id, name and status, active first, then by name."""
+    out: dict[str, dict] = {}
+    for m in mappings or []:
+        m = m or {}
+        mid = str(m.get("mapping_id") or "")
+        if not mid or mid in out:
+            continue
+        status = "paused" if str(m.get("status") or "active").strip().lower() == "paused" else "active"
+        out[mid] = {"id": mid, "name": _mapping_name(m), "status": status}
+    return sorted(
+        out.values(), key=lambda i: (i["status"] == "paused", i["name"].lower(), i["id"])
+    )
 
 
 def _token_cloning_enabled(mappings: list[dict]) -> bool:
@@ -3110,9 +3153,15 @@ async def api_system_senders():
     status = await _collect_status()
     server = status.get("server") or {}
     pool = server.get("token_pool") if server.get("state") == "running" else None
-    items = _merge_senders(db.list_all_user_tokens(), pool)
-    enabled = _token_cloning_enabled(db.list_guild_mappings())
-    return JSONResponse({"ok": True, "enabled": enabled, "items": items})
+    mappings = db.list_guild_mappings()
+    return JSONResponse(
+        {
+            "ok": True,
+            "enabled": _token_cloning_enabled(mappings),
+            "items": _merge_senders(db.list_all_user_tokens(), pool),
+            "mappings": _senders_mappings(mappings),
+        }
+    )
 
 
 @app.get("/filters/{mapping_id}")

@@ -1,6 +1,7 @@
 import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Sender } from "../../types/system";
+import type { Sender, SenderMapping } from "../../types/system";
+import { forgetAvatars } from "./SenderAvatar";
 import { SendersTableSkeleton } from "./SendersSkeleton";
 import { SendersTable } from "./SendersTable";
 import { SystemSkeleton } from "./SystemSkeleton";
@@ -19,6 +20,7 @@ function sender(id: string, over: Partial<Sender> = {}): Sender {
     since: null,
     last_used: null,
     use_count: 0,
+    mapping_ids: [],
     ...over,
   };
 }
@@ -51,12 +53,6 @@ function serve(...replies: Array<() => Response>) {
 
 const ok = (items: Sender[]) => () => json({ ok: true, items });
 
-const COLORS = ["#5865F2", "#747F8D", "#3BA55D", "#FAA61A", "#ED4245", "#EB459E"];
-/** A hex colour as jsdom reports an inline background. */
-function rgb(hex: string) {
-  const n = Number.parseInt(hex.slice(1), 16);
-  return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`;
-}
 
 const order = () => [...document.querySelectorAll("tr[data-sender]")].map((r) => r.getAttribute("data-sender"));
 
@@ -67,6 +63,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   localStorage.clear();
+  forgetAvatars();
 });
 
 describe("SendersTable", () => {
@@ -140,23 +137,25 @@ describe("SendersTable", () => {
     expect(dimmed).toEqual(["f", "g"]);
   });
 
-  it("shows the avatar lazily over its default colour and the colour circle when there is none or it fails", async () => {
+  it("shows each avatar image eagerly over a shimmer, and the default image when there is no URL", async () => {
     serve(ok(ITEMS));
     render(<SendersTable />);
     await waitFor(() => expect(rowOf("a")).toBeTruthy());
     const img = rowOf("a").querySelector("img")!;
-    expect(img).toHaveAttribute("loading", "lazy");
+    expect(img).not.toHaveAttribute("loading");
+    expect(img).toHaveAttribute("decoding", "async");
     expect(img).toHaveAttribute("src", "https://cdn.discordapp.com/embed/avatars/0.png");
     expect(img).toHaveAttribute("alt", "");
     expect(img.className).toContain("size-6");
-    expect(img.style.backgroundColor).toBe(rgb("#5865F2"));
-    expect(rowOf("d").querySelector('[data-avatar="default"]')).not.toBeNull();
-    fireEvent.error(img);
-    expect(rowOf("a").querySelector("img")).toBeNull();
-    const circle = rowOf("a").querySelector<HTMLElement>('[data-avatar="default"]')!;
-    expect(circle.className).toContain("size-6");
-    expect(circle.style.backgroundColor).toBe(rgb("#5865F2"));
-    expect(circle.textContent).toBe("");
+    expect(rowOf("a").querySelector('[data-avatar="loading"] [data-skeleton]')).not.toBeNull();
+    // No URL: the default avatar image of the row id ("d" = 100 % 6 = 4).
+    expect(rowOf("d").querySelector("img")).toHaveAttribute("src", "https://cdn.discordapp.com/embed/avatars/4.png");
+    fireEvent.load(img);
+    expect(rowOf("a").querySelector('[data-avatar="img"]')).not.toBeNull();
+    expect(rowOf("a").querySelector("[data-skeleton]")).toBeNull();
+    for (const el of document.querySelectorAll<HTMLElement>("tr[data-sender] [data-avatar], tr[data-sender] img")) {
+      expect(el.style.backgroundColor).toBe("");
+    }
   });
 
   it("locks the avatars in place: not draggable, not selectable, and a drag start is cancelled", async () => {
@@ -170,7 +169,7 @@ describe("SendersTable", () => {
     const drag = createEvent.dragStart(img);
     fireEvent(img, drag);
     expect(drag.defaultPrevented).toBe(true);
-    expect(rowOf("d").querySelector('[data-avatar="default"]')!.className).toContain("select-none");
+    expect(rowOf("a").querySelector("[data-avatar]")!.className).toContain("select-none");
   });
 
   it("ticks Online for every second", async () => {
@@ -304,8 +303,13 @@ describe("SendersTable loading", () => {
         .map((h) => [h.textContent, h.className, h.style.width, h.querySelector("button")?.className]);
     const firstCells = (root: HTMLElement) => [...root.querySelector("tr[data-skeleton-row]")!.querySelectorAll("td")].map((c) => c.className);
     // The section's tree of tags and classes, down to the table and the count box: header, toolbar card, search, wrap.
-    // The chip swaps its loading box for the loaded one and has cases of its own below.
-    const leaf = (el: Element) => el.tagName === "TABLE" || el.id === "system-senders-count";
+    // The chip swaps its loading box for the loaded one and has cases of its own below; the status line and the
+    // mapping dropdown keep their boxes and swap their bars for text.
+    const leaf = (el: Element) =>
+      el.tagName === "TABLE" ||
+      el.id === "system-senders-count" ||
+      el.id === "system-senders-status" ||
+      el.querySelector(":scope > select#system-senders-mapping") !== null;
     const shape = (el: Element): unknown => [
       el.tagName,
       el.getAttribute("class"),
@@ -317,6 +321,10 @@ describe("SendersTable loading", () => {
     expect(shape(section(skel.container))).toEqual(shape(section(page.container)));
     expect(within(section(skel.container)).getByRole("heading", { level: 2, hidden: true })).toHaveTextContent("Token Message Cloning");
     expect(skel.container.querySelector("#system-senders-count [data-skeleton]")).not.toBeNull();
+    expect(skel.container.querySelector("#system-senders-status [data-skeleton]")).not.toBeNull();
+    expect(page.container.querySelector("#system-senders-status [data-skeleton]")).not.toBeNull();
+    const toggleClass = (root: HTMLElement) => root.querySelector("#system-senders-mapping")!.parentElement!.className;
+    expect(toggleClass(skel.container)).toBe(toggleClass(page.container));
     expect(within(skel.container).getByRole("searchbox", { hidden: true })).toHaveAttribute("placeholder", "Search accounts");
     const skelWrap = skel.container.querySelector("table")!.parentElement!;
     expect(skelWrap.className).toBe(document.getElementById("system-senders")!.className);
@@ -355,24 +363,21 @@ describe("SendersTable size", () => {
 });
 
 describe("SendersTable avatars", () => {
-  it("falls back to the Discord default colour of the URL index, or of a stable id hash", async () => {
-    const items = [
-      ...COLORS.map((_, n) => sender(`u${n}`, { avatar_url: `https://cdn.discordapp.com/embed/avatars/${n}.png` })),
-      sender("a", { avatar_url: null }),
-      sender("b", { avatar_url: "https://cdn.discordapp.com/avatars/2/abc.png" }),
-    ];
-    serve(ok(items));
+  it("keeps a loaded avatar on screen through polls naming the same URL", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const real = "https://cdn.discordapp.com/avatars/1/abc.png?size=64";
+    serve(ok([sender("a", { avatar_url: real })]), ok([sender("a", { avatar_url: real, use_count: 9 })]));
     render(<SendersTable />);
-    await waitFor(() => expect(rowOf("u0")).toBeTruthy());
-    for (const img of document.querySelectorAll("tr[data-sender] img")) fireEvent.error(img);
-    const circle = (id: string) => rowOf(id).querySelector<HTMLElement>('[data-avatar="default"]')!;
-    COLORS.forEach((hex, n) => {
-      expect(circle(`u${n}`).style.backgroundColor).toBe(rgb(hex));
-      expect(circle(`u${n}`)).toHaveAttribute("data-avatar-index", String(n));
+    await vi.waitFor(() => expect(rowOf("a")).toBeTruthy());
+    const img = rowOf("a").querySelector("img")!;
+    fireEvent.load(img);
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
     });
-    // No default URL: ("a".charCodeAt(0) = 97) % 6 = 1 grey; "b" = 98 % 6 = 2 green, the same on every render.
-    expect(circle("a").style.backgroundColor).toBe(rgb(COLORS[1]!));
-    expect(circle("b").style.backgroundColor).toBe(rgb(COLORS[2]!));
+    await vi.waitFor(() => expect(cellText("a", 5)).toBe("9"));
+    expect(rowOf("a").querySelector("img")).toBe(img);
+    expect(rowOf("a").querySelector('[data-avatar="img"]')).not.toBeNull();
+    expect(rowOf("a").querySelector("[data-skeleton]")).toBeNull();
   });
 
   it("swaps the default for the real avatar on a later poll in the same box", async () => {
@@ -382,7 +387,7 @@ describe("SendersTable avatars", () => {
     render(<SendersTable />);
     await vi.waitFor(() => expect(rowOf("a")).toBeTruthy());
     const img = rowOf("a").querySelector("img")!;
-    expect(img.style.backgroundColor).toBe(rgb(COLORS[3]!));
+    fireEvent.load(img);
     const cls = img.className;
     await act(async () => {
       vi.advanceTimersByTime(SENDERS_POLL_MS);
@@ -390,7 +395,8 @@ describe("SendersTable avatars", () => {
     await vi.waitFor(() => expect(rowOf("a").querySelector("img")).toHaveAttribute("src", real));
     expect(rowOf("a").querySelector("img")).toBe(img);
     expect(img.className).toBe(cls);
-    expect(img).toHaveAttribute("loading", "lazy");
+    fireEvent.load(img);
+    expect(rowOf("a").querySelector('[data-avatar="img"]')).not.toBeNull();
   });
 });
 
@@ -648,5 +654,140 @@ describe("SendersTable idle", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Search accounts" }), { target: { value: "idle" } });
     expect(order()).toEqual(["h"]);
     expect(document.getElementById("system-senders-count")).toHaveTextContent(/^1 of 8 accounts$/);
+  });
+});
+
+describe("SendersTable mapping filter and status line", () => {
+  const MAPPINGS: SenderMapping[] = [
+    { id: "m1", name: "wdr", status: "active" },
+    { id: "m2", name: "osrs", status: "paused" },
+  ];
+  const M_ITEMS: Sender[] = [
+    sender("a", { state: "online", presence: "online", since: NOW, mapping_ids: ["m1"] }),
+    sender("b", { state: "online", presence: "dnd", since: NOW, mapping_ids: ["m1"] }),
+    sender("c", { state: "connecting", mapping_ids: ["m1"] }),
+    sender("d", { state: "offline", mapping_ids: ["m2"] }),
+    sender("e", { state: "disabled", mapping_ids: ["m2"] }),
+    sender("f", { state: "revoked", mapping_ids: ["m2"] }),
+    sender("s", { state: "online", presence: "idle", since: NOW, mapping_ids: ["m1", "m2"] }),
+  ];
+  const okM = (items: Sender[], mappings: SenderMapping[] = MAPPINGS) => () => json({ ok: true, enabled: true, items, mappings });
+  const select = () => document.getElementById("system-senders-mapping") as HTMLSelectElement;
+  const pick = (id: string) => fireEvent.change(select(), { target: { value: id } });
+  const statusLine = () => [...document.querySelectorAll("#system-senders-status [data-count]")].map((e) => e.textContent);
+  const count = () => document.getElementById("system-senders-count")!.textContent;
+
+  it("lists All mappings first, then each mapping with paused ones marked", async () => {
+    serve(okM(M_ITEMS));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("a")).toBeTruthy());
+    expect([...select().options].map((o) => [o.value, o.textContent])).toEqual([
+      ["", "All mappings"],
+      ["m1", "wdr"],
+      ["m2", "osrs (paused)"],
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "All mappings" }));
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["All mappings", "wdr", "osrs (paused)"]);
+    fireEvent.click(screen.getByRole("option", { name: "osrs (paused)" }));
+    expect(select()).toHaveValue("m2");
+    expect(order()).toEqual(["d", "e", "f", "s"]);
+  });
+
+  it("filters the rows, the count and the status line by mapping, a shared token under each", async () => {
+    serve(okM(M_ITEMS));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("a")).toBeTruthy());
+    expect(order()).toEqual(["a", "b", "c", "d", "e", "f", "s"]);
+    expect(count()).toBe("7 accounts");
+    expect(statusLine()).toEqual(["3 online", "1 connecting", "1 offline", "1 disabled", "1 revoked"]);
+    expect(document.querySelector('#system-senders-status [data-count="online"] .bg-good')).not.toBeNull();
+
+    pick("m1");
+    expect(order()).toEqual(["a", "b", "c", "s"]);
+    expect(count()).toBe("4 accounts");
+    expect(statusLine()).toEqual(["3 online", "1 connecting"]);
+
+    pick("m2");
+    expect(order()).toEqual(["d", "e", "f", "s"]);
+    expect(count()).toBe("4 accounts");
+    expect(statusLine()).toEqual(["1 online", "1 offline", "1 disabled", "1 revoked"]);
+
+    pick("");
+    expect(order()).toHaveLength(7);
+  });
+
+  it("combines with the search", async () => {
+    serve(okM(M_ITEMS));
+    render(<SendersTable />);
+    await waitFor(() => expect(rowOf("a")).toBeTruthy());
+    pick("m2");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search accounts" }), { target: { value: "relay.s" } });
+    expect(order()).toEqual(["s"]);
+    expect(count()).toBe("1 of 4 accounts");
+    expect(statusLine()).toEqual(["1 online"]);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search accounts" }), { target: { value: "relay.a" } });
+    expect(order()).toEqual([]);
+    expect(statusLine()).toEqual([]);
+    expect(screen.getByText("No matching accounts")).toBeInTheDocument();
+  });
+
+  it("falls back to All mappings when the chosen one is gone from a later poll", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    serve(okM(M_ITEMS), okM(M_ITEMS, MAPPINGS.slice(0, 1)));
+    render(<SendersTable />);
+    await vi.waitFor(() => expect(rowOf("a")).toBeTruthy());
+    pick("m2");
+    expect(order()).toEqual(["d", "e", "f", "s"]);
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
+    });
+    await vi.waitFor(() => expect(select().options).toHaveLength(2));
+    expect(select()).toHaveValue("");
+    expect(order()).toHaveLength(7);
+    expect(count()).toBe("7 accounts");
+    expect(screen.getByRole("button", { name: "All mappings" })).toBeInTheDocument();
+  });
+
+  it("keeps the mapping across polls and updates the status line in place; a failed poll keeps the last values", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const later = M_ITEMS.map((s) => (s.id === "c" ? { ...s, state: "online" as const, presence: "online" as const, since: NOW } : s));
+    const fetchMock = serve(okM(M_ITEMS), okM(later), () => json({ detail: "boom" }, 500));
+    render(<SendersTable />);
+    await vi.waitFor(() => expect(rowOf("a")).toBeTruthy());
+    pick("m1");
+    const line = document.getElementById("system-senders-status")!;
+    expect(statusLine()).toEqual(["3 online", "1 connecting"]);
+
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
+    });
+    await vi.waitFor(() => expect(statusLine()).toEqual(["4 online"]));
+    expect(document.getElementById("system-senders-status")).toBe(line);
+    expect(line.className).toContain("tabular-nums");
+    expect(select()).toHaveValue("m1");
+    expect(order()).toEqual(["a", "b", "c", "s"]);
+
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await act(async () => {
+      vi.advanceTimersByTime(SENDERS_POLL_MS);
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(statusLine()).toEqual(["4 online"]);
+    expect(count()).toBe("4 accounts");
+    expect(select()).toHaveValue("m1");
+    expect([...select().options].map((o) => o.textContent)).toEqual(["All mappings", "wdr", "osrs (paused)"]);
+  });
+
+  it("holds a bar in the status line and the dropdown until the first answer, and shows neither after a first failure", async () => {
+    serve(() => json({ detail: "boom" }, 500));
+    render(<SendersTable />);
+    expect(document.querySelector("#system-senders-status [data-skeleton]")).not.toBeNull();
+    expect(select().parentElement!.querySelector("[data-skeleton]")).not.toBeNull();
+    await waitFor(() => expect(screen.getByText("Could not load sending accounts")).toBeInTheDocument());
+    expect(document.getElementById("system-senders-status")).toBeEmptyDOMElement();
+    expect(screen.getByRole("button", { name: "All mappings" })).toBeInTheDocument();
   });
 });

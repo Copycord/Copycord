@@ -13,9 +13,10 @@ UID = "175928847299117063"  # (UID >> 22) % 6 == 2
 
 
 def _row(tid, value, *, username=None, display_name=None, avatar_url=None, user_id=None,
-         enabled=1, last_used=None, use_count=0):
+         enabled=1, last_used=None, use_count=0, mapping_id=None):
     return {
         "token_id": tid,
+        "mapping_id": mapping_id,
         "token_value": value,
         "username": username,
         "display_name": display_name,
@@ -38,8 +39,8 @@ def _pool(**tokens):
 def test_shared_token_is_one_item_with_max_last_used_and_summed_count():
     rows = [
         _row("t1", "SECRET-A", username="relay.alpha", display_name="Ava", user_id=UID,
-             last_used=100, use_count=3),
-        _row("t2", "SECRET-A", username="relay.alpha", last_used=250, use_count=4),
+             last_used=100, use_count=3, mapping_id="m2"),
+        _row("t2", "SECRET-A", username="relay.alpha", last_used=250, use_count=4, mapping_id="m1"),
     ]
     items = app_module._merge_senders(rows, _pool(t2=_entry("online", presence="dnd")))
     assert items == [
@@ -53,6 +54,7 @@ def test_shared_token_is_one_item_with_max_last_used_and_summed_count():
             "since": 1000,
             "last_used": 250,
             "use_count": 7,
+            "mapping_ids": ["m1", "m2"],
         }
     ]
 
@@ -90,7 +92,7 @@ def test_identity_fallbacks():
     ]
     by_id = {i["id"]: i for i in app_module._merge_senders(rows, None)}
     assert by_id["s"]["display_name"] == "Stored Name"
-    assert by_id["s"]["avatar_url"] == "https://cdn.discordapp.com/avatars/1/h.png?size=1024"
+    assert by_id["s"]["avatar_url"] == "https://cdn.discordapp.com/avatars/1/h.png?size=64"
     assert by_id["u"]["display_name"] == "plain"
     assert by_id["u"]["avatar_url"] == "https://cdn.discordapp.com/embed/avatars/2.png"
     assert by_id["n"]["display_name"] is None
@@ -120,7 +122,31 @@ def test_real_avatar_replaces_the_id_default():
         [_row("n", "N", avatar_url="https://cdn.discordapp.com/avatars/1/h.png?size=1024", user_id="1")],
         None,
     )[0]
-    assert item["avatar_url"] == "https://cdn.discordapp.com/avatars/1/h.png?size=1024"
+    assert item["avatar_url"] == "https://cdn.discordapp.com/avatars/1/h.png?size=64"
+
+
+def test_sized_avatar_url_sets_size_64_on_real_avatars_only():
+    cdn = "https://cdn.discordapp.com"
+    sized = app_module._sized_avatar_url
+    assert sized(f"{cdn}/avatars/{UID}/abc.png?size=1024") == f"{cdn}/avatars/{UID}/abc.png?size=64"
+    assert sized(f"{cdn}/avatars/{UID}/a_abc.gif?size=1024") == f"{cdn}/avatars/{UID}/a_abc.gif?size=64"
+    assert sized(f"{cdn}/avatars/{UID}/abc.png") == f"{cdn}/avatars/{UID}/abc.png?size=64"
+    # Other query params are kept; only size changes.
+    assert sized(f"{cdn}/avatars/{UID}/abc.webp?animated=true&size=4096") == (
+        f"{cdn}/avatars/{UID}/abc.webp?animated=true&size=64"
+    )
+    assert sized(f"{cdn}/embed/avatars/3.png") == f"{cdn}/embed/avatars/3.png"
+    assert sized("https://example.com/avatars/1/abc.png?size=1024") == "https://example.com/avatars/1/abc.png?size=1024"
+    assert sized(None) is None
+    assert sized("") == ""
+
+
+def test_merged_sender_avatar_is_64_px_and_the_stored_url_untouched():
+    stored = "https://cdn.discordapp.com/avatars/1/a_h.gif?size=1024"
+    row = _row("n", "N", avatar_url=stored, user_id="1")
+    item = app_module._merge_senders([row], None)[0]
+    assert item["avatar_url"] == "https://cdn.discordapp.com/avatars/1/a_h.gif?size=64"
+    assert row["avatar_url"] == stored
 
 
 def test_sort_online_first_then_username():
