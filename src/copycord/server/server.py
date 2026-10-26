@@ -372,6 +372,8 @@ class ServerReceiver:
         # still to be reported as (start time, token count).
         self._pool_wanted_count: Optional[int] = None
         self._pool_wave: Optional[tuple[float, int]] = None
+        # Sessions of that wave seen out of the initial offline state.
+        self._pool_wave_started: set[str] = set()
         # Last account identity stored per pool session, so the DB is written only on change.
         self._pool_identity_saved: dict[str, dict] = {}
         self.token_pool = TokenSessionPool(
@@ -1103,6 +1105,7 @@ class ServerReceiver:
             extra,
         )
         self._pool_wave = (time.monotonic(), count)
+        self._pool_wave_started = set()
 
     def _log_token_pool_wave(self) -> None:
         """Log once when the first wave has settled: no wanted session is still connecting, or the wave timed out."""
@@ -1116,11 +1119,16 @@ class ServerReceiver:
         except Exception:
             return
         # One session per token value, however many rows share it.
-        mine = list({snap[t].get("session") or t: snap[t] for t in self._pool_ids if t in snap}.values())
-        if len(mine) < count and elapsed < TOKEN_POOL_WAVE_TIMEOUT:
-            return
-        if any(e.get("state") == "connecting" for e in mine) and elapsed < TOKEN_POOL_WAVE_TIMEOUT:
-            return
+        by_session = {snap[t].get("session") or t: snap[t] for t in self._pool_ids if t in snap}
+        mine = list(by_session.values())
+        # A session starts offline and only turns connecting once it gets a connect slot, so
+        # offline alone does not mean failed: wait until each one has left it at least once.
+        self._pool_wave_started.update(k for k, e in by_session.items() if e.get("state") != "offline")
+        if elapsed < TOKEN_POOL_WAVE_TIMEOUT:
+            if len(mine) < count or any(k not in self._pool_wave_started for k in by_session):
+                return
+            if any(e.get("state") == "connecting" for e in mine):
+                return
         self._pool_wave = None
         online = sum(1 for e in mine if e.get("state") == "online")
         logger.info(
