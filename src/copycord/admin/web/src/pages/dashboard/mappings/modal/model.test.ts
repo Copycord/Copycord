@@ -7,7 +7,9 @@ import {
   initialForm,
   invalidFields,
   modeOf,
+  normalizeIdleMinutes,
   normalizePresence,
+  resolveNoFreeAccount,
   settingMatches,
   snapshot,
 } from "./model";
@@ -165,5 +167,49 @@ describe("mapping modal model", () => {
       expect("USER_TOKEN_STRATEGY" in buildPayload(f).settings).toBe(false);
       expect("USER_TOKEN_STRATEGY" in initialForm({ ...M, settings: { USER_TOKEN_STRATEGY: stored } }, "clone").settings).toBe(false);
     }
+  });
+
+  describe("when no account is free", () => {
+    const load = (settings: DashboardMapping["settings"]) => initialForm({ ...M, settings }, "edit").settings;
+
+    it("a new mapping defaults to webhook with 30 idle minutes", () => {
+      const s = initialForm(null, "create").settings;
+      expect(s.USER_TOKEN_NO_FREE_ACCOUNT).toBe("webhook");
+      expect(s.USER_TOKEN_REUSE_IDLE_MINUTES).toBe(30);
+      const p = buildPayload(initialForm(null, "create")).settings;
+      expect(p.USER_TOKEN_NO_FREE_ACCOUNT).toBe("webhook");
+      expect(p.USER_TOKEN_REUSE_IDLE_MINUTES).toBe(30);
+    });
+
+    it("resolves the stored key first, then the older fallback switch, then webhook", () => {
+      expect(resolveNoFreeAccount({ USER_TOKEN_NO_FREE_ACCOUNT: "reuse", USER_TOKEN_FALLBACK_WEBHOOK: false })).toBe("reuse");
+      expect(resolveNoFreeAccount({ USER_TOKEN_NO_FREE_ACCOUNT: "drop", USER_TOKEN_FALLBACK_WEBHOOK: true })).toBe("drop");
+      expect(resolveNoFreeAccount({ USER_TOKEN_FALLBACK_WEBHOOK: false })).toBe("drop");
+      expect(resolveNoFreeAccount({ USER_TOKEN_FALLBACK_WEBHOOK: "false" })).toBe("drop");
+      expect(resolveNoFreeAccount({ USER_TOKEN_FALLBACK_WEBHOOK: true })).toBe("webhook");
+      expect(resolveNoFreeAccount({})).toBe("webhook");
+      expect(resolveNoFreeAccount({ USER_TOKEN_NO_FREE_ACCOUNT: "nope", USER_TOKEN_FALLBACK_WEBHOOK: false })).toBe("drop");
+    });
+
+    it("an older mapping with the switch off loads and saves as drop and keeps the old key", () => {
+      const f = initialForm({ ...M, settings: { USER_TOKEN_FALLBACK_WEBHOOK: false } }, "edit");
+      expect(f.settings.USER_TOKEN_NO_FREE_ACCOUNT).toBe("drop");
+      const p = buildPayload(f).settings;
+      expect(p.USER_TOKEN_NO_FREE_ACCOUNT).toBe("drop");
+      expect(p.USER_TOKEN_FALLBACK_WEBHOOK).toBe(false);
+      expect(load({ USER_TOKEN_FALLBACK_WEBHOOK: true }).USER_TOKEN_NO_FREE_ACCOUNT).toBe("webhook");
+      expect(load({}).USER_TOKEN_NO_FREE_ACCOUNT).toBe("webhook");
+    });
+
+    it("saves reuse with whole idle minutes of at least 1", () => {
+      const f = initialForm({ ...M, settings: { USER_TOKEN_NO_FREE_ACCOUNT: "reuse", USER_TOKEN_REUSE_IDLE_MINUTES: 45 } }, "edit");
+      expect(f.settings.USER_TOKEN_NO_FREE_ACCOUNT).toBe("reuse");
+      expect(f.settings.USER_TOKEN_REUSE_IDLE_MINUTES).toBe(45);
+      f.settings.USER_TOKEN_REUSE_IDLE_MINUTES = "0";
+      expect(buildPayload(f).settings.USER_TOKEN_REUSE_IDLE_MINUTES).toBe(1);
+      f.settings.USER_TOKEN_REUSE_IDLE_MINUTES = "";
+      expect(buildPayload(f).settings.USER_TOKEN_REUSE_IDLE_MINUTES).toBe(30);
+      expect(normalizeIdleMinutes("12.7")).toBe(12);
+    });
   });
 });

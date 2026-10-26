@@ -158,6 +158,10 @@ class _DB:
         uid = getattr(self, "token_users", {}).get(str(token_id))
         return {"user_id": uid} if uid else None
 
+    def delete_token_identity(self, mapping_id, author_id):
+        self.deleted = getattr(self, "deleted", []) + [str(author_id)]
+        return self.identities.pop((str(mapping_id), str(author_id)), None) is not None
+
     def get_role_mapping_for_clone(self, host_id, clone_gid):
         crid = self.role_map.get(int(host_id))
         return {"cloned_role_id": crid} if crid else None
@@ -479,3 +483,217 @@ class TestResetIdentity:
 
         assert [r.id for r in member.roles] == [30]
         assert member.nick is None
+
+
+class TestNoFreeAccountSetting:
+
+    @pytest.mark.parametrize(
+        "settings,policy,action",
+        [
+            ({}, "webhook", "webhook"),
+            ({"USER_TOKEN_FALLBACK_WEBHOOK": True}, "webhook", "webhook"),
+            ({"USER_TOKEN_FALLBACK_WEBHOOK": False}, "drop", "skip"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "reuse", "USER_TOKEN_FALLBACK_WEBHOOK": False}, "reuse", "webhook"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "drop", "USER_TOKEN_FALLBACK_WEBHOOK": True}, "drop", "skip"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "webhook", "USER_TOKEN_FALLBACK_WEBHOOK": False}, "webhook", "webhook"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": " Reuse "}, "reuse", "webhook"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "nope", "USER_TOKEN_FALLBACK_WEBHOOK": False}, "drop", "skip"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": None}, "webhook", "webhook"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": 3}, "webhook", "webhook"),
+        ],
+    )
+    def test_resolution(self, settings, policy, action):
+        assert token_identity.no_free_account_policy(settings) == policy
+        assert token_identity.exhausted_action(settings) == action
+
+    def test_server_uses_the_same_helper(self):
+        from copycord.server.server import ServerReceiver
+
+        assert ServerReceiver._identity_exhausted_action({"USER_TOKEN_FALLBACK_WEBHOOK": False}) == "skip"
+        assert ServerReceiver._identity_exhausted_action({"USER_TOKEN_NO_FREE_ACCOUNT": "reuse"}) == "webhook"
+        assert ServerReceiver._identity_exhausted_action({"USER_TOKEN_NO_FREE_ACCOUNT": "drop"}) == "skip"
+
+    @pytest.mark.parametrize(
+        "raw,minutes", [(None, 30), (45, 45), ("10", 10), (0, 1), (-5, 1), ("x", 30)]
+    )
+    def test_idle_minutes(self, raw, minutes):
+        settings = {} if raw is None else {"USER_TOKEN_REUSE_IDLE_MINUTES": raw}
+        assert token_identity.reuse_idle_minutes(settings) == minutes
+
+    def test_config_defaults_leave_the_policy_unset(self):
+        from copycord.common.config import Config
+
+        defaults = Config.default_mapping_settings(object())
+        assert "USER_TOKEN_NO_FREE_ACCOUNT" not in defaults
+        assert defaults["USER_TOKEN_REUSE_IDLE_MINUTES"] == 30
+        assert defaults["USER_TOKEN_FALLBACK_WEBHOOK"] is True
+
+
+NOW = 1_000_000
+
+
+class TestReuseIdleAccount:
+
+    def _setup(self, holders, tokens=None, now=NOW):
+        """holders: {author: (token, assigned_at, applied_nick, applied_role_ids)}."""
+        token_identity.time = types.SimpleNamespace(time=lambda: now)
+        db = _DB()
+        members = {}
+        for author, (tid, assigned_at, nick, roles) in holders.items():
+            db.identities[("m", author)] = {
+                "author_id": author, "token_id": tid, "cloned_guild_id": 2,
+                "applied_nick": nick, "applied_role_ids": roles,
+                "applied_avatar_hash": None, "assigned_at": assigned_at,
+            }
+        tokens = tokens or []
+        db.token_users = {t["token_id"]: t["user_id"] for t in tokens}
+        for t in tokens:
+            members[int(t["user_id"])] = _Member(int(t["user_id"]))
+        guild = _Guild(2, members, {})
+        logs = []
+        log = _silent()
+        log.info = lambda msg, *a, **k: logs.append(msg % a)
+        mgr = TokenIdentityManager(bot=_Bot(guild), db=db, logger=log)
+        return mgr, db, members, logs
+
+    def _kw(self, tokens, author="new", minutes=30, policy="reuse"):
+        return dict(
+            mapping_id="m", cloned_guild_id=2, author_id=author,
+            author_display_name="Newbie", author_role_ids=[],
+            settings={
+                "USER_TOKEN_STICKY_NICKNAME": True,
+                "USER_TOKEN_NO_FREE_ACCOUNT": policy,
+                "USER_TOKEN_REUSE_IDLE_MINUTES": minutes,
+            },
+            tokens=tokens,
+        )
+
+    @pytest.fixture(autouse=True)
+    def _restore_time(self):
+        import time as real_time
+
+        yield
+        token_identity.time = real_time
+
+    @pytest.mark.asyncio
+    async def test_free_token_preferred_over_eviction(self):
+        tokens = [
+            {"token_id": "a", "user_id": "500", "last_used": 0},
+            {"token_id": "b", "user_id": "600", "last_used": None},
+        ]
+        mgr, db, members, _ = self._setup({"old": ("a", 0, "Old", [])}, tokens)
+        assert await mgr.prepare(**self._kw(tokens)) == ("b", None)
+        assert ("m", "old") in db.identities
+        assert getattr(db, "deleted", []) == []
+
+    @pytest.mark.asyncio
+    async def test_evicts_the_longest_idle_holder(self):
+        tokens = [
+            {"token_id": "a", "user_id": "500", "last_used": NOW - 40 * 60},
+            {"token_id": "b", "user_id": "600", "last_used": NOW - 90 * 60},
+        ]
+        mgr, db, members, logs = self._setup(
+            {"x": ("a", 0, "Xan", []), "y": ("b", 0, "Yve", [])}, tokens
+        )
+        members[600].nick = "Yve"
+        resets = []
+        orig = mgr._reset_identity
+
+        async def spy(guild, member, **kw):
+            resets.append((member.id, kw))
+            await orig(guild, member, **kw)
+
+        mgr._reset_identity = spy
+        assert await mgr.prepare(**self._kw(tokens)) == ("b", None)
+        assert resets == [(600, {"applied_nick": "Yve", "applied_role_ids": []})]
+        assert db.deleted == ["y"]
+        assert ("m", "y") not in db.identities
+        assert db.identities[("m", "new")]["token_id"] == "b"
+        assert db.identities[("m", "new")]["applied_nick"] == "Newbie"
+        assert members[600].nick == "Newbie"
+        assert len(logs) == 1 and "'reuse'" in logs[0] and "90 min" in logs[0]
+
+    @pytest.mark.asyncio
+    async def test_nobody_idle_enough_gives_webhook(self):
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": NOW - 29 * 60}]
+        mgr, db, _, _ = self._setup({"x": ("a", 0, "Xan", [])}, tokens)
+        assert await mgr.prepare(**self._kw(tokens)) == (None, "webhook")
+        assert ("m", "x") in db.identities
+        assert getattr(db, "deleted", []) == []
+
+    @pytest.mark.asyncio
+    async def test_recent_assignment_counts_over_old_last_used(self):
+        # Last send was long ago, but the token changed hands 5 minutes ago.
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": NOW - 999 * 60}]
+        mgr, db, _, _ = self._setup({"x": ("a", NOW - 5 * 60, "Xan", [])}, tokens)
+        assert await mgr.prepare(**self._kw(tokens)) == (None, "webhook")
+        assert ("m", "x") in db.identities
+
+    @pytest.mark.asyncio
+    async def test_never_used_token_counts_from_assignment(self):
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": None}]
+        mgr, db, _, _ = self._setup({"x": ("a", NOW - 10 * 60, "Xan", [])}, tokens)
+        assert await mgr.prepare(**self._kw(tokens)) == (None, "webhook")
+        mgr2, db2, _, _ = self._setup({"x": ("a", NOW - 31 * 60, "Xan", [])}, tokens)
+        assert await mgr2.prepare(**self._kw(tokens)) == ("a", None)
+        assert ("m", "x") not in db2.identities
+
+    @pytest.mark.asyncio
+    async def test_benched_token_is_not_evicted(self):
+        tokens = [
+            {"token_id": "a", "user_id": "500", "last_used": 0},
+            {"token_id": "b", "user_id": "600", "last_used": NOW - 60 * 60},
+        ]
+        mgr, db, _, _ = self._setup(
+            {"x": ("a", 0, "Xan", []), "y": ("b", 0, "Yve", [])}, tokens
+        )
+        mgr.mark_token_bad("a")
+        assert await mgr.prepare(**self._kw(tokens)) == ("b", None)
+        assert ("m", "x") in db.identities
+        assert db.deleted == ["y"]
+
+    @pytest.mark.asyncio
+    async def test_excluded_token_is_not_evicted(self):
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": 0}]
+        mgr, db, _, _ = self._setup({"x": ("a", 0, "Xan", [])}, tokens)
+        assert await mgr.prepare(**self._kw(tokens), exclude={"a"}) == (None, "webhook")
+        assert ("m", "x") in db.identities
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("policy,action", [("webhook", "webhook"), ("drop", "skip")])
+    async def test_other_policies_never_evict(self, policy, action):
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": 0}]
+        mgr, db, _, _ = self._setup({"x": ("a", 0, "Xan", [])}, tokens)
+        assert await mgr.prepare(**self._kw(tokens, policy=policy)) == (None, action)
+        assert ("m", "x") in db.identities
+
+    @pytest.mark.asyncio
+    async def test_two_new_authors_do_not_take_the_same_token(self):
+        import asyncio
+
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": 0}]
+        mgr, db, _, _ = self._setup({"x": ("a", 0, "Xan", [])}, tokens)
+        r1, r2 = await asyncio.gather(
+            mgr.prepare(**self._kw(tokens, author="n1")),
+            mgr.prepare(**self._kw(tokens, author="n2")),
+        )
+        assert sorted([r1, r2], key=str) == sorted([("a", None), (None, "webhook")], key=str)
+        holders = [k[1] for k, v in db.identities.items() if v["token_id"] == "a"]
+        assert len(holders) == 1
+
+    @pytest.mark.asyncio
+    async def test_evicted_author_coming_back(self):
+        tokens = [
+            {"token_id": "a", "user_id": "500", "last_used": 0},
+            {"token_id": "b", "user_id": "600", "last_used": 0},
+        ]
+        mgr, db, _, _ = self._setup(
+            {"x": ("a", 0, "Xan", []), "y": ("b", NOW - 60 * 60, "Yve", [])}, tokens
+        )
+        # "new" takes x's account (idle since 0, the longest).
+        assert await mgr.prepare(**self._kw(tokens)) == ("a", None)
+        # x comes back: y's account is idle 60 min, so x takes it.
+        assert await mgr.prepare(**self._kw(tokens, author="x")) == ("b", None)
+        assert ("m", "y") not in db.identities
+        # y comes back: "new" and x were just assigned, nobody is idle enough.
+        assert await mgr.prepare(**self._kw(tokens, author="y")) == (None, "webhook")

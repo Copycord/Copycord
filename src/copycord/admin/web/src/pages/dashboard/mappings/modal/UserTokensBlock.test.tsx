@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../../components/Toast";
@@ -66,6 +66,59 @@ describe("UserTokensBlock sticky per author", () => {
     expect(stickyRows().every((r) => r !== null)).toBe(true);
     expect(screen.queryByText("Rotate evenly")).toBeNull();
     expect(setSetting.mock.calls.some(([k]) => k === "USER_TOKEN_STRATEGY")).toBe(false);
+  });
+});
+
+describe("UserTokensBlock when no account is free", () => {
+  const noFree = () => screen.getByRole("combobox", { name: "When no account is free" });
+  const minutes = () => document.getElementById("ut_reuse_idle_minutes");
+
+  it("replaces the old Fall back to webhook switch", () => {
+    renderBlock({});
+    expect(screen.queryByText("Fall back to webhook")).toBeNull();
+    expect(document.querySelector('[data-setting-key="user_token_fallback_webhook"]')).toBeNull();
+    expect(document.getElementById("ut_no_free_account_desc")).toHaveTextContent(
+      "What to do with a message when every account already belongs to another author.",
+    );
+  });
+
+  it("lists the three choices and writes the new key", () => {
+    const setSetting = renderBlock({});
+    expect(noFree()).toHaveTextContent("Send with the webhook");
+    fireEvent.click(noFree());
+    const list = screen.getByRole("listbox");
+    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Send with the webhook",
+      "Drop the message",
+      "Reuse the account idle longest",
+    ]);
+    fireEvent.click(within(list).getByRole("option", { name: "Reuse the account idle longest" }));
+    expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_NO_FREE_ACCOUNT", "reuse");
+    expect(setSetting.mock.calls.some(([k]) => k === "USER_TOKEN_FALLBACK_WEBHOOK")).toBe(false);
+  });
+
+  it("derives drop from a stored old switch off and webhook from on or missing", () => {
+    renderBlock({ USER_TOKEN_FALLBACK_WEBHOOK: false });
+    expect(noFree()).toHaveTextContent("Drop the message");
+    cleanup();
+    renderBlock({ USER_TOKEN_FALLBACK_WEBHOOK: true });
+    expect(noFree()).toHaveTextContent("Send with the webhook");
+    cleanup();
+    renderBlock({ USER_TOKEN_NO_FREE_ACCOUNT: "drop", USER_TOKEN_FALLBACK_WEBHOOK: true });
+    expect(noFree()).toHaveTextContent("Drop the message");
+  });
+
+  it("shows the idle minutes row only for reuse", () => {
+    renderBlock({ USER_TOKEN_NO_FREE_ACCOUNT: "webhook" });
+    expect(minutes()).toBeNull();
+    expect(screen.queryByText("Reuse after idle (minutes)")).toBeNull();
+    cleanup();
+    const setSetting = renderBlock({ USER_TOKEN_NO_FREE_ACCOUNT: "reuse", USER_TOKEN_REUSE_IDLE_MINUTES: 30 });
+    expect(noFree()).toHaveTextContent("Reuse the account idle longest");
+    expect(minutes()).toHaveValue(30);
+    expect(screen.getByText(/Only an account that has not sent for this long is taken over/)).toBeInTheDocument();
+    fireEvent.change(minutes()!, { target: { value: "45" } });
+    expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_REUSE_IDLE_MINUTES", "45");
   });
 });
 
