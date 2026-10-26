@@ -1266,8 +1266,8 @@ class GatewayClient:
         self._log_sent(payload, text)
 
     def _log_sent(self, payload: Dict[str, Any], text: str) -> None:
-        if log.isEnabledFor(logging.DEBUG):
-            log.debug("sent %s", frame_summary(payload))
+        if log.isEnabledFor(TRACE):
+            log.log(TRACE, "sent %s", frame_summary(payload))
         if self._capture is not None:
             self._capture.ws_sent(self._capture_ws, payload, text)
 
