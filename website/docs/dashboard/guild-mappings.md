@@ -91,7 +91,7 @@ To send a mapping's messages from user accounts:
 3. Turn on **Send messages as users**.
 4. Click **Save Mapping**.
 
-Each cloned message is then sent by one of the enabled tokens. If an account cannot deliver a message, Copycord tries another enabled token, then falls back to the webhook when **Fall back to webhook** is on.
+Each cloned message is then sent by one of the enabled tokens. If an account cannot deliver a message, Copycord tries another enabled token, then follows **When no account is free**.
 
 Tokens are shown masked. You can enable, disable or remove each one. The **Token options** menu has **Verify tokens**, which checks every token and offers to delete the ones that fail, **Release all tokens**, which frees every account from the author it is assigned to and resets the nicknames and roles it applied (the tokens stay and keep sending), and **Delete all tokens**.
 
@@ -107,13 +107,13 @@ While a mapping is active, every enabled token stays connected to Discord, so it
 | **Mirror author nickname** | Sticky per author only. Renames the assigned account in the clone server to the author's display name |
 | **Mirror author roles** | Sticky per author only. Gives the assigned account the cloned roles that match the author's roles |
 | **Mirror author avatar** | Sticky per author only. Sets the assigned account's profile picture to the author's. This changes the account everywhere, not only in the clone server. The picture is uploaded again only when the author changes theirs. If Discord refuses the change, for example with a captcha, that account is skipped for the rest of the session |
-| **Fall back to webhook** | When no token can deliver a message, or **Sticky per author** has no free token for a new author, send it through the webhook. When off, the message is skipped |
+| **When no account is free** | What happens when no token can deliver a message, or **Sticky per author** has no free token for a new author. **Send with the webhook** (the default) sends it through the webhook. **Drop the message** skips it. **Reuse the account idle longest** gives the new author the account that has not sent for the longest time, if it has been idle for at least **Reuse after idle (minutes)** (default 30); the old author's nickname and roles are reset on that account, and the old author gets a new account the next time they post. When no account has been idle that long, the webhook sends it. Mappings saved before this option existed keep their old **Fall back to webhook** choice: on means webhook, off means drop |
 | **Show typing indicator** | Show "typing" for the whole **Send delay** before the message appears. With no delay it shows only briefly |
 | **Attachments as links** | Post links to the source attachments instead of uploading the files again |
 | **Send through proxies** | Send each account's requests through its own proxy from `proxies.txt`, so the accounts do not share one IP address. No two accounts use the same proxy at once, and each account keeps its proxy across sessions. Recommended, but off by default: with it off, the accounts connect and send from the server's own IP address. With it on and no proxies configured, the mapping's accounts stay offline. A token used by several mappings goes through a proxy when any of them has this on |
 | **Send delay** | Wait a random time between **Minimum send delay** and **Maximum send delay** seconds before each message. Messages to the same channel take turns, so they never arrive in a burst |
 
-With **Sticky per author**, an author moves to another account only when their token stops working: it is disabled, revoked or removed from the clone server. The author then gets an unused token, and the old account's mirrored nickname and roles are cleared. Its mirrored avatar stays until the account is assigned to another author, because Copycord has no record of the original picture. If no unused token is free, **Fall back to webhook** decides what happens.
+With **Sticky per author**, an author moves to another account only when their token stops working: it is disabled, revoked or removed from the clone server. The author then gets an unused token, and the old account's mirrored nickname and roles are cleared. Its mirrored avatar stays until the account is assigned to another author, because Copycord has no record of the original picture. If no unused token is free, **When no account is free** decides what happens.
 
 ### How token sending differs from webhooks
 
