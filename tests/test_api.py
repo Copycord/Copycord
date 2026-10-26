@@ -996,9 +996,11 @@ class TestTokenPoolGlue:
         assert resp.json()["ok"] is True
 
 
-# Proxies are mandatory for user tokens
+# Mappings that send through proxies need proxies for token checks
 
-PROXIES_REQUIRED = "Proxies are required for user tokens. Add proxies first."
+PROXIES_REQUIRED = (
+    "No proxies are configured. Add proxies, or turn off Send through proxies for this mapping."
+)
 
 
 class TestProxiesRequired:

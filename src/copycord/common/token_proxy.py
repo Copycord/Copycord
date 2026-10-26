@@ -21,7 +21,9 @@ import time
 # The default when a mapping has no stored value.
 USE_PROXY = True
 
-PROXIES_REQUIRED_ERROR = "Proxies are required for user tokens. Add proxies first."
+PROXIES_REQUIRED_ERROR = (
+    "No proxies are configured. Add proxies, or turn off Send through proxies for this mapping."
+)
 
 _WARN_INTERVAL = 60.0
 # total time lease_with_timezone spends rotating before the token counts as unavailable
@@ -113,10 +115,13 @@ def proxies_configured(pool=None) -> bool:
 
 
 TOKENS_DISABLED_NOTICE = (
-    "Token message cloning is disabled for mappings that use proxies: no proxies are "
-    "configured. Add proxies in the Proxy settings to enable it."
+    "Token message cloning is paused for mappings with Send through proxies on: no proxies "
+    "are configured. Proxies are recommended: add them in the Proxy settings, or turn off "
+    "Send through proxies on a mapping to send from this server's own IP."
 )
-TOKENS_ENABLED_NOTICE = "Proxies found: token message cloning is enabled."
+TOKENS_ENABLED_NOTICE = (
+    "Proxies found: token message cloning is enabled for mappings with Send through proxies on."
+)
 # Set once the disabled notice is logged; cleared when proxies come back.
 _tokens_disabled_noticed = False
 
