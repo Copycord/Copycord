@@ -3,10 +3,13 @@ import asyncio
 import logging
 import random
 import time
+from types import SimpleNamespace
 
 import pytest
 
-from copycord.selfclient.errors import ConnectionClosed, HTTPException, LoginFailure
+from copycord.common import login_limiter
+from copycord.common.login_limiter import INITIAL_INTERVAL, LoginLimiter
+from copycord.selfclient.errors import ConnectionClosed, HTTPException, LoginFailure, RateLimited
 from copycord.server import token_pool
 from copycord.server.token_pool import RANDOM_STATUSES, TokenSessionPool
 
@@ -119,6 +122,26 @@ class Fakes:
 @pytest.fixture()
 def fakes():
     return Fakes()
+
+
+def _instant_time():
+    """A limiter clock whose sleeps return at once, moving the clock forward."""
+    now = [0.0]
+
+    async def sleep(delay):
+        now[0] += max(0.0, delay)
+        await asyncio.sleep(0)
+
+    return (lambda: now[0]), sleep
+
+
+@pytest.fixture(autouse=True)
+def login_limits(monkeypatch):
+    """Every pool gets a fresh login limiter whose pacing costs no real time."""
+    clock, sleep = _instant_time()
+    limiter = LoginLimiter(clock=clock, sleep=sleep)
+    monkeypatch.setattr(login_limiter, "LIMITER", limiter)
+    return limiter
 
 
 @pytest.fixture()
@@ -327,6 +350,7 @@ async def test_connects_overlap_up_to_the_concurrency_limit(pool, fakes):
 
     class SlowClient(FakeClient):
         async def connect(self, *, reconnect=True):
+            self.fakes.events.append(("connect", self.token))
             await release.wait()
             await super().connect(reconnect=reconnect)
 
@@ -341,10 +365,13 @@ async def test_connects_overlap_up_to_the_concurrency_limit(pool, fakes):
     try:
         await ensure_all(pool, pairs, keep_online=total)
         await settle()
+        connects = [t for kind, t in fakes.events if kind == "connect"]
         logins = [t for kind, t in fakes.events if kind == "login"]
         # Every slot is waiting for READY, so no more than the limit is in flight.
         assert token_pool.CONNECT_CONCURRENCY > 1
-        assert len(logins) == token_pool.CONNECT_CONCURRENCY
+        assert len(connects) == token_pool.CONNECT_CONCURRENCY
+        # Logins are paced by the limiter before the gate, so none waits for a slot.
+        assert len(logins) == total
         release.set()
         await until(lambda: len(pool.online_ids()) == total)
     finally:
@@ -1137,3 +1164,180 @@ async def test_close_all_survives_a_close_error(pool, fakes):
     await settle()
     assert all(t.done() for t in tasks)
     assert all(c.is_closed() for c in fakes.clients[1:])
+
+
+# login pacing per exit IP
+
+
+class SpyLimiter(LoginLimiter):
+    """Records the key of every acquire; keys in ``held`` wait until released."""
+
+    def __init__(self):
+        clock, sleep = _instant_time()
+        super().__init__(clock=clock, sleep=sleep)
+        self.keys = []
+        self.held = {}
+
+    async def acquire(self, key):
+        self.keys.append(key)
+        gate = self.held.get(key)
+        if gate is not None:
+            await gate.wait()
+        await super().acquire(key)
+
+
+def _ended_warnings(caplog):
+    return [r for r in caplog.records if "ended (" in r.getMessage()]
+
+
+async def test_rate_limited_login_retries_through_the_limiter_and_connects(
+    pool, fakes, sleeps, login_limits, caplog
+):
+    caplog.set_level(logging.DEBUG, logger="test.token_pool")
+    fakes.fail("login", "tok-1", RateLimited(0.0), RateLimited(2.0), RateLimited(0.0))
+    try:
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="online")
+        await until(lambda: pool.online_ids() == {"t1"})
+        logins = [t for kind, t in fakes.events if kind == "login"]
+        assert logins == ["tok-1"] * 4
+        # one client, never torn down: the session did not end, and no backoff ran
+        assert len(fakes.clients) == 1 and not fakes.clients[0].is_closed()
+        assert next(iter(pool._sessions.values())).failures == 0
+        assert [d for d in sleeps if d > 0] == []
+        assert _ended_warnings(caplog) == []
+        # the IP was slowed, then sped up by the success
+        key = "http://proxy.invalid:8080"
+        assert INITIAL_INTERVAL < login_limits.interval(key) < 8 * INITIAL_INTERVAL
+        assert "proxy.invalid" not in caplog.text
+    finally:
+        await pool.close_all()
+
+
+async def test_rate_limited_then_401_still_marks_the_token_dead(pool, fakes, sleeps):
+    fakes.fail("login", "tok-a", RateLimited(0.0), LoginFailure("Improper token has been passed."))
+    try:
+        await ensure_all(pool, [("a", "tok-a"), ("b", "tok-b")], keep_online=1)
+        await until(lambda: pool.dead_ids() == {"a"})
+        await until(lambda: pool.online_ids() == {"b"})
+        assert len(fakes.for_token("tok-a")) == 1
+        assert [d for d in sleeps if d > 0] == []
+    finally:
+        await pool.close_all()
+
+
+async def test_login_rate_limited_forever_ends_the_session_with_the_normal_backoff(
+    pool, fakes, sleeps, caplog
+):
+    caplog.set_level(logging.WARNING, logger="test.token_pool")
+    tries = token_pool.LOGIN_RATE_LIMIT_TRIES
+    fakes.fail("login", "tok-1", *[RateLimited(0.0) for _ in range(tries)])
+    try:
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="online")
+        await until(lambda: pool.online_ids() == {"t1"})
+        logins = [t for kind, t in fakes.events if kind == "login"]
+        assert len(logins) == tries + 1
+        # the first client gave up after the bound and was torn down; one backoff, then a fresh client
+        assert len(fakes.clients) == 2 and fakes.clients[0].is_closed()
+        backoffs = [d for d in sleeps if d > 0]
+        assert len(backoffs) == 1 and 5.0 <= backoffs[0] <= 6.25
+        (ended,) = _ended_warnings(caplog)
+        assert "ended (RateLimited)" in ended.getMessage()
+    finally:
+        await pool.close_all()
+
+
+async def test_proxied_and_direct_sessions_use_different_limiter_keys(fakes, sleeps):
+    def proxy_for(token):
+        return "http://user:pw@proxy-%s.invalid:8080" % token
+
+    pool = TokenSessionPool(
+        logger=logging.getLogger("test.token_pool"),
+        proxy_for=proxy_for,
+        client_factory=fakes.factory,
+    )
+    spy = pool._login_limiter = SpyLimiter()
+    try:
+        await pool.ensure("p1", "tok-p1", keep_online=4, presence="online")
+        await pool.ensure("p2", "tok-p2", keep_online=4, presence="online")
+        await pool.ensure("d1", "tok-d1", keep_online=4, presence="online", use_proxy=False)
+        await pool.ensure("d2", "tok-d2", keep_online=4, presence="online", use_proxy=False)
+        await until(lambda: len(pool.online_ids()) == 4)
+        assert sorted(spy.keys) == sorted(
+            [
+                "direct",
+                "direct",
+                "http://user:pw@proxy-tok-p1.invalid:8080",
+                "http://user:pw@proxy-tok-p2.invalid:8080",
+            ]
+        )
+    finally:
+        await pool.close_all()
+
+
+async def test_a_rotated_proxy_gets_the_new_limiter_key(pool, fakes, sleeps):
+    class RotatingClient(FakeClient):
+        def __init__(self, fakes, **kwargs):
+            super().__init__(fakes, **kwargs)
+            self.http = SimpleNamespace(proxy=kwargs.get("proxy"))
+
+        async def login(self, token):
+            if self.http.proxy == "http://proxy.invalid:8080":
+                # REST rotated the lease after the 429s
+                self.http.proxy = "http://rotated.invalid:9090"
+                self.fakes.events.append(("login", token))
+                raise RateLimited(0.0)
+            await super().login(token)
+
+    def factory(**kwargs):
+        client = RotatingClient(fakes, **kwargs)
+        fakes.clients.append(client)
+        return client
+
+    pool._factory = factory
+    spy = pool._login_limiter = SpyLimiter()
+    try:
+        await pool.ensure("t1", "tok-1", keep_online=1, presence="online")
+        await until(lambda: pool.online_ids() == {"t1"})
+        assert spy.keys == ["http://proxy.invalid:8080", "http://rotated.invalid:9090"]
+    finally:
+        await pool.close_all()
+
+
+async def test_a_session_queued_at_the_limiter_holds_no_connect_slot(fakes, sleeps, monkeypatch):
+    """Sessions waiting on a slow IP's limiter leave the connect gate to other IPs; READY_TIMEOUT has not started."""
+
+    def proxy_for(token):
+        return "http://proxy-%s.invalid:8080" % token
+
+    pool = TokenSessionPool(
+        logger=logging.getLogger("test.token_pool"),
+        proxy_for=proxy_for,
+        client_factory=fakes.factory,
+    )
+    spy = pool._login_limiter = SpyLimiter()
+    release = spy.held["direct"] = asyncio.Event()
+    waits = []
+    real_wait = asyncio.wait
+
+    async def spy_wait(aws, *args, **kwargs):
+        waits.append(kwargs.get("timeout"))
+        return await real_wait(aws, *args, **kwargs)
+
+    monkeypatch.setattr(token_pool.asyncio, "wait", spy_wait)
+    blocked = token_pool.CONNECT_CONCURRENCY + 2
+    try:
+        for i in range(blocked):
+            await pool.ensure(
+                f"d{i}", f"tok-d{i}", keep_online=blocked + 1, presence="online", use_proxy=False
+            )
+        await pool.ensure("p", "tok-p", keep_online=blocked + 1, presence="online")
+        await until(lambda: pool.online_ids() == {"p"})
+        assert spy.keys.count("direct") == blocked
+        assert pool._gate._value == token_pool.CONNECT_CONCURRENCY
+        # only the proxied session reached the READY wait
+        assert waits.count(token_pool.READY_TIMEOUT) == 1
+        release.set()
+        await until(lambda: len(pool.online_ids()) == blocked + 1)
+    finally:
+        release.set()
+        await pool.close_all()
