@@ -146,6 +146,7 @@ class Client:
         self._connection.http = http
         self._ready = asyncio.Event()
         self._closed = False
+        self._rest_closed = False
         self._listeners: Dict[str, List[Coro]] = {}
         self._tasks: set = set()
         # op 8 carries no nonce, so one request per guild is in flight at a time
@@ -315,6 +316,13 @@ class Client:
                 await self.gateway.close()
             except Exception:
                 log.debug("gateway close failed", exc_info=True)
+        await self.close_rest()
+
+    async def close_rest(self) -> None:
+        """Close the REST and TLS sessions; also run after a gateway close that was cut off."""
+        if self._rest_closed:
+            return
+        self._rest_closed = True
         if self.science is not None:
             await self.science.close()
         if self.token:
@@ -331,6 +339,7 @@ class Client:
     def clear(self) -> None:
         """Reset a closed client so start() can be called on it again."""
         self._closed = False
+        self._rest_closed = False
         self._ready.clear()
         self._connection.clear()
         self.gateway = None

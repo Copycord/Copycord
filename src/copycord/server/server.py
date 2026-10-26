@@ -157,6 +157,10 @@ TOKEN_POOL_DEBOUNCE = 2.0
 TOKEN_POOL_INTERVAL = 60.0
 # How often the online set is checked for a status republish between reconciles.
 TOKEN_POOL_WATCH = 5.0
+# Shutdown's cap on closing the pool. close_all closes CLOSE_CONCURRENCY sessions
+# at once and cuts each off at CLOSE_TIMEOUT, so a normal close of a thousand
+# sessions takes a few seconds; this leaves room for several waves of stuck ones.
+TOKEN_POOL_CLOSE_CAP = 30.0
 
 
 def _setting_on(value) -> bool:
@@ -13805,7 +13809,9 @@ class ServerReceiver:
         )
         if getattr(self, "token_pool", None) is not None:
             try:
-                await asyncio.wait_for(self._close_token_pool(), 10)
+                await asyncio.wait_for(
+                    self._close_token_pool(), TOKEN_POOL_CLOSE_CAP
+                )
             except Exception:
                 logger.debug("[shutdown] token pool close failed", exc_info=True)
 
