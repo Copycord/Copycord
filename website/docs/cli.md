@@ -39,7 +39,7 @@ copycord --verbose <command>
 
 Every status line starts with one symbol: `✓` success, `!` warning, `✗` failure, `•` info and `?` question. Where the terminal cannot print them, they are replaced with `+ ! x -`.
 
-Colors are off when the output is not a terminal (a pipe, a file or a service log), when `NO_COLOR` is set, when `TERM=dumb` or with `--no-color` before or after the command. `FORCE_COLOR=1` turns them on. In terminals that support it, web addresses and the folders Copycord prints can be clicked; links are off without colors, inside tmux or screen, over SSH, inside Docker and with `--json`.
+Colors are off when the output is not a terminal (a pipe, a file or a service log), when `NO_COLOR` is set, when `TERM=dumb` or with `--no-color` before or after the command. `FORCE_COLOR=1` turns them on. On a Windows console that cannot show colors, such as the classic Command Prompt, Copycord prints plain text instead of raw escape codes. In terminals that support it, web addresses and the folders Copycord prints can be clicked; links are off without colors, inside tmux or screen, over SSH, inside Docker and with `--json`.
 
 ### JSON output {#json}
 
@@ -175,7 +175,7 @@ copycord doctor --data-dir ~/copycord/data
 
 | Group | Checks |
 |-------|--------|
-| Install | The version, commit and update channel; Python is 3.12 to 3.14; the web UI files are installed; the required packages (`curl_cffi`, `py-cord`, `fastapi`, `uvicorn`) import, as one `dependencies OK` line that names only the missing ones |
+| Install | The version, commit and update channel; Python is 3.12 to 3.14; the web UI files are installed; the required packages (`curl_cffi`, `py-cord`, `pydantic_core`, `pydantic`, `fastapi`, `uvicorn`) import, as one `dependencies OK` line that names only the missing ones |
 | Settings | `<home>/.env` exists; a dashboard password is set (`no dashboard password` is only info, since `copycord run` makes one) and is not still the default `copycord`; a `FAIL` when the dashboard listens beyond this computer without a real password; a `FAIL` when the removed `ROLE` variable is still set |
 | Data | The Copycord home exists and is writable; the data files are in the `data` folder, not loose in the home; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the last backup in the backups folder is under 2 days old and did not fail its check |
 | Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running, and on Linux whether the user service starts at boot |
@@ -430,7 +430,7 @@ It lists:
 
 Removes the Copycord program and its background service. It asks whether to keep or delete your data in the [Copycord home](#data-dir). Pressing **Enter** keeps it; **Esc** or **Ctrl+C** cancels.
 
-Where arrow keys do not work (for example Git Bash without a console), Copycord asks you to type a number or `y`/`n` instead. `COPYCORD_PLAIN_PROMPTS=1` forces this.
+Where arrow keys do not work (for example Git Bash without a console, or a Windows console that cannot show colors), Copycord asks you to type a number or `y`/`n` instead. `COPYCORD_PLAIN_PROMPTS=1` forces this.
 
 ```bash
 copycord uninstall --dry-run          # show what would be removed, change nothing
@@ -483,6 +483,10 @@ The full install output is saved to `logs/update.log` in the [Copycord home](#da
 When the install is already the newest on the saved channel (the same release version on `stable` or `beta`, the same commit as the branch head on `dev`), `copycord update` says it is up to date and changes nothing. If GitHub cannot be reached for that check, it warns and installs anyway. A channel switch, `--tag`, `--force` and `copycord doctor --fix` always install.
 
 On Windows, `copycord update` stops a running service and moves the program files in use into `.copycord-old` in the Copycord home before it installs; the next update deletes that folder. If Copycord is running in another window, for example with `copycord run`, stop it first; the update changes nothing until you do.
+
+After installing, `copycord update` checks that the new install works by loading its required packages in a fresh process. If one fails, it reinstalls once from a clean cache and checks again. If that also fails, it stops without restarting the service, names the package that is broken and prints the steps to repair it by hand.
+
+If a role cannot start because a package fails to load, the log says the install is broken and to run `copycord doctor --fix`, and Copycord waits 5 minutes between restart attempts instead of retrying every few seconds.
 
 `status` also shows when Copycord last checked for an update and whether auto-update is on.
 
@@ -560,7 +564,7 @@ copycord update --channel beta --no-install
 |---------|----------|
 | `stable` (default) | The newest [GitHub release](https://github.com/Copycord/Copycord/releases) that is not a pre-release |
 | `beta` | The newest GitHub release, pre-releases included |
-| `dev` | A git ref of a GitHub repository, by default `main` of `Copycord/Copycord`. It runs `uv tool install --force git+https://github.com/<repo>@<ref>`, which builds the dashboard from source, so it needs Node.js (`npm`). Without `npm` on your `PATH` it reuses or downloads the official Node build (SHA-256 checked) into `<home>/node`, the same one the installer uses, so a release install can switch to a branch with no manual steps. |
+| `dev` | A git ref of a GitHub repository, by default `main` of `Copycord/Copycord`. It runs `uv tool install --force git+https://github.com/<repo>@<ref>`, which builds the dashboard from source, so it needs Node.js (`npm`). Without `npm` on your `PATH` it reuses or downloads the official Node build (SHA-256 checked) into `<home>/node`, the same one the installer uses, so a release install can switch to a branch with no manual steps. It also needs git: when git is missing, Windows downloads a per-user MinGit (SHA-256 checked, no admin rights), and Linux and macOS install git with the package manager (`brew` on macOS; sudo may ask for your password). With `--yes`, during auto-update or without a terminal, Linux and macOS print the command to install git instead. Stable and beta never need git. |
 
 Release versions have four numbers, and the last one goes up with every release (`v4.0.0.1`, `v4.0.0.2`, ...), so a higher number is always newer. A release is a pre-release only when it is marked as one on GitHub; the version does not say.
 

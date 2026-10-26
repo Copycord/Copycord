@@ -102,7 +102,7 @@ This uses user tokens. Discord may revoke your tokens or disable them. Only use 
 | Fall back to webhook | On | When no account can send a message, send it through the webhook instead of dropping it |
 | Show typing indicator | Off | Show "typing…" briefly before each message |
 | Attachments as links | Off | Post links to the source attachments instead of uploading the files again |
-| Send through proxies | Off | Give each account its own proxy from the [proxy list](/docs/configuration/advanced#proxy-support) |
+| Send through proxies | Off | Give each account its own proxy from the [proxy list](/docs/configuration/advanced#proxy-support). Recommended. When off, the accounts connect and send from the server's own IP address; when on with no proxies configured, they stay offline |
 | Send delay | 0 to 0 s | A random pause before each message, between the minimum and maximum, in seconds |
 
 To add accounts, click **Add user token**; for a new mapping, save it and open it again first. You can add one token or several at once; each is checked when you add it. The token menu has **Verify tokens**, **Release all tokens** and **Delete all tokens**.

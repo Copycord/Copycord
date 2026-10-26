@@ -81,7 +81,7 @@ Deleting a mapping removes the link between the two servers. The channels, roles
 Copycord posts cloned messages through channel webhooks. With token message cloning, a mapping posts them from real user accounts instead, so messages come from ordinary members.
 
 :::warning
-Sending messages from user accounts (self-bots) is against Discord's Terms of Service and can get those accounts banned.
+This feature uses user tokens. Discord may revoke your tokens or disable them. Only use accounts you are willing to lose.
 :::
 
 To send a mapping's messages from user accounts:
@@ -95,6 +95,10 @@ Each cloned message is then sent by one of the enabled tokens. If an account can
 
 Tokens are shown masked. You can enable, disable or remove each one. The **Token options** menu has **Verify tokens**, which checks every token and offers to delete the ones that fail, **Release all tokens**, which frees every account from the author it is assigned to and resets the nicknames and roles it applied (the tokens stay and keep sending), and **Delete all tokens**.
 
+**Verify tokens** first asks whether to check through your proxies or directly from the server; the choice starts at the mapping's **Send through proxies** setting. Checks run in parallel: through proxies, one at a time per proxy and up to 20 at once; directly, 3 at a time.
+
+While a mapping is active, every enabled token stays connected to Discord, so it is ready to send. Up to 10 accounts connect at once, and logins from one IP address start a quarter of a second apart, slowing down when Discord answers with a rate limit and speeding up again afterwards. A paused mapping keeps none of its tokens online. When Copycord stops, it closes all sessions at once and gives each one at most 3 seconds.
+
 ### Options
 
 | Option | What it does |
@@ -106,7 +110,7 @@ Tokens are shown masked. You can enable, disable or remove each one. The **Token
 | **Fall back to webhook** | When no token can deliver a message, or **Sticky per author** has no free token for a new author, send it through the webhook. When off, the message is skipped |
 | **Show typing indicator** | Show "typing" for the whole **Send delay** before the message appears. With no delay it shows only briefly |
 | **Attachments as links** | Post links to the source attachments instead of uploading the files again |
-| **Send through proxies** | Send each account's requests through its own proxy from `proxies.txt`, so the accounts do not share one IP address. No two accounts use the same proxy at once, and each account keeps its proxy across sessions. Recommended, but off by default: with it off, the accounts connect and send from the server's own IP address. With it on and no proxies configured, the mapping's accounts stay offline |
+| **Send through proxies** | Send each account's requests through its own proxy from `proxies.txt`, so the accounts do not share one IP address. No two accounts use the same proxy at once, and each account keeps its proxy across sessions. Recommended, but off by default: with it off, the accounts connect and send from the server's own IP address. With it on and no proxies configured, the mapping's accounts stay offline. A token used by several mappings goes through a proxy when any of them has this on |
 | **Send delay** | Wait a random time between **Minimum send delay** and **Maximum send delay** seconds before each message. Messages to the same channel take turns, so they never arrive in a burst |
 
 With **Sticky per author**, an author moves to another account only when their token stops working: it is disabled, revoked or removed from the clone server. The author then gets an unused token, and the old account's mirrored nickname and roles are cleared. Its mirrored avatar stays until the account is assigned to another author, because Copycord has no record of the original picture. If no unused token is free, **Fall back to webhook** decides what happens.

@@ -34,7 +34,7 @@ Check that your computer can run Copycord and that you have the Discord tokens i
 </TabItem>
 </Tabs>
 
-The installer brings Python 3.14 and every package Copycord needs. To [test a branch](/docs/getting-started/manual-install#branches), you also need git. Node.js is also used for that; the installer downloads it when it is missing.
+The installer brings Python 3.14 and every package Copycord needs. A release install, the default, never needs git. To [test a branch](/docs/getting-started/manual-install#branches), Copycord uses git and Node.js; you do not need to install either yourself, because the installer sets them up when they are missing.
 
 ## Discord tokens
 

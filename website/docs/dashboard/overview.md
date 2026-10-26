@@ -48,7 +48,7 @@ When a newer release exists, **New Update Available** appears at the top of the 
 
 Cloning works only while both the server bot and the client are running. The bots need valid tokens to start, and you can add or edit guild mappings only while they are stopped.
 
-- To start the bots, click **Start** on the **Bots** card. While they run, the button reads **Stop**, and the card shows each bot's status and uptime.
+- To start the bots, click **Start** on the **Bots** card. While they run, the button reads **Stop**, and the card shows each bot's status and uptime. After you click **Stop**, the bots show an amber **stopping** status and the button reads **Stopping...** and cannot be clicked until both bots have really stopped. With many user tokens online, closing their sessions can take a little while.
 
 ## Add the bot to your server
 
