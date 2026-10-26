@@ -35,7 +35,7 @@ async def test_teardown_close_failure_is_logged_with_traceback(caplog):
     assert records[0].exc_info and records[0].exc_info[0] is RuntimeError
 
 
-def test_proxies_configured_failure_is_false_and_logged(caplog):
+async def test_proxies_configured_failure_is_false_and_logged(caplog):
     caplog.set_level(logging.DEBUG, logger="common.token_proxy")
 
     class Boom:
