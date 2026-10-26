@@ -243,7 +243,8 @@ def _quiet_libraries(level: int) -> None:
     logging.getLogger("websockets").setLevel(
         logging.DEBUG if level <= logging.DEBUG else logging.WARNING
     )
-    # LOG_LEVEL=DEBUG shows each gateway frame sent and each science post.
+    # LOG_LEVEL=DEBUG shows each gateway connect and READY; the frames sent and
+    # the science posts are TRACE lines and stay hidden.
     debug = level <= logging.DEBUG
     logging.getLogger("selfclient.gateway").setLevel(
         logging.DEBUG if debug else logging.WARNING
