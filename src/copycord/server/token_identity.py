@@ -22,6 +22,39 @@ from copycord.server.token_avatar import avatar_hash_from_url, set_avatar
 # Discord's hard limit for a member nickname.
 MAX_NICK_LEN = 32
 
+NO_FREE_ACCOUNT_POLICIES = ("webhook", "drop", "reuse")
+DEFAULT_REUSE_IDLE_MINUTES = 30
+
+
+def no_free_account_policy(settings: dict) -> str:
+    """What to do when every account belongs to another author: webhook, drop or reuse.
+
+    USER_TOKEN_NO_FREE_ACCOUNT wins when it holds a known value. Otherwise the
+    older USER_TOKEN_FALLBACK_WEBHOOK toggle decides (off means drop), and a
+    mapping with neither sends with the webhook.
+    """
+    settings = settings or {}
+    raw = settings.get("USER_TOKEN_NO_FREE_ACCOUNT")
+    if isinstance(raw, str) and raw.strip().lower() in NO_FREE_ACCOUNT_POLICIES:
+        return raw.strip().lower()
+    return "webhook" if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True) else "drop"
+
+
+def exhausted_action(settings: dict) -> str:
+    """The send path's action when no token can deliver: 'webhook' or 'skip'.
+
+    Reuse falls back to the webhook when nobody is idle long enough.
+    """
+    return "skip" if no_free_account_policy(settings) == "drop" else "webhook"
+
+
+def reuse_idle_minutes(settings: dict) -> int:
+    try:
+        n = int((settings or {}).get("USER_TOKEN_REUSE_IDLE_MINUTES", DEFAULT_REUSE_IDLE_MINUTES))
+    except (TypeError, ValueError):
+        n = DEFAULT_REUSE_IDLE_MINUTES
+    return max(1, n)
+
 
 class TokenIdentityManager:
     def __init__(self, *, bot, db, logger, session_provider=None):
@@ -115,9 +148,8 @@ class TokenIdentityManager:
         payloads carry no identity fields, so treating absent as empty would
         clear the account's nickname and strip every mirrored role.
         """
-        exhausted = (
-            "webhook" if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True) else "skip"
-        )
+        policy = no_free_account_policy(settings)
+        exhausted = exhausted_action(settings)
         if not author_id:
             return None, exhausted
 
@@ -161,7 +193,16 @@ class TokenIdentityManager:
                     identities, author_id, enabled_token_ids
                 )
                 if not chosen:
-                    return None, exhausted
+                    if policy != "reuse":
+                        return None, exhausted
+                    chosen = await self._evict_idle(
+                        mapping_id, author_id, identities, token_by_id,
+                        cloned_guild_id, reuse_idle_minutes(settings), now,
+                    )
+                    if not chosen:
+                        return None, exhausted
+                    prev = str(cur["token_id"]) if cur else None
+                    reset_prev = prev if (prev and prev != chosen) else None
                 keep = False
 
             try:
@@ -285,6 +326,69 @@ class TokenIdentityManager:
             )
 
             return chosen, None
+
+    async def _evict_idle(
+        self, mapping_id, author_id, identities, token_by_id,
+        cloned_guild_id, idle_minutes: int, now: int,
+    ) -> str | None:
+        """Free the account whose holder has been idle longest, if at least idle_minutes.
+
+        Idle runs from the later of the token's last send and the holder's
+        assignment, so a never-used token counts from its assignment. Only
+        enabled, unbenched tokens (the keys of token_by_id) qualify. Returns
+        the freed token id, or None when nobody has been idle long enough.
+        """
+        best = None
+        best_idle = -1
+        for ident in identities:
+            tid = str(ident.get("token_id"))
+            if str(ident.get("author_id")) == author_id or tid not in token_by_id:
+                continue
+            try:
+                last_used = int(token_by_id[tid].get("last_used") or 0)
+            except (TypeError, ValueError):
+                last_used = 0
+            try:
+                assigned_at = int(ident.get("assigned_at") or 0)
+            except (TypeError, ValueError):
+                assigned_at = 0
+            idle = now - max(last_used, assigned_at)
+            if idle >= idle_minutes * 60 and idle > best_idle:
+                best, best_idle = ident, idle
+        if best is None:
+            return None
+
+        tid = str(best.get("token_id"))
+        try:
+            gid = int(best.get("cloned_guild_id") or cloned_guild_id or 0)
+            guild = self._bot.get_guild(gid) if gid else None
+            member = await self._resolve_member(
+                guild, (token_by_id.get(tid) or {}).get("user_id")
+            )
+            if member is not None:
+                await self._reset_identity(
+                    guild,
+                    member,
+                    applied_nick=best.get("applied_nick"),
+                    applied_role_ids=best.get("applied_role_ids") or [],
+                )
+        except Exception:
+            self._log.debug(
+                "[identity] failed to reset reused token %s", tid, exc_info=True
+            )
+        try:
+            self._db.delete_token_identity(mapping_id, str(best.get("author_id")))
+        except Exception:
+            self._log.debug(
+                "[identity] failed to remove the idle assignment", exc_info=True
+            )
+            return None
+        self._log.info(
+            "[identity] No free account; policy 'reuse' took over token %s after %d min idle",
+            tid,
+            best_idle // 60,
+        )
+        return tid
 
     def _persist(
         self, mapping_id, author_id, token_id, cloned_guild_id,
