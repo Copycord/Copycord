@@ -796,3 +796,71 @@ async def test_stale_round_robin_value_changes_nothing(srv, monkeypatch):
     # Author-less sends always start from the same first token.
     s = _sender(SenderDB(["a", "b", "c"]), pool)
     assert await _author_firsts(s, tried, [None, None, None]) == ["ta", "ta", "ta"]
+
+
+# startup and count log lines
+
+
+def _pool_lines(caplog):
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("[token-pool]")]
+
+
+@pytest.mark.asyncio
+async def test_startup_line_counts_tokens_mappings_and_routes_once(make_rx, caplog):
+    caplog.set_level(logging.INFO, logger="test.server_pool")
+    rx = make_rx(
+        [
+            ("m1", _settings(proxy=True), [("1", "X", True), ("2", "Y", True)]),
+            ("m2", _settings(proxy=False), [("3", "Z", True)]),
+            ("m3", _settings(proxy=True), [("4", "W", True)]),
+        ]
+    )
+    rx.db.status["m3"] = "paused"
+    await rx._reconcile_token_pool()
+    assert _pool_lines(caplog) == [
+        "[token-pool] Bringing 3 token(s) online for 2 mapping(s): 2 through proxies, 1 direct, 1 paused mapping(s) skipped"
+    ]
+    caplog.clear()
+    await rx._reconcile_token_pool()
+    assert _pool_lines(caplog) == []
+
+
+@pytest.mark.asyncio
+async def test_empty_plan_logs_once(make_rx, caplog):
+    caplog.set_level(logging.INFO, logger="test.server_pool")
+    rx = make_rx([("m1", _settings(use=False), [("1", "X", True)])])
+    await rx._reconcile_token_pool()
+    await rx._reconcile_token_pool()
+    assert _pool_lines(caplog) == ["[token-pool] No tokens to bring online"]
+
+
+@pytest.mark.asyncio
+async def test_count_change_logs_one_line_and_steady_state_none(make_rx, caplog):
+    caplog.set_level(logging.INFO, logger="test.server_pool")
+    rx = make_rx([("m1", _settings(), [("1", "X", True)])])
+    await rx._reconcile_token_pool()
+    caplog.clear()
+    rx.db.mappings[0][2].append(("2", "Y", True))
+    await rx._reconcile_token_pool()
+    assert _pool_lines(caplog) == ["[token-pool] Token count changed from 1 to 2"]
+
+
+@pytest.mark.asyncio
+async def test_wave_line_logs_once_when_sessions_settle(make_rx, caplog):
+    caplog.set_level(logging.INFO, logger="test.server_pool")
+    rx = make_rx([("m1", _settings(), [("1", "X", True), ("2", "Y", True)])])
+    states = {"1": "connecting", "2": "online"}
+    rx.token_pool.snapshot = lambda: {
+        "tokens": {t: {"state": s, "session": t} for t, s in states.items()}
+    }
+    await rx._reconcile_token_pool()
+    caplog.clear()
+    rx._log_token_pool_wave()
+    assert _pool_lines(caplog) == []
+    states["1"] = "offline"
+    rx._log_token_pool_wave()
+    rx._log_token_pool_wave()
+    lines = _pool_lines(caplog)
+    assert len(lines) == 1
+    assert lines[0].startswith("[token-pool] 1 of 2 token(s) online after ")
+    assert lines[0].endswith(" s, 1 failed")
