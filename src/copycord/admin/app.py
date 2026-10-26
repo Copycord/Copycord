@@ -69,6 +69,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from copycord.common.config import CURRENT_VERSION
+from copycord.common.control_protocol import SERVER_STOP_BUDGET, STOPPING
 from copycord.version import is_dev_build
 from copycord.common.db import DBManager, backups_dir
 from copycord.common.paths import data_dir, out_candidates, out_dir
@@ -1979,6 +1980,8 @@ async def start_all(request: Request):
 
     srv = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "start"})
     cli = await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "start"})
+    _clear_stop_requested("server", srv)
+    _clear_stop_requested("client", cli)
 
     errors: list[str] = []
     if not srv.get("ok") or srv.get("error"):
@@ -2012,6 +2015,8 @@ async def start_all(request: Request):
 @app.post("/stop")
 async def stop_all(request: Request):
     LOGGER.info("POST /stop requested")
+    # First, so a status poll racing this request already reads stopping.
+    _mark_stop_requested("server", "client")
     await _stop_task_runs()
     await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
     await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
@@ -2269,6 +2274,8 @@ async def _autostart_if_ready():
 
         srv = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "start"})
         cli = await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "start"})
+        _clear_stop_requested("server", srv)
+        _clear_stop_requested("client", cli)
 
         LOGGER.info(
             "Auto-start complete: server=%s, client=%s",
@@ -2659,6 +2666,7 @@ async def backup_restore(
             f.write(await file.read())
 
     try:
+        _mark_stop_requested("server", "client")
         await _stop_task_runs()
         await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
         await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
@@ -2917,9 +2925,36 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
     )
 
 
+# A stop asked for through the dashboard, per role (monotonic time of the request).
+# Until a status answer confirms stopped, the role reads stopping even when it
+# cannot be asked; a role that never stopped reads as it says after the TTL.
+_STOP_REQUESTED: dict[str, float] = {}
+STOP_PENDING_TTL = SERVER_STOP_BUDGET + 60.0
+
+
+def _mark_stop_requested(*roles: str) -> None:
+    now = time.monotonic()
+    for role in roles:
+        _STOP_REQUESTED[role] = now
+
+
+def _clear_stop_requested(role: str, reply: dict) -> None:
+    """Forget a stop request once a start for the role went through."""
+    if (reply or {}).get("ok") and not (reply or {}).get("error"):
+        _STOP_REQUESTED.pop(role, None)
+
+
+def _stop_pending(role: str) -> bool:
+    at = _STOP_REQUESTED.get(role)
+    return at is not None and time.monotonic() - at < STOP_PENDING_TTL
+
+
 def _derive_state(obj: dict) -> str:
-    """Normalize a status payload to 'running' or 'stopped', or pass it through."""
+    """Normalize a status payload to 'running', 'stopping' or 'stopped', or pass it through."""
     s = str(obj.get("status", "")).strip().lower()
+    # Before running: a stopping role is still running until its task ends.
+    if s == STOPPING or obj.get("stopping") is True:
+        return STOPPING
     if obj.get("running") is True:
         return "running"
 
@@ -2948,14 +2983,20 @@ def _derive_state(obj: dict) -> str:
     return "stopped" if s == "" else s
 
 
-def _enrich_from_bus(ctrl: dict, bus: dict) -> dict:
+def _enrich_from_bus(ctrl: dict, bus: dict, stopping: bool = False) -> dict:
+    """The control answer with gaps filled from the role's last bus status.
+
+    While a stop is in flight the bus is not asked for status, pid or running: its
+    last word predates the stop or is the shutdown's own early "Stopped" note.
+    """
     out = dict(ctrl or {})
-    if not out.get("status") and bus.get("status"):
-        out["status"] = bus["status"]
-    if not out.get("pid") and bus.get("pid"):
-        out["pid"] = bus["pid"]
-    if "running" not in out and "running" in bus:
-        out["running"] = bus["running"]
+    if not stopping:
+        if not out.get("status") and bus.get("status"):
+            out["status"] = bus["status"]
+        if not out.get("pid") and bus.get("pid"):
+            out["pid"] = bus["pid"]
+        if "running" not in out and "running" in bus:
+            out["running"] = bus["running"]
     if "discord" not in out and isinstance(bus.get("discord"), dict):
         out["discord"] = bus["discord"]
     if "token_pool" not in out and "token_pool" in bus:
@@ -2982,6 +3023,28 @@ def _is_discord_ready(obj: dict) -> bool:
     return st2 in {"ready", "connected", "online"}
 
 
+def _role_status(role: str, ctrl: dict, bus: dict) -> tuple[dict, str]:
+    """A role's merged status and its state.
+
+    After a stop asked for here the state is stopping until an answer from the role
+    confirms stopped: a failed or timed out query, or one that raced the stop, never
+    reads stopped or running. A stopping role keeps running true (its task is
+    alive), so per role running means up; both_running stays false while stopping.
+    """
+    pending = _stop_pending(role)
+    out = _enrich_from_bus(ctrl, bus, stopping=pending)
+    state = _derive_state(out)
+    if pending:
+        answered = (ctrl or {}).get("ok") is not False and not (ctrl or {}).get("error")
+        if answered and state == "stopped":
+            _STOP_REQUESTED.pop(role, None)
+        else:
+            state = STOPPING
+    if state == STOPPING:
+        out["running"] = True
+    return out, state
+
+
 async def _collect_status() -> dict:
     with _Timer("/status") as t:
         s_server = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "status"}, timeout=0.7)
@@ -2990,15 +3053,18 @@ async def _collect_status() -> dict:
     bus_srv = hub.status.get("server") or {}
     bus_cli = hub.status.get("client") or {}
 
-    s_server = _enrich_from_bus(s_server, bus_srv)
-    s_client = _enrich_from_bus(s_client, bus_cli)
-
-    server_state = _derive_state(s_server)
-    client_state = _derive_state(s_client)
+    s_server, server_state = _role_status("server", s_server, bus_srv)
+    s_client, client_state = _role_status("client", s_client, bus_cli)
     both_running = (server_state == "running") and (client_state == "running")
+    stopping = STOPPING in (server_state, client_state)
 
-    server_ready = _is_discord_ready(s_server) or _is_discord_ready(bus_srv)
-    client_ready = _is_discord_ready(s_client) or _is_discord_ready(bus_cli)
+    # A stopping role is not ready, whatever its last bus status said.
+    server_ready = server_state != STOPPING and (
+        _is_discord_ready(s_server) or _is_discord_ready(bus_srv)
+    )
+    client_ready = client_state != STOPPING and (
+        _is_discord_ready(s_client) or _is_discord_ready(bus_cli)
+    )
     both_ready = server_ready and client_ready
 
     res = {
@@ -3008,7 +3074,8 @@ async def _collect_status() -> dict:
         "both_ready": both_ready,
         "running_and_ready": both_running and both_ready,
         "running": both_running,
-        "status": "running" if both_running else "stopped",
+        "stopping": stopping,
+        "status": "running" if both_running else (STOPPING if stopping else "stopped"),
     }
 
     LOGGER.debug(
