@@ -3022,8 +3022,8 @@ task_routes.set_bots_check(_bots_running)
 _POOL_STATES = ("online", "connecting", "offline")
 
 
-def _group_senders(rows: list[dict], pool: dict | None) -> list[tuple[list[dict], dict | None, str]]:
-    """(rows, live pool entry, state) per token value; the state the senders table shows for it.
+def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
+    """One item per token value: its DB rows merged with the live pool entry of any of its ids.
 
     ``pool`` is the server's token_pool status, or None when the server is stopped.
     """
@@ -3037,7 +3037,7 @@ def _group_senders(rows: list[dict], pool: dict | None) -> list[tuple[list[dict]
         if value:
             groups.setdefault(value, []).append(r)
 
-    out = []
+    items = []
     for group in groups.values():
         entries = [
             e
@@ -3056,80 +3056,6 @@ def _group_senders(rows: list[dict], pool: dict | None) -> list[tuple[list[dict]
             state = entry["state"]
         else:
             state = "offline"
-        out.append((group, entry, state))
-    return out
-
-
-def _merge_senders(rows: list[dict], pool: dict | None) -> list[dict]:
-    """One item per token value: its DB rows merged with the live pool entry of any of its ids.
-
-    ``pool`` is the server's token_pool status, or None when the server is stopped.
-    """
-    return _senders_items(_group_senders(rows, pool))
-
-
-_MAPPING_COUNTS = ("online", "connecting", "offline", "disabled", "revoked")
-
-
-def _mapping_name(m: dict) -> str:
-    mid = str(m.get("mapping_id") or "")
-    for field in ("mapping_name", "original_guild_name", "cloned_guild_name"):
-        name = str(m.get(field) or "").strip()
-        if name:
-            return name
-    return f"Mapping {mid[:8]}" if mid else "Mapping"
-
-
-def _mapping_senders(groups, mappings: list[dict]) -> list[dict]:
-    """Per mapping token counts from the grouped senders, in one pass over the token rows.
-
-    A value shared by several mappings counts once under each. A paused mapping keeps none of
-    its tokens online, so a token there that is not disabled or revoked counts as offline.
-    """
-    out: dict[str, dict] = {}
-    for m in mappings or []:
-        m = m or {}
-        mid = str(m.get("mapping_id") or "")
-        if not mid or mid in out:
-            continue
-        status = "paused" if str(m.get("status") or "active").strip().lower() == "paused" else "active"
-        settings = m.get("settings") if isinstance(m.get("settings"), dict) else {}
-        out[mid] = {
-            "id": mid,
-            "name": _mapping_name(m),
-            "status": status,
-            "tokens_enabled": bool({**DEFAULTS, **settings}.get("USE_USER_TOKENS", False)),
-            "total": 0,
-            **{k: 0 for k in _MAPPING_COUNTS},
-        }
-
-    for group, _entry, state in groups:
-        enabled_in: dict[str, bool] = {}
-        for r in group:
-            mid = str(r.get("mapping_id") or "")
-            if mid in out:
-                enabled_in[mid] = enabled_in.get(mid, False) or bool(r.get("enabled"))
-        for mid, enabled in enabled_in.items():
-            item = out[mid]
-            if state == "revoked":
-                s = "revoked"
-            elif not enabled:
-                s = "disabled"
-            elif item["status"] == "paused":
-                s = "offline"
-            else:
-                s = state
-            item["total"] += 1
-            item[s] += 1
-
-    return sorted(
-        out.values(), key=lambda i: (i["status"] == "paused", i["name"].lower(), i["id"])
-    )
-
-
-def _senders_items(groups) -> list[dict]:
-    items = []
-    for group, entry, state in groups:
         online = state == "online"
 
         def first(field):
@@ -3151,6 +3077,9 @@ def _senders_items(groups) -> list[dict]:
                 "since": int(since) if isinstance(since, (int, float)) else None,
                 "last_used": max(last_used) if last_used else None,
                 "use_count": sum(int(r.get("use_count") or 0) for r in group),
+                "mapping_ids": sorted(
+                    {str(r["mapping_id"]) for r in group if r.get("mapping_id")}
+                ),
             }
         )
 
@@ -3163,6 +3092,30 @@ def _senders_items(groups) -> list[dict]:
         )
     )
     return items
+
+
+def _mapping_name(m: dict) -> str:
+    mid = str(m.get("mapping_id") or "")
+    for field in ("mapping_name", "original_guild_name", "cloned_guild_name"):
+        name = str(m.get(field) or "").strip()
+        if name:
+            return name
+    return f"Mapping {mid[:8]}" if mid else "Mapping"
+
+
+def _senders_mappings(mappings: list[dict]) -> list[dict]:
+    """The mappings the senders table filters by: id, name and status, active first, then by name."""
+    out: dict[str, dict] = {}
+    for m in mappings or []:
+        m = m or {}
+        mid = str(m.get("mapping_id") or "")
+        if not mid or mid in out:
+            continue
+        status = "paused" if str(m.get("status") or "active").strip().lower() == "paused" else "active"
+        out[mid] = {"id": mid, "name": _mapping_name(m), "status": status}
+    return sorted(
+        out.values(), key=lambda i: (i["status"] == "paused", i["name"].lower(), i["id"])
+    )
 
 
 def _token_cloning_enabled(mappings: list[dict]) -> bool:
@@ -3184,14 +3137,13 @@ async def api_system_senders():
     status = await _collect_status()
     server = status.get("server") or {}
     pool = server.get("token_pool") if server.get("state") == "running" else None
-    groups = _group_senders(db.list_all_user_tokens(), pool)
     mappings = db.list_guild_mappings()
     return JSONResponse(
         {
             "ok": True,
             "enabled": _token_cloning_enabled(mappings),
-            "items": _senders_items(groups),
-            "mappings": _mapping_senders(groups, mappings),
+            "items": _merge_senders(db.list_all_user_tokens(), pool),
+            "mappings": _senders_mappings(mappings),
         }
     )
 

@@ -13,9 +13,10 @@ UID = "175928847299117063"  # (UID >> 22) % 6 == 2
 
 
 def _row(tid, value, *, username=None, display_name=None, avatar_url=None, user_id=None,
-         enabled=1, last_used=None, use_count=0):
+         enabled=1, last_used=None, use_count=0, mapping_id=None):
     return {
         "token_id": tid,
+        "mapping_id": mapping_id,
         "token_value": value,
         "username": username,
         "display_name": display_name,
@@ -38,8 +39,8 @@ def _pool(**tokens):
 def test_shared_token_is_one_item_with_max_last_used_and_summed_count():
     rows = [
         _row("t1", "SECRET-A", username="relay.alpha", display_name="Ava", user_id=UID,
-             last_used=100, use_count=3),
-        _row("t2", "SECRET-A", username="relay.alpha", last_used=250, use_count=4),
+             last_used=100, use_count=3, mapping_id="m2"),
+        _row("t2", "SECRET-A", username="relay.alpha", last_used=250, use_count=4, mapping_id="m1"),
     ]
     items = app_module._merge_senders(rows, _pool(t2=_entry("online", presence="dnd")))
     assert items == [
@@ -53,6 +54,7 @@ def test_shared_token_is_one_item_with_max_last_used_and_summed_count():
             "since": 1000,
             "last_used": 250,
             "use_count": 7,
+            "mapping_ids": ["m1", "m2"],
         }
     ]
 
