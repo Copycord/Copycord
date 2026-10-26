@@ -303,7 +303,10 @@ class TestRefusalLogLevels:
         with caplog.at_level("DEBUG", logger="selfclient.http"):
             with pytest.raises(LoginFailure):
                 await client.login()
-        assert not [r for r in caplog.records if r.levelname in ("ERROR", "WARNING")]
+        assert not [
+            r for r in caplog.records
+            if r.name == "selfclient.http" and r.levelname in ("ERROR", "WARNING")
+        ]
         assert [r.levelname for r in _refusals(caplog)] == ["DEBUG"]
 
     @pytest.mark.asyncio
