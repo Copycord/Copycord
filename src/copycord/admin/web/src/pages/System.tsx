@@ -40,7 +40,7 @@ import {
   ROW_BUTTON,
 } from "./system/SystemSkeleton";
 import { useNotify, useSafeConfirm } from "./system/providers";
-import { SendersTable } from "./system/SendersTable";
+import { SystemSenders } from "./system/SendersTable";
 
 /** The archive list scrolls once it has more rows than this. */
 export const VISIBLE_ROWS = 5;
@@ -329,7 +329,7 @@ export function System() {
           </div>
         </div>
       </Card>
-      <SendersTable />
+      <SystemSenders />
     </div>
   );
 }

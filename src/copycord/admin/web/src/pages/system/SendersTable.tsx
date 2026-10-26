@@ -43,7 +43,9 @@ import {
   SendersLoadingRows,
   SendersToolbar,
 } from "./SendersSkeleton";
+import { MappingsSection } from "./MappingsSection";
 import { useSenders } from "./useSenders";
+import type { SendersState } from "./useSenders";
 
 const DASH = "-";
 
@@ -161,8 +163,22 @@ function SenderRow({ s, now }: { s: Sender; now: number }) {
 
 const accounts = (n: number) => `${n.toLocaleString()} ${n === 1 ? "account" : "accounts"}`;
 
+/** The mappings and the sending accounts off one senders poll. */
+export function SystemSenders() {
+  const state = useSenders();
+  return (
+    <>
+      <MappingsSection mappings={state.mappings} error={state.error} />
+      <SendersTableView {...state} />
+    </>
+  );
+}
+
 export function SendersTable() {
-  const { items, enabled, error, busy } = useSenders();
+  return <SendersTableView {...useSenders()} />;
+}
+
+function SendersTableView({ items, enabled, error, busy }: SendersState) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SenderSort | null>(null);
   const reveal = useReveal(items !== undefined || error);

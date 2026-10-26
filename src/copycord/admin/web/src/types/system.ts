@@ -56,10 +56,29 @@ export interface Sender {
   use_count: number;
 }
 
+/** One mapping and how its sending accounts stand. A token shared by several mappings counts under each. */
+export interface SenderMapping {
+  id: string;
+  /** The mapping name, else a guild name, else a short id. */
+  name: string;
+  status: "active" | "paused";
+  /** Token message cloning is on for this mapping. */
+  tokens_enabled: boolean;
+  total: number;
+  online: number;
+  connecting: number;
+  /** A paused mapping counts every running token here. */
+  offline: number;
+  disabled: number;
+  revoked: number;
+}
+
 /** GET /api/system/senders */
 export interface SendersResponse {
   ok: boolean;
   /** Token message cloning is on for at least one mapping (its setting resolved over the defaults). */
   enabled: boolean;
   items: Sender[];
+  /** Active first, then by name. */
+  mappings?: SenderMapping[];
 }
