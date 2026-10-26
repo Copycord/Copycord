@@ -159,6 +159,7 @@ def make_rx(srv, monkeypatch):
         r._pool_online_seen = None
         r._pool_wanted_count = None
         r._pool_wave = None
+        r._pool_wave_started = set()
         r._pool_identity_saved = {}
         r.proxies = proxies
         return r
@@ -864,3 +865,29 @@ async def test_wave_line_logs_once_when_sessions_settle(make_rx, caplog):
     assert len(lines) == 1
     assert lines[0].startswith("[token-pool] 1 of 2 token(s) online after ")
     assert lines[0].endswith(" s, 1 failed")
+
+
+@pytest.mark.asyncio
+async def test_wave_waits_while_sessions_are_still_offline_before_connecting(make_rx, caplog):
+    caplog.set_level(logging.INFO, logger="test.server_pool")
+    rx = make_rx([("m1", _settings(), [("1", "X", True), ("2", "Y", True)])])
+    states = {"1": "offline", "2": "offline"}
+    rx.token_pool.snapshot = lambda: {
+        "tokens": {t: {"state": s, "session": t} for t, s in states.items()}
+    }
+    await rx._reconcile_token_pool()
+    caplog.clear()
+    rx._log_token_pool_wave()
+    assert _pool_lines(caplog) == []
+    states["1"] = "online"
+    rx._log_token_pool_wave()
+    assert _pool_lines(caplog) == []
+    states["2"] = "connecting"
+    rx._log_token_pool_wave()
+    assert _pool_lines(caplog) == []
+    states["2"] = "online"
+    rx._log_token_pool_wave()
+    lines = _pool_lines(caplog)
+    assert len(lines) == 1
+    assert lines[0].startswith("[token-pool] 2 of 2 token(s) online after ")
+    assert lines[0].endswith(" s, 0 failed")
