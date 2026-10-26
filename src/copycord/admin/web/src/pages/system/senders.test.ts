@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Sender } from "../../types/system";
-import { STATUS_LABEL, STATUS_ORDER, filterSenders, senderStatus, sortSenders } from "./senders";
+import {
+  STATUS_LABEL,
+  STATUS_ORDER,
+  avatarSources,
+  defaultAvatarIndex,
+  filterSenders,
+  senderStatus,
+  sortSenders,
+} from "./senders";
 
 function sender(id: string, state: Sender["state"], presence: Sender["presence"] = null): Sender {
   return { id, username: `relay.${id}`, display_name: null, avatar_url: null, state, presence, since: null, last_used: null, use_count: 0, mapping_ids: [] };
@@ -54,5 +62,26 @@ describe("senderStatus", () => {
     ];
     expect(sortSenders(items, { by: "status", dir: "asc" }).map((s) => s.id)).toEqual(["o", "i", "b", "r"]);
     expect(filterSenders(items, "IDLE").map((s) => s.id)).toEqual(["i"]);
+  });
+});
+
+describe("avatarSources", () => {
+  const CDN = "https://cdn.discordapp.com";
+
+  it("tries a real avatar, then the default image of its Discord user id", () => {
+    // (175928847299117063 >> 22) % 6 == 2
+    const real = `${CDN}/avatars/175928847299117063/a_abc.gif?size=64`;
+    expect(avatarSources(real, "t1")).toEqual([real, `${CDN}/embed/avatars/2.png`]);
+    expect(defaultAvatarIndex(real, "t1")).toBe(2);
+  });
+
+  it("an API default is its own only source", () => {
+    expect(avatarSources(`${CDN}/embed/avatars/5.png`, "t1")).toEqual([`${CDN}/embed/avatars/5.png`]);
+  });
+
+  it("no URL, or one without a user id, uses a stable hash of the row id", () => {
+    // "d".charCodeAt(0) = 100, 100 % 6 = 4
+    expect(avatarSources(null, "d")).toEqual([`${CDN}/embed/avatars/4.png`]);
+    expect(avatarSources("https://example.com/me.png", "d")).toEqual(["https://example.com/me.png", `${CDN}/embed/avatars/4.png`]);
   });
 });

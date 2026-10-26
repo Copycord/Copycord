@@ -13,9 +13,7 @@ import { MUTED } from "../messages/MessagesSkeleton";
 import { absoluteTime, relativeTime } from "../messages/model";
 import {
   ALL_MAPPINGS,
-  DEFAULT_AVATAR_COLORS,
   STATUS_LABEL,
-  defaultAvatarIndex,
   filterSenders,
   liveMapping,
   mappingOptions,
@@ -27,9 +25,9 @@ import {
   stateCounts,
 } from "./senders";
 import type { SenderSort, SenderStatus } from "./senders";
+import { SenderAvatar } from "./SenderAvatar";
 import {
   ACCOUNT,
-  AVATAR,
   SENDER_ROW,
   SENDER_TD,
   SENDER_TD_RIGHT,
@@ -71,41 +69,6 @@ export const STATUS: Record<SenderStatus, { label: string; dot?: string; text?: 
 
 const DIMMED = new Set<SenderStatus>(["revoked", "disabled"]);
 
-/** The avatar the API names (a Discord default until the account has connected, then the real one) over a
- *  circle in the account's default colour, which shows while an image loads and when it fails or is missing.
- *  A new URL on a later poll swaps the image in the same 24 px box. */
-function Avatar({ url, id }: { url: string | null; id: string }) {
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const index = defaultAvatarIndex(url, id);
-  const color = { backgroundColor: DEFAULT_AVATAR_COLORS[index] };
-  if (!url || failedUrl === url) {
-    return (
-      <span
-        aria-hidden="true"
-        data-avatar="default"
-        data-avatar-index={index}
-        className={cx(AVATAR, "select-none")}
-        style={color}
-      />
-    );
-  }
-  // Locked in place: the browser's image drag ghost and text selection are switched off.
-  return (
-    <img
-      src={url}
-      alt=""
-      loading="lazy"
-      draggable={false}
-      data-avatar="img"
-      data-avatar-index={index}
-      className={cx(AVATAR, "pointer-events-none select-none object-cover")}
-      style={color}
-      onDragStart={(e) => e.preventDefault()}
-      onError={() => setFailedUrl(url)}
-    />
-  );
-}
-
 /** Time online from `since` (unix seconds), redrawn on each whole second. */
 function OnlineFor({ since }: { since: number }) {
   const [, redraw] = useState(0);
@@ -138,7 +101,7 @@ function SenderRow({ s, now }: { s: Sender; now: number }) {
     <tr className={cx(SENDER_ROW, DIMMED.has(status) && "opacity-60")} data-sender={s.id} data-status={status}>
       <td className={SENDER_TD}>
         <span className={ACCOUNT}>
-          <Avatar url={s.avatar_url} id={s.id} />
+          <SenderAvatar url={s.avatar_url} id={s.id} />
           <Text text={senderName(s)} className="font-medium" />
         </span>
       </td>

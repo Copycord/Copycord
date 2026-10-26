@@ -1,6 +1,6 @@
 // Pure logic of the sending accounts table: the status of a row, the mapping filter, the status
-// counts, the client side search and column sort over the rows already loaded, and the Discord
-// default avatar colour of an account.
+// counts, the client side search and column sort over the rows already loaded, and the images an
+// account's avatar tries (its own, then the Discord default).
 
 import type { Sender, SenderMapping, SenderState } from "../../types/system";
 
@@ -119,14 +119,27 @@ export function sortSenders(items: readonly Sender[], sort: SenderSort | null): 
     .map((x) => x.s);
 }
 
-/** Discord's six default avatar colours, by avatar index. */
-export const DEFAULT_AVATAR_COLORS = ["#5865F2", "#747F8D", "#3BA55D", "#FAA61A", "#ED4245", "#EB459E"] as const;
+/** How many default avatars Discord has. */
+const DEFAULT_AVATARS = 6;
 
-/** The default avatar index: from a /embed/avatars/<n>.png URL, else a stable hash of the account id. */
+const EMBED_AVATAR = /\/embed\/avatars\/(\d+)\.png/;
+
+/** The default avatar index: from a /embed/avatars/<n>.png URL, else from the Discord user id of an
+ *  /avatars/<user id>/ URL as Discord picks it, else a stable hash of the row id. */
 export function defaultAvatarIndex(url: string | null, id: string): number {
-  const m = url ? /\/embed\/avatars\/(\d+)\.png/.exec(url) : null;
-  if (m) return Number(m[1]) % DEFAULT_AVATAR_COLORS.length;
+  const embed = url ? EMBED_AVATAR.exec(url) : null;
+  if (embed) return Number(embed[1]) % DEFAULT_AVATARS;
+  const user = url ? /\/avatars\/(\d+)\//.exec(url) : null;
+  if (user) return Number((BigInt(user[1]!) >> 22n) % BigInt(DEFAULT_AVATARS));
   let h = 0;
   for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return h % DEFAULT_AVATAR_COLORS.length;
+  return h % DEFAULT_AVATARS;
+}
+
+/** The images an avatar tries in order: the URL the API names, then the Discord default avatar image
+ *  (only the URL itself when it already is a default). */
+export function avatarSources(url: string | null, id: string): string[] {
+  const fallback = `https://cdn.discordapp.com/embed/avatars/${defaultAvatarIndex(url, id)}.png`;
+  if (!url || EMBED_AVATAR.test(url)) return [url || fallback];
+  return [url, fallback];
 }
