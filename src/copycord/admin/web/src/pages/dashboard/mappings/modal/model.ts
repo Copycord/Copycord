@@ -54,6 +54,8 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
   ON_DEMAND_WEBHOOKS: true,
   USE_USER_TOKENS: false,
   USER_TOKEN_FALLBACK_WEBHOOK: true,
+  USER_TOKEN_NO_FREE_ACCOUNT: "webhook",
+  USER_TOKEN_REUSE_IDLE_MINUTES: 30,
   USER_TOKEN_TYPING: false,
   USER_TOKEN_MIN_DELAY: 0,
   USER_TOKEN_MAX_DELAY: 0,
@@ -68,6 +70,10 @@ export const DEFAULT_MAPPING_SETTINGS: MappingSettings = {
 
 export const PRESENCE_VALUES = ["random", "online", "idle", "busy"] as const;
 export type TokenPresence = (typeof PRESENCE_VALUES)[number];
+
+export const NO_FREE_ACCOUNT_VALUES = ["webhook", "drop", "reuse"] as const;
+export type NoFreeAccount = (typeof NO_FREE_ACCOUNT_VALUES)[number];
+export const DEFAULT_REUSE_IDLE_MINUTES = 30;
 
 export const FRIENDLY_NAMES: Record<string, string> = {
   ENABLE_CLONING: "Enable Cloning",
@@ -224,6 +230,20 @@ export function normalizePresence(v: unknown): TokenPresence {
   return (PRESENCE_VALUES as readonly string[]).includes(s) ? (s as TokenPresence) : "random";
 }
 
+/** When no account is free: the stored choice, else the older fallback switch (off means drop), else webhook. */
+export function resolveNoFreeAccount(settings: Record<string, unknown> | null | undefined): NoFreeAccount {
+  const s = String(settings?.USER_TOKEN_NO_FREE_ACCOUNT ?? "").trim().toLowerCase();
+  if ((NO_FREE_ACCOUNT_VALUES as readonly string[]).includes(s)) return s as NoFreeAccount;
+  const old = settings?.USER_TOKEN_FALLBACK_WEBHOOK;
+  return old == null || toBool(old) ? "webhook" : "drop";
+}
+
+/** Reuse idle minutes: a whole number, at least 1, default 30. */
+export function normalizeIdleMinutes(v: unknown): number {
+  const n = Math.floor(parseFloat(String(v ?? "")));
+  return Number.isFinite(n) ? Math.max(1, n) : DEFAULT_REUSE_IDLE_MINUTES;
+}
+
 export function modeOf(mapping: DashboardMapping | null | undefined, mode?: "clone"): MappingMode {
   if (mode === "clone" && mapping) return "clone";
   return mapping ? "edit" : "create";
@@ -238,6 +258,8 @@ export function initialForm(mapping: DashboardMapping | null | undefined, mode: 
     const raw =
       source && key in source && !(key === "USER_TOKEN_USE_PROXIES" && source[key] == null) ? source[key] : def;
     if (key === "USER_TOKEN_PRESENCE") settings[key] = normalizePresence(raw);
+    else if (key === "USER_TOKEN_NO_FREE_ACCOUNT") settings[key] = resolveNoFreeAccount(source);
+    else if (key === "USER_TOKEN_REUSE_IDLE_MINUTES") settings[key] = normalizeIdleMinutes(raw);
     else if (typeof def === "boolean") settings[key] = toBool(raw);
     else settings[key] = (raw as MappingSettingValue | null | undefined) ?? def;
   }
@@ -272,6 +294,9 @@ export function buildPayload(form: MappingFormState): MappingSavePayload {
   settings.USER_TOKEN_MIN_DELAY = num(settings.USER_TOKEN_MIN_DELAY);
   settings.USER_TOKEN_MAX_DELAY = num(settings.USER_TOKEN_MAX_DELAY);
   settings.USER_TOKEN_PRESENCE = normalizePresence(settings.USER_TOKEN_PRESENCE);
+  // The older USER_TOKEN_FALLBACK_WEBHOOK goes back exactly as loaded.
+  settings.USER_TOKEN_NO_FREE_ACCOUNT = resolveNoFreeAccount(settings);
+  settings.USER_TOKEN_REUSE_IDLE_MINUTES = normalizeIdleMinutes(settings.USER_TOKEN_REUSE_IDLE_MINUTES);
   // Sent as saved even under a fixed status; the server only reads it with Random.
   settings.USER_TOKEN_PRESENCE_ROTATE = toBool(settings.USER_TOKEN_PRESENCE_ROTATE);
   return {

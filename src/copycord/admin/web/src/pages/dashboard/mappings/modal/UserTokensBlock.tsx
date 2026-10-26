@@ -30,7 +30,7 @@ import type {
 import { GhostButton } from "../../../system/buttons";
 import { useNotify, useSafeConfirm } from "../../../system/providers";
 import { ToolbarSelect } from "../../../channels/ToolbarSelect";
-import { normalizePresence, toBool } from "./model";
+import { normalizePresence, resolveNoFreeAccount, toBool } from "./model";
 import { DESC, ROW, SECTION, SectionSummary, Switch, ToggleRow } from "./parts";
 import {
   BULK_LABELS,
@@ -71,6 +71,12 @@ const PRESENCE_DESCS: Record<string, string> = {
   idle: "Every kept online account shows as Idle.",
   busy: "Every kept online account shows as Busy (Do Not Disturb).",
 };
+
+const NO_FREE_OPTIONS = [
+  { value: "webhook", label: "Send with the webhook" },
+  { value: "drop", label: "Drop the message" },
+  { value: "reuse", label: "Reuse the account idle longest" },
+];
 
 // .user-token-num, .user-token-menu-item and .user-token-bulk-results.
 const NUM =
@@ -390,6 +396,7 @@ export function UserTokensBlock({
     [tokens, query],
   );
   const presence = normalizePresence(settings.USER_TOKEN_PRESENCE);
+  const noFree = resolveNoFreeAccount(settings);
 
   const addToken = async () => {
     if (!mappingId) return;
@@ -713,11 +720,56 @@ export function UserTokensBlock({
             )}
           </div>
 
-          {switchRow(
-            "USER_TOKEN_FALLBACK_WEBHOOK",
-            "Fall back to webhook",
-            "If no token can send the message, use the normal webhook instead of dropping it.",
-            "user_token_fallback_webhook",
+          <div className={ROW} data-setting-key="user_token_no_free_account">
+            <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
+              <label
+                htmlFor="ut_no_free_account"
+                className="mapping-toggle-name text-[13px] font-medium text-text"
+              >
+                When no account is free
+              </label>
+              <span id="ut_no_free_account_desc" className={DESC}>
+                What to do with a message when every account already belongs
+                to another author.
+              </span>
+            </div>
+            <div className="w-[240px] max-w-[55%] flex-none">
+              <ToolbarSelect
+                variant="field"
+                id="ut_no_free_account"
+                value={noFree}
+                options={NO_FREE_OPTIONS}
+                onChange={(v) => setSetting("USER_TOKEN_NO_FREE_ACCOUNT", v)}
+                toggleClassName={SELECT_TOGGLE}
+              />
+            </div>
+          </div>
+          {noFree === "reuse" && (
+            <div className={ROW} data-setting-key="user_token_reuse_idle_minutes">
+              <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
+                <label
+                  htmlFor="ut_reuse_idle_minutes"
+                  className="mapping-toggle-name text-[13px] font-medium text-text"
+                >
+                  Reuse after idle (minutes)
+                </label>
+                <span className={DESC}>
+                  Only an account that has not sent for this long is taken
+                  over; its nickname and roles are reset for the new author.
+                </span>
+              </div>
+              <input
+                type="number"
+                id="ut_reuse_idle_minutes"
+                className={NUM}
+                min={1}
+                step={1}
+                value={String(settings.USER_TOKEN_REUSE_IDLE_MINUTES ?? "")}
+                onChange={(e) =>
+                  setSetting("USER_TOKEN_REUSE_IDLE_MINUTES", e.target.value)
+                }
+              />
+            </div>
           )}
           {switchRow(
             "USER_TOKEN_TYPING",
