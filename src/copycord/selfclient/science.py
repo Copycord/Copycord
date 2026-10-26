@@ -46,6 +46,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from copycord.common import traffic_capture
+from copycord.logging_setup import TRACE
 
 from . import fingerprint
 from .http import API_BASE
@@ -553,7 +554,8 @@ class ScienceReporter:
         if capture is not None:
             capture.response(rid, status)
         if 200 <= status < 300:
-            log.debug(
+            log.log(
+                TRACE,
                 "science POST sent %d event(s) [%s]: HTTP %s",
                 len(body["events"]),
                 ", ".join(str(e.get("type")) for e in body["events"]),

@@ -59,7 +59,7 @@ from copycord.common.websockets import WebsocketManager, AdminBus
 from copycord.common.db import DBManager
 from copycord.common.http_session import close_shared_session
 from copycord.common.paths import data_dir
-from copycord.logging_setup import apply_level
+from copycord.logging_setup import TRACE, apply_level
 from copycord.server.rate_limiter import RateLimitManager, ActionType
 from copycord.server.token_sender import (
     UserTokenSender,
@@ -3334,7 +3334,8 @@ class ServerReceiver:
 
                     actual_parent_id = int(ch.category.id) if ch.category else None
                     if actual_parent_id == cat_id_for_this_clone:
-                        logger.debug(
+                        logger.log(
+                            TRACE,
                             "[repair:skip:already-correct] guild=%s(%d) ch_id=%d parent=%s",
                             guild.name,
                             guild.id,
