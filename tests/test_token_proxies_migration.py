@@ -49,6 +49,7 @@ def test_runs_once_and_flips_only_false_and_null(tmp_path, caplog):
     db.close()
 
     caplog.set_level(logging.INFO, logger="common.db")
+    caplog.clear()
     db = DBManager(path, init_schema=True)
     assert _setting(db, off) is True
     assert _setting(db, null) is True
