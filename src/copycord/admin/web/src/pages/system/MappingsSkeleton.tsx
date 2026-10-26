@@ -18,7 +18,8 @@ export const MAPPING_CARD = cx(
 /** The name and chip line, the status line and the bar: fixed line boxes, so changing counts never move a card. */
 export const MAPPING_TOP = "flex h-6 min-w-0 items-center justify-between gap-3";
 export const MAPPING_NAME = "min-w-0 truncate text-[14px] leading-6 font-semibold text-text";
-export const MAPPING_LINE = "flex h-5 min-w-0 items-center gap-x-3 overflow-hidden text-[13px] leading-5 whitespace-nowrap";
+// One line high: counts that do not fit wrap onto a hidden second line whole, never cut mid word.
+export const MAPPING_LINE = "flex h-5 min-w-0 flex-wrap items-center gap-x-3 overflow-hidden text-[13px] leading-5 whitespace-nowrap";
 export const MAPPING_BAR = "flex h-1.5 w-full gap-px overflow-hidden rounded-full bg-wash-6";
 export const MAPPINGS_NOTE = "m-0 rounded-xl border border-border px-4 py-6 text-center text-[13px] text-muted";
 

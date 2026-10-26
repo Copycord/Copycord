@@ -80,8 +80,8 @@ function StatusLine({ m }: { m: SenderMapping }) {
     );
   }
   return (
-    <div className={MAPPING_LINE}>
-      <span className="flex flex-none items-center gap-1.5">
+    <div className={MAPPING_LINE} title={mappingSummary(m)}>
+      <span className="flex h-5 flex-none items-center gap-1.5">
         <span
           aria-hidden="true"
           className={m.online > 0 ? cx(DOT, "bg-good") : cx(DOT, "border-[1.5px] border-muted")}
@@ -91,7 +91,7 @@ function StatusLine({ m }: { m: SenderMapping }) {
         </span>
       </span>
       {REST.filter((p) => m[p] > 0).map((p) => (
-        <span key={p} className="flex flex-none items-center gap-1 text-[12px] text-muted">
+        <span key={p} className="flex h-5 flex-none items-center gap-1 text-[12px] text-muted">
           <span aria-hidden="true" className={cx("inline-block size-1.5 rounded-full", PART_COLOR[p])} />
           <span data-count={p} className="tabular-nums">{`${num(m[p])} ${p}`}</span>
         </span>
