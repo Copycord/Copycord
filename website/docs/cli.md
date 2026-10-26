@@ -560,7 +560,7 @@ copycord update --channel beta --no-install
 |---------|----------|
 | `stable` (default) | The newest [GitHub release](https://github.com/Copycord/Copycord/releases) that is not a pre-release |
 | `beta` | The newest GitHub release, pre-releases included |
-| `dev` | A git ref of a GitHub repository, by default `main` of `Copycord/Copycord`. It runs `uv tool install --force git+https://github.com/<repo>@<ref>`, which builds the dashboard from source, so it needs Node.js (`npm`). Without `npm` on your `PATH` it reuses or downloads the official Node build (SHA-256 checked) into `<home>/node`, the same one the installer uses, so a release install can switch to a branch with no manual steps. |
+| `dev` | A git ref of a GitHub repository, by default `main` of `Copycord/Copycord`. It runs `uv tool install --force git+https://github.com/<repo>@<ref>`, which builds the dashboard from source, so it needs Node.js (`npm`). Without `npm` on your `PATH` it reuses or downloads the official Node build (SHA-256 checked) into `<home>/node`, the same one the installer uses, so a release install can switch to a branch with no manual steps. It also needs git: when git is missing, Windows downloads a per-user MinGit (SHA-256 checked, no admin rights), and Linux and macOS install git with the package manager (`brew` on macOS; sudo may ask for your password). With `--yes`, during auto-update or without a terminal, Linux and macOS print the command to install git instead. Stable and beta never need git. |
 
 Release versions have four numbers, and the last one goes up with every release (`v4.0.0.1`, `v4.0.0.2`, ...), so a higher number is always newer. A release is a pre-release only when it is marked as one on GitHub; the version does not say.
 
