@@ -44,6 +44,26 @@ def _file_levels(handlers):
     return {r: h.level for r, h in handlers.items()}
 
 
+def test_trace_lines_stay_hidden_at_debug(installed):
+    tmp, handlers = installed
+    logging_setup.apply_level("DEBUG")
+    assert logging_setup.TRACE < logging.DEBUG
+
+    def go():
+        gw = logging.getLogger("selfclient.gateway")
+        gw.debug("gateway-debug-visible")
+        gw.log(logging_setup.TRACE, "gateway-trace-hidden")
+
+    t = threading.Thread(target=go, name="copycord-client")
+    t.start()
+    t.join()
+    for h in handlers.values():
+        h.flush()
+    text = (tmp / "client.out").read_text(encoding="utf-8")
+    assert "gateway-debug-visible" in text
+    assert "gateway-trace-hidden" not in text
+
+
 def test_apply_level_debug_then_info(installed):
     tmp, handlers = installed
     root = logging.getLogger()
