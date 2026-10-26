@@ -40,6 +40,7 @@ from types import SimpleNamespace
 from dotenv import load_dotenv
 from copycord.common.config import Config, CURRENT_VERSION
 from copycord.common.common_helpers import resolve_mapping_settings
+from copycord.common.control_protocol import TOKEN_POOL_CLOSE_CAP
 from copycord.common.selfbot_headers import (
     refresh_build_info,
     close_all_tls_sessions,
@@ -157,10 +158,8 @@ TOKEN_POOL_DEBOUNCE = 2.0
 TOKEN_POOL_INTERVAL = 60.0
 # How often the online set is checked for a status republish between reconciles.
 TOKEN_POOL_WATCH = 5.0
-# Shutdown's cap on closing the pool. close_all closes CLOSE_CONCURRENCY sessions
-# at once and cuts each off at CLOSE_TIMEOUT, so a normal close of a thousand
-# sessions takes a few seconds; this leaves room for several waves of stuck ones.
-TOKEN_POOL_CLOSE_CAP = 30.0
+# Shutdown's cap on closing the pool is TOKEN_POOL_CLOSE_CAP from control_protocol,
+# which the supervisor's stop budget for this role is built from.
 
 
 def _setting_on(value) -> bool:

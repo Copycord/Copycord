@@ -35,20 +35,29 @@ export const BOTS_TABLE = "mt-2 w-full table-fixed border-collapse border-table-
 // Bots table: fixed layout, four equal columns spread across the card
 // (Component left, State, Uptime and Status centered), muted 0.9rem headers, a rule under every row.
 export const BOTS_COL_COMPONENT = "w-1/4 text-left";
-export const BOTS_COL_STATE = "w-1/4 text-center";
+// On a phone the State column takes room from the ellipsized Status column, so the
+// state badge (sized for "stopping") fits its cell instead of running into the uptime.
+export const BOTS_COL_STATE = "w-1/4 text-center max-sm:w-[30%] max-sm:px-1";
 export const BOTS_COL_UPTIME = "w-1/4 text-center";
-export const BOTS_COL_STATUS = "w-1/4 text-center";
+export const BOTS_COL_STATUS = "w-1/4 text-center max-sm:w-[20%]";
 export const BOTS_HEAD = "border-b border-b-border px-3 py-2 align-middle text-[0.9rem] font-medium whitespace-nowrap text-muted";
 export const BOTS_CELL = "border-b border-b-border px-3 py-2 align-middle text-[0.95rem] whitespace-nowrap";
 
 // Bots state badge: fill and text only,
 // the 1px border stays transparent so the chip keeps its box.
+// The badge is a one cell grid with an invisible "stopping" (the longest label) under the
+// label, so running, stopping, stopped and the skeleton all have the same box.
 export const BOTS_STATE =
-  "inline-block rounded-[12px] border border-transparent px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold";
+  "inline-grid justify-items-center rounded-[12px] border border-transparent px-2 py-0.5 font-[system-ui,sans-serif] text-[12px] leading-[1.8] font-semibold after:invisible after:col-start-1 after:row-start-1 after:content-['stopping']";
+export const BOTS_STATE_LABEL = "col-start-1 row-start-1";
 
 /** The Bots state badge until the first status lands: the badge box with a bar over it. */
 export function BotStatePending() {
-  return <Skeleton.Box className={BOTS_STATE}>stopped</Skeleton.Box>;
+  return (
+    <Skeleton.Box className={BOTS_STATE}>
+      <span className={BOTS_STATE_LABEL}>stopping</span>
+    </Skeleton.Box>
+  );
 }
 
 /** The label.toggle switch until its value lands: a bar the size of the 38x22 track. */

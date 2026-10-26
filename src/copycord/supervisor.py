@@ -30,7 +30,14 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from copycord.common.config import CURRENT_VERSION
-from copycord.common.control_protocol import ALLOWED_ENV, serve_json, status_payload
+from copycord.common.control_protocol import (
+    ALLOWED_ENV,
+    ROLE_ABANDON_GRACE,
+    SERVER_STOP_BUDGET,
+    STOPPING,
+    serve_json,
+    status_payload,
+)
 from copycord.common.paths import data_dir
 from copycord.common.ports import (
     DEFAULT_ADMIN_PORT,
@@ -57,6 +64,8 @@ SHUTDOWN_ORDER = ("client", "server", "admin")
 # hold its ports for a few seconds.
 PORT_WAIT = 15.0
 PORT_RETRY = 0.5
+# How much longer than a role's own stop budget a stop request waits for it.
+STOP_GRACE = 5.0
 
 
 class PortBusyError(Exception):
@@ -143,6 +152,8 @@ class RoleSupervisor:
         self._import_failed = False
 
         self._task: Optional[asyncio.Task] = None
+        # From a stop request until the task has really ended.
+        self._stopping = False
         self._started_wall: Optional[float] = None
         self._started_mono: Optional[float] = None
         self.runs = 0
@@ -199,12 +210,24 @@ class RoleSupervisor:
             logger.info("%s role restarting in %.1fs", self.name, delay)
             await self._sleep(delay)
 
+    def is_stopping(self) -> bool:
+        return self._stopping and self.is_running()
+
     def start(self) -> dict:
+        if self.is_stopping():
+            # One task per role: a second one would race the first for ports and sessions.
+            return {
+                "ok": False,
+                "status": STOPPING,
+                "error": f"{self.name} is still stopping; start it again once it has stopped",
+            }
         if self.is_running():
             return {"ok": True, "status": "already-running", "pid": os.getpid()}
         self._task = asyncio.get_running_loop().create_task(
             self._supervise(), name=f"copycord-{self.name}"
         )
+        # The last task may have ended before its done callback ran.
+        self._stopping = False
         self._started_wall = time.time()
         self._started_mono = time.monotonic()
         logger.info("%s role started", self.name)
@@ -216,7 +239,12 @@ class RoleSupervisor:
             self._clear()
             return {"ok": True, "status": "already-stopped"}
 
-        task.cancel()
+        if not self._stopping:
+            self._stopping = True
+            # The state clears when the task really ends, even after this call gave up waiting.
+            task.add_done_callback(self._ended)
+            task.cancel()
+            logger.info("%s role stopping", self.name)
         try:
             await asyncio.wait_for(asyncio.shield(task), self.stop_timeout)
         except asyncio.CancelledError:
@@ -224,24 +252,38 @@ class RoleSupervisor:
                 raise
         except asyncio.TimeoutError:
             logger.warning(
-                "[%s] did not stop within %.0fs", self.name, self.stop_timeout
+                "[%s] still stopping after %.0fs; it reports stopping until its task ends",
+                self.name,
+                self.stop_timeout,
             )
+            return {"ok": True, "status": STOPPING}
         except Exception:
             logger.debug("%s role error while stopping", self.name, exc_info=True)
+        self._ended(task)
+        return {"ok": True, "status": "stopped", "code": None}
+
+    def _ended(self, task: asyncio.Task) -> None:
+        if self._task is not task or not self._stopping:
+            return
         self._clear()
         logger.info("%s role stopped", self.name)
-        return {"ok": True, "status": "stopped", "code": None}
 
     def _clear(self) -> None:
         self._task = None
+        self._stopping = False
         self._started_wall = None
         self._started_mono = None
 
     def status(self) -> dict:
         running = self.is_running()
-        return status_payload(
+        payload = status_payload(
             running, os.getpid(), self._started_wall, self._started_mono
         )
+        if running and self._stopping:
+            # running stays true (the task is alive); status says it is on its way out.
+            payload["status"] = STOPPING
+            payload["stopping"] = True
+        return payload
 
     async def handle(self, msg: dict) -> dict:
         """Commands: status, start, stop."""
@@ -396,10 +438,17 @@ class ThreadedRole:
     Cancelling the task runs the role's _shutdown() and joins the thread.
     """
 
-    def __init__(self, name: str, build: Callable[[], object], stop_timeout: float = 15.0):
+    def __init__(
+        self,
+        name: str,
+        build: Callable[[], object],
+        stop_timeout: float = 15.0,
+        abandon_grace: float = ROLE_ABANDON_GRACE,
+    ):
         self.name = name
         self.build = build
         self.stop_timeout = stop_timeout
+        self.abandon_grace = abandon_grace
 
     async def __call__(self) -> None:
         outer = asyncio.get_running_loop()
@@ -457,13 +506,26 @@ class ThreadedRole:
             try:
                 await asyncio.wait_for(asyncio.shield(done), self.stop_timeout)
             except asyncio.TimeoutError:
+                # Ending the task now would report stopped while the thread still
+                # closes sessions; keep waiting, up to the grace (a second cancel at exit ends it).
                 logger.warning(
-                    "[%s] thread still running after %.0fs; abandoning it",
+                    "[%s] still shutting down after its %.0fs stop budget; waiting for it to exit",
                     self.name,
                     self.stop_timeout,
                 )
+                try:
+                    await asyncio.wait_for(asyncio.shield(done), self.abandon_grace)
+                except asyncio.TimeoutError:
+                    # A hung close: give up on the (daemon) thread so the role can start again.
+                    logger.error(
+                        "[%s] thread still running after %.0fs; abandoning it, state reset so it can be started again",
+                        self.name,
+                        self.stop_timeout + self.abandon_grace,
+                    )
+                except Exception:
+                    logger.debug("[%s] role exited with an error while stopping", self.name, exc_info=True)
             except Exception:
-                pass
+                logger.debug("[%s] role exited with an error while stopping", self.name, exc_info=True)
             raise
 
 
@@ -473,7 +535,8 @@ def server_factory() -> RoleFactory:
 
         return ServerReceiver()
 
-    return ThreadedRole("server", build)
+    # Its shutdown closes the token pool for up to TOKEN_POOL_CLOSE_CAP.
+    return ThreadedRole("server", build, stop_timeout=SERVER_STOP_BUDGET)
 
 
 def client_factory() -> RoleFactory:
@@ -612,6 +675,10 @@ def build_supervisor(
             factories[name],
             backoff=backoff,
             restart_on_exit=is_admin,
+            # A little past the server's own budget and grace, so its own lines come first.
+            stop_timeout=(
+                SERVER_STOP_BUDGET + ROLE_ABANDON_GRACE + STOP_GRACE if name == "server" else 20.0
+            ),
             # Real server/client read their config from os.environ.
             before_start=_apply_db_config if real and not is_admin else None,
         )

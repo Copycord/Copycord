@@ -10,9 +10,13 @@ export interface VersionInfo {
 
 export type BotRole = "server" | "client";
 
-/** One row of the Bots table. */
+/** A bot's state: stopping from a Stop click until the role has really exited. */
+export type BotState = "running" | "stopping" | "stopped";
+
+/** One row of the Bots table. running is true while stopping too (the role is still up). */
 export interface BotStatus {
   running: boolean;
+  state?: BotState;
   uptime_sec?: number | null;
   status?: string;
 }
