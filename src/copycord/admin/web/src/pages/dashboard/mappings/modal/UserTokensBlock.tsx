@@ -75,7 +75,7 @@ const PRESENCE_DESCS: Record<string, string> = {
 const NO_FREE_OPTIONS = [
   { value: "webhook", label: "Send with the webhook" },
   { value: "drop", label: "Drop the message" },
-  { value: "reuse", label: "Reuse the account idle longest" },
+  { value: "reuse", label: "Reuse the idle account" },
 ];
 
 // .user-token-num, .user-token-menu-item and .user-token-bulk-results.
@@ -720,7 +720,10 @@ export function UserTokensBlock({
             )}
           </div>
 
-          <div className={ROW} data-setting-key="user_token_no_free_account">
+          <div
+            className={cx(ROW, "max-[600px]:flex-col max-[600px]:items-stretch max-[600px]:gap-2")}
+            data-setting-key="user_token_no_free_account"
+          >
             <div className="mapping-toggle-info flex min-w-0 flex-col gap-px">
               <label
                 htmlFor="ut_no_free_account"
@@ -733,7 +736,7 @@ export function UserTokensBlock({
                 to another author.
               </span>
             </div>
-            <div className="w-[240px] max-w-[55%] flex-none">
+            <div className="w-[240px] max-w-[55%] flex-none max-[600px]:w-full max-[600px]:max-w-none">
               <ToolbarSelect
                 variant="field"
                 id="ut_no_free_account"
