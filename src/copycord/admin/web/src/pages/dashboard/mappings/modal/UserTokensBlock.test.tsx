@@ -193,7 +193,7 @@ describe("UserTokensBlock Verify tokens", () => {
     await screen.findByRole("dialog", { name: "Token verification" });
     const calls = verifyCalls(fetchMock);
     expect(calls).toHaveLength(1);
-    const init = calls[0][1] as RequestInit;
+    const init = calls[0]![1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({ use_proxies: expected });
   });
