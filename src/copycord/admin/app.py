@@ -5173,22 +5173,34 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
 
     existing = {r["token_value"] for r in db.list_mapping_tokens(mapping_id)}
 
+    async def _check(t, proxy):
+        if t in existing:
+            return "duplicate", None
+        if not await _selfbot_in_guild(t, clone_gid, proxy=proxy):
+            return "invalid", None
+        return "valid", await _selfbot_identity(t, proxy=proxy)
+
+    # Validate in parallel across proxies, one token at a time per proxy (see
+    # _run_token_checks), then store the valid ones in input order.
+    checks = await _run_token_checks(tokens, _token_check_proxy, _check)
+
     results = []
     added = 0
-    # Validate sequentially to avoid hammering Discord's rate limits.
-    for t in tokens:
+    for t, outcome in zip(tokens, checks):
         masked = _mask_token(t)
-        if t in existing:
-            results.append({"masked": masked, "status": "duplicate"})
+        if isinstance(outcome, Exception):
+            LOGGER.warning(
+                "bulk_add_mapping_tokens | check failed token=%s: %s",
+                _redact_token(t),
+                outcome,
+            )
+            results.append({"masked": masked, "status": "error"})
+            continue
+        status, ident = outcome
+        if status != "valid":
+            results.append({"masked": masked, "status": status})
             continue
 
-        proxy = _token_check_proxy(t)
-        in_clone = await _selfbot_in_guild(t, clone_gid, proxy=proxy)
-        if not in_clone:
-            results.append({"masked": masked, "status": "invalid"})
-            continue
-
-        ident = await _selfbot_identity(t, proxy=proxy)
         username = (ident or {}).get("username") or None
         user_id = (ident or {}).get("id") or None
         try:
