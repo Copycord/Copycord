@@ -158,6 +158,8 @@ TOKEN_POOL_DEBOUNCE = 2.0
 TOKEN_POOL_INTERVAL = 60.0
 # How often the online set is checked for a status republish between reconciles.
 TOKEN_POOL_WATCH = 5.0
+# The startup wave is reported after this long even if a session is still connecting.
+TOKEN_POOL_WAVE_TIMEOUT = 300.0
 # Shutdown's cap on closing the pool is TOKEN_POOL_CLOSE_CAP from control_protocol,
 # which the supervisor's stop budget for this role is built from.
 
@@ -366,6 +368,10 @@ class ServerReceiver:
         self._pool_debounce_task: Optional[asyncio.Task] = None
         self._pool_loop_task: Optional[asyncio.Task] = None
         self._pool_online_seen: Optional[frozenset] = None
+        # Wanted token count of the last reconcile (None before the first) and the startup wave
+        # still to be reported as (start time, token count).
+        self._pool_wanted_count: Optional[int] = None
+        self._pool_wave: Optional[tuple[float, int]] = None
         # Last account identity stored per pool session, so the DB is written only on change.
         self._pool_identity_saved: dict[str, dict] = {}
         self.token_pool = TokenSessionPool(
@@ -1032,6 +1038,7 @@ class ServerReceiver:
             wanted = [v for v in wanted if not plan["tokens"][v]["use_proxy"]]
         else:
             notice_tokens_enabled(logger)
+        self._log_token_pool_plan(plan, wanted)
         wanted_ids = {
             tid for value in wanted for tid in plan["tokens"][value]["ids"]
         }
@@ -1068,6 +1075,61 @@ class ServerReceiver:
                     use_proxy=value in proxied,
                 )
                 self._pool_ids.add(token_id)
+
+    def _log_token_pool_plan(self, plan: dict, wanted: list) -> None:
+        """One line at startup for the first wave, then one only when the wanted count changes."""
+        count = len(wanted)
+        last = self._pool_wanted_count
+        self._pool_wanted_count = count
+        if last is not None:
+            if count != last:
+                logger.info("[token-pool] Token count changed from %d to %d", last, count)
+            return
+        if not count:
+            logger.info("[token-pool] No tokens to bring online")
+            return
+        proxied = sum(1 for v in wanted if plan["tokens"][v]["use_proxy"])
+        in_mappings = {m for v in wanted for m in plan["tokens"][v]["mappings"]}
+        extra = ""
+        blocked = len(plan["wanted"]) - count
+        if blocked:
+            extra += f", {blocked} waiting for proxies"
+        logger.info(
+            "[token-pool] Bringing %d token(s) online for %d mapping(s): %d through proxies, %d direct%s",
+            count,
+            len(in_mappings),
+            proxied,
+            count - proxied,
+            extra,
+        )
+        self._pool_wave = (time.monotonic(), count)
+
+    def _log_token_pool_wave(self) -> None:
+        """Log once when the first wave has settled: no wanted session is still connecting, or the wave timed out."""
+        wave = self._pool_wave
+        if wave is None:
+            return
+        started, count = wave
+        elapsed = time.monotonic() - started
+        try:
+            snap = self.token_pool.snapshot().get("tokens") or {}
+        except Exception:
+            return
+        # One session per token value, however many rows share it.
+        mine = list({snap[t].get("session") or t: snap[t] for t in self._pool_ids if t in snap}.values())
+        if len(mine) < count and elapsed < TOKEN_POOL_WAVE_TIMEOUT:
+            return
+        if any(e.get("state") == "connecting" for e in mine) and elapsed < TOKEN_POOL_WAVE_TIMEOUT:
+            return
+        self._pool_wave = None
+        online = sum(1 for e in mine if e.get("state") == "online")
+        logger.info(
+            "[token-pool] %d of %d token(s) online after %d s, %d failed",
+            online,
+            count,
+            round(elapsed),
+            max(count - online, 0),
+        )
 
     def _schedule_token_pool_reconcile(self, delay: float = TOKEN_POOL_DEBOUNCE) -> None:
         """Reconcile ``delay`` seconds after the last call; a running reconcile is never cancelled."""
@@ -1116,6 +1178,7 @@ class ServerReceiver:
 
     async def _publish_token_pool_status(self, *, force: bool = False) -> None:
         """Republish the server status with the pool snapshot when the online set changed."""
+        self._log_token_pool_wave()
         try:
             online = frozenset(self.token_pool.online_ids())
         except Exception:
