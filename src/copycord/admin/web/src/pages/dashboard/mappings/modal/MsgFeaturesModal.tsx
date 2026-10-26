@@ -1,4 +1,4 @@
-// #msg-features-modal: the six per mapping message options with a live preview. The toggles
+// #msg-features-modal: the seven per mapping message options with a live preview. The toggles
 // write straight into the mapping form state, so Save sends them with the rest.
 
 import { useEffect, useRef } from "react";
@@ -112,8 +112,14 @@ export function MsgFeaturesModal({ settings, onToggle, onClose }: Props) {
                     <div id="msg-features-preview-reply" className="msg-preview-reply hidden" />
                   )}
                   <div id="msg-features-preview-content" className="msg-preview-content text-sm leading-[1.4] text-discord-text">
-                    Hey <span className={on("DISABLE_EVERYONE_MENTIONS") ? PLAIN : MENTION}>@everyone</span> check this
-                    out <span className={on("DISABLE_ROLE_MENTIONS") ? PLAIN : MENTION}>@Moderator</span>
+                    {on("STRIP_MENTIONS") ? (
+                      "Hey check this out"
+                    ) : (
+                      <>
+                        Hey <span className={on("DISABLE_EVERYONE_MENTIONS") ? PLAIN : MENTION}>@everyone</span> check this
+                        out <span className={on("DISABLE_ROLE_MENTIONS") ? PLAIN : MENTION}>@Moderator</span>
+                      </>
+                    )}
                   </div>
                   <div
                     id="msg-features-preview-footer"
