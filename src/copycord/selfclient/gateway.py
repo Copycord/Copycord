@@ -1136,10 +1136,13 @@ class GatewayClient:
                 self.session_id,
                 self.resume_url,
             )
-            # An unfocused tab's one op 3 comes about 90 s after READY.
+            # An unfocused tab's one op 3 comes about 90 s after READY. An online account looks
+            # the same either way, so that timing is kept; any other status goes out at once
+            # instead of showing online for the first minute or two.
             await self._cancel_task("_presence_task")
+            delay = self.presence_delay if self.status == "online" else 0.0
             self._presence_task = asyncio.create_task(
-                self._delayed_presence(self._ws, self.presence_delay)
+                self._delayed_presence(self._ws, delay)
             )
             # A new session keeps no subscriptions from the old one.
             self._subscribed_guilds.clear()

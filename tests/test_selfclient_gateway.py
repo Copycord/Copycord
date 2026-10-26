@@ -364,6 +364,26 @@ class TestPresence:
         assert d["status"] == "idle" and d["afk"] is True
         assert isinstance(d["since"], int) and d["since"] > 0
 
+    @pytest.mark.asyncio
+    async def test_non_online_status_goes_out_at_once_not_after_the_delay(self):
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws, status="dnd", presence_delay=30.0)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(3))
+        await stop(client, task)
+
+        assert ws.frames(3)[0]["d"]["status"] == "dnd"
+
+    @pytest.mark.asyncio
+    async def test_online_status_keeps_the_browser_delay(self):
+        ws = FakeWS([hello(), ready()])
+        client, _ = make_client(ws, status="online", presence_delay=30.0)
+        task = asyncio.create_task(client.run(refresh_build=False))
+        await wait_until(lambda: ws.frames(2))
+        await asyncio.sleep(0.3)
+        assert ws.frames(3) == []
+        await stop(client, task)
+
 
 # heartbeat
 

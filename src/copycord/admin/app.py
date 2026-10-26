@@ -68,6 +68,7 @@ from starlette.types import Scope, Receive, Send
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from copycord.common.bot_status import STATUS_KEYS, normalize_status, read_status
 from copycord.common.config import CURRENT_VERSION
 from copycord.common.control_protocol import SERVER_STOP_BUDGET, STOPPING
 from copycord.version import is_dev_build
@@ -1850,6 +1851,44 @@ async def health():
         ok,
     )
     return "ok" if ok else PlainTextResponse("control not reachable", status_code=500)
+
+
+def _bot_status_values() -> Dict[str, str]:
+    return {k: read_status(db, k) for k in STATUS_KEYS}
+
+
+@app.get("/api/bot-status", response_class=JSONResponse)
+async def api_bot_status():
+    """SERVER_STATUS and CLIENT_STATUS, online when unset."""
+    return JSONResponse(_bot_status_values())
+
+
+@app.post("/api/bot-status", response_class=JSONResponse)
+async def api_bot_status_save(request: Request):
+    """Save the two status keys only; a running bot applies its value right away."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    current = _bot_status_values()
+    for k in STATUS_KEYS:
+        if k in payload:
+            current[k] = normalize_status(payload.get(k))
+        db.set_config(k, current[k])
+    LOGGER.info("Bot status saved | %s", current)
+
+    live = {}
+    for role, url, key in (
+        ("server", SERVER_AGENT_URL, "SERVER_STATUS"),
+        ("client", CLIENT_AGENT_URL, "CLIENT_STATUS"),
+    ):
+        res = await _ws_cmd(
+            url, {"type": "bot_status", "data": {"status": current[key]}}, timeout=1.0
+        )
+        live[role] = bool(isinstance(res, dict) and res.get("applied"))
+    return JSONResponse({"ok": True, **current, "live": live})
 
 
 @app.get("/api/config", response_class=JSONResponse)

@@ -23,6 +23,12 @@ export interface ToolbarOption {
   value: string;
   label: string;
   disabled?: boolean;
+  /** A colored dot before the label, in the list and on the closed control. */
+  dot?: string;
+}
+
+function OptionDot({ color }: { color?: string }) {
+  return color ? <span aria-hidden className="mr-2 inline-block size-2 shrink-0 rounded-full align-middle" style={{ background: color }} /> : null;
 }
 
 export interface ToolbarSelectProps {
@@ -49,6 +55,8 @@ export interface ToolbarSelectProps {
   toggleClassName?: string;
   /** Field variant only: the toggle is a text input that filters the options by label or value. */
   searchable?: boolean;
+  /** A checkmark at the end of the chosen row in the list. */
+  checkSelected?: boolean;
   "aria-describedby"?: string;
   "aria-invalid"?: boolean;
 }
@@ -117,6 +125,7 @@ export function ToolbarSelect({
   className,
   toggleClassName,
   searchable,
+  checkSelected,
   ...aria
 }: ToolbarSelectProps) {
   const field = variant === "field";
@@ -306,7 +315,19 @@ export function ToolbarSelect({
                     : "cursor-pointer text-text",
             )}
           >
-            {o.label}
+            {o.dot || checkSelected ? (
+              <span className="flex items-center">
+                <OptionDot color={o.dot} />
+                <span className="min-w-0 flex-1">{o.label}</span>
+                {checkSelected && i === selected ? (
+                  <span aria-hidden className="ml-2">
+                    ✓
+                  </span>
+                ) : null}
+              </span>
+            ) : (
+              o.label
+            )}
           </span>
         );
       })}
@@ -401,6 +422,7 @@ export function ToolbarSelect({
             <Skeleton.Text className="align-middle">{pendingLabel}</Skeleton.Text>
           ) : (
             <span className={cx("block truncate", placeholderShown && "text-muted")}>
+              <OptionDot color={options[selected]?.dot} />
               {prefix && options[selected] ? `${prefix}: ${options[selected].label}` : options[selected]?.label || (field ? "\u00a0" : "")}
             </span>
           )}

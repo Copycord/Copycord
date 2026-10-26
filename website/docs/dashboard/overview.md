@@ -50,6 +50,15 @@ Cloning works only while both the server bot and the client are running. The bot
 
 - To start the bots, click **Start** on the **Bots** card. While they run, the button reads **Stop**, and the card shows each bot's status and uptime. After you click **Stop**, the bots show an amber **stopping** status and the button reads **Stopping...** and cannot be clicked until both bots have really stopped. With many user tokens online, closing their sessions can take a little while.
 
+### Bot settings
+
+The gear button at the top right of the **Bots** card opens **Bot settings**, where you pick how the server bot and the client bot each appear on Discord: **Online**, **Idle**, **Busy** or **Invisible**. These are global settings, not per mapping. A bot that is running switches right away when you click **Save**; a stopped bot uses the new status at its next start. The values are stored in two keys, both `online` by default:
+
+| Key | Values |
+| --- | --- |
+| `SERVER_STATUS` | `online`, `idle`, `dnd` (Busy), `invisible` |
+| `CLIENT_STATUS` | `online`, `idle`, `dnd` (Busy), `invisible` |
+
 ## Add the bot to your server
 
 After your bot token is validated, an **Add Bot to Server** link appears in **Global Configuration**.

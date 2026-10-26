@@ -35,6 +35,7 @@ from copycord.selfclient.models import (
     Thread,
 )
 from copycord.selfclient.events import RawMessageDeleteEvent, RawMessageUpdateEvent
+from copycord.common.bot_status import normalize_status, read_status
 from copycord.common.config import Config, CURRENT_VERSION
 from copycord.common.selfbot_headers import refresh_build_info
 from copycord.common import wire_probe
@@ -293,7 +294,12 @@ class ClientListener:
 
     def _new_bot(self, proxy: Optional[str]) -> Client:
         """A fresh Client with every handler registered; the build is pinned by _resolve_client_build before each start."""
-        bot = Client(proxy=proxy, refresh_build=False)
+        # Login status: IDENTIFY still says unknown; this goes out in the first op 3.
+        bot = Client(
+            proxy=proxy,
+            refresh_build=False,
+            status=read_status(getattr(self, "db", None), "CLIENT_STATUS"),
+        )
         for name in self.EVENT_HANDLERS:
             bot.event(getattr(self, name))
         return bot
@@ -391,6 +397,22 @@ class ClientListener:
         except Exception:
             logger.debug("Failed to publish proxies_dead event", exc_info=True)
 
+    async def apply_bot_status(self, value) -> dict:
+        """Set the account's status; sent now when connected, otherwise in the next op 3."""
+        status = normalize_status(value)
+        if not self.bot.is_ready():
+            self.bot.status = status
+            if self.bot.gateway is not None:
+                self.bot.gateway.status = status
+            return {"ok": True, "applied": False}
+        try:
+            await self.bot.change_presence(status=status)
+        except Exception as e:
+            logger.debug("Failed to apply client status: %s", e)
+            return {"ok": True, "applied": False}
+        logger.info("[🟢] Client status set to %s", status)
+        return {"ok": True, "applied": True}
+
     async def _on_ws(self, msg: dict) -> dict | None:
         """Handle WebSocket messages received by the client."""
         typ = msg.get("type")
@@ -417,6 +439,9 @@ class ClientListener:
                     "client_start_time": self.start_time.isoformat(),
                 },
             }
+        elif typ == "bot_status":
+            return await self.apply_bot_status(data.get("status"))
+
         elif typ == "filters_reload":
             self.config._load_filters_from_db()
             logger.info("[⚙️] Filters reloaded from DB")
