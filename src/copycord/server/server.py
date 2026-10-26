@@ -2120,6 +2120,14 @@ class ServerReceiver:
                 # A mapping, its tokens or its token settings changed.
                 self._schedule_token_pool_reconcile()
 
+            elif typ == "release_user_tokens":
+                # Free every sticky identity of a mapping so any author can take its tokens.
+                mapping_id = str((data or {}).get("mapping_id") or "")
+                if not mapping_id:
+                    return {"ok": False, "error": "mapping_id is required"}
+                await self.token_identity.reset_mapping(mapping_id)
+                return {"ok": True}
+
             elif typ == "reload_proxies":
                 # The proxy list was saved; the pool connects or stops on the new count.
                 get_proxy_pool().reload()
