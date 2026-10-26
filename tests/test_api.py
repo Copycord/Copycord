@@ -1152,3 +1152,166 @@ class TestProxiesRequired:
         assert len(picks) == 1
         monkeypatch.setattr(app_mod, "_user_token_proxies", lambda: [])
         assert app_mod._token_check_proxy("tokaaaaaaaa") is None
+
+
+class TestParallelTokenChecks:
+    """Verify and bulk add check tokens in parallel across proxies, one at a time per proxy."""
+
+    def _mapping(self):
+        return db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name="Parallel",
+            original_guild_id=111,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=222,
+            cloned_guild_name="",
+        )
+
+    def _proxies(self, monkeypatch, proxy_of):
+        """Pin each token to a proxy; proxy_of maps token -> proxy url."""
+        import copycord.admin.app as app_mod
+
+        monkeypatch.setattr(
+            app_mod, "_user_token_proxies", lambda: sorted(set(proxy_of.values()))
+        )
+        monkeypatch.setattr(app_mod, "_token_check_proxy", lambda t: proxy_of.get(t))
+        monkeypatch.setattr(app_mod, "_selfbot_identity", AsyncMock(return_value=None))
+
+    def _tracker(self, monkeypatch, *, delay=0.02, fail=(), member=None):
+        """A fake _selfbot_in_guild recording how many checks overlap, overall and per proxy."""
+        import asyncio
+        import copycord.admin.app as app_mod
+
+        state = {"active": 0, "max": 0, "per_proxy": {}, "max_per_proxy": {}, "calls": []}
+
+        async def fake_in_guild(token, gid, proxy=None):
+            state["calls"].append(token)
+            state["active"] += 1
+            state["max"] = max(state["max"], state["active"])
+            n = state["per_proxy"].get(proxy, 0) + 1
+            state["per_proxy"][proxy] = n
+            state["max_per_proxy"][proxy] = max(state["max_per_proxy"].get(proxy, 0), n)
+            try:
+                await asyncio.sleep(delay(token) if callable(delay) else delay)
+                if token in fail:
+                    raise RuntimeError("network down")
+                return True if member is None else token in member
+            finally:
+                state["active"] -= 1
+                state["per_proxy"][proxy] -= 1
+
+        monkeypatch.setattr(app_mod, "_selfbot_in_guild", fake_in_guild)
+        return state
+
+    def _store(self, mid, tokens):
+        return [db.add_mapping_token(mid, t) for t in tokens]
+
+    @pytest.mark.asyncio
+    async def test_verify_keeps_stored_order(self, client, monkeypatch):
+        mid = self._mapping()
+        self._store(mid, [f"tok{i:08d}" for i in range(6)])
+        rows = db.list_mapping_tokens(mid)
+        stored_ids = [r["token_id"] for r in rows]
+        tokens = [r["token_value"] for r in rows]
+        self._proxies(monkeypatch, {t: f"http://p{i % 3}.test:1" for i, t in enumerate(tokens)})
+        # Later tokens finish first, and only even ones are members.
+        self._tracker(
+            monkeypatch,
+            delay=lambda t: 0.06 - 0.01 * tokens.index(t),
+            member={t for i, t in enumerate(tokens) if i % 2 == 0},
+        )
+
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 6
+        assert body["working"] == 3
+        assert body["broken"] == 3
+        assert [r["id"] for r in body["results"]] == stored_ids
+        assert [r["ok"] for r in body["results"]] == [True, False] * 3
+        assert set(body["results"][0]) == {"id", "masked", "username", "ok"}
+
+    @pytest.mark.asyncio
+    async def test_verify_serialises_per_proxy_and_overlaps_across_proxies(self, client, monkeypatch):
+        tokens = [f"tok{i:08d}" for i in range(6)]
+        proxy_of = {t: ("http://a.test:1" if i < 3 else "http://b.test:1") for i, t in enumerate(tokens)}
+        self._proxies(monkeypatch, proxy_of)
+        state = self._tracker(monkeypatch)
+        mid = self._mapping()
+        self._store(mid, tokens)
+
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
+        assert resp.json()["working"] == 6
+        # Never two checks at once on one proxy, but the two proxies did run together.
+        assert state["max_per_proxy"] == {"http://a.test:1": 1, "http://b.test:1": 1}
+        assert state["max"] == 2
+
+    @pytest.mark.asyncio
+    async def test_verify_respects_the_concurrency_cap(self, client, monkeypatch):
+        import copycord.admin.app as app_mod
+
+        monkeypatch.setattr(app_mod, "TOKEN_CHECK_CONCURRENCY", 3)
+        tokens = [f"tok{i:08d}" for i in range(10)]
+        self._proxies(monkeypatch, {t: f"http://p{i}.test:1" for i, t in enumerate(tokens)})
+        state = self._tracker(monkeypatch)
+        mid = self._mapping()
+        self._store(mid, tokens)
+
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
+        assert resp.json()["working"] == 10
+        assert state["max"] == 3
+
+    @pytest.mark.asyncio
+    async def test_verify_one_failure_does_not_abort_the_rest(self, client, monkeypatch):
+        mid = self._mapping()
+        self._store(mid, [f"tok{i:08d}" for i in range(4)])
+        tokens = [r["token_value"] for r in db.list_mapping_tokens(mid)]
+        self._proxies(monkeypatch, {t: "http://a.test:1" for t in tokens})
+        state = self._tracker(monkeypatch, delay=0, fail={tokens[1]})
+
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [r["ok"] for r in body["results"]] == [True, False, True, True]
+        assert (body["working"], body["broken"]) == (3, 1)
+        assert state["calls"] == tokens
+
+    @pytest.mark.asyncio
+    async def test_verify_without_proxies_is_refused(self, client, monkeypatch):
+        self._proxies(monkeypatch, {})
+        state = self._tracker(monkeypatch)
+        mid = self._mapping()
+        self._store(mid, ["tokaaaaaaaa"])
+
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
+        assert resp.status_code == 400
+        assert resp.json() == {"ok": False, "error": PROXIES_REQUIRED}
+        assert state["calls"] == []
+
+    @pytest.mark.asyncio
+    async def test_bulk_add_runs_in_parallel_and_keeps_input_order(self, client, monkeypatch):
+        import copycord.admin.app as app_mod
+
+        tokens = [f"tok{i:08d}" for i in range(6)]
+        proxy_of = {t: ("http://a.test:1" if i % 2 else "http://b.test:1") for i, t in enumerate(tokens)}
+        self._proxies(monkeypatch, proxy_of)
+        state = self._tracker(monkeypatch, fail={tokens[2]}, member=set(tokens) - {tokens[4]})
+        mid = self._mapping()
+        self._store(mid, [tokens[5]])
+
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/bulk", json={"tokens": "\n".join(tokens)}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 6
+        assert body["added"] == 3
+        assert [r["status"] for r in body["results"]] == [
+            "added", "added", "error", "added", "invalid", "duplicate"
+        ]
+        assert [r["masked"] for r in body["results"]] == [app_mod._mask_token(t) for t in tokens]
+        assert state["max_per_proxy"] == {"http://a.test:1": 1, "http://b.test:1": 1}
+        assert state["max"] == 2
+        stored = {r["token_value"] for r in db.list_mapping_tokens(mid)}
+        assert stored == {tokens[5], tokens[0], tokens[1], tokens[3]}

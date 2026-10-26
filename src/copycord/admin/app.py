@@ -1233,6 +1233,36 @@ def _proxies_required_response() -> JSONResponse:
     return JSONResponse({"ok": False, "error": PROXIES_REQUIRED_ERROR}, status_code=400)
 
 
+# Most admin-side token checks in flight at once, across all proxies.
+TOKEN_CHECK_CONCURRENCY = 20
+
+
+async def _run_token_checks(items, proxy_of, check, *, limit: int | None = None) -> list:
+    """Run check(item, proxy) for every item and return the results in items order.
+
+    Items sharing a proxy are checked one at a time, so each proxy IP sends requests at the
+    same pace as a sequential loop; different proxies run in parallel, at most `limit`
+    checks at once. A check that raises yields its exception in place of a result, so one
+    failure never stops the others.
+    """
+    results: list = [None] * len(items)
+    groups: dict = {}
+    for i, item in enumerate(items):
+        groups.setdefault(proxy_of(item), []).append(i)
+    sem = asyncio.Semaphore(limit or TOKEN_CHECK_CONCURRENCY)
+
+    async def _group(proxy, indexes):
+        for i in indexes:
+            async with sem:
+                try:
+                    results[i] = await check(items[i], proxy)
+                except Exception as e:
+                    results[i] = e
+
+    await asyncio.gather(*(_group(p, idx) for p, idx in groups.items()))
+    return results
+
+
 def _default_avatar_url(user_id) -> str | None:
     """Discord's default avatar for a user id, or None when the id is unknown."""
     try:
@@ -5143,22 +5173,34 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
 
     existing = {r["token_value"] for r in db.list_mapping_tokens(mapping_id)}
 
+    async def _check(t, proxy):
+        if t in existing:
+            return "duplicate", None
+        if not await _selfbot_in_guild(t, clone_gid, proxy=proxy):
+            return "invalid", None
+        return "valid", await _selfbot_identity(t, proxy=proxy)
+
+    # Validate in parallel across proxies, one token at a time per proxy (see
+    # _run_token_checks), then store the valid ones in input order.
+    checks = await _run_token_checks(tokens, _token_check_proxy, _check)
+
     results = []
     added = 0
-    # Validate sequentially to avoid hammering Discord's rate limits.
-    for t in tokens:
+    for t, outcome in zip(tokens, checks):
         masked = _mask_token(t)
-        if t in existing:
-            results.append({"masked": masked, "status": "duplicate"})
+        if isinstance(outcome, Exception):
+            LOGGER.warning(
+                "bulk_add_mapping_tokens | check failed token=%s: %s",
+                _redact_token(t),
+                outcome,
+            )
+            results.append({"masked": masked, "status": "error"})
+            continue
+        status, ident = outcome
+        if status != "valid":
+            results.append({"masked": masked, "status": status})
             continue
 
-        proxy = _token_check_proxy(t)
-        in_clone = await _selfbot_in_guild(t, clone_gid, proxy=proxy)
-        if not in_clone:
-            results.append({"masked": masked, "status": "invalid"})
-            continue
-
-        ident = await _selfbot_identity(t, proxy=proxy)
         username = (ident or {}).get("username") or None
         user_id = (ident or {}).get("id") or None
         try:
@@ -5205,16 +5247,33 @@ async def api_verify_mapping_tokens(mapping_id: str):
     if rows and not _user_token_proxies():
         return _proxies_required_response()
 
+    def _proxy_of(r):
+        token_value = r.get("token_value") or ""
+        return _token_check_proxy(token_value) if token_value else None
+
+    async def _check(r, proxy):
+        token_value = r.get("token_value") or ""
+        return bool(proxy) and bool(
+            await _selfbot_in_guild(token_value, clone_gid, proxy=proxy)
+        )
+
+    # Tokens on the same proxy are checked one at a time, so no proxy IP calls Discord faster
+    # than a sequential check would; different proxies run in parallel so hundreds of tokens
+    # finish in seconds. One failed check only marks that token broken.
+    checks = await _run_token_checks(rows, _proxy_of, _check)
+
     results = []
     working = 0
     broken = 0
-    # Check sequentially to avoid hammering Discord's rate limits.
-    for r in rows:
+    for r, outcome in zip(rows, checks):
         token_value = r.get("token_value") or ""
-        proxy = _token_check_proxy(token_value) if token_value else None
-        ok = bool(proxy) and bool(
-            await _selfbot_in_guild(token_value, clone_gid, proxy=proxy)
-        )
+        if isinstance(outcome, Exception):
+            LOGGER.warning(
+                "verify_mapping_tokens | check failed token=%s: %s",
+                _redact_token(token_value),
+                outcome,
+            )
+        ok = outcome is True
         if ok:
             working += 1
         else:
