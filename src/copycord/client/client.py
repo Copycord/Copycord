@@ -298,7 +298,7 @@ class ClientListener:
         bot = Client(
             proxy=proxy,
             refresh_build=False,
-            status=read_status(self.db, "CLIENT_STATUS"),
+            status=read_status(getattr(self, "db", None), "CLIENT_STATUS"),
         )
         for name in self.EVENT_HANDLERS:
             bot.event(getattr(self, name))

@@ -23,6 +23,8 @@ def normalize_status(value) -> str:
 
 def read_status(db, key: str) -> str:
     """The saved status for ``key``, online when unset or unreadable."""
+    if db is None:
+        return DEFAULT_STATUS
     try:
         return normalize_status(db.get_config(key, DEFAULT_STATUS))
     except (OSError, ValueError, RuntimeError, sqlite3.Error):
