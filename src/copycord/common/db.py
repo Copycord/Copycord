@@ -26,6 +26,8 @@ logger = logging.getLogger("common.db")
 # app_config row that orders future migrations. A DB without it has never been opened by v4.
 SCHEMA_VERSION_KEY = "schema_version"
 SCHEMA_VERSION = 4
+# app_config row set once the one-time reset of USER_TOKEN_USE_PROXIES to on has run.
+TOKEN_PROXIES_ON_KEY = "migrated_user_token_use_proxies_on"
 # data-pre-update-<from version>-<UTC timestamp>.db, written by `copycord update`.
 PRE_UPDATE_PREFIX = "data-pre-update-"
 PRE_UPDATE_RETAIN = 5
@@ -296,6 +298,7 @@ class DBManager:
         _OPEN.add(self)
         if init_schema:
             self._init_schema()
+            self._migrate_token_proxies_on()
             self._set_schema_version()
 
     @contextlib.contextmanager
@@ -333,6 +336,47 @@ class DBManager:
             except sqlite3.Error:
                 pass
             self.conn.close()
+
+    def _migrate_token_proxies_on(self) -> int:
+        """Once per DB, turn Send through proxies back on for every mapping that stores it off or null.
+
+        Older versions hid the setting and their mapping form saved false, so a stored false
+        was never chosen by anyone. The app_config flag records the run, so a false the user
+        saves afterwards is kept. Returns how many mappings changed.
+        """
+        if self.get_config(TOKEN_PROXIES_ON_KEY, ""):
+            return 0
+        changed = 0
+        with self._tx():
+            rows = self.conn.execute(
+                "SELECT mapping_id, settings FROM guild_mappings"
+            ).fetchall()
+            for row in rows:
+                try:
+                    settings = json.loads(row["settings"] or "{}")
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(settings, dict) or "USER_TOKEN_USE_PROXIES" not in settings:
+                    continue
+                value = settings["USER_TOKEN_USE_PROXIES"]
+                if isinstance(value, str):
+                    off = value.strip().lower() in ("0", "false", "no", "off", "")
+                else:
+                    off = value is None or value is False or value == 0
+                if not off:
+                    continue
+                settings["USER_TOKEN_USE_PROXIES"] = True
+                self.conn.execute(
+                    "UPDATE guild_mappings SET settings = ? WHERE mapping_id = ?",
+                    (json.dumps(settings, separators=(",", ":")), row["mapping_id"]),
+                )
+                changed += 1
+            self.set_config(TOKEN_PROXIES_ON_KEY, "1")
+        logger.info(
+            "Send through proxies turned back on for %d guild mapping(s) (one-time migration)",
+            changed,
+        )
+        return changed
 
     def _set_schema_version(self) -> None:
         """Record the schema version, written after the pre-v4 backup exists; only ever raises it."""
