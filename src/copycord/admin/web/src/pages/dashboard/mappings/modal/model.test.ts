@@ -68,7 +68,7 @@ describe("mapping modal model", () => {
     expect(p.settings.USER_TOKEN_MAX_DELAY).toBe(3.5);
     expect(p.settings.USER_TOKEN_MIN_DELAY).toBe(0);
     expect(Object.keys(p.settings).length).toBe(Object.keys(DEFAULT_MAPPING_SETTINGS).length);
-    expect(Object.keys(p.settings).length).toBe(52);
+    expect(Object.keys(p.settings).length).toBe(54);
     expect(p.settings.USER_TOKEN_PRESENCE_ROTATE).toBe(false);
   });
 
