@@ -1333,7 +1333,8 @@ async def test_a_session_queued_at_the_limiter_holds_no_connect_slot(fakes, slee
         await pool.ensure("p", "tok-p", keep_online=blocked + 1, presence="online")
         await until(lambda: pool.online_ids() == {"p"})
         assert spy.keys.count("direct") == blocked
-        assert pool._gate._value == token_pool.CONNECT_CONCURRENCY
+        # the proxied session's slot comes back; the queued ones never took one
+        await until(lambda: pool._gate._value == token_pool.CONNECT_CONCURRENCY)
         # only the proxied session reached the READY wait
         assert waits.count(token_pool.READY_TIMEOUT) == 1
         release.set()
