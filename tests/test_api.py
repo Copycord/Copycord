@@ -583,6 +583,17 @@ class TestMappingUserTokensAPI:
                 assigned_at=1,
             )
 
+    def _other_mapping(self):
+        return db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name="UT other",
+            original_guild_id=333,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=444,
+            cloned_guild_name="",
+        )
+
     def _release_calls(self, monkeypatch, result):
         import copycord.admin.app as app_mod
         ws = AsyncMock(return_value=result)
@@ -597,7 +608,7 @@ class TestMappingUserTokensAPI:
     @pytest.mark.asyncio
     async def test_release_server_running_sends_message(self, client, monkeypatch):
         mid = self._make_mapping()
-        other = self._make_mapping()
+        other = self._other_mapping()
         self._add_identities(mid, ["a1", "a2"])
         self._add_identities(other, ["b1"])
         ws = self._release_calls(monkeypatch, {"ok": True})
@@ -618,7 +629,7 @@ class TestMappingUserTokensAPI:
     @pytest.mark.asyncio
     async def test_release_server_not_running_clears_db(self, client, monkeypatch):
         mid = self._make_mapping()
-        other = self._make_mapping()
+        other = self._other_mapping()
         self._add_identities(mid, ["a1", "a2", "a3"])
         self._add_identities(other, ["b1"])
         self._release_calls(

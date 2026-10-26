@@ -332,6 +332,7 @@ export function UserTokensBlock({
   const [menuOpen, setMenuOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [releasing, setReleasing] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(mappingId);
   idRef.current = mappingId;
@@ -603,6 +604,7 @@ export function UserTokensBlock({
       confirmVariant: "primary",
     });
     if (!ok) return;
+    setReleasing(true);
     try {
       const j = await api.post<{
         ok: boolean;
@@ -628,6 +630,8 @@ export function UserTokensBlock({
       else notify(msg, "success");
     } catch (e) {
       notify(errorText(e, "Failed to release tokens"), "error");
+    } finally {
+      setReleasing(false);
     }
   };
 
@@ -964,7 +968,7 @@ export function UserTokensBlock({
                               MENU_ITEM,
                               "disabled:cursor-not-allowed disabled:opacity-50",
                             )}
-                            disabled={!hasTokens || busy}
+                            disabled={!hasTokens || verifying || releasing}
                             onClick={() => void releaseAll()}
                           >
                             <svg
