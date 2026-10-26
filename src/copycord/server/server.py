@@ -51,6 +51,7 @@ from copycord.common.token_proxy import (
     notice_tokens_disabled,
     notice_tokens_enabled,
     proxies_configured,
+    set_direct_tokens,
     token_use_proxy,
 )
 from copycord.common.websockets import WebsocketManager, AdminBus
@@ -173,7 +174,8 @@ def plan_token_pool(mappings: list[dict], *, skip_values: set = frozenset()) -> 
     Every working token of every mapping with ``USE_USER_TOKENS`` on is wanted online:
     a row marked ``enabled`` false or a value in ``skip_values`` (dead in the sender) is
     left out. A token value used by several mappings is one entry: its ids and mappings
-    are the union, ``use_proxy`` is always on (proxies are mandatory for tokens),
+    are the union, ``use_proxy`` (``USER_TOKEN_USE_PROXIES``, default on) is on if
+    any of them has it on,
     ``presence`` is the first mapping's and ``rotate`` (``USER_TOKEN_PRESENCE_ROTATE``)
     is on if any of them has it on. ``keep_online`` is the number of distinct wanted
     values, so the pool cap never trims a wanted token. A stored
@@ -972,38 +974,40 @@ class ServerReceiver:
         # The sender benches a REST 401 without telling the pool; skip those values.
         skip = set(getattr(self.user_token_sender, "_dead_tokens", None) or ())
         plan = plan_token_pool(mappings, skip_values=skip)
+        # Sends and the rest read this: only these values may go direct.
+        set_direct_tokens(
+            v for v, entry in plan["tokens"].items() if not entry["use_proxy"]
+        )
         proxies = get_proxy_pool()
+        wanted = list(plan["wanted"])
         if not proxies_configured(proxies):
-            # Proxies are mandatory: nothing connects, and one notice says why.
-            for token_id in sorted(self._pool_ids):
-                await pool.close(token_id)
-            self._pool_ids = set()
-            self._pool_proxied = set()
-            await pool.close_all()
-            if plan["wanted"]:
+            # A proxied token never goes direct: those stay offline, and one notice
+            # says why. Tokens of mappings with proxies off still connect.
+            if any(plan["tokens"][v]["use_proxy"] for v in wanted):
                 notice_tokens_disabled(logger)
-            return
-        notice_tokens_enabled(logger)
+            wanted = [v for v in wanted if not plan["tokens"][v]["use_proxy"]]
+        else:
+            notice_tokens_enabled(logger)
         wanted_ids = {
-            tid for value in plan["wanted"] for tid in plan["tokens"][value]["ids"]
+            tid for value in wanted for tid in plan["tokens"][value]["ids"]
         }
         # Disabled, deleted, dead or no longer wanted rows give their slot back first.
         for token_id in sorted(self._pool_ids - wanted_ids):
             await pool.close(token_id)
         self._pool_ids &= wanted_ids
-        if not plan["wanted"]:
+        if not wanted:
             self._pool_proxied = set()
             await pool.close_all()
             return
 
-        # One session and one proxy per token value. Lease here so proxy_for finds the
-        # lease before the connect, and REST, which reads the same lease, matches it.
-        proxied = {v for v in plan["wanted"] if plan["tokens"][v]["use_proxy"]}
+        # One session and one proxy per proxied token value. Lease here so proxy_for finds
+        # the lease before the connect, and REST, which reads the same lease, matches it.
+        proxied = {v for v in wanted if plan["tokens"][v]["use_proxy"]}
         self._pool_proxied = proxied
         # The pool's keep_online is one global count: every wanted value, so none is trimmed.
         # Never below the wanted set: only the empty plan above closes everything.
-        keep = max(int(plan["keep_online"] or 0), len(plan["wanted"]))
-        for value in plan["wanted"]:
+        keep = len(wanted)
+        for value in wanted:
             entry = plan["tokens"][value]
             if value in proxied and proxies.enabled:
                 try:
@@ -1017,6 +1021,7 @@ class ServerReceiver:
                     keep_online=keep,
                     presence=entry["presence"],
                     rotate=entry["rotate"],
+                    use_proxy=value in proxied,
                 )
                 self._pool_ids.add(token_id)
 

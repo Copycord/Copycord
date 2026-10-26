@@ -36,7 +36,12 @@ from copycord.common.selfbot_headers import (
     context_properties,
     get_tls_session,
 )
-from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable, warn_no_proxy
+from copycord.common.token_proxy import (
+    USE_PROXY,
+    NoProxyAvailable,
+    resolve_use_proxy,
+    warn_no_proxy,
+)
 
 if TYPE_CHECKING:
     from copycord.server.token_pool import TokenSessionPool
@@ -200,8 +205,13 @@ async def _sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
-def _leased_proxy(token: str) -> str:
-    """The token's proxy for this request; NoProxyAvailable if the lease is gone, so nothing goes direct."""
+def _leased_proxy(token: str, use_proxy: bool = USE_PROXY) -> Optional[str]:
+    """The token's proxy for this request; NoProxyAvailable if the lease is gone, so nothing goes direct.
+
+    None without asking the pool when the token goes direct (``resolve_use_proxy``).
+    """
+    if not resolve_use_proxy(token, use_proxy):
+        return None
     proxy = get_proxy_pool().current(token)
     if not proxy:
         raise NoProxyAvailable("token lost its proxy lease")
@@ -1137,10 +1147,14 @@ class UserTokenSender:
         async with self._token_lock(token):
             while True:
                 await self._await_cooldown(token)
-                proxy = get_proxy_pool().current(token)
+                proxy = (
+                    get_proxy_pool().current(token)
+                    if resolve_use_proxy(token, use_proxy)
+                    else None
+                )
                 try:
                     session = await self._tls_session(token, use_proxy=use_proxy)
-                    proxy = _leased_proxy(token)
+                    proxy = _leased_proxy(token, use_proxy)
                     if not await note_token_proxy(token, proxy):
                         # never a fallback zone for a proxied token: unavailable for this send
                         raise NoProxyAvailable("exit timezone lookup failed for the token's proxy")
@@ -1290,7 +1304,7 @@ class UserTokenSender:
             self._token_last_seen[token] = time.monotonic()
             try:
                 session = await self._tls_session(token, use_proxy=use_proxy)
-                proxy = _leased_proxy(token)
+                proxy = _leased_proxy(token, use_proxy)
                 rid = _capture_request(capture, "POST", url, headers, {})
                 try:
                     resp = await session.post(url, headers=headers, timeout=10, proxy=proxy)
@@ -1363,7 +1377,7 @@ class UserTokenSender:
         """
         try:
             session = await self._tls_session(token, use_proxy=use_proxy)
-            proxy = _leased_proxy(token)
+            proxy = _leased_proxy(token, use_proxy)
             resp = await session.request(
                 "PUT",
                 upload_url,

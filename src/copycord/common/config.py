@@ -160,7 +160,7 @@ class Config:
             "USER_TOKEN_STICKY_NICKNAME": False,
             "USER_TOKEN_STICKY_AVATAR": False,
             "USER_TOKEN_STICKY_ROLES": False,
-            # kept for old databases; ignored: proxies are mandatory for token sends
+            # off: this mapping's tokens talk to Discord from the server's own address
             "USER_TOKEN_USE_PROXIES": True,
         }
 

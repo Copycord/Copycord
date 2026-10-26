@@ -99,9 +99,14 @@ class FakeLeasedPool:
 
 @pytest.fixture(autouse=True)
 def _sender_has_a_proxy(monkeypatch):
-    """Proxies are mandatory for user tokens; sender tests run with a leased fake one.
-    A test about the no-proxy path patches get_proxy_pool itself."""
+    """Proxies are on by default for user tokens; sender tests run with a leased fake one.
+    A test about the no-proxy path patches get_proxy_pool itself. No token may go
+    direct unless a test publishes it (a reconcile in one test never leaks into the next)."""
     import sys
+
+    from copycord.common import token_proxy
+
+    monkeypatch.setattr(token_proxy, "_direct_tokens", frozenset())
 
     for name in ("copycord.server.token_sender", "copycord.server.token_avatar"):
         mod = sys.modules.get(name)

@@ -74,7 +74,7 @@ from copycord.common.db import DBManager, backups_dir
 from copycord.common.paths import data_dir, out_candidates, out_dir
 from copycord.common.http_session import close_shared_session, shared_session
 from copycord.common.proxy_pool import ProxyPool, _normalise_proxy_url
-from copycord.common.token_proxy import PROXIES_REQUIRED_ERROR
+from copycord.common.token_proxy import PROXIES_REQUIRED_ERROR, token_use_proxy
 from copycord.common.timezone import configured_tz_name
 from copycord.common import inprocess
 from copycord.common import install_identity
@@ -327,7 +327,7 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "USER_TOKEN_FALLBACK_WEBHOOK": True,
     "USER_TOKEN_TYPING": False,
     "USER_TOKEN_LINKS_ONLY": False,
-    # ignored: proxies are mandatory for user tokens
+    # off: this mapping's tokens talk to Discord from the server's own address
     "USER_TOKEN_USE_PROXIES": True,
     "USER_TOKEN_STICKY_NICKNAME": False,
     "USER_TOKEN_STICKY_AVATAR": False,
@@ -1233,6 +1233,15 @@ def _proxies_required_response() -> JSONResponse:
     return JSONResponse({"ok": False, "error": PROXIES_REQUIRED_ERROR}, status_code=400)
 
 
+def _mapping_uses_proxies(mapping_id: str) -> bool:
+    """Whether the mapping's tokens go through proxies (``USER_TOKEN_USE_PROXIES``, default on)."""
+    try:
+        row = db.get_mapping_by_id(mapping_id) or {}
+    except Exception:
+        row = {}
+    return token_use_proxy(row.get("settings") or {})
+
+
 # Most admin-side token checks in flight at once, across all proxies.
 TOKEN_CHECK_CONCURRENCY = 20
 
@@ -1260,6 +1269,31 @@ async def _run_token_checks(items, proxy_of, check, *, limit: int | None = None)
                     results[i] = e
 
     await asyncio.gather(*(_group(p, idx) for p, idx in groups.items()))
+    return results
+
+
+# Most direct (no proxy) token checks in flight at once: they all leave from this server's IP.
+DIRECT_CHECK_CONCURRENCY = 3
+
+
+async def _run_direct_token_checks(items, check, *, limit: int | None = None) -> list:
+    """Run check(item, None) for every item from this server's own address, in items order.
+
+    At most `limit` (DIRECT_CHECK_CONCURRENCY) checks run at once, each lane taking the next
+    unchecked item. A check that raises yields its exception in place of a result.
+    """
+    results: list = [None] * len(items)
+    pending = iter(range(len(items)))
+
+    async def _lane():
+        for i in pending:
+            try:
+                results[i] = await check(items[i], None)
+            except Exception as e:
+                results[i] = e
+
+    lanes = max(1, min(limit or DIRECT_CHECK_CONCURRENCY, len(items)))
+    await asyncio.gather(*(_lane() for _ in range(lanes)))
     return results
 
 
@@ -4952,10 +4986,14 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
     old_host_id = int(existing["original_guild_id"] or 0) if existing else 0
     old_clone_id = int(existing["cloned_guild_id"] or 0) if existing else 0
 
-    # Proxies are mandatory for user tokens. Refuse only the save that turns them on
-    # with tokens attached; any other save of a mapping using tokens gets a warning.
+    # Tokens of a mapping that uses proxies need proxies configured. Refuse only the
+    # save that turns tokens on with tokens attached; any other such save gets a warning.
     proxy_warning = None
-    if bool(settings.get("USE_USER_TOKENS", False)) and not _user_token_proxies():
+    if (
+        bool(settings.get("USE_USER_TOKENS", False))
+        and token_use_proxy(settings)
+        and not _user_token_proxies()
+    ):
         try:
             has_tokens = bool(db.get_enabled_mapping_tokens(mapping_id))
         except Exception:
@@ -5094,10 +5132,13 @@ async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
     if not token:
         return JSONResponse({"ok": False, "error": "Missing token."}, status_code=400)
 
-    # Proxies are mandatory for user tokens: refuse before any Discord call.
-    proxy = _token_check_proxy(token)
-    if not proxy:
-        return _proxies_required_response()
+    # A mapping that sends through proxies checks through one too: refuse before any Discord
+    # call when none are configured. With the setting off the check goes direct.
+    proxy = None
+    if _mapping_uses_proxies(mapping_id):
+        proxy = _token_check_proxy(token)
+        if not proxy:
+            return _proxies_required_response()
 
     try:
         clone_gid = int(m.get("cloned_guild_id") or 0)
@@ -5163,7 +5204,8 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
             seen_input.add(t)
             tokens.append(t)
 
-    if tokens and not _user_token_proxies():
+    use_proxies = _mapping_uses_proxies(mapping_id)
+    if use_proxies and tokens and not _user_token_proxies():
         return _proxies_required_response()
 
     try:
@@ -5181,8 +5223,12 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
         return "valid", await _selfbot_identity(t, proxy=proxy)
 
     # Validate in parallel across proxies, one token at a time per proxy (see
-    # _run_token_checks), then store the valid ones in input order.
-    checks = await _run_token_checks(tokens, _token_check_proxy, _check)
+    # _run_token_checks), or direct a few at a time when the mapping does not use proxies,
+    # then store the valid ones in input order.
+    if use_proxies:
+        checks = await _run_token_checks(tokens, _token_check_proxy, _check)
+    else:
+        checks = await _run_direct_token_checks(tokens, _check)
 
     results = []
     added = 0
@@ -5230,8 +5276,12 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
     "/api/guild-mappings/{mapping_id}/user-tokens/verify",
     response_class=JSONResponse,
 )
-async def api_verify_mapping_tokens(mapping_id: str):
-    """Check each attached token is valid and in the clone guild, returning per-token results with ids."""
+async def api_verify_mapping_tokens(mapping_id: str, payload: dict | None = Body(None)):
+    """Check each attached token is valid and in the clone guild, returning per-token results with ids.
+
+    An optional ``{"use_proxies": bool}`` body picks proxied or direct checks; without it the
+    mapping's Send through proxies setting decides.
+    """
     m = db.get_mapping_by_id(mapping_id)
     if not m:
         return JSONResponse(
@@ -5243,8 +5293,12 @@ async def api_verify_mapping_tokens(mapping_id: str):
     except Exception:
         clone_gid = 0
 
+    use_proxies = payload.get("use_proxies") if isinstance(payload, dict) else None
+    if not isinstance(use_proxies, bool):
+        use_proxies = _mapping_uses_proxies(mapping_id)
+
     rows = db.list_mapping_tokens(mapping_id)
-    if rows and not _user_token_proxies():
+    if use_proxies and rows and not _user_token_proxies():
         return _proxies_required_response()
 
     def _proxy_of(r):
@@ -5253,14 +5307,18 @@ async def api_verify_mapping_tokens(mapping_id: str):
 
     async def _check(r, proxy):
         token_value = r.get("token_value") or ""
-        return bool(proxy) and bool(
-            await _selfbot_in_guild(token_value, clone_gid, proxy=proxy)
-        )
+        if not token_value or (use_proxies and not proxy):
+            return False
+        return bool(await _selfbot_in_guild(token_value, clone_gid, proxy=proxy))
 
     # Tokens on the same proxy are checked one at a time, so no proxy IP calls Discord faster
     # than a sequential check would; different proxies run in parallel so hundreds of tokens
-    # finish in seconds. One failed check only marks that token broken.
-    checks = await _run_token_checks(rows, _proxy_of, _check)
+    # finish in seconds. Direct checks share this server's IP, so only a few run at once.
+    # One failed check only marks that token broken.
+    if use_proxies:
+        checks = await _run_token_checks(rows, _proxy_of, _check)
+    else:
+        checks = await _run_direct_token_checks(rows, _check)
 
     results = []
     working = 0
@@ -5348,7 +5406,7 @@ async def api_update_mapping_token(
 
     if "enabled" in payload:
         turning_on = bool(payload.get("enabled")) and not bool(row.get("enabled"))
-        if turning_on and not _user_token_proxies():
+        if turning_on and _mapping_uses_proxies(mapping_id) and not _user_token_proxies():
             return _proxies_required_response()
         db.set_mapping_token_enabled(token_id, bool(payload.get("enabled")))
         _notify_user_tokens_changed()

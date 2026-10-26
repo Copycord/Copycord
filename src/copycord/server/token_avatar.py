@@ -26,15 +26,25 @@ from copycord.common.selfbot_headers import (
     gateway_properties,
     get_tls_session,
 )
-from copycord.common.token_proxy import USE_PROXY, NoProxyAvailable, warn_no_proxy
+from copycord.common.token_proxy import (
+    USE_PROXY,
+    NoProxyAvailable,
+    resolve_use_proxy,
+    warn_no_proxy,
+)
 from copycord.selfclient import qos
 from copycord.selfclient.gateway import IDLE_VOICE_STATE, QOS_VERSION
 
 DISCORD_API_BASE = "https://discord.com/api/v9"
 
 
-def _leased_proxy(token: str) -> str:
-    """The token's proxy; NoProxyAvailable when it has none, so nothing goes direct."""
+def _leased_proxy(token: str, use_proxy: bool = USE_PROXY) -> Optional[str]:
+    """The token's proxy; NoProxyAvailable when it has none, so nothing goes direct.
+
+    None without asking the pool when the token goes direct (``resolve_use_proxy``).
+    """
+    if not resolve_use_proxy(token, use_proxy):
+        return None
     proxy = get_proxy_pool().current(token)
     if not proxy:
         raise NoProxyAvailable("token has no proxy lease")
@@ -172,7 +182,7 @@ class GatewaySession:
         """
         try:
             session = await get_tls_session(self._token, use_proxy=self._use_proxy)
-            proxy = _leased_proxy(self._token)
+            proxy = _leased_proxy(self._token, self._use_proxy)
         except NoProxyAvailable:
             warn_no_proxy(self._log, _token_log_id(self._token), "avatar gateway")
             return False
@@ -375,7 +385,7 @@ async def set_avatar(
 
     try:
         session = await get_tls_session(token, use_proxy=use_proxy)
-        proxy = _leased_proxy(token)
+        proxy = _leased_proxy(token, use_proxy)
 
         url = f"{DISCORD_API_BASE}/users/@me"
         body = {"avatar": to_data_uri(data, ctype)}
