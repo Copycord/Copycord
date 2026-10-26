@@ -138,6 +138,50 @@ function ResultRow({
   );
 }
 
+const VERIFY_CHOICES = [
+  { value: true, label: "Use proxies", note: "Recommended" },
+  { value: false, label: "Don't use proxies", note: "" },
+];
+
+// The Verify tokens dialog body: check through proxies or from this server directly.
+// Preselected from the mapping's Send through proxies setting.
+function VerifyProxyChoice({
+  initial,
+  onChange,
+}: {
+  initial: boolean;
+  onChange: (useProxies: boolean) => void;
+}) {
+  const [useProxies, setUseProxies] = useState(initial);
+  return (
+    <div id="user-token-verify-choice">
+      <div className="mb-2.5">Check the tokens through your proxies?</div>
+      <div role="radiogroup" aria-label="Check through proxies" className="flex flex-col gap-1.5">
+        {VERIFY_CHOICES.map((c) => (
+          <label key={c.label} className="flex cursor-pointer items-center gap-2 text-[13px] text-text">
+            <input
+              type="radio"
+              name="user-token-verify-proxies"
+              className="accent-accent"
+              checked={useProxies === c.value}
+              onChange={() => {
+                setUseProxies(c.value);
+                onChange(c.value);
+              }}
+            />
+            {c.label}
+            {c.note ? <span className="text-xs text-muted">({c.note})</span> : null}
+          </label>
+        ))}
+      </div>
+      <div className="user-token-verify-direct-note mt-2.5 text-xs leading-normal text-muted">
+        Checking without proxies sends the checks from this server's own IP address, which Discord can link across
+        accounts, and is slower.
+      </div>
+    </div>
+  );
+}
+
 function BulkModal({
   mappingId,
   onClose,
@@ -275,6 +319,9 @@ export function UserTokensBlock({
   const notify = useNotify();
   const confirm = useSafeConfirm();
   const on = (k: string) => toBool(settings[k]);
+  // Send through proxies is on unless the mapping stored it off.
+  const proxiesOn =
+    settings.USER_TOKEN_USE_PROXIES == null ? true : on("USER_TOKEN_USE_PROXIES");
 
   const [tokens, setTokens] = useState<UserToken[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -435,10 +482,27 @@ export function UserTokensBlock({
   const verifyAll = async () => {
     setMenuOpen(false);
     if (!mappingId) return;
+    let useProxies = proxiesOn;
+    const go = await confirm({
+      title: "Verify tokens",
+      body: (
+        <VerifyProxyChoice
+          initial={proxiesOn}
+          onChange={(v) => {
+            useProxies = v;
+          }}
+        />
+      ),
+      confirmLabel: "Verify",
+      confirmVariant: "primary",
+    });
+    if (!go) return;
     setVerifying(true);
     let j: VerifyResponse;
     try {
-      j = await api.post<VerifyResponse>(tokensPath(mappingId, "/verify"));
+      j = await api.post<VerifyResponse>(tokensPath(mappingId, "/verify"), {
+        use_proxies: useProxies,
+      });
     } catch (err) {
       setVerifying(false);
       notify(errorText(err, "Failed to verify tokens"), "error");
@@ -559,9 +623,10 @@ export function UserTokensBlock({
           ban them at any time. Only use accounts you are willing to lose.
         </div>
         <div className="user-token-proxy-notice mb-3 rounded-input border border-warn/35 bg-warn-a10 px-3 py-2.5 text-xs leading-normal text-text">
-          <strong className="text-warn">Proxies:</strong> Token message cloning sends through proxies by default. With Send
-          through proxies on and no proxies, the mapping falls back to the default webhook behavior. Configure proxies in
-          the Proxy section of the dashboard.
+          <strong className="text-warn">Proxies:</strong> Proxies are recommended for token message cloning, and Send
+          through proxies is on by default. With it on and no proxies, the mapping falls back to the default webhook
+          behavior. With it off, tokens connect from this server's own IP address. Configure proxies in the Proxy
+          section of the dashboard.
         </div>
         <div className="user-token-system-notice mb-3 rounded-input border border-info/35 bg-info-a12 px-3 py-2.5 text-xs leading-normal text-text">
           <strong className="text-info">Accounts:</strong> Each account's status, online time, last send and messages sent are

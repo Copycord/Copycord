@@ -30,9 +30,12 @@ describe("UserTokensBlock proxy notice", () => {
     const warning = document.querySelector(".user-token-disclaimer")!;
     const notice = warning.nextElementSibling as HTMLElement;
     expect(notice).toHaveClass("user-token-proxy-notice");
-    expect(notice).toHaveTextContent("sends through proxies by default");
+    expect(notice).toHaveTextContent("Proxies are recommended for token message cloning");
+    expect(notice).toHaveTextContent("Send through proxies is on by default");
     expect(notice).toHaveTextContent("default webhook behavior");
+    expect(notice).toHaveTextContent("With it off, tokens connect from this server's own IP address");
     expect(notice).toHaveTextContent("Configure proxies");
+    expect(notice).not.toHaveTextContent(/required/i);
   });
 
   it("points to the System page table in a card after the proxy notice, opening a new tab", () => {
@@ -118,6 +121,83 @@ function renderPool(settings: Record<string, string | number | boolean> = {}) {
   );
   return setSetting;
 }
+
+describe("UserTokensBlock Verify tokens", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const VERIFY_OK = { ok: true, total: 1, working: 1, broken: 0, results: [{ id: "t1", masked: "aaa***", username: "alpha", ok: true }] };
+
+  function mockVerify() {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/verify")) return json(VERIFY_OK);
+      if (url.includes("/user-tokens")) return json({ ok: true, tokens: TOKENS });
+      return json({ ok: false });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const verifyCalls = (fetchMock: ReturnType<typeof mockVerify>) =>
+    fetchMock.mock.calls.filter(([u]) => String(u).includes("/verify"));
+
+  async function openVerify() {
+    await screen.findByText("alpha");
+    fireEvent.click(screen.getByRole("button", { name: "Token options" }));
+    fireEvent.click(document.getElementById("user-token-verify")!);
+    return screen.findByRole("dialog", { name: "Verify tokens" });
+  }
+
+  const radio = (dialog: HTMLElement, name: RegExp) => within(dialog).getByRole("radio", { name });
+
+  it("asks first, preselecting Use proxies when the setting is on or unset", async () => {
+    const fetchMock = mockVerify();
+    renderPool();
+    const dialog = await openVerify();
+    expect(radio(dialog, /^Use proxies/)).toBeChecked();
+    expect(radio(dialog, /^Use proxies/)).toHaveAccessibleName(/Recommended/);
+    expect(radio(dialog, /^Don't use proxies/)).not.toBeChecked();
+    expect(dialog).toHaveTextContent(
+      "Checking without proxies sends the checks from this server's own IP address, which Discord can link across accounts, and is slower.",
+    );
+    expect(verifyCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it("preselects Don't use proxies when the mapping's setting is off", async () => {
+    mockVerify();
+    renderPool({ USER_TOKEN_USE_PROXIES: false });
+    const dialog = await openVerify();
+    expect(radio(dialog, /^Don't use proxies/)).toBeChecked();
+    expect(radio(dialog, /^Use proxies/)).not.toBeChecked();
+  });
+
+  it("Cancel sends nothing", async () => {
+    const fetchMock = mockVerify();
+    renderPool();
+    const dialog = await openVerify();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Verify tokens" })).toBeNull();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(verifyCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it.each([
+    [true, /^Use proxies/, false],
+    [false, /^Don't use proxies/, true],
+  ])("posts use_proxies %s for that choice", async (expected, choice, settingOn) => {
+    const fetchMock = mockVerify();
+    renderPool({ USER_TOKEN_USE_PROXIES: settingOn });
+    const dialog = await openVerify();
+    fireEvent.click(radio(dialog, choice));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Verify" }));
+    await screen.findByRole("dialog", { name: "Token verification" });
+    const calls = verifyCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    const init = calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ use_proxies: expected });
+  });
+});
 
 describe("UserTokensBlock warm pool", () => {
   afterEach(() => vi.unstubAllGlobals());
