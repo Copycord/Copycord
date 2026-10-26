@@ -157,6 +157,8 @@ def make_rx(srv, monkeypatch):
         r._pool_debounce_task = None
         r._pool_loop_task = None
         r._pool_online_seen = None
+        r._pool_wanted_count = None
+        r._pool_wave = None
         r._pool_identity_saved = {}
         r.proxies = proxies
         return r
