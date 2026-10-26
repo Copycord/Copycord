@@ -228,6 +228,11 @@ class TokenSessionPool:
     off) skips ``proxy_for`` and connects directly, with no proxy pool.
     """
 
+    @property
+    def logger(self) -> Any:
+        """The pool's logger; the name is what lets the lint rule see handlers that log tracebacks."""
+        return self._log
+
     def __init__(
         self,
         *,
@@ -369,7 +374,7 @@ class TokenSessionPool:
                     try:
                         identity = _identity_of(sess.client)
                     except Exception:
-                        self._log.debug("[token-pool] identity lookup failed for %s", key, exc_info=True)
+                        self.logger.debug("[token-pool] identity lookup failed for %s", key, exc_info=True)
                         identity = None
             else:
                 state, since = STATE_OFFLINE, None
@@ -510,7 +515,7 @@ class TokenSessionPool:
             try:
                 await sess.client.change_presence(status=status)
             except Exception as exc:
-                self._log.debug("[token-pool] presence change failed for %s: %r", key, exc, exc_info=True)
+                self.logger.debug("[token-pool] presence change failed for %s: %r", key, exc, exc_info=True)
 
     def _start(self, key: str) -> None:
         status = self._status_for(key, self._presence_by_key.get(key, "random"))
@@ -548,7 +553,7 @@ class TokenSessionPool:
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    self._log.debug("[token-pool] session %s ended with an error", sess.key, exc_info=True)
+                    self.logger.debug("[token-pool] session %s ended with an error", sess.key, exc_info=True)
                     exc = e
                 await self._teardown(sess)
                 sess.set_state(STATE_OFFLINE)
@@ -621,7 +626,7 @@ class TokenSessionPool:
                         gateway_factory=_FOREGROUND_GATEWAY,
                     )
                 except Exception as exc:
-                    self._log.debug("[token-pool] connect setup failed for %s", sess.key, exc_info=True)
+                    self.logger.debug("[token-pool] connect setup failed for %s", sess.key, exc_info=True)
                     sess.runner = asyncio.ensure_future(_raise(exc))
                     return
                 self._watch(sess, client)
@@ -690,7 +695,7 @@ class TokenSessionPool:
             try:
                 await client.close()
             except Exception as exc:
-                self._log.debug("[token-pool] close failed for %s: %r", sess.key, exc, exc_info=True)
+                self.logger.debug("[token-pool] close failed for %s: %r", sess.key, exc, exc_info=True)
         if runner is not None and not runner.done():
             runner.cancel()
         if runner is not None:
@@ -736,7 +741,7 @@ class TokenSessionPool:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self._log.debug("[token-pool] status reshuffle failed: %r", exc, exc_info=True)
+                self.logger.debug("[token-pool] status reshuffle failed: %r", exc, exc_info=True)
                 wait = SHUFFLE_GAP_S
             # Capped so a clock armed meanwhile is never overslept.
             await _sleep(max(0.0, min(wait, SHUFFLE_GAP_S)))
@@ -768,7 +773,7 @@ class TokenSessionPool:
             try:
                 await sess.client.change_presence(status=status)
             except Exception as exc:
-                self._log.debug("[token-pool] presence change failed for %s: %r", key, exc, exc_info=True)
+                self.logger.debug("[token-pool] presence change failed for %s: %r", key, exc, exc_info=True)
             self._log.debug("[token-pool] Session %s status %s -> %s", key, old, status)
             return SHUFFLE_GAP_S
 
