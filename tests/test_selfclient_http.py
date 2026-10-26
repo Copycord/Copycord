@@ -271,6 +271,56 @@ class TestRequests:
         assert "cf-ray: abc" in dumped
 
 
+def _refusals(caplog):
+    return [r for r in caplog.records if r.name == "selfclient.http" and "refused" in r.getMessage()]
+
+
+class TestRefusalLogLevels:
+    @pytest.mark.asyncio
+    async def test_unknown_channel_warns_once_then_debug(self, caplog):
+        from copycord.selfclient.errors import NotFound
+
+        other = "222222222222222222"
+        client, _, _ = _client([
+            FakeResponse(404, {"code": 10003, "message": "Unknown Channel"}),
+            FakeResponse(404, {"code": 10003, "message": "Unknown Channel"}),
+        ])
+        with caplog.at_level("DEBUG", logger="selfclient.http"):
+            with pytest.raises(NotFound):
+                await client.get_channel(CHANNEL)
+            with pytest.raises(NotFound):
+                await client.get_channel(other)
+        levels = [r.levelname for r in _refusals(caplog)]
+        assert levels == ["WARNING", "DEBUG"]
+        assert "full response at debug" in _refusals(caplog)[0].getMessage()
+        assert any("full response:" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_login_401_is_not_an_error(self, caplog):
+        from copycord.selfclient.errors import LoginFailure
+
+        client, _, _ = _client([FakeResponse(401, {"code": 0, "message": "401: Unauthorized"})])
+        with caplog.at_level("DEBUG", logger="selfclient.http"):
+            with pytest.raises(LoginFailure):
+                await client.login()
+        assert not [
+            r for r in caplog.records
+            if r.name == "selfclient.http" and r.levelname in ("ERROR", "WARNING")
+        ]
+        assert [r.levelname for r in _refusals(caplog)] == ["DEBUG"]
+
+    @pytest.mark.asyncio
+    async def test_500_still_error(self, caplog):
+        from copycord.selfclient.errors import HTTPException
+
+        client, _, _ = _client([FakeResponse(500, {"code": 0, "message": "boom"})])
+        with caplog.at_level("DEBUG", logger="selfclient.http"):
+            with pytest.raises(HTTPException) as info:
+                await client.get_channel(CHANNEL)
+        assert info.value.status == 500
+        assert [r.levelname for r in _refusals(caplog)] == ["ERROR"]
+
+
 # messages() paginator
 
 

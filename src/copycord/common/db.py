@@ -297,6 +297,7 @@ class DBManager:
         if init_schema:
             self._init_schema()
             self._set_schema_version()
+            self._purge_orphan_token_identities()
 
     @contextlib.contextmanager
     def _tx(self):
@@ -5488,8 +5489,12 @@ class DBManager:
 
     @_in_tx
     def delete_mapping_token(self, token_id: str) -> bool:
-        """Detach a user token from a mapping."""
+        """Detach a user token from a mapping, with the sticky identities that pointed at it."""
         with self.lock:
+            self.conn.execute(
+                "DELETE FROM mapping_token_identities WHERE token_id = ?",
+                (str(token_id),),
+            )
             cur = self.conn.execute(
                 "DELETE FROM mapping_user_tokens WHERE token_id = ?", (token_id,)
             )
@@ -5497,12 +5502,35 @@ class DBManager:
 
     @_in_tx
     def delete_all_mapping_tokens(self, mapping_id: str) -> int:
-        """Detach every user token from a mapping. Returns the number removed."""
+        """Detach every user token from a mapping, with its sticky identities. Returns the number removed."""
         with self.lock:
+            self.conn.execute(
+                "DELETE FROM mapping_token_identities WHERE mapping_id = ?",
+                (str(mapping_id),),
+            )
             cur = self.conn.execute(
                 "DELETE FROM mapping_user_tokens WHERE mapping_id = ?", (mapping_id,)
             )
             return cur.rowcount
+
+    def _purge_orphan_token_identities(self) -> int:
+        """Remove identities whose token no longer belongs to the same mapping; safe to run on every open."""
+        with self._tx():
+            cur = self.conn.execute(
+                """
+                DELETE FROM mapping_token_identities
+                WHERE token_id NOT IN (
+                    SELECT token_id FROM mapping_user_tokens
+                    WHERE mapping_user_tokens.mapping_id = mapping_token_identities.mapping_id
+                )
+                """
+            )
+            removed = cur.rowcount
+        if removed > 0:
+            logger.info(
+                "Removed %d sticky identities that pointed at deleted tokens", removed
+            )
+        return removed
 
     @_in_tx
     def increment_mapping_token_usage(self, token_id: str) -> None:

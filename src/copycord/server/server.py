@@ -246,6 +246,23 @@ class _GuildPrefixFilter(logging.Filter):
 logger.addFilter(_GuildPrefixFilter())
 
 
+_CUSTOM_EMOJI_RE = re.compile(r"<a?:\w+:\d+>")
+
+
+def _strip_custom_emoji(text: str | None) -> str:
+    """The text without custom emoji tokens like <:name:id>; Unicode emoji stay."""
+    out = _CUSTOM_EMOJI_RE.sub("", text or "")
+    return re.sub(r" {2,}", " ", out).strip()
+
+
+def _is_deleted_emoji_topic_error(e: BaseException) -> bool:
+    """Discord's 50035 for a channel topic that holds a deleted custom emoji."""
+    if not isinstance(e, discord.HTTPException) or getattr(e, "code", None) != 50035:
+        return False
+    msg = str(e).lower()
+    return "topic" in msg and "deleted emoji" in msg
+
+
 class ServerReceiver:
     # Seconds between backfill_job_delivered frames for one job.
     BF_PROGRESS_INTERVAL = 0.5
@@ -414,6 +431,10 @@ class ServerReceiver:
             try:
                 await orig_on_connect()
             except Forbidden as e:
+                if getattr(e, "code", None) == 50001:
+                    # commands.py on_ready runs the same sync and logs the hint once
+                    logger.debug("Slash command sync on connect: %s", e)
+                    return
                 logger.warning(
                     "[⚠️] Can't sync slash commands, make sure the bot is in the server: %s",
                     e,
@@ -3296,6 +3317,38 @@ class ServerReceiver:
 
         return created, reparented, repaired_ids
 
+    def _clone_topic(self, clone_id: int, topic):
+        """The topic to give a clone channel: without custom emoji once Discord rejected its deleted ones."""
+        sanitized = getattr(self, "_sanitized_topic_channels", set())
+        if topic and int(clone_id) in sanitized:
+            return _strip_custom_emoji(topic)
+        return topic
+
+    async def _edit_channel_metadata(self, ch, changes: Dict[str, object]) -> None:
+        """Apply the metadata edit; a topic with a deleted custom emoji is retried once without custom emoji."""
+        try:
+            await ch.edit(**changes)
+            return
+        except discord.HTTPException as e:
+            topic = changes.get("topic")
+            if not topic or not _is_deleted_emoji_topic_error(e):
+                raise
+            clean = _strip_custom_emoji(topic)
+            if clean == topic:
+                raise
+            try:
+                await ch.edit(**dict(changes, topic=clean))
+            except Exception:
+                raise e from None
+        changes["topic"] = clean
+        if not hasattr(self, "_sanitized_topic_channels"):
+            self._sanitized_topic_channels = set()
+        self._sanitized_topic_channels.add(int(ch.id))
+        logger.info(
+            "[📝] Cloned the topic of channel #%d without its deleted custom emoji",
+            ch.id,
+        )
+
     async def _sync_channel_metadata(self, guild: Guild, sitemap: Dict) -> List[str]:
         """Synchronize all channel metadata in one pass after structural sync.
 
@@ -3795,7 +3848,7 @@ class ServerReceiver:
             is_forum_ch = isinstance(ch, ForumChannel)
 
             if sync_topic and orig_id in topic_map and hasattr(ch, "topic"):
-                desired_topic = topic_map[orig_id]
+                desired_topic = self._clone_topic(ch.id, topic_map[orig_id])
                 current_topic = getattr(ch, "topic", None)
                 current_norm = current_topic if current_topic else None
                 desired_norm = desired_topic if desired_topic else None
@@ -3898,7 +3951,7 @@ class ServerReceiver:
                         stage_changed_here = True
 
                 if meta.get("topic") is not None:
-                    desired_topic = meta["topic"]
+                    desired_topic = self._clone_topic(ch.id, meta["topic"])
                     current_topic = getattr(ch, "topic", None)
                     if current_topic != desired_topic:
                         changes["topic"] = desired_topic
@@ -3925,7 +3978,7 @@ class ServerReceiver:
                     return False
 
                 if meta.get("topic") is not None and hasattr(ch, "topic"):
-                    desired_topic = meta["topic"]
+                    desired_topic = self._clone_topic(ch.id, meta["topic"])
                     current_topic = getattr(ch, "topic", None)
                     if current_topic != desired_topic:
                         changes.setdefault("topic", desired_topic)
@@ -4163,7 +4216,7 @@ class ServerReceiver:
 
             try:
                 if changes:
-                    await ch.edit(**changes)
+                    await self._edit_channel_metadata(ch, changes)
 
                 tag_log_parts = []
                 if raw_available_tags is not None:

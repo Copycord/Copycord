@@ -76,6 +76,9 @@ _SECRET_HEADERS = frozenset(
 # Missing Access and Missing Permissions: routine on a source guild, logged at INFO.
 _ROUTINE_CODES = frozenset({50001, 50013})
 
+# 404s callers expect and handle: Unknown Channel (also threads), Guild, Message, User.
+_EXPECTED_404_CODES = frozenset({10003, 10004, 10008, 10013})
+
 # Account-level refusals, explained once per run.
 _ACCOUNT_CODES = {
     40002: (
@@ -91,6 +94,8 @@ _METHODS_WITHOUT_ORIGIN = frozenset({"GET", "HEAD"})
 
 # Major-parameter ids keep their own bucket; other ids collapse, as Discord's do.
 _MAJOR_RE = re.compile(r"(?<!channels/)(?<!guilds/)(?<!webhooks/)\b\d{15,21}\b")
+# Every id, for grouping log lines by path template.
+_ID_RE = re.compile(r"\b\d{15,21}\b")
 
 
 def snowflake_at(milliseconds: float) -> int:
@@ -246,6 +251,8 @@ class HTTPClient:
         self._bucket_reset: Dict[str, float] = {}
         self._global_reset: float = 0.0
         self._explained: set = set()
+        # (path template, status, code) of expected refusals already logged at warning
+        self._expected_seen: set = set()
 
     # lifecycle
 
@@ -356,6 +363,17 @@ class HTTPClient:
             )
         elif status == 404 and quiet:
             log.debug("%s HTTP 404, code %s, %r", where, code, message)
+        elif status == 401 and path.split("?", 1)[0] == "/users/@me":
+            # login() turns this into LoginFailure and the caller logs it
+            log.debug("%s Discord refused it: HTTP 401, code %s, %r", where, code, message)
+        elif status == 401 or (status == 404 and code in _EXPECTED_404_CODES):
+            key = (method, _ID_RE.sub("{id}", path.split("?", 1)[0]), status, code)
+            first = key not in self._expected_seen
+            self._expected_seen.add(key)
+            (log.warning if first else log.debug)(
+                "%s Discord refused it: HTTP %s, code %s, %r, full response at debug.",
+                where, status, code, message,
+            )
         elif code is not None:
             log.error(
                 "%s Discord refused it: HTTP %s, code %s, %r, full response at debug.",

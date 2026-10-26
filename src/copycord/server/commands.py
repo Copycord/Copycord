@@ -33,6 +33,19 @@ from copycord.server import search as message_search
 
 logger = logging.getLogger("server")
 
+SLASH_MISSING_ACCESS_HINT = (
+    "[⚠️] Slash commands could not be registered: the bot has no access to one of the "
+    "clone servers (403 Missing Access). Invite or re-invite the bot to every clone server "
+    "with the Add Bot to Server button on the dashboard. Mirroring does not use slash "
+    "commands and is not affected."
+)
+
+
+def is_slash_missing_access(e: BaseException) -> bool:
+    """Discord's 403 Missing Access (50001) from a slash command sync."""
+    return isinstance(e, Forbidden) and getattr(e, "code", None) == 50001
+
+
 config = Config(logger=logger)
 
 _db_boot = DBManager(config.DB_PATH)
@@ -217,8 +230,11 @@ class CloneCommands(commands.Cog):
             new_ids = self._refresh_command_guilds()
             await self.bot.sync_commands()
             logger.debug("[✅] Slash commands synced for guilds: %s", new_ids)
-        except Exception:
-            logger.exception("Slash command sync failed")
+        except Exception as e:
+            if is_slash_missing_access(e):
+                logger.warning(SLASH_MISSING_ACCESS_HINT)
+            else:
+                logger.exception("Slash command sync failed")
 
     def _ok_embed(
         self,

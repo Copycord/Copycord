@@ -606,6 +606,81 @@ class TestMappingTokenIdentities:
         db.delete_guild_mapping(mid)
         assert db.list_token_identities(mid) == []
 
+    def _identity(self, db, mapping_id, author_id, token_id):
+        db.upsert_token_identity(
+            mapping_id=mapping_id, author_id=author_id, token_id=token_id,
+            cloned_guild_id=2, applied_nick=None, applied_role_ids=[],
+            assigned_at=1,
+        )
+
+    def _authors(self, db, mapping_id):
+        return sorted(i["author_id"] for i in db.list_token_identities(mapping_id))
+
+    def test_delete_token_removes_only_its_identities(self, db):
+        self._mapping(db)
+        self._mapping(db, mapping_id="id-map2", ogid=3, cgid=4)
+        t1 = db.add_mapping_token("id-map", "tokA")
+        t2 = db.add_mapping_token("id-map", "tokB")
+        t3 = db.add_mapping_token("id-map2", "tokA")
+        self._identity(db, "id-map", "a", t1)
+        self._identity(db, "id-map", "b", t2)
+        # Same author on another mapping keeps its identity.
+        self._identity(db, "id-map2", "a", t3)
+        assert db.delete_mapping_token(t1) is True
+        assert self._authors(db, "id-map") == ["b"]
+        assert self._authors(db, "id-map2") == ["a"]
+
+    def test_bulk_delete_by_ids_removes_their_identities(self, db):
+        self._mapping(db)
+        ids = [db.add_mapping_token("id-map", f"tok{i}") for i in range(3)]
+        for i, tid in enumerate(ids):
+            self._identity(db, "id-map", f"a{i}", tid)
+        for tid in ids[:2]:
+            db.delete_mapping_token(tid)
+        assert self._authors(db, "id-map") == ["a2"]
+
+    def test_delete_all_tokens_removes_mapping_identities(self, db):
+        self._mapping(db)
+        self._mapping(db, mapping_id="id-map2", ogid=3, cgid=4)
+        t1 = db.add_mapping_token("id-map", "tokA")
+        t2 = db.add_mapping_token("id-map2", "tokA")
+        self._identity(db, "id-map", "a", t1)
+        self._identity(db, "id-map2", "a", t2)
+        assert db.delete_all_mapping_tokens("id-map") == 1
+        assert db.list_token_identities("id-map") == []
+        assert self._authors(db, "id-map2") == ["a"]
+
+    def test_open_removes_orphan_identities(self, db, tmp_db_path, caplog):
+        import logging
+
+        from copycord.common.db import DBManager
+
+        self._mapping(db)
+        self._mapping(db, mapping_id="id-map2", ogid=3, cgid=4)
+        t1 = db.add_mapping_token("id-map", "tokA")
+        t2 = db.add_mapping_token("id-map2", "tokB")
+        self._identity(db, "id-map", "keep", t1)
+        self._identity(db, "id-map", "gone", "deleted-token")
+        # t2 exists, but in another mapping: still an orphan here.
+        self._identity(db, "id-map", "wrong-map", t2)
+        self._identity(db, "id-map2", "keep2", t2)
+        db.close()
+
+        with caplog.at_level(logging.INFO, logger="common.db"):
+            db2 = DBManager(tmp_db_path, init_schema=True)
+        assert self._authors(db2, "id-map") == ["keep"]
+        assert self._authors(db2, "id-map2") == ["keep2"]
+        lines = [r.getMessage() for r in caplog.records if "sticky identities" in r.getMessage()]
+        assert lines == ["Removed 2 sticky identities that pointed at deleted tokens"]
+        db2.close()
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="common.db"):
+            db3 = DBManager(tmp_db_path, init_schema=True)
+        assert self._authors(db3, "id-map") == ["keep"]
+        assert not [r for r in caplog.records if "sticky identities" in r.getMessage()]
+        db3.close()
+
 
 # Cascade: deleting a guild mapping cleans child tables
 
