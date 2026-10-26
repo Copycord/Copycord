@@ -1,4 +1,11 @@
-from copycord.server.mention_strip import strip_embed_mentions, strip_mentions
+from copycord.server.mention_strip import (
+    disable_embed_user_mentions,
+    disable_user_mentions,
+    strip_embed_mentions,
+    strip_mentions,
+)
+
+Z = "​"
 
 
 def test_everyone_and_here_are_removed():
@@ -84,3 +91,51 @@ def test_embed_fields():
 
 def test_embed_without_text_parts():
     assert strip_embed_mentions({"type": "rich"}) == {"type": "rich"}
+
+
+def test_disable_user_names_get_a_zero_width_space():
+    out = disable_user_mentions(
+        "thanks @Bob Smith and @Bob", user_names=["Bob", "Bob Smith"]
+    )
+    assert out == f"thanks @{Z}Bob Smith and @{Z}Bob"
+
+
+def test_disable_raw_user_tokens():
+    out = disable_user_mentions("a <@123> b <@!456> c")
+    assert out == f"a <@{Z}123> b <@{Z}!456> c"
+
+
+def test_disable_leaves_roles_channels_and_everyone():
+    text = "<@&789> <#1> @everyone @Mod"
+    assert disable_user_mentions(text, user_names=["Bob"]) == text
+
+
+def test_disable_leaves_emails_bare_at_and_unknown_names():
+    text = "mail a@Bob.com or bob@Bob, use @ Bob, hi @Bobby @Someone"
+    assert disable_user_mentions(text, user_names=["Bob"]) == text
+
+
+def test_disable_is_idempotent():
+    once = disable_user_mentions("@Bob <@1>", user_names=["Bob"])
+    assert disable_user_mentions(once, user_names=["Bob"]) == once
+
+
+def test_disable_none_and_empty_pass_through():
+    assert disable_user_mentions(None) is None
+    assert disable_user_mentions("") == ""
+
+
+def test_disable_embed_fields():
+    embed = {
+        "title": "@Alice news",
+        "description": "for <@1> and @Moderator",
+        "author": {"name": "<@!2>"},
+        "footer": {"text": "sent to @here"},
+        "fields": [{"name": "@Alice", "value": "a@b.com", "inline": True}],
+    }
+    out = disable_embed_user_mentions(embed, user_names=["Alice"])
+    assert out["title"] == f"@{Z}Alice news"
+    assert out["description"] == f"for <@{Z}1> and @Moderator"
+    assert out["author"]["name"] == f"<@{Z}!2>"
+    assert out["footer"]["text"] == "sent to @here"
+    assert out["fields"][0] == {"name": f"@{Z}Alice", "value": "a@b.com", "inline": True}

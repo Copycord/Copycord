@@ -57,12 +57,13 @@ export interface MappingSaveResponse {
   mapping_id?: string;
 }
 
-/** The seven per mapping message options edited in the Message Features sub-modal. */
+/** The eight per mapping message options edited in the Message Features sub-modal. */
 export type MsgFeatureKey =
   | "TAG_REPLY_MSG"
   | "ANONYMIZE_USERS"
   | "DISABLE_EVERYONE_MENTIONS"
   | "DISABLE_ROLE_MENTIONS"
+  | "DISABLE_USER_MENTIONS"
   | "STRIP_MENTIONS"
   | "APPEND_TIMESTAMP"
   | "APPEND_AUTHOR";

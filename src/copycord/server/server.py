@@ -90,7 +90,12 @@ from copycord.server.helpers import (
     _anonymize_user,
     host_message_needs_webhook,
 )
-from copycord.server.mention_strip import strip_embed_mentions, strip_mentions
+from copycord.server.mention_strip import (
+    disable_embed_user_mentions,
+    disable_user_mentions,
+    strip_embed_mentions,
+    strip_mentions,
+)
 from copycord.server.permission_sync import ChannelPermissionSync
 from copycord.server.guild_resolver import GuildResolver
 from copycord.server import logctx
@@ -9313,13 +9318,26 @@ class ServerReceiver:
                                 "@everyone", "@\u200beveryone"
                             ).replace("@here", "@\u200bhere")
 
+            user_names = [
+                str(u.get("name") or "")
+                for u in (msg.get("user_mentions") or [])
+                if isinstance(u, dict)
+            ]
+
+            # STRIP_MENTIONS removes the mentions outright, so it wins
+            if mapping_settings.get(
+                "DISABLE_USER_MENTIONS", False
+            ) and not mapping_settings.get("STRIP_MENTIONS", False):
+                text = disable_user_mentions(text, user_names=user_names)
+                embeds = [
+                    Embed.from_dict(
+                        disable_embed_user_mentions(e.to_dict(), user_names=user_names)
+                    )
+                    for e in embeds
+                ]
+
             # last of the mention passes, after role remap and the footer append
             if mapping_settings.get("STRIP_MENTIONS", False):
-                user_names = [
-                    str(u.get("name") or "")
-                    for u in (msg.get("user_mentions") or [])
-                    if isinstance(u, dict)
-                ]
                 role_names = [
                     str(r.get("name") or "")
                     for r in role_mentions_meta

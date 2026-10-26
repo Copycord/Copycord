@@ -8,7 +8,11 @@
 # =============================================================================
 
 
-"""STRIP_MENTIONS: remove user, role, @everyone and @here mentions from cloned text."""
+"""Mention passes for cloned text.
+
+STRIP_MENTIONS removes user, role, @everyone and @here mentions.
+DISABLE_USER_MENTIONS keeps user mentions visible but stops them pinging.
+"""
 
 from __future__ import annotations
 import re
@@ -16,6 +20,11 @@ from typing import Iterable
 
 # raw user and role tokens: <@id>, <@!id>, <@&id>
 _RAW_MENTION = re.compile(r"<@[!&]?\d+>")
+
+# raw user tokens only: <@id>, <@!id>
+_RAW_USER_MENTION = re.compile(r"<@(?=!?\d+>)")
+
+_ZWSP = "​"
 
 # @everyone / @here, also after DISABLE_EVERYONE_MENTIONS put a zero-width space in
 _EVERYONE = re.compile(r"(?<![\w@.])@​?(?:everyone|here)(?!\w)")
@@ -67,6 +76,31 @@ def strip_mentions(
     return "\n".join(out).strip()
 
 
+def disable_user_mentions(
+    text: str | None, *, user_names: Iterable[str] = ()
+) -> str | None:
+    """Put a zero-width space after the '@' of user mentions so they show but don't ping.
+
+    Covers '@Name' for the given display names and raw <@id> / <@!id> tokens.
+    Emails, a bare '@' and unknown names are left alone.
+    """
+    if not text:
+        return text
+    text = _RAW_USER_MENTION.sub("<@" + _ZWSP, text)
+    names = _names_pattern(user_names)
+    if names is not None:
+        text = names.sub(lambda m: "@" + _ZWSP + m.group(0)[1:], text)
+    return text
+
+
+def disable_embed_user_mentions(embed: dict, *, user_names: Iterable[str] = ()) -> dict:
+    """disable_user_mentions over the same embed parts strip_embed_mentions covers."""
+    user_names = list(user_names)
+    return _map_embed_text(
+        embed, lambda v: disable_user_mentions(v, user_names=user_names)
+    )
+
+
 def strip_embed_mentions(
     embed: dict,
     *,
@@ -76,10 +110,14 @@ def strip_embed_mentions(
     """strip_mentions over an embed dict's title, description, author name, footer text and fields."""
     user_names = list(user_names)
     role_names = list(role_names)
+    return _map_embed_text(
+        embed,
+        lambda v: strip_mentions(v, user_names=user_names, role_names=role_names),
+    )
 
-    def s(v):
-        return strip_mentions(v, user_names=user_names, role_names=role_names)
 
+def _map_embed_text(embed: dict, s) -> dict:
+    """Run s over an embed dict's title, description, author name, footer text and fields."""
     for key in ("title", "description"):
         if embed.get(key):
             embed[key] = s(embed[key])
