@@ -31,7 +31,8 @@ def no_free_account_policy(settings: dict) -> str:
 
     USER_TOKEN_NO_FREE_ACCOUNT wins when it holds a known value. Otherwise the
     older USER_TOKEN_FALLBACK_WEBHOOK toggle decides (off means drop), and a
-    mapping with neither sends with the webhook.
+    mapping with neither sends with the webhook. With reuse the toggle still
+    picks the fallback; see exhausted_action.
     """
     settings = settings or {}
     raw = settings.get("USER_TOKEN_NO_FREE_ACCOUNT")
@@ -43,9 +44,15 @@ def no_free_account_policy(settings: dict) -> str:
 def exhausted_action(settings: dict) -> str:
     """The send path's action when no token can deliver: 'webhook' or 'skip'.
 
-    Reuse falls back to the webhook when nobody is idle long enough.
+    When reuse cannot free an account (nobody idle long enough, no token left,
+    no author id), USER_TOKEN_FALLBACK_WEBHOOK decides: on sends with the
+    webhook, off skips. A mapping without the setting sends with the webhook.
     """
-    return "skip" if no_free_account_policy(settings) == "drop" else "webhook"
+    policy = no_free_account_policy(settings)
+    if policy == "reuse":
+        on = (settings or {}).get("USER_TOKEN_FALLBACK_WEBHOOK", True)
+        return "webhook" if on else "skip"
+    return "skip" if policy == "drop" else "webhook"
 
 
 def reuse_idle_minutes(settings: dict) -> int:

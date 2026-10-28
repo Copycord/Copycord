@@ -73,7 +73,7 @@ describe("UserTokensBlock when no account is free", () => {
   const noFree = () => screen.getByRole("combobox", { name: "When no account is free" });
   const minutes = () => document.getElementById("ut_reuse_idle_minutes");
 
-  it("replaces the old Fall back to webhook switch", () => {
+  it("replaces the old Fall back to webhook switch outside reuse", () => {
     renderBlock({});
     expect(screen.queryByText("Fall back to webhook")).toBeNull();
     expect(document.querySelector('[data-setting-key="user_token_fallback_webhook"]')).toBeNull();
@@ -119,6 +119,35 @@ describe("UserTokensBlock when no account is free", () => {
     expect(screen.getByText(/Only an account that has not sent for this long is taken over/)).toBeInTheDocument();
     fireEvent.change(minutes()!, { target: { value: "45" } });
     expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_REUSE_IDLE_MINUTES", "45");
+  });
+
+  const fallback = () => document.getElementById("map_USER_TOKEN_FALLBACK_WEBHOOK");
+
+  it.each(["webhook", "drop"])("hides the fallback switch for %s", (policy) => {
+    renderBlock({ USER_TOKEN_NO_FREE_ACCOUNT: policy, USER_TOKEN_FALLBACK_WEBHOOK: false });
+    expect(fallback()).toBeNull();
+    expect(screen.queryByText("Fall back to webhook")).toBeNull();
+  });
+
+  it("shows the fallback switch after the idle minutes row for reuse and writes the old key", () => {
+    const setSetting = renderBlock({ USER_TOKEN_NO_FREE_ACCOUNT: "reuse", USER_TOKEN_FALLBACK_WEBHOOK: true });
+    const row = document.querySelector('[data-setting-key="user_token_fallback_webhook"]')!;
+    expect(row).toHaveTextContent("Fall back to webhook");
+    expect(row).toHaveTextContent("When no account has been idle long enough, send the message with the webhook. Off drops it.");
+    expect(row.previousElementSibling).toHaveAttribute("data-setting-key", "user_token_reuse_idle_minutes");
+    expect(fallback()).toBeChecked();
+    fireEvent.click(fallback()!);
+    expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_FALLBACK_WEBHOOK", false);
+  });
+
+  it("the reuse fallback switch is off when stored off and on when missing", () => {
+    const setSetting = renderBlock({ USER_TOKEN_NO_FREE_ACCOUNT: "reuse", USER_TOKEN_FALLBACK_WEBHOOK: false });
+    expect(fallback()).not.toBeChecked();
+    fireEvent.click(fallback()!);
+    expect(setSetting).toHaveBeenCalledWith("USER_TOKEN_FALLBACK_WEBHOOK", true);
+    cleanup();
+    renderBlock({ USER_TOKEN_NO_FREE_ACCOUNT: "reuse" });
+    expect(fallback()).toBeChecked();
   });
 });
 

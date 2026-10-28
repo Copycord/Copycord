@@ -327,6 +327,9 @@ export function UserTokensBlock({
   const on = (k: string) => toBool(settings[k]);
   // Send through proxies is off unless the mapping stored it on.
   const proxiesOn = on("USER_TOKEN_USE_PROXIES");
+  // Reuse's fallback is on unless the mapping stored it off.
+  const fallbackOn =
+    settings.USER_TOKEN_FALLBACK_WEBHOOK == null || on("USER_TOKEN_FALLBACK_WEBHOOK");
 
   const [tokens, setTokens] = useState<UserToken[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -773,6 +776,17 @@ export function UserTokensBlock({
                 }
               />
             </div>
+          )}
+          {noFree === "reuse" && (
+            <ToggleRow
+              id="map_USER_TOKEN_FALLBACK_WEBHOOK"
+              settingKey="user_token_fallback_webhook"
+              field={false}
+              name="Fall back to webhook"
+              desc="When no account has been idle long enough, send the message with the webhook. Off drops it."
+              checked={fallbackOn}
+              onChange={(v) => setSetting("USER_TOKEN_FALLBACK_WEBHOOK", v)}
+            />
           )}
           {switchRow(
             "USER_TOKEN_TYPING",
