@@ -493,10 +493,17 @@ class TestNoFreeAccountSetting:
             ({}, "webhook", "webhook"),
             ({"USER_TOKEN_FALLBACK_WEBHOOK": True}, "webhook", "webhook"),
             ({"USER_TOKEN_FALLBACK_WEBHOOK": False}, "drop", "skip"),
-            ({"USER_TOKEN_NO_FREE_ACCOUNT": "reuse", "USER_TOKEN_FALLBACK_WEBHOOK": False}, "reuse", "webhook"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "reuse", "USER_TOKEN_FALLBACK_WEBHOOK": True}, "reuse", "webhook"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "reuse", "USER_TOKEN_FALLBACK_WEBHOOK": False}, "reuse", "skip"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "reuse"}, "reuse", "webhook"),
             ({"USER_TOKEN_NO_FREE_ACCOUNT": "drop", "USER_TOKEN_FALLBACK_WEBHOOK": True}, "drop", "skip"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "drop", "USER_TOKEN_FALLBACK_WEBHOOK": False}, "drop", "skip"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "drop"}, "drop", "skip"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "webhook", "USER_TOKEN_FALLBACK_WEBHOOK": True}, "webhook", "webhook"),
             ({"USER_TOKEN_NO_FREE_ACCOUNT": "webhook", "USER_TOKEN_FALLBACK_WEBHOOK": False}, "webhook", "webhook"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": "webhook"}, "webhook", "webhook"),
             ({"USER_TOKEN_NO_FREE_ACCOUNT": " Reuse "}, "reuse", "webhook"),
+            ({"USER_TOKEN_NO_FREE_ACCOUNT": " Reuse ", "USER_TOKEN_FALLBACK_WEBHOOK": False}, "reuse", "skip"),
             ({"USER_TOKEN_NO_FREE_ACCOUNT": "nope", "USER_TOKEN_FALLBACK_WEBHOOK": False}, "drop", "skip"),
             ({"USER_TOKEN_NO_FREE_ACCOUNT": None}, "webhook", "webhook"),
             ({"USER_TOKEN_NO_FREE_ACCOUNT": 3}, "webhook", "webhook"),
@@ -511,7 +518,33 @@ class TestNoFreeAccountSetting:
 
         assert ServerReceiver._identity_exhausted_action({"USER_TOKEN_FALLBACK_WEBHOOK": False}) == "skip"
         assert ServerReceiver._identity_exhausted_action({"USER_TOKEN_NO_FREE_ACCOUNT": "reuse"}) == "webhook"
+        assert ServerReceiver._identity_exhausted_action(
+            {"USER_TOKEN_NO_FREE_ACCOUNT": "reuse", "USER_TOKEN_FALLBACK_WEBHOOK": False}
+        ) == "skip"
         assert ServerReceiver._identity_exhausted_action({"USER_TOKEN_NO_FREE_ACCOUNT": "drop"}) == "skip"
+
+    def test_resolved_mapping_without_the_toggle_keeps_the_webhook_fallback(self):
+        from copycord.common.common_helpers import resolve_mapping_settings
+        from copycord.common.config import Config
+
+        class _Cfg:
+            def default_mapping_settings(self):
+                return Config.default_mapping_settings(object())
+
+        class _MapDB:
+            def __init__(self, settings):
+                self.settings = settings
+
+            def get_mapping_by_id(self, _mid):
+                return {"settings": self.settings, "status": "active"}
+
+        def resolved(settings):
+            return resolve_mapping_settings(_MapDB(settings), _Cfg(), mapping_id=1)
+
+        assert token_identity.exhausted_action(resolved({"USER_TOKEN_NO_FREE_ACCOUNT": "reuse"})) == "webhook"
+        assert token_identity.exhausted_action(
+            resolved({"USER_TOKEN_NO_FREE_ACCOUNT": "reuse", "USER_TOKEN_FALLBACK_WEBHOOK": False})
+        ) == "skip"
 
     @pytest.mark.parametrize(
         "raw,minutes", [(None, 30), (45, 45), ("10", 10), (0, 1), (-5, 1), ("x", 30)]
@@ -556,15 +589,18 @@ class TestReuseIdleAccount:
         mgr = TokenIdentityManager(bot=_Bot(guild), db=db, logger=log)
         return mgr, db, members, logs
 
-    def _kw(self, tokens, author="new", minutes=30, policy="reuse"):
+    def _kw(self, tokens, author="new", minutes=30, policy="reuse", fallback_webhook=None):
+        settings = {
+            "USER_TOKEN_STICKY_NICKNAME": True,
+            "USER_TOKEN_NO_FREE_ACCOUNT": policy,
+            "USER_TOKEN_REUSE_IDLE_MINUTES": minutes,
+        }
+        if fallback_webhook is not None:
+            settings["USER_TOKEN_FALLBACK_WEBHOOK"] = fallback_webhook
         return dict(
             mapping_id="m", cloned_guild_id=2, author_id=author,
             author_display_name="Newbie", author_role_ids=[],
-            settings={
-                "USER_TOKEN_STICKY_NICKNAME": True,
-                "USER_TOKEN_NO_FREE_ACCOUNT": policy,
-                "USER_TOKEN_REUSE_IDLE_MINUTES": minutes,
-            },
+            settings=settings,
             tokens=tokens,
         )
 
@@ -666,6 +702,45 @@ class TestReuseIdleAccount:
         mgr, db, _, _ = self._setup({"x": ("a", 0, "Xan", [])}, tokens)
         assert await mgr.prepare(**self._kw(tokens, policy=policy)) == (None, action)
         assert ("m", "x") in db.identities
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("policy", ["webhook", "drop"])
+    @pytest.mark.parametrize("fallback", [True, False])
+    async def test_other_policies_ignore_the_fallback_toggle(self, policy, fallback):
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": 0}]
+        mgr, _, _, _ = self._setup({"x": ("a", 0, "Xan", [])}, tokens)
+        expected = "skip" if policy == "drop" else "webhook"
+        kw = self._kw(tokens, policy=policy, fallback_webhook=fallback)
+        assert await mgr.prepare(**kw) == (None, expected)
+
+    REUSE_FALLBACK = [(True, "webhook"), (False, "skip"), (None, "webhook")]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fallback,action", REUSE_FALLBACK)
+    async def test_reuse_nobody_idle_follows_the_fallback_toggle(self, fallback, action):
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": NOW - 29 * 60}]
+        mgr, db, _, _ = self._setup({"x": ("a", 0, "Xan", [])}, tokens)
+        kw = self._kw(tokens, fallback_webhook=fallback)
+        assert await mgr.prepare(**kw) == (None, action)
+        assert ("m", "x") in db.identities
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fallback,action", REUSE_FALLBACK)
+    async def test_reuse_no_token_left_follows_the_fallback_toggle(self, fallback, action):
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": 0}]
+        mgr, _, _, _ = self._setup({}, tokens)
+        kw = self._kw(tokens, fallback_webhook=fallback)
+        assert await mgr.prepare(**kw, exclude={"a"}) == (None, action)
+        kw = self._kw([], fallback_webhook=fallback)
+        assert await mgr.prepare(**kw) == (None, action)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fallback,action", REUSE_FALLBACK)
+    async def test_reuse_no_author_follows_the_fallback_toggle(self, fallback, action):
+        tokens = [{"token_id": "a", "user_id": "500", "last_used": 0}]
+        mgr, _, _, _ = self._setup({}, tokens)
+        kw = self._kw(tokens, author=None, fallback_webhook=fallback)
+        assert await mgr.prepare(**kw) == (None, action)
 
     @pytest.mark.asyncio
     async def test_two_new_authors_do_not_take_the_same_token(self):
