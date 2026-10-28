@@ -71,7 +71,11 @@ from copycord.server.token_sender import (
     SEND_RATE_LIMITED,
     SEND_TRANSIENT,
 )
-from copycord.server.token_identity import TokenIdentityManager, exhausted_action
+from copycord.server.token_identity import (
+    TokenIdentityManager,
+    exhausted_action,
+    no_free_account_policy,
+)
 from copycord.server.token_pool import TokenSessionPool
 from copycord.server.emojis import EmojiManager
 from copycord.server.stickers import StickerManager
@@ -8644,9 +8648,15 @@ class ServerReceiver:
                     msg.get("author"),
                 )
             elif identity_active:
+                reason = (
+                    "When no account is free: reuse, with webhook fallback off"
+                    if no_free_account_policy(settings) == "reuse"
+                    else "When no account is free: drop"
+                )
                 logger.info(
                     "[user-send] No token could deliver this identity's message and 'skip' is set "
-                    "(When no account is free: drop); dropping from %s (clone ch=%s)",
+                    "(%s); dropping from %s (clone ch=%s)",
+                    reason,
                     msg.get("author"),
                     target_channel_id,
                 )
