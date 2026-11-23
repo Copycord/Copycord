@@ -487,8 +487,41 @@ class Snapshot:
                         )
                     return None
 
-                url = f"https://discord.com/api/v9/channels/{chan_id}/messages?limit={int(limit)}"
                 headers = build_headers(token)
+
+                around_url = (
+                    f"https://discord.com/api/v9/channels/{chan_id}/messages"
+                    f"?around={msg_id}&limit=1"
+                )
+                try:
+                    async with aiohttp.ClientSession() as sess:
+                        async with sess.get(around_url, headers=headers) as resp:
+                            if resp.status == 200:
+                                around = await resp.json()
+                            else:
+                                around = None
+                                if logger:
+                                    logger.debug(
+                                        "[forward-snapshot] GET %s -> %s",
+                                        around_url,
+                                        resp.status,
+                                    )
+                    for m in around or []:
+                        try:
+                            if int(m.get("id", 0)) != msg_id:
+                                continue
+                        except Exception:
+                            continue
+                        found = Snapshot.Message._from_snapshots(
+                            m.get("message_snapshots"), wrapper_msg
+                        )
+                        if found is not None:
+                            return found
+                except Exception as e:
+                    if logger:
+                        logger.debug("[forward-snapshot] around fetch error: %r", e)
+
+                url = f"https://discord.com/api/v9/channels/{chan_id}/messages?limit={int(limit)}"
 
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(url, headers=headers) as resp:
