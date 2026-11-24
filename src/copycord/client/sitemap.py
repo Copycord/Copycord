@@ -491,6 +491,51 @@ class SitemapService:
         except Exception:
             self.logger.debug("[sitemap] placeholder diagnostic failed", exc_info=True)
 
+    async def _log_rest_channel_names(self, guild: Guild) -> None:
+        """Diagnostic: ask REST for the guild's channels and compare names.
+
+        Logs how many REST channels carry real names versus ___hidden___, and
+        for the gateway placeholders whether REST returned a real name.
+        """
+        try:
+            placeholder = "___hidden___"
+            gw_hidden = {
+                int(c.id)
+                for c in list(getattr(guild, "channels", None) or [])
+                + list(getattr(guild, "categories", None) or [])
+                if (getattr(c, "name", "") or "") == placeholder
+            }
+            if not gw_hidden:
+                return
+            http = getattr(self.bot, "http", None)
+            rows = await http.get_guild_channels(guild.id)
+            rows = rows if isinstance(rows, list) else []
+            rest_real = {
+                int(r["id"]): r.get("name")
+                for r in rows
+                if isinstance(r, dict) and r.get("name") not in (None, placeholder)
+            }
+            rest_hidden = [
+                r for r in rows if isinstance(r, dict) and r.get("name") == placeholder
+            ]
+            recovered = [i for i in gw_hidden if i in rest_real]
+            state = getattr(self.bot, "_state", None) or getattr(guild, "_state", None)
+            self.logger.info(
+                "[sitemap] rest guild=%s rest_channels=%d rest_real=%d "
+                "rest_hidden=%d gateway_hidden=%d recovered_by_rest=%d "
+                "account_id=%s cached_members=%s",
+                getattr(guild, "id", None),
+                len(rows),
+                len(rest_real),
+                len(rest_hidden),
+                len(gw_hidden),
+                len(recovered),
+                getattr(getattr(state, "user", None), "id", None),
+                len(getattr(guild, "members", None) or []),
+            )
+        except Exception as e:
+            self.logger.info("[sitemap] rest channel check failed: %r", e)
+
     async def build_for_guild(
         self, guild: Guild, cloned_guild_id: int | None = None
     ) -> Dict:
@@ -820,6 +865,7 @@ class SitemapService:
         include_overwrites = True
 
         self._log_hidden_placeholders(guild)
+        await self._log_rest_channel_names(guild)
 
         for cat in guild.categories:
             channels = []
