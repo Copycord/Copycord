@@ -4720,7 +4720,8 @@ class ServerReceiver:
 
             if parent_id:
                 # None when the parent is obfuscated and has no clone: the forum is
-                # then created without a category, as for any missing parent.
+                # then created and mapped without a category, like a standalone one
+                # (the mapping's parent must reference an existing category mapping).
                 cat, _ = await self._ensure_category(
                     guild,
                     int(parent_id),
@@ -4729,6 +4730,8 @@ class ServerReceiver:
                     obfuscated=_cat_obfuscated_in_sitemap(parent_id),
                 )
                 cloned_parent_id = int(getattr(cat, "id", 0)) or None
+                if cat is None:
+                    parent_id = None
             else:
                 cloned_parent_id = None
 
@@ -4873,7 +4876,8 @@ class ServerReceiver:
         category = None
         if parent_id is not None:
             # None when the parent is obfuscated and has no clone: the channel is
-            # then created without a category, as for any missing parent.
+            # then created and mapped without a category, like a standalone one
+            # (the mapping's parent must reference an existing category mapping).
             category, _ = await self._ensure_category(
                 guild,
                 parent_id,
@@ -4881,6 +4885,8 @@ class ServerReceiver:
                 host_guild_id,
                 obfuscated=parent_obfuscated,
             )
+            if category is None:
+                parent_id = None
 
         per = self.chan_map_by_clone.setdefault(int(guild.id), {})
         row = per.get(int(original_id))
@@ -5074,7 +5080,8 @@ class ServerReceiver:
         category = None
         if parent_id is not None:
             # None when the parent is obfuscated and has no clone: the channel is
-            # then created without a category, as for any missing parent.
+            # then created and mapped without a category, like a standalone one
+            # (the mapping's parent must reference an existing category mapping).
             category, _ = await self._ensure_category(
                 guild,
                 parent_id,
@@ -5082,6 +5089,8 @@ class ServerReceiver:
                 host_guild_id,
                 obfuscated=parent_obfuscated,
             )
+            if category is None:
+                parent_id = None
 
         per = self.chan_map_by_clone.setdefault(int(guild.id), {})
         row = per.get(int(original_id))
@@ -6934,7 +6943,8 @@ class ServerReceiver:
         category = None
         if parent_id is not None:
             # None when the parent is obfuscated and has no clone: the channel is
-            # then created without a category, as for any missing parent.
+            # then created and mapped without a category, like a standalone one
+            # (the mapping's parent must reference an existing category mapping).
             category, _ = await self._ensure_category(
                 guild,
                 parent_id,
@@ -6942,6 +6952,8 @@ class ServerReceiver:
                 host_guild_id,
                 obfuscated=parent_obfuscated,
             )
+            if category is None:
+                parent_id = None
 
         per = self.chan_map_by_clone.setdefault(int(guild.id), {})
         row = per.get(int(original_id))
