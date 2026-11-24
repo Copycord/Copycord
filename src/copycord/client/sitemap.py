@@ -427,6 +427,47 @@ class SitemapService:
 
         self.enqueue_all()
 
+    def _log_hidden_placeholders(self, guild: Guild) -> None:
+        """Log how many channels and categories arrived named ___hidden___.
+
+        Diagnostic only: shows the gateway capabilities in use and, for the
+        first few placeholder channels, their id, type, category and overwrite
+        count, so a user can send the line back when real names go missing.
+        """
+        try:
+            placeholder = "___hidden___"
+            chans = list(getattr(guild, "channels", None) or [])
+            cats = list(getattr(guild, "categories", None) or [])
+            hidden_chans = [
+                c for c in chans if (getattr(c, "name", "") or "") == placeholder
+            ]
+            hidden_cats = [
+                c for c in cats if (getattr(c, "name", "") or "") == placeholder
+            ]
+            caps = getattr(getattr(self.bot, "gateway", None), "capabilities", None)
+            self.logger.info(
+                "[sitemap] guild=%s channels=%d hidden_channels=%d categories=%d "
+                "hidden_categories=%d capabilities=%s obfuscation_bit=%s",
+                getattr(guild, "id", None),
+                len(chans),
+                len(hidden_chans),
+                len(cats),
+                len(hidden_cats),
+                caps,
+                (bool(int(caps) & (1 << 15)) if caps is not None else None),
+            )
+            for c in (hidden_chans + hidden_cats)[:10]:
+                ctype = getattr(c, "type", None)
+                self.logger.info(
+                    "[sitemap] placeholder id=%s type=%s category_id=%s overwrites=%d",
+                    getattr(c, "id", None),
+                    getattr(ctype, "value", ctype),
+                    getattr(c, "category_id", None),
+                    len(getattr(c, "overwrites", None) or {}),
+                )
+        except Exception:
+            self.logger.debug("[sitemap] placeholder diagnostic failed", exc_info=True)
+
     async def build_for_guild(
         self, guild: Guild, cloned_guild_id: int | None = None
     ) -> Dict:
@@ -754,6 +795,8 @@ class SitemapService:
         }
 
         include_overwrites = True
+
+        self._log_hidden_placeholders(guild)
 
         for cat in guild.categories:
             channels = []
