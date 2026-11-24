@@ -22,7 +22,7 @@ dependencies = [
     "cryptography>=44.0",
     "tzdata==2025.2",
     "py-cord==2.8.1",
-    "curl_cffi==0.16.2",
+    "curl_cffi==0.17.0",
     "Pillow==12.2.0",
     "audioop-lts==0.2.1; python_version >= '3.13'",
 ]
