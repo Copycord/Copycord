@@ -188,11 +188,24 @@ class CloseCode:
 FATAL_CLOSE_CODES = frozenset({4004, 4010, 4011, 4012, 4013, 4014})
 
 
+# Channel ``flags`` bit Discord sets on a channel the account cannot view
+# (VIEW_CHANNEL denied). Such a channel still arrives over the gateway, but with
+# the placeholder name ``___hidden___`` and an @everyone VIEW_CHANNEL deny;
+# only id, type, position and parent_id are real. The real name arrives in a
+# later CHANNEL_UPDATE once the account gains access. Detect obfuscation by this
+# flag, not by the name.
+CHANNEL_OBFUSCATED = 1 << 17
+
+
 class Capabilities:
     """IDENTIFY ``capabilities`` bits.
 
-    ``WEB`` is what the web client sends. ``DEFAULT`` drops CHANNEL_OBFUSCATION
-    so READY carries real channel names instead of ``___hidden___``.
+    ``WEB`` is what the web client sends. ``DEFAULT`` is ``WEB`` without the
+    CHANNEL_OBFUSCATION bit. That bit opts a client into channel obfuscation, but
+    since 2026-11-16 Discord obfuscates channels the account cannot view whether
+    or not it is set, so clearing it does not bring back real names: READY and
+    channel dispatches still carry ``___hidden___`` with the CHANNEL_OBFUSCATED
+    channel flag for those channels.
     """
 
     LAZY_USER_NOTES = 1 << 0
@@ -236,6 +249,7 @@ __all__ = [
     "GatewayOp",
     "CloseCode",
     "Capabilities",
+    "CHANNEL_OBFUSCATED",
     "FATAL_CLOSE_CODES",
     "THREAD_TYPES",
     "TEXT_LIKE_TYPES",

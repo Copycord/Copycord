@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 from .enums import (
+    CHANNEL_OBFUSCATED,
     FORUM_LIKE_TYPES,
     NON_SYSTEM_MESSAGE_TYPES,
     TEXT_LIKE_TYPES,
@@ -1031,6 +1032,18 @@ class GuildChannel(_Channel):
     @property
     def flags(self) -> ChannelFlags:
         return ChannelFlags(self._data.get("flags") or 0)
+
+    @property
+    def obfuscated(self) -> bool:
+        """True when Discord sent this channel obfuscated (CHANNEL_OBFUSCATED flag set).
+
+        The account cannot view it: the name is the ``___hidden___`` placeholder and only
+        id, type, position and parent_id are real. Reads the raw flags, not the name.
+        """
+        try:
+            return bool(int(self._data.get("flags") or 0) & CHANNEL_OBFUSCATED)
+        except (TypeError, ValueError):
+            return False
 
     @property
     def jump_url(self) -> str:
