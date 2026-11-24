@@ -572,6 +572,14 @@ class SitemapService:
                 return "auto"
             return None
 
+        def _obfuscated(ch) -> bool:
+            """Whether Discord sent this channel obfuscated (CHANNEL_OBFUSCATED flag).
+
+            Obfuscated channels stay in the sitemap: the server deletes the clone of
+            any mapped channel missing from it, so it decides what to skip.
+            """
+            return getattr(ch, "obfuscated", False) is True
+
         def _sticker_url(s):
             u = getattr(s, "url", None)
             if not u:
@@ -763,6 +771,7 @@ class SitemapService:
                         {
                             "id": ch.id,
                             "name": ch.name,
+                            "obfuscated": _obfuscated(ch),
                             "type": ch.type.value,
                             "nsfw": getattr(ch, "nsfw", False),
                             "topic": getattr(ch, "topic", None),
@@ -779,6 +788,7 @@ class SitemapService:
                         {
                             "id": ch.id,
                             "name": ch.name,
+                            "obfuscated": _obfuscated(ch),
                             "type": ch.type.value,
                             "nsfw": getattr(ch, "nsfw", False),
                             "slowmode_delay": getattr(ch, "slowmode_delay", 0),
@@ -798,6 +808,7 @@ class SitemapService:
                         {
                             "id": ch.id,
                             "name": ch.name,
+                            "obfuscated": _obfuscated(ch),
                             "type": ch.type.value,
                             "nsfw": getattr(ch, "nsfw", False),
                             "slowmode_delay": getattr(ch, "slowmode_delay", 0),
@@ -818,6 +829,7 @@ class SitemapService:
                 {
                     "id": cat.id,
                     "name": cat.name,
+                    "obfuscated": _obfuscated(cat),
                     "channels": channels,
                     **(
                         {"overwrites": self._serialize_role_overwrites(cat)}
@@ -835,6 +847,7 @@ class SitemapService:
                         {
                             "id": ch.id,
                             "name": ch.name,
+                            "obfuscated": _obfuscated(ch),
                             "type": ch.type.value,
                             "nsfw": getattr(ch, "nsfw", False),
                             "topic": getattr(ch, "topic", None),
@@ -851,6 +864,7 @@ class SitemapService:
                         {
                             "id": ch.id,
                             "name": ch.name,
+                            "obfuscated": _obfuscated(ch),
                             "type": ch.type.value,
                             "nsfw": getattr(ch, "nsfw", False),
                             "slowmode_delay": getattr(ch, "slowmode_delay", 0),
@@ -870,6 +884,7 @@ class SitemapService:
                         {
                             "id": ch.id,
                             "name": ch.name,
+                            "obfuscated": _obfuscated(ch),
                             "type": ch.type.value,
                             "nsfw": getattr(ch, "nsfw", False),
                             "slowmode_delay": getattr(ch, "slowmode_delay", 0),
@@ -891,6 +906,7 @@ class SitemapService:
                 "id": forum.id,
                 "type": forum.type.value,
                 "name": forum.name,
+                "obfuscated": _obfuscated(forum),
                 "category_id": forum.category.id if forum.category else None,
                 "nsfw": getattr(forum, "nsfw", False),
                 "post_guidelines": getattr(forum, "topic", None),

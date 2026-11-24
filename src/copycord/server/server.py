@@ -164,6 +164,32 @@ def _channel_name_blacklisted(name: str, patterns: list[str]) -> bool:
     return False
 
 
+# Name Discord gives a channel the forwarding account cannot view.
+HIDDEN_CHANNEL_PLACEHOLDER = "___hidden___"
+
+
+def is_obfuscated_item(item: Optional[dict]) -> bool:
+    """True if a sitemap category/channel/forum item is obfuscated by Discord.
+
+    The client sets ``obfuscated`` from the CHANNEL_OBFUSCATED channel flag; the
+    placeholder name is the fallback for payloads from clients without that field.
+    Only id, type, position and parent_id of such an item are real.
+    """
+    if not item:
+        return False
+    if item.get("obfuscated") is True:
+        return True
+    return (item.get("name") or "").strip() == HIDDEN_CHANNEL_PLACEHOLDER
+
+
+def _known_real_name(stored: Optional[str]) -> Optional[str]:
+    """A stored original name, unless it is empty or the placeholder itself."""
+    name = (stored or "").strip()
+    if not name or name == HIDDEN_CHANNEL_PLACEHOLDER:
+        return None
+    return name
+
+
 # Debounce for a reconcile asked for by a mapping change, and the safety loop period.
 TOKEN_POOL_DEBOUNCE = 2.0
 TOKEN_POOL_INTERVAL = 60.0
@@ -3300,6 +3326,16 @@ class ServerReceiver:
             clone_cat_id = int((mapping or {}).get("cloned_category_id") or 0)
             cat_obj = guild.get_channel(clone_cat_id) if clone_cat_id else None
 
+            if not cat_obj and is_obfuscated_item(upstream):
+                # Obfuscated upstream: its name is the placeholder. Rebuild under the
+                # last known real name, or wait until Discord sends the real one.
+                upstream_name = _known_real_name(
+                    (mapping or {}).get("original_category_name")
+                )
+                if not upstream_name:
+                    # _sync_categories logs the skip for this id.
+                    continue
+
             if not cat_obj:
 
                 cat_obj = discord.utils.get(guild.categories, name=upstream_name)
@@ -4516,9 +4552,16 @@ class ServerReceiver:
             parts.append(f"Renamed {ren} categories")
         created = 0
         for cat in sitemap.get("categories", []):
-            _, did_create = await self._ensure_category(
-                guild, cat["id"], cat["name"], host_guild_id
+            obfuscated = is_obfuscated_item(cat)
+            cat_obj, did_create = await self._ensure_category(
+                guild, cat["id"], cat["name"], host_guild_id, obfuscated=obfuscated
             )
+            if cat_obj is None and obfuscated:
+                logger.info(
+                    "[sitemap] skipped obfuscated channel id=%s (account cannot view it)",
+                    cat["id"],
+                )
+                continue
             if did_create:
                 created += 1
         if created:
@@ -4563,6 +4606,17 @@ class ServerReceiver:
                 except Exception:
                     continue
             return None
+
+        def _cat_obfuscated_in_sitemap(cat_id: int | None) -> bool:
+            if not cat_id:
+                return False
+            for cat in sitemap.get("categories") or []:
+                try:
+                    if int(cat.get("id") or 0) == int(cat_id):
+                        return is_obfuscated_item(cat)
+                except Exception:
+                    continue
+            return False
 
         per_clone = (getattr(self, "chan_map_by_clone", {}) or {}).setdefault(
             int(guild.id), {}
@@ -4650,11 +4704,34 @@ class ServerReceiver:
             )
             ch = guild.get_channel(clone_id) if clone_id else None
 
+            # Obfuscated by Discord: the name is a placeholder. With no clone yet, skip
+            # it until the real name arrives; a mapped one keeps its clone and the
+            # stored name (also used to rebuild a clone that was deleted).
+            obfuscated = is_obfuscated_item(f)
+            if obfuscated:
+                known_name = _known_real_name((row or {}).get("original_channel_name"))
+                if not row or (not ch and not known_name):
+                    logger.info(
+                        "[sitemap] skipped obfuscated channel id=%s (account cannot view it)",
+                        orig_id,
+                    )
+                    continue
+                name = known_name or name
+
             if parent_id:
+                # None when the parent is obfuscated and has no clone: the forum is
+                # then created and mapped without a category, like a standalone one
+                # (the mapping's parent must reference an existing category mapping).
                 cat, _ = await self._ensure_category(
-                    guild, int(parent_id), parent_nm, host_guild_id
+                    guild,
+                    int(parent_id),
+                    parent_nm,
+                    host_guild_id,
+                    obfuscated=_cat_obfuscated_in_sitemap(parent_id),
                 )
                 cloned_parent_id = int(getattr(cat, "id", 0)) or None
+                if cat is None:
+                    parent_id = None
             else:
                 cloned_parent_id = None
 
@@ -4698,7 +4775,9 @@ class ServerReceiver:
 
             else:
 
-                if (ch.name or "") != name:
+                # Skip obfuscated forums (flag, or the "___hidden___" placeholder
+                # name from older clients); keep the clone's current name.
+                if (ch.name or "") != name and not obfuscated:
                     await ch.edit(name=name)
                     renamed += 1
                     logger.info("[✏️] Renamed forum #%d to %s", ch.id, name)
@@ -4788,6 +4867,7 @@ class ServerReceiver:
         rtc_region: Optional[str] = None,
         video_quality: str | int | None = None,
         clone_messages: bool = True,
+        parent_obfuscated: bool = False,
     ) -> Tuple[int, int, str]:
         """Ensure a voice channel exists with a webhook for its text chat."""
         if self._shutting_down:
@@ -4795,9 +4875,18 @@ class ServerReceiver:
 
         category = None
         if parent_id is not None:
+            # None when the parent is obfuscated and has no clone: the channel is
+            # then created and mapped without a category, like a standalone one
+            # (the mapping's parent must reference an existing category mapping).
             category, _ = await self._ensure_category(
-                guild, parent_id, parent_name, host_guild_id
+                guild,
+                parent_id,
+                parent_name,
+                host_guild_id,
+                obfuscated=parent_obfuscated,
             )
+            if category is None:
+                parent_id = None
 
         per = self.chan_map_by_clone.setdefault(int(guild.id), {})
         row = per.get(int(original_id))
@@ -4974,6 +5063,7 @@ class ServerReceiver:
         topic: Optional[str] = None,
         video_quality: str | int | None = None,
         clone_messages: bool = True,
+        parent_obfuscated: bool = False,
     ) -> Tuple[int, int, str]:
         """Ensure a stage channel exists with a webhook for its text chat."""
         if self._shutting_down:
@@ -4989,9 +5079,18 @@ class ServerReceiver:
 
         category = None
         if parent_id is not None:
+            # None when the parent is obfuscated and has no clone: the channel is
+            # then created and mapped without a category, like a standalone one
+            # (the mapping's parent must reference an existing category mapping).
             category, _ = await self._ensure_category(
-                guild, parent_id, parent_name, host_guild_id
+                guild,
+                parent_id,
+                parent_name,
+                host_guild_id,
+                obfuscated=parent_obfuscated,
             )
+            if category is None:
+                parent_id = None
 
         per = self.chan_map_by_clone.setdefault(int(guild.id), {})
         row = per.get(int(original_id))
@@ -5252,6 +5351,23 @@ class ServerReceiver:
             if stage_only and not is_stage:
                 continue
 
+            # Obfuscated by Discord: the name is a placeholder. With no clone yet, skip
+            # it until the real name arrives (a mapped one keeps its clone and name).
+            obfuscated = is_obfuscated_item(item)
+            parent_obfuscated = bool(item.get("parent_obfuscated"))
+            ensure_name = name
+            if obfuscated:
+                known_name = _known_real_name((mrow or {}).get("original_channel_name"))
+                if not mrow or (is_new and not known_name):
+                    # Forums are logged by _sync_forums; stages already in the first pass.
+                    if not stage_only and ctype != ChannelType.forum.value:
+                        logger.info(
+                            "[sitemap] skipped obfuscated channel id=%s (account cannot view it)",
+                            orig,
+                        )
+                    continue
+                ensure_name = known_name or name
+
             if is_voice:
                 if not clone_voice:
                     voice_skipped += 1
@@ -5273,7 +5389,7 @@ class ServerReceiver:
                     host_guild_id,
                     guild,
                     orig,
-                    name,
+                    ensure_name,
                     pid,
                     pname,
                     ctype,
@@ -5282,6 +5398,7 @@ class ServerReceiver:
                     rtc_region=rtc_region,
                     video_quality=video_quality,
                     clone_messages=clone_messages,
+                    parent_obfuscated=parent_obfuscated,
                 )
 
                 if is_new:
@@ -5291,7 +5408,9 @@ class ServerReceiver:
                 if not ch:
                     continue
 
-                did_rename, _reason = await self._maybe_rename_channel(ch, name, orig)
+                did_rename, _reason = await self._maybe_rename_channel(
+                    ch, name, orig, obfuscated=obfuscated
+                )
                 if did_rename:
                     renamed += 1
 
@@ -5334,7 +5453,7 @@ class ServerReceiver:
                     host_guild_id,
                     guild,
                     orig,
-                    name,
+                    ensure_name,
                     pid,
                     pname,
                     ctype,
@@ -5344,6 +5463,7 @@ class ServerReceiver:
                     topic=topic,
                     video_quality=video_quality,
                     clone_messages=clone_messages,
+                    parent_obfuscated=parent_obfuscated,
                 )
 
                 if result is None or result == (None, None, None):
@@ -5359,7 +5479,9 @@ class ServerReceiver:
                 if not ch:
                     continue
 
-                did_rename, _reason = await self._maybe_rename_channel(ch, name, orig)
+                did_rename, _reason = await self._maybe_rename_channel(
+                    ch, name, orig, obfuscated=obfuscated
+                )
                 if did_rename:
                     renamed += 1
 
@@ -5368,11 +5490,12 @@ class ServerReceiver:
                     host_guild_id,
                     guild,
                     orig,
-                    name,
+                    ensure_name,
                     pid,
                     pname,
                     ctype,
                     clone_messages=clone_messages,
+                    parent_obfuscated=parent_obfuscated,
                 )
                 if is_new:
                     created += 1
@@ -5441,7 +5564,9 @@ class ServerReceiver:
                         }
                         self.chan_map[int(orig)] = dict(per[int(orig)])
 
-                did_rename, _reason = await self._maybe_rename_channel(ch, name, orig)
+                did_rename, _reason = await self._maybe_rename_channel(
+                    ch, name, orig, obfuscated=obfuscated
+                )
                 if did_rename:
                     renamed += 1
 
@@ -5771,15 +5896,21 @@ class ServerReceiver:
 
     def _parse_sitemap(self, sitemap: dict) -> list[dict]:
         items = []
+        obfuscated_cat_ids = {
+            int(c["id"]) for c in sitemap.get("categories", []) if is_obfuscated_item(c)
+        }
 
         for cat in sitemap.get("categories", []):
+            cat_obfuscated = is_obfuscated_item(cat)
             for ch in cat.get("channels", []):
                 items.append(
                     {
                         "id": ch["id"],
                         "name": ch["name"],
+                        "obfuscated": is_obfuscated_item(ch),
                         "parent_id": cat["id"],
                         "parent_name": cat["name"],
+                        "parent_obfuscated": cat_obfuscated,
                         "type": ch["type"],
                         "bitrate": ch.get("bitrate"),
                         "user_limit": ch.get("user_limit"),
@@ -5793,8 +5924,10 @@ class ServerReceiver:
                 {
                     "id": ch["id"],
                     "name": ch["name"],
+                    "obfuscated": is_obfuscated_item(ch),
                     "parent_id": None,
                     "parent_name": None,
+                    "parent_obfuscated": False,
                     "type": ch["type"],
                     "bitrate": ch.get("bitrate"),
                     "user_limit": ch.get("user_limit"),
@@ -5808,8 +5941,12 @@ class ServerReceiver:
                 {
                     "id": forum["id"],
                     "name": forum["name"],
+                    "obfuscated": is_obfuscated_item(forum),
                     "parent_id": forum.get("category_id"),
                     "parent_name": None,
+                    "parent_obfuscated": (
+                        int(forum.get("category_id") or 0) in obfuscated_cat_ids
+                    ),
                     "type": ChannelType.forum.value,
                     "bitrate": None,
                     "user_limit": None,
@@ -5935,6 +6072,7 @@ class ServerReceiver:
         ch: discord.abc.GuildChannel,
         upstream_name: str,
         orig_source_id: int,
+        obfuscated: bool = False,
     ) -> tuple[bool, str]:
         """Enforce the per-clone pinned name (channel_mappings.clone_channel_name), else match upstream if RENAME_CHANNELS is on."""
         try:
@@ -5980,11 +6118,28 @@ class ServerReceiver:
 
             rename_enabled = settings.get("RENAME_CHANNELS", True)
 
+            # Discord obfuscates channels the forwarding account cannot view: the
+            # CHANNEL_OBFUSCATED flag is set and the name is the "___hidden___"
+            # placeholder (the name is the fallback check for older clients).
+            # Cloning that string onto the destination channel, or persisting it as
+            # the known original name, would lose the real name. Keep the stored
+            # name and the clone's current name. A pinned name is still enforced.
+            upstream_obfuscated = is_obfuscated_item(
+                {"obfuscated": obfuscated, "name": upstream_name}
+            )
+            hidden_placeholder = not has_pin and upstream_obfuscated
+            stored_name = upstream_name
+            if upstream_obfuscated:
+                stored_name = (
+                    _known_real_name((mapping or {}).get("original_channel_name"))
+                    or upstream_name
+                )
+
             if mapping is not None:
                 try:
                     self.db.upsert_channel_mapping(
                         int(orig_source_id),
-                        upstream_name,
+                        stored_name,
                         mapping.get("cloned_channel_id"),
                         mapping.get("channel_webhook_url"),
                         mapping.get("original_parent_category_id"),
@@ -5994,11 +6149,14 @@ class ServerReceiver:
                         original_guild_id=mapping.get("original_guild_id"),
                         cloned_guild_id=mapping.get("cloned_guild_id"),
                     )
-                    mapping["original_channel_name"] = upstream_name
+                    mapping["original_channel_name"] = stored_name
                     if has_pin:
                         mapping["clone_channel_name"] = pinned_name
                 except Exception:
                     logger.debug("[rename] mapping upsert failed", exc_info=True)
+
+            if hidden_placeholder:
+                return False, "skipped_hidden_placeholder"
 
             if has_pin:
                 target = pinned_name
@@ -6416,6 +6574,7 @@ class ServerReceiver:
         host_guild_id: int,
         original_category_id: int,
         upstream_name: str | None,
+        obfuscated: bool = False,
     ) -> tuple[bool, str]:
         try:
             per_clone = (self.cat_map_by_clone or {}).get(int(cat.guild.id), {}) or {}
@@ -6446,6 +6605,20 @@ class ServerReceiver:
 
             rename_enabled = settings.get("RENAME_CHANNELS", True)
 
+            # Skip obfuscated categories (CHANNEL_OBFUSCATED flag, or the
+            # "___hidden___" placeholder name from older clients): the name is not
+            # real, so keep the clone's current name and the stored name.
+            upstream_obfuscated = is_obfuscated_item(
+                {"obfuscated": obfuscated, "name": upstream_name}
+            )
+            if not has_pin and upstream_obfuscated:
+                return False, "skipped_hidden_placeholder"
+            stored_orig_name = upstream_name
+            if upstream_obfuscated:
+                stored_orig_name = _known_real_name(
+                    (mapping or {}).get("original_category_name")
+                )
+
             if has_pin:
                 desired = pinned
             elif rename_enabled and upstream_name:
@@ -6475,7 +6648,7 @@ class ServerReceiver:
             try:
                 self.db.upsert_category_mapping(
                     orig_id=int(original_category_id),
-                    orig_name=(upstream_name or cat.name or "").strip(),
+                    orig_name=(stored_orig_name or cat.name or "").strip(),
                     clone_id=int(cat.id),
                     clone_name=(pinned or None),
                     original_guild_id=int(host_guild_id),
@@ -6500,6 +6673,9 @@ class ServerReceiver:
         """Rename categories in THIS clone to match upstream (or pinned) if RENAME_CHANNELS is enabled."""
         renamed = 0
         desired = {c["id"]: c["name"] for c in sitemap.get("categories", [])}
+        obfuscated_ids = {
+            c["id"] for c in sitemap.get("categories", []) if is_obfuscated_item(c)
+        }
         host_guild_id = (sitemap.get("guild") or {}).get("id")
 
         per_clone = (getattr(self, "cat_map_by_clone", {}) or {}).get(int(guild.id), {})
@@ -6519,6 +6695,7 @@ class ServerReceiver:
                 host_guild_id=host_guild_id,
                 original_category_id=orig_id,
                 upstream_name=upstream_name,
+                obfuscated=orig_id in obfuscated_ids,
             )
             if did:
                 renamed += 1
@@ -6530,8 +6707,15 @@ class ServerReceiver:
         original_id: int,
         name: str,
         host_guild_id: Optional[int] = None,
-    ) -> Tuple[discord.CategoryChannel, bool]:
-        """Ensure a mapping exists for (original_category_id, this clone guild). Returns (category_obj, did_create)."""
+        *,
+        obfuscated: bool = False,
+    ) -> Tuple[Optional[discord.CategoryChannel], bool]:
+        """Ensure a mapping exists for (original_category_id, this clone guild). Returns (category_obj, did_create).
+
+        An obfuscated category (``name`` is Discord's placeholder) is never created from
+        scratch: with no mapping this returns (None, False) and callers treat it as a
+        missing parent. A mapped one whose clone is gone is rebuilt under its stored name.
+        """
 
         if not hasattr(self, "cat_map_by_clone") or self.cat_map_by_clone is None:
             self.cat_map_by_clone = {}
@@ -6579,6 +6763,15 @@ class ServerReceiver:
                         self.cat_map = {}
                     self.cat_map[int(original_id)] = dict(entry)
                     return cat, False
+
+        if is_obfuscated_item({"obfuscated": obfuscated, "name": name}):
+            known = _known_real_name(
+                (dbrow or {}).get("original_category_name")
+                or (row or {}).get("original_category_name")
+            )
+            if not known:
+                return None, False
+            name = known
 
         cat = await asyncio.shield(guild.create_category(name))
         logger.info("[➕] Created category '%s' #%d", name, cat.id)
@@ -6733,6 +6926,7 @@ class ServerReceiver:
         channel_type: int,
         *,
         clone_messages: bool = True,
+        parent_obfuscated: bool = False,
     ) -> Tuple[int, int, str]:
         if host_guild_id and int(host_guild_id) == int(guild.id):
             logger.error(
@@ -6748,9 +6942,18 @@ class ServerReceiver:
 
         category = None
         if parent_id is not None:
+            # None when the parent is obfuscated and has no clone: the channel is
+            # then created and mapped without a category, like a standalone one
+            # (the mapping's parent must reference an existing category mapping).
             category, _ = await self._ensure_category(
-                guild, parent_id, parent_name, host_guild_id
+                guild,
+                parent_id,
+                parent_name,
+                host_guild_id,
+                obfuscated=parent_obfuscated,
             )
+            if category is None:
+                parent_id = None
 
         per = self.chan_map_by_clone.setdefault(int(guild.id), {})
         row = per.get(int(original_id))

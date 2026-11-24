@@ -82,8 +82,10 @@ RESUME_CLOSE_CODE = CloseCode.RESUME
 # Close codes after which only a fresh IDENTIFY works.
 _SESSION_RESET_CODES = frozenset({CloseCode.INVALID_SEQ, CloseCode.SESSION_TIMED_OUT})
 
-# Without CHANNEL_OBFUSCATION, so READY has real names for channels the account
-# cannot view instead of `___hidden___`.
+# The web client's bits without CHANNEL_OBFUSCATION (that bit opts into
+# obfuscation). Since 2026-11-16 Discord obfuscates channels the account cannot
+# view regardless, so READY still names them `___hidden___` and sets the
+# CHANNEL_OBFUSCATED channel flag; clearing the bit does not restore real names.
 CAPABILITIES = Capabilities.DEFAULT  # 1734653
 
 # The default subscription skips threads the account has not joined; `threads`
