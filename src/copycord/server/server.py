@@ -4698,7 +4698,9 @@ class ServerReceiver:
 
             else:
 
-                if (ch.name or "") != name:
+                # Skip the "___hidden___" placeholder Discord sends for forums the
+                # account cannot view; keep the clone's current name.
+                if (ch.name or "") != name and (name or "").strip() != "___hidden___":
                     await ch.edit(name=name)
                     renamed += 1
                     logger.info("[✏️] Renamed forum #%d to %s", ch.id, name)
@@ -5980,11 +5982,26 @@ class ServerReceiver:
 
             rename_enabled = settings.get("RENAME_CHANNELS", True)
 
+            # Discord's source server sends the literal name "___hidden___" for
+            # channels/categories the forwarding account cannot view. Cloning that
+            # string onto the destination channel, or persisting it as the known
+            # original name, would lose the real name permanently (even if the
+            # account later regains visibility). Ignore it and keep the previous
+            # name. A pinned name is unaffected.
+            hidden_placeholder = (
+                not has_pin and (upstream_name or "").strip() == "___hidden___"
+            )
+            stored_name = upstream_name
+            if hidden_placeholder:
+                stored_name = (
+                    (mapping or {}).get("original_channel_name") or ""
+                ).strip() or upstream_name
+
             if mapping is not None:
                 try:
                     self.db.upsert_channel_mapping(
                         int(orig_source_id),
-                        upstream_name,
+                        stored_name,
                         mapping.get("cloned_channel_id"),
                         mapping.get("channel_webhook_url"),
                         mapping.get("original_parent_category_id"),
@@ -5994,11 +6011,14 @@ class ServerReceiver:
                         original_guild_id=mapping.get("original_guild_id"),
                         cloned_guild_id=mapping.get("cloned_guild_id"),
                     )
-                    mapping["original_channel_name"] = upstream_name
+                    mapping["original_channel_name"] = stored_name
                     if has_pin:
                         mapping["clone_channel_name"] = pinned_name
                 except Exception:
                     logger.debug("[rename] mapping upsert failed", exc_info=True)
+
+            if hidden_placeholder:
+                return False, "skipped_hidden_placeholder"
 
             if has_pin:
                 target = pinned_name
@@ -6445,6 +6465,11 @@ class ServerReceiver:
                 settings = self.config.default_mapping_settings()
 
             rename_enabled = settings.get("RENAME_CHANNELS", True)
+
+            # Skip the "___hidden___" placeholder Discord sends for categories the
+            # account cannot view; keep the clone's current name and stored name.
+            if not has_pin and (upstream_name or "").strip() == "___hidden___":
+                return False, "skipped_hidden_placeholder"
 
             if has_pin:
                 desired = pinned
