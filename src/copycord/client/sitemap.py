@@ -456,14 +456,37 @@ class SitemapService:
                 caps,
                 (bool(int(caps) & (1 << 15)) if caps is not None else None),
             )
+            me = getattr(guild, "me", None)
+            try:
+                me_roles = [int(getattr(r, "id", 0)) for r in (me.roles or [])]
+                me_admin = bool(me.guild_permissions.administrator)
+            except Exception:
+                me_roles, me_admin = None, None
+            self.logger.info(
+                "[sitemap] account in guild=%s member=%s administrator=%s roles=%s",
+                getattr(guild, "id", None),
+                me is not None,
+                me_admin,
+                me_roles,
+            )
             for c in (hidden_chans + hidden_cats)[:10]:
                 ctype = getattr(c, "type", None)
+                try:
+                    can_view = bool(c.permissions_for(me).view_channel)
+                except Exception:
+                    can_view = None
+                ows = [
+                    (o.id, o.type, o.allow, o.deny)
+                    for o in (getattr(c, "overwrites", None) or {}).values()
+                ]
                 self.logger.info(
-                    "[sitemap] placeholder id=%s type=%s category_id=%s overwrites=%d",
+                    "[sitemap] placeholder id=%s type=%s category_id=%s "
+                    "view_channel=%s overwrites(id,type,allow,deny)=%s",
                     getattr(c, "id", None),
                     getattr(ctype, "value", ctype),
                     getattr(c, "category_id", None),
-                    len(getattr(c, "overwrites", None) or {}),
+                    can_view,
+                    ows,
                 )
         except Exception:
             self.logger.debug("[sitemap] placeholder diagnostic failed", exc_info=True)
