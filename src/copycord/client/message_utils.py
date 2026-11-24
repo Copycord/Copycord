@@ -444,10 +444,34 @@ class Snapshot:
             self.type = getattr(wrapper, "type", None)
 
         @staticmethod
+        def _from_snapshots(snaps, wrapper_msg):
+            for s in snaps or []:
+                inner = (s or {}).get("message") or {}
+                has_text = bool(
+                    (inner.get("content") or inner.get("system_content") or "").strip()
+                )
+                has_atts = bool(inner.get("attachments"))
+                has_stickers = bool(inner.get("stickers"))
+                has_embeds = bool(inner.get("embeds"))
+
+                if has_text or has_atts or has_stickers or has_embeds:
+                    return Snapshot.Message(inner, wrapper_msg)
+            return None
+
+        @staticmethod
         async def resolve_via_snapshot(
             bot, wrapper_msg, *, limit: int = 50, logger=None
         ):
             try:
+                local_snaps = getattr(wrapper_msg, "message_snapshots", None)
+                if not local_snaps:
+                    raw = getattr(wrapper_msg, "_data", None)
+                    if isinstance(raw, dict):
+                        local_snaps = raw.get("message_snapshots")
+                found = Snapshot.Message._from_snapshots(local_snaps, wrapper_msg)
+                if found is not None:
+                    return found
+
                 chan = getattr(wrapper_msg, "channel", None)
                 chan_id = int(getattr(chan, "id", 0) or 0)
                 msg_id = int(getattr(wrapper_msg, "id", 0) or 0)
@@ -463,8 +487,41 @@ class Snapshot:
                         )
                     return None
 
-                url = f"https://discord.com/api/v9/channels/{chan_id}/messages?limit={int(limit)}"
                 headers = build_headers(token)
+
+                around_url = (
+                    f"https://discord.com/api/v9/channels/{chan_id}/messages"
+                    f"?around={msg_id}&limit=1"
+                )
+                try:
+                    async with aiohttp.ClientSession() as sess:
+                        async with sess.get(around_url, headers=headers) as resp:
+                            if resp.status == 200:
+                                around = await resp.json()
+                            else:
+                                around = None
+                                if logger:
+                                    logger.debug(
+                                        "[forward-snapshot] GET %s -> %s",
+                                        around_url,
+                                        resp.status,
+                                    )
+                    for m in around or []:
+                        try:
+                            if int(m.get("id", 0)) != msg_id:
+                                continue
+                        except Exception:
+                            continue
+                        found = Snapshot.Message._from_snapshots(
+                            m.get("message_snapshots"), wrapper_msg
+                        )
+                        if found is not None:
+                            return found
+                except Exception as e:
+                    if logger:
+                        logger.debug("[forward-snapshot] around fetch error: %r", e)
+
+                url = f"https://discord.com/api/v9/channels/{chan_id}/messages?limit={int(limit)}"
 
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(url, headers=headers) as resp:
@@ -487,20 +544,11 @@ class Snapshot:
                 if not target:
                     return None
 
-                snaps = target.get("message_snapshots") or []
-                for s in snaps:
-                    inner = (s or {}).get("message") or {}
-                    has_text = bool(
-                        (
-                            inner.get("content") or inner.get("system_content") or ""
-                        ).strip()
-                    )
-                    has_atts = bool(inner.get("attachments"))
-                    has_stickers = bool(inner.get("stickers"))
-                    has_embeds = bool(inner.get("embeds"))
-
-                    if has_text or has_atts or has_stickers or has_embeds:
-                        return Snapshot.Message(inner, wrapper_msg)
+                found = Snapshot.Message._from_snapshots(
+                    target.get("message_snapshots"), wrapper_msg
+                )
+                if found is not None:
+                    return found
 
                 return None
             except Exception as e:
